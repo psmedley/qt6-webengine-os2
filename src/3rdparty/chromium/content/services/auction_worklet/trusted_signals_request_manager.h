@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "content/common/content_export.h"
 #include "content/services/auction_worklet/trusted_signals.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -33,7 +34,7 @@ class TrustedSignals;
 // requests.
 //
 // TODO(https://crbug.com/1276639): Cache responses as well.
-class TrustedSignalsRequestManager {
+class CONTENT_EXPORT TrustedSignalsRequestManager {
  public:
   // Delay between construction of a Request and automatically starting a
   // network request when `automatically_send_requests` is true.
@@ -88,6 +89,7 @@ class TrustedSignalsRequestManager {
       bool automatically_send_requests,
       const url::Origin& top_level_origin,
       const GURL& trusted_signals_url,
+      absl::optional<uint16_t> experiment_group_id,
       AuctionV8Helper* v8_helper);
 
   explicit TrustedSignalsRequestManager(const TrustedSignalsRequestManager&) =
@@ -101,7 +103,8 @@ class TrustedSignalsRequestManager {
   // StartBatchedTrustedSignalsRequest() is invoked. `this` must be of Type
   // kBiddingSignals.
   std::unique_ptr<Request> RequestBiddingSignals(
-      const std::vector<std::string>& keys,
+      const std::string& interest_group_name,
+      const absl::optional<std::vector<std::string>>& keys,
       LoadSignalsCallback load_signals_callback);
 
   // Queues a scoring signals request. Does not start a network request until
@@ -127,6 +130,7 @@ class TrustedSignalsRequestManager {
   class RequestImpl : public Request {
    public:
     RequestImpl(TrustedSignalsRequestManager* trusted_signals_request_manager,
+                const std::string& interest_group_name,
                 std::set<std::string> bidder_keys,
                 LoadSignalsCallback load_signals_callback);
 
@@ -144,6 +148,7 @@ class TrustedSignalsRequestManager {
 
     // Used for requests for bidder signals. Must be non-null and non-empty for
     // bidder signals requests, null for scoring signals requests.
+    absl::optional<std::string> interest_group_name_;
     absl::optional<std::set<std::string>> bidder_keys_;
 
     // Used for requests for scoring signals. `render_url_` must be non-null
@@ -201,6 +206,7 @@ class TrustedSignalsRequestManager {
   const bool automatically_send_requests_;
   const url::Origin top_level_origin_;
   const GURL trusted_signals_url_;
+  const absl::optional<uint16_t> experiment_group_id_;
   const scoped_refptr<AuctionV8Helper> v8_helper_;
 
   // All live requests that haven't yet been assigned to a

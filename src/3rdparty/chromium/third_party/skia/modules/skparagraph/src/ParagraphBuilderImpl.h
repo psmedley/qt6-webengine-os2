@@ -56,11 +56,22 @@ public:
 
     void addPlaceholder(const PlaceholderStyle& placeholderStyle) override;
 
-    void setParagraphStyle(const ParagraphStyle& style) override;
-
     // Constructs a SkParagraph object that can be used to layout and paint the text to a SkCanvas.
     std::unique_ptr<Paragraph> Build() override;
 
+    // Support for "Client" unicode
+    SkSpan<char> getText();
+    const ParagraphStyle& getParagraphStyle() const;
+    std::unique_ptr<Paragraph> BuildWithClientInfo(
+                    std::vector<SkUnicode::BidiRegion> bidiRegions,
+                    std::vector<SkUnicode::Position> words,
+                    std::vector<SkUnicode::Position> graphemeBreaks,
+                    std::vector<SkUnicode::LineBreakBefore> lineBreaks);
+    void SetUnicode(std::unique_ptr<SkUnicode> unicode) {
+        fUnicode = std::move(unicode);
+    }
+
+    // Support for Flutter optimization
     void Reset() override;
 
     static std::unique_ptr<ParagraphBuilder> make(const ParagraphStyle& style,
@@ -70,14 +81,16 @@ public:
     // Just until we fix all the code; calls icu::make inside
     static std::unique_ptr<ParagraphBuilder> make(const ParagraphStyle& style,
                                                   sk_sp<FontCollection> fontCollection);
-private:
+protected:
+    void startStyledBlock();
     void endRunIfNeeded();
+    const TextStyle& internalPeekStyle();
     void addPlaceholder(const PlaceholderStyle& placeholderStyle, bool lastOne);
 
     SkString fUtf8;
-    std::stack<TextStyle> fTextStyles;
-    SkTArray<Block, true> fStyledBlocks;
-    SkTArray<Placeholder, true> fPlaceholders;
+    SkSTArray<4, TextStyle, true> fTextStyles;
+    SkSTArray<4, Block, true> fStyledBlocks;
+    SkSTArray<4, Placeholder, true> fPlaceholders;
     sk_sp<FontCollection> fFontCollection;
     ParagraphStyle fParagraphStyle;
 

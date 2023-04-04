@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_node.h"
 
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_param_descriptor.h"
@@ -42,7 +43,7 @@ AudioWorkletNode::AudioWorkletNode(
   HeapHashMap<String, Member<AudioParam>> audio_param_map;
   HashMap<String, scoped_refptr<AudioParamHandler>> param_handler_map;
   for (const auto& param_info : param_info_list) {
-    String param_name = param_info.Name().IsolatedCopy();
+    String param_name = param_info.Name();
     AudioParamHandler::AutomationRate param_automation_rate(
         AudioParamHandler::AutomationRate::kAudio);
     if (param_info.AutomationRate() == "k-rate") {
@@ -176,14 +177,14 @@ AudioWorkletNode* AudioWorkletNode::Create(
               .ToLocalChecked(),
           serialize_options, exception_state);
 
-  // |serialized_node_options| can be nullptr if the option dictionary is not
+  // `serialized_node_options` can be nullptr if the option dictionary is not
   // valid.
   if (!serialized_node_options) {
     serialized_node_options = SerializedScriptValue::NullValue();
   }
   DCHECK(serialized_node_options);
 
-  // This is non-blocking async call. |node| still can be returned to user
+  // This is non-blocking async call. `node` still can be returned to user
   // before the scheduled async task is completed.
   context->audioWorklet()->CreateProcessor(node->GetWorkletHandler(),
                                            std::move(processor_port_channel),
@@ -191,7 +192,7 @@ AudioWorkletNode* AudioWorkletNode::Create(
 
   {
     // The node should be manually added to the automatic pull node list,
-    // even without a |connect()| call.
+    // even without a `connect()` call.
     BaseAudioContext::GraphAutoLocker locker(context);
     node->Handler().UpdatePullStatusIfNeeded();
   }
@@ -230,7 +231,7 @@ void AudioWorkletNode::FireProcessorError(
       break;
   }
   ErrorEvent* event = ErrorEvent::Create(
-      error_message, SourceLocation::Capture(GetExecutionContext()), nullptr);
+      error_message, CaptureSourceLocation(GetExecutionContext()), nullptr);
   DispatchEvent(*event);
 }
 

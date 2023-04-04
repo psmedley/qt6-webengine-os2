@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,10 +98,12 @@ class NET_EXPORT_PRIVATE WebSocketDeflateStream : public WebSocketStream {
   const std::unique_ptr<WebSocketStream> stream_;
   WebSocketDeflater deflater_;
   WebSocketInflater inflater_;
-  ReadingState reading_state_;
-  WritingState writing_state_;
-  WebSocketFrameHeader::OpCode current_reading_opcode_;
-  WebSocketFrameHeader::OpCode current_writing_opcode_;
+  ReadingState reading_state_ = NOT_READING;
+  WritingState writing_state_ = NOT_WRITING;
+  WebSocketFrameHeader::OpCode current_reading_opcode_ =
+      WebSocketFrameHeader::kOpCodeText;
+  WebSocketFrameHeader::OpCode current_writing_opcode_ =
+      WebSocketFrameHeader::kOpCodeText;
   std::unique_ptr<WebSocketDeflatePredictor> predictor_;
 
   // User callback saved for asynchronous reads.

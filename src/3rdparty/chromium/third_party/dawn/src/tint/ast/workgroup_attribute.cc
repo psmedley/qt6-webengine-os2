@@ -23,25 +23,26 @@ TINT_INSTANTIATE_TYPEINFO(tint::ast::WorkgroupAttribute);
 namespace tint::ast {
 
 WorkgroupAttribute::WorkgroupAttribute(ProgramID pid,
+                                       NodeID nid,
                                        const Source& src,
                                        const ast::Expression* x_,
                                        const ast::Expression* y_,
                                        const ast::Expression* z_)
-    : Base(pid, src), x(x_), y(y_), z(z_) {}
+    : Base(pid, nid, src), x(x_), y(y_), z(z_) {}
 
 WorkgroupAttribute::~WorkgroupAttribute() = default;
 
 std::string WorkgroupAttribute::Name() const {
-  return "workgroup_size";
+    return "workgroup_size";
 }
 
 const WorkgroupAttribute* WorkgroupAttribute::Clone(CloneContext* ctx) const {
-  // Clone arguments outside of create() call to have deterministic ordering
-  auto src = ctx->Clone(source);
-  auto* x_ = ctx->Clone(x);
-  auto* y_ = ctx->Clone(y);
-  auto* z_ = ctx->Clone(z);
-  return ctx->dst->create<WorkgroupAttribute>(src, x_, y_, z_);
+    // Clone arguments outside of create() call to have deterministic ordering
+    auto src = ctx->Clone(source);
+    auto* x_ = ctx->Clone(x);
+    auto* y_ = ctx->Clone(y);
+    auto* z_ = ctx->Clone(z);
+    return ctx->dst->create<WorkgroupAttribute>(src, x_, y_, z_);
 }
 
 }  // namespace tint::ast

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ class InterfaceRegistrationHelper {
     // binder_map.
     binder_initializers_->push_back(
         base::BindRepeating([](WebUIBinderMap* binder_map) {
-          binder_map->Add(base::BindRepeating(
+          binder_map->Add<Interface>(base::BindRepeating(
               [](WebUIController* controller,
                  mojo::PendingReceiver<Interface> receiver) {
                 auto* concrete_controller = controller->GetAs<ControllerType>();

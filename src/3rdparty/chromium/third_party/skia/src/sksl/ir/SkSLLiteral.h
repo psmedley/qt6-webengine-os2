@@ -8,10 +8,18 @@
 #ifndef SKSL_FLOATLITERAL
 #define SKSL_FLOATLITERAL
 
+#include "include/core/SkTypes.h"
+#include "include/private/SkSLDefines.h"
+#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLContext.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLType.h"
 
 #include <cinttypes>
+#include <memory>
+#include <optional>
+#include <string>
 
 namespace SkSL {
 
@@ -98,24 +106,7 @@ public:
         return fValue;
     }
 
-    std::string description() const override {
-        if (this->type().isFloat()) {
-            return skstd::to_string(this->floatValue());
-        }
-        if (this->type().isInteger()) {
-            return std::to_string(this->intValue());
-        }
-        SkASSERT(this->type().isBoolean());
-        return fValue ? "true" : "false";
-    }
-
-    bool hasProperty(Property property) const override {
-        return false;
-    }
-
-    bool isCompileTimeConstant() const override {
-        return true;
-    }
+    std::string description(OperatorPrecedence) const override;
 
     ComparisonResult compareConstant(const Expression& other) const override {
         if (!other.is<Literal>() || this->type().numberKind() != other.type().numberKind()) {
@@ -126,8 +117,8 @@ public:
                        : ComparisonResult::kNotEqual;
     }
 
-    std::unique_ptr<Expression> clone() const override {
-        return std::make_unique<Literal>(fPosition, this->value(), &this->type());
+    std::unique_ptr<Expression> clone(Position pos) const override {
+        return std::make_unique<Literal>(pos, this->value(), &this->type());
     }
 
     bool supportsConstantValues() const override {

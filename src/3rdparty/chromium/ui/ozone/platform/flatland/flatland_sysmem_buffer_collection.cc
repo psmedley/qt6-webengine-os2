@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,18 +121,25 @@ VkImageFormatConstraintsInfoFUCHSIA GetDefaultImageFormatConstraintsInfo(
   DCHECK(create_info.usage != 0);
 
   static const VkSysmemColorSpaceFUCHSIA kSrgbColorSpace = {
-      .sType = VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA,
-      .pNext = nullptr,
-      .colorSpace =
-          static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::SRGB),
+      VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+      static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::SRGB)};
+
+  static const VkSysmemColorSpaceFUCHSIA kYuvDefaultColorSpaces[] = {
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC709)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC601_NTSC)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(
+           fuchsia::sysmem::ColorSpaceType::REC601_NTSC_FULL_RANGE)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC601_PAL)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(
+           fuchsia::sysmem::ColorSpaceType::REC601_PAL_FULL_RANGE)},
   };
 
-  static const VkSysmemColorSpaceFUCHSIA kYuvDefaultColorSpace = {
-      .sType = VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA,
-      .pNext = nullptr,
-      .colorSpace =
-          static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC709),
-  };
+  bool is_yuv = IsYuvVkFormat(create_info.format);
 
   VkImageFormatConstraintsInfoFUCHSIA format_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_CONSTRAINTS_INFO_FUCHSIA,
@@ -141,9 +148,9 @@ VkImageFormatConstraintsInfoFUCHSIA GetDefaultImageFormatConstraintsInfo(
       .requiredFormatFeatures =
           GetFormatFeatureFlagsFromUsage(create_info.usage),
       .sysmemPixelFormat = 0u,
-      .colorSpaceCount = 1u,
-      .pColorSpaces = IsYuvVkFormat(create_info.format) ? &kYuvDefaultColorSpace
-                                                        : &kSrgbColorSpace,
+      .colorSpaceCount = static_cast<uint32_t>(
+          is_yuv ? std::size(kYuvDefaultColorSpaces) : 1u),
+      .pColorSpaces = is_yuv ? kYuvDefaultColorSpaces : &kSrgbColorSpace,
   };
   return format_info;
 }
@@ -296,8 +303,19 @@ bool FlatlandSysmemBufferCollection::Initialize(
       min_buffer_count);
 }
 
+void FlatlandSysmemBufferCollection::InitializeForTesting(
+    gfx::BufferUsage usage) {
+  if (usage == gfx::BufferUsage::SCANOUT) {
+    // Scanout buffers need to be registered with flatland.
+    fuchsia::ui::composition::BufferCollectionExportToken export_token;
+    zx::eventpair::create(0, &export_token.value,
+                          &flatland_import_token_.value);
+  }
+}
+
 scoped_refptr<gfx::NativePixmap>
-FlatlandSysmemBufferCollection::CreateNativePixmap(size_t buffer_index) {
+FlatlandSysmemBufferCollection::CreateNativePixmap(size_t buffer_index,
+                                                   gfx::Size size) {
   CHECK_LT(buffer_index, num_buffers());
 
   gfx::NativePixmapHandle handle;
@@ -324,10 +342,10 @@ FlatlandSysmemBufferCollection::CreateNativePixmap(size_t buffer_index) {
   // The logic should match LogicalBufferCollection::Allocate().
   size_t stride =
       RoundUp(std::max(static_cast<size_t>(format.min_bytes_per_row),
-                       image_size_.width() * GetBytesPerPixel(format_)),
+                       size.width() * GetBytesPerPixel(format_)),
               format.bytes_per_row_divisor);
   size_t plane_offset = buffers_info_.buffers[buffer_index].vmo_usable_start;
-  size_t plane_size = stride * image_size_.height();
+  size_t plane_size = stride * size.height();
   handle.planes.emplace_back(stride, plane_offset, plane_size,
                              std::move(main_plane_vmo));
 
@@ -340,7 +358,7 @@ FlatlandSysmemBufferCollection::CreateNativePixmap(size_t buffer_index) {
     DCHECK_LE(uv_plane_offset + uv_plane_size, buffer_size_);
   }
 
-  return new FlatlandSysmemNativePixmap(this, std::move(handle));
+  return new FlatlandSysmemNativePixmap(this, std::move(handle), size);
 }
 
 bool FlatlandSysmemBufferCollection::CreateVkImage(
@@ -350,8 +368,7 @@ bool FlatlandSysmemBufferCollection::CreateVkImage(
     VkImage* vk_image,
     VkImageCreateInfo* vk_image_info,
     VkDeviceMemory* vk_device_memory,
-    VkDeviceSize* mem_allocation_size,
-    absl::optional<gpu::VulkanYCbCrInfo>* ycbcr_info) {
+    VkDeviceSize* mem_allocation_size) {
   DCHECK_CALLED_ON_VALID_THREAD(vulkan_thread_checker_);
 
   if (vk_device_ != vk_device) {
@@ -426,38 +443,13 @@ bool FlatlandSysmemBufferCollection::CreateVkImage(
 
   *mem_allocation_size = requirements.size;
 
-  auto color_space =
-      buffers_info_.settings.image_format_constraints.color_space[0].type;
-  switch (color_space) {
-    case fuchsia::sysmem::ColorSpaceType::SRGB:
-      *ycbcr_info = absl::nullopt;
-      break;
-
-    case fuchsia::sysmem::ColorSpaceType::REC709: {
-      // Currently sysmem doesn't specify location of chroma samples relative to
-      // luma (see fxb/13677). Assume they are cosited with luma. YCbCr info
-      // here must match the values passed for the same buffer in
-      // FuchsiaVideoDecoder. |format_features| are resolved later in the GPU
-      // process before the ycbcr info is passed to Skia.
-      *ycbcr_info = gpu::VulkanYCbCrInfo(
-          vk_image_info->format, /*external_format=*/0,
-          VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
-          VK_SAMPLER_YCBCR_RANGE_ITU_NARROW, VK_CHROMA_LOCATION_COSITED_EVEN,
-          VK_CHROMA_LOCATION_COSITED_EVEN, /*format_features=*/0);
-      break;
-    }
-
-    default:
-      DLOG(ERROR) << "Sysmem allocated buffer with unsupported color space: "
-                  << static_cast<int>(color_space);
-      return false;
-  }
-
   return true;
 }
 
 fuchsia::ui::composition::BufferCollectionImportToken
 FlatlandSysmemBufferCollection::GetFlatlandImportToken() const {
+  DCHECK(HasFlatlandImportToken());
+
   fuchsia::ui::composition::BufferCollectionImportToken import_dup;
   zx_status_t status = flatland_import_token_.value.duplicate(
       ZX_RIGHT_SAME_RIGHTS, &import_dup.value);
@@ -465,6 +457,10 @@ FlatlandSysmemBufferCollection::GetFlatlandImportToken() const {
     ZX_DLOG(ERROR, status) << "BufferCollectionImportToken duplicate failed";
   }
   return import_dup;
+}
+
+bool FlatlandSysmemBufferCollection::HasFlatlandImportToken() const {
+  return flatland_import_token_.value.is_valid();
 }
 
 void FlatlandSysmemBufferCollection::AddOnDeletedCallback(
@@ -610,16 +606,6 @@ bool FlatlandSysmemBufferCollection::InitializeInternal(
   DCHECK_GE(buffers_info_.buffer_count, min_buffer_count);
   DCHECK(buffers_info_.settings.has_image_format_constraints);
 
-  // The logic should match LogicalBufferCollection::Allocate().
-  const fuchsia::sysmem::ImageFormatConstraints& format =
-      buffers_info_.settings.image_format_constraints;
-  size_t width =
-      RoundUp(std::max(format.min_coded_width, format.required_max_coded_width),
-              format.coded_width_divisor);
-  size_t height = RoundUp(
-      std::max(format.min_coded_height, format.required_max_coded_height),
-      format.coded_height_divisor);
-  image_size_ = gfx::Size(width, height);
   buffer_size_ = buffers_info_.settings.buffer_settings.size_bytes;
   is_protected_ = buffers_info_.settings.buffer_settings.is_secure;
 

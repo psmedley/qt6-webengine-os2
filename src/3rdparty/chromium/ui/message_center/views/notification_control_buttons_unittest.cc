@@ -1,9 +1,10 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/message_center/views/notification_control_buttons_view.h"
 
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_palette.h"
@@ -14,6 +15,7 @@
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/vector_icons.h"
 #include "ui/message_center/views/message_view.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
 
@@ -35,7 +37,7 @@ class TestMessageView : public MessageView {
   }
 
  private:
-  NotificationControlButtonsView* buttons_view_ = nullptr;
+  raw_ptr<NotificationControlButtonsView> buttons_view_ = nullptr;
 };
 
 }  // namespace
@@ -74,7 +76,7 @@ class NotificationControlButtonsTest : public views::ViewsTestBase {
     return message_view_->GetControlButtonsView();
   }
 
-  bool MatchesIcon(PaddedButton* button,
+  bool MatchesIcon(views::ImageButton* button,
                    const gfx::VectorIcon& icon,
                    SkColor color) {
     SkBitmap expected = *gfx::CreateVectorIcon(icon, color).bitmap();

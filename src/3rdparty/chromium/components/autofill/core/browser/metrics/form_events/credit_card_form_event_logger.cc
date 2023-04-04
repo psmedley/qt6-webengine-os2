@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,18 @@
 
 #include <string>
 
+#include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/ranges/algorithm.h"
 #include "components/autofill/core/browser/form_data_importer.h"
 #include "components/autofill/core/browser/metrics/form_events/form_events.h"
+#include "components/autofill/core/browser/payments/autofill_offer_manager.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 
 namespace autofill {
 
@@ -33,16 +36,13 @@ CreditCardFormEventLogger::CreditCardFormEventLogger(
 
 CreditCardFormEventLogger::~CreditCardFormEventLogger() = default;
 
-void CreditCardFormEventLogger::set_suggestions(
-    std::vector<Suggestion> suggestions) {
+void CreditCardFormEventLogger::OnDidFetchSuggestion(
+    const std::vector<Suggestion>& suggestions,
+    bool with_offer) {
+  has_eligible_offer_ = with_offer;
   suggestions_.clear();
-  for (auto suggestion : suggestions) {
+  for (const auto& suggestion : suggestions)
     suggestions_.emplace_back(suggestion);
-
-    // Track whether or not offers are being shown
-    if (!suggestion.offer_label.empty())
-      has_eligible_offer_ = true;
-  }
 }
 
 void CreditCardFormEventLogger::OnDidShowSuggestions(
@@ -149,6 +149,12 @@ void CreditCardFormEventLogger::OnDidFillSuggestion(
         record_type == CreditCard::VIRTUAL_CARD;
     switch (record_type) {
       case CreditCard::LOCAL_CARD:
+        // Check if the local card is a duplicate of an existing server card
+        // and log an additional metric if so.
+        if (IsLocalDuplicateOfServerCard(credit_card)) {
+          Log(FORM_EVENT_LOCAL_SUGGESTION_FILLED_FOR_AN_EXISTING_SERVER_CARD_ONCE,
+              form);
+        }
         Log(FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE, form);
         break;
       case CreditCard::MASKED_SERVER_CARD:
@@ -215,7 +221,6 @@ void CreditCardFormEventLogger::LogFormSubmitted(const FormStructure& form) {
   if (!has_logged_suggestion_filled_) {
     Log(FORM_EVENT_NO_SUGGESTION_SUBMITTED_ONCE, form);
   } else if (logged_suggestion_filled_was_masked_server_card_) {
-    DCHECK_NE(current_authentication_flow_, UnmaskAuthFlowType::kNone);
     Log(FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SUBMITTED_ONCE, form);
 
     // Log BetterAuth.FlowEvents.
@@ -227,11 +232,8 @@ void CreditCardFormEventLogger::LogFormSubmitted(const FormStructure& form) {
     // Log BetterAuth.FlowEvents.
     RecordCardUnmaskFlowEvent(current_authentication_flow_,
                               UnmaskAuthFlowEvent::kFormSubmitted);
-    if (base::FeatureList::IsEnabled(
-            features::kAutofillEnableVirtualCardsRiskBasedAuthentication)) {
-      AutofillMetrics::LogServerCardUnmaskFormSubmission(
-          AutofillClient::PaymentsRpcCardType::kVirtualCard);
-    }
+    AutofillMetrics::LogServerCardUnmaskFormSubmission(
+        AutofillClient::PaymentsRpcCardType::kVirtualCard);
   } else if (logged_suggestion_filled_was_server_data_) {
     Log(FORM_EVENT_SERVER_SUGGESTION_SUBMITTED_ONCE, form);
   } else {
@@ -285,6 +287,17 @@ void CreditCardFormEventLogger::OnLog(const std::string& name,
   if (has_eligible_offer_) {
     base::UmaHistogramEnumeration(name + ".WithOffer", event, NUM_FORM_EVENTS);
   }
+}
+
+bool CreditCardFormEventLogger::IsLocalDuplicateOfServerCard(
+    const CreditCard& credit_card) {
+  // Get the list of all the server credit cards for the user and see if any
+  // card in the list matches/isDuplicateOf the local card.
+  return base::ranges::any_of(
+      personal_data_manager_->GetServerCreditCards(),
+      [&credit_card](CreditCard* card_from_list) {
+        return credit_card.IsLocalDuplicateOfServerCard(*card_from_list);
+      });
 }
 
 FormEvent CreditCardFormEventLogger::GetCardNumberStatusFormEvent(
@@ -347,11 +360,13 @@ void CreditCardFormEventLogger::RecordCardUnmaskFlowEvent(
 
 bool CreditCardFormEventLogger::DoesCardHaveOffer(
     const CreditCard& credit_card) {
-  for (auto& suggestion : suggestions_) {
-    if (suggestion.backend_id == credit_card.guid())
-      return !suggestion.offer_label.empty();
-  }
-  return false;
+  auto* offer_manager = client_->GetAutofillOfferManager();
+  if (!offer_manager)
+    return false;
+
+  auto card_linked_offer_map = offer_manager->GetCardLinkedOffersMap(
+      client_->GetLastCommittedPrimaryMainFrameURL());
+  return base::Contains(card_linked_offer_map, credit_card.guid());
 }
 
 bool CreditCardFormEventLogger::DoSuggestionsIncludeVirtualCard() {

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "content/browser/process_internals/process_internals.mojom.h"
 #include "content/browser/process_internals/process_internals_handler_impl.h"
-#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/grit/dev_ui_content_resources.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -55,9 +54,9 @@ void ProcessInternalsUI::WebUIRenderFrameCreated(RenderFrameHost* rfh) {
   rfh->EnableMojoJsBindings(nullptr);
 }
 
-void ProcessInternalsUI::BindProcessInternalsHandler(
-    mojo::PendingReceiver<::mojom::ProcessInternalsHandler> receiver,
-    RenderFrameHost* render_frame_host) {
+void ProcessInternalsUI::BindInterface(
+    RenderFrameHost* render_frame_host,
+    mojo::PendingReceiver<::mojom::ProcessInternalsHandler> receiver) {
   ui_handler_ = std::make_unique<ProcessInternalsHandlerImpl>(
       render_frame_host->GetSiteInstance()->GetBrowserContext(),
       std::move(receiver));

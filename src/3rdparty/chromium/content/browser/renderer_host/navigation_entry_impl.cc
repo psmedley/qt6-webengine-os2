@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,15 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <map>
 #include <string>
 #include <utility>
 
 #include "base/containers/queue.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ptr_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -218,7 +217,7 @@ void RegisterOriginsRecursive(NavigationEntryImpl::TreeNode* node,
         node->frame_entry->committed_origin().value();
     SiteInstanceImpl* site_instance = node->frame_entry->site_instance();
     if (site_instance && origin == node_origin)
-      site_instance->PreventOptInOriginIsolation(node_origin);
+      site_instance->RegisterAsDefaultOriginIsolation(node_origin);
   }
 
   for (auto& child : node->children)
@@ -227,7 +226,7 @@ void RegisterOriginsRecursive(NavigationEntryImpl::TreeNode* node,
 
 }  // namespace
 
-void NavigationEntryImpl::RegisterExistingOriginToPreventOptInIsolation(
+void NavigationEntryImpl::RegisterExistingOriginAsHavingDefaultIsolation(
     const url::Origin& origin) {
   return RegisterOriginsRecursive(root_node(), origin);
 }
@@ -241,12 +240,6 @@ NavigationEntryImpl::TreeNode::~TreeNode() {}
 
 bool NavigationEntryImpl::TreeNode::MatchesFrame(
     FrameTreeNode* frame_tree_node) const {
-  if (!frame_tree_node) {
-    SCOPED_CRASH_KEY_BOOL("NoFTN", "is_main_frame", !parent);
-    SCOPED_CRASH_KEY_NUMBER("NoFTN", "children_size", children.size());
-    base::debug::DumpWithoutCrashing();
-    return false;
-  }
   // The root node is for the main frame whether the unique name matches or not.
   if (!parent)
     return frame_tree_node->IsMainFrame();
@@ -864,7 +857,8 @@ NavigationEntryImpl::ConstructCommitNavigationParams(
     int pending_history_list_offset,
     int current_history_list_offset,
     int current_history_list_length,
-    const blink::FramePolicy& frame_policy) {
+    const blink::FramePolicy& frame_policy,
+    bool ancestor_or_self_has_cspee) {
   // Set the redirect chain to the navigation's redirects, unless returning to a
   // completed navigation (whose previous redirects don't apply).
   // Note that this is actually does not work as intended right now because
@@ -894,8 +888,7 @@ NavigationEntryImpl::ConstructCommitNavigationParams(
           origin_to_commit,
           // The correct storage key will be computed before committing the
           // navigation.
-          blink::StorageKey(), network::mojom::WebSandboxFlags(),
-          GetIsOverridingUserAgent(), redirects,
+          blink::StorageKey(), GetIsOverridingUserAgent(), redirects,
           std::vector<network::mojom::URLResponseHeadPtr>(),
           std::vector<net::RedirectInfo>(), std::string(), original_url,
           original_method, GetCanLoadLocalResources(),
@@ -926,8 +919,10 @@ NavigationEntryImpl::ConstructCommitNavigationParams(
           absl::nullopt /* ad_auction_components */,
           /*fenced_frame_reporting_metadata=*/nullptr,
           // This timestamp will be populated when the commit IPC is sent.
-          base::TimeTicks() /* commit_sent */, false /* anonymous */,
-          std::string() /* srcdoc_value */, false /* should_load_data_url */);
+          base::TimeTicks() /* commit_sent */, std::string() /* srcdoc_value */,
+          GURL() /* fallback_srcdoc_baseurl */,
+          false /* should_load_data_url */, ancestor_or_self_has_cspee,
+          std::string() /* reduced_accept_language */);
 #if BUILDFLAG(IS_ANDROID)
   // `data_url_as_string` is saved in NavigationEntry but should only be used by
   // main frames, because loadData* navigations can only happen on the main
@@ -961,29 +956,17 @@ void NavigationEntryImpl::ResetForCommit(FrameNavigationEntry* frame_entry) {
 NavigationEntryImpl::TreeNode* NavigationEntryImpl::GetTreeNode(
     FrameTreeNode* frame_tree_node) const {
   NavigationEntryImpl::TreeNode* node = nullptr;
-  // TODO(https://crbug.com/1279628): Remove the BFS depth from the queue once
-  // we don't need to debug the crash anymore.
-  base::queue<std::pair<NavigationEntryImpl::TreeNode*, int>> work_queue;
-  work_queue.push(std::make_pair(root_node(), 0));
+  base::queue<NavigationEntryImpl::TreeNode*> work_queue;
+  work_queue.push(root_node());
   while (!work_queue.empty()) {
-    node = work_queue.front().first;
-    int depth = work_queue.front().second;
+    node = work_queue.front();
     work_queue.pop();
-    if (!node) {
-      SCOPED_CRASH_KEY_BOOL("NoNode", "ftn_is_main_frame",
-                            frame_tree_node->IsMainFrame());
-      SCOPED_CRASH_KEY_NUMBER("NoNode", "ftn_child_count",
-                              frame_tree_node->child_count());
-      SCOPED_CRASH_KEY_NUMBER("NoNode", "bfs_depth", depth);
-      base::debug::DumpWithoutCrashing();
-      continue;
-    }
     if (node->MatchesFrame(frame_tree_node))
       return node;
 
     // Enqueue any children and keep looking.
     for (const auto& child : node->children)
-      work_queue.push(std::make_pair(child.get(), depth + 1));
+      work_queue.push(child.get());
   }
   return nullptr;
 }
@@ -1103,6 +1086,23 @@ FrameNavigationEntry* NavigationEntryImpl::GetFrameEntry(
   return tree_node ? tree_node->frame_entry.get() : nullptr;
 }
 
+void NavigationEntryImpl::ForEachFrameEntry(
+    FrameEntryIterationCallback on_frame_entry) {
+  NavigationEntryImpl::TreeNode* node = nullptr;
+  base::queue<NavigationEntryImpl::TreeNode*> work_queue;
+  work_queue.push(root_node());
+  while (!work_queue.empty()) {
+    node = work_queue.front();
+    work_queue.pop();
+
+    on_frame_entry(node->frame_entry.get());
+
+    // Enqueue any children.
+    for (const auto& child : node->children)
+      work_queue.push(child.get());
+  }
+}
+
 base::flat_map<std::string, bool> NavigationEntryImpl::GetSubframeUniqueNames(
     FrameTreeNode* frame_tree_node) const {
   base::flat_map<std::string, bool> names;
@@ -1152,24 +1152,22 @@ void NavigationEntryImpl::RemoveEntryForFrame(FrameTreeNode* frame_tree_node,
       !InSameTreePosition(frame_tree_node, node)) {
     auto* frame_entry = node->frame_entry.get();
     if (frame_entry && frame_entry->committed_origin()) {
-      // Normally non-isolated origins are tracked through their presence in
+      // Normally default-isolated origins are tracked through their presence in
       // session history, which is consulted whenever an origin newly requests
       // isolation. If we remove a frame_entry, its origin won't be available
       // to any future global walk if the same origin later wants to opt-in. So
       // we add it to the non-opt-in list here to be spec compliant (unless it's
       // currently opted-in, in which case this call will do nothing).
       ChildProcessSecurityPolicyImpl::GetInstance()
-          ->AddNonIsolatedOriginIfNeeded(
+          ->AddDefaultIsolatedOriginIfNeeded(
               frame_entry->site_instance()->GetIsolationContext(),
               frame_entry->committed_origin().value(),
               true /* global_ walk_or_frame_removal */);
     }
     NavigationEntryImpl::TreeNode* parent_node = node->parent;
-    auto it = std::find_if(
-        parent_node->children.begin(), parent_node->children.end(),
-        [node](const std::unique_ptr<NavigationEntryImpl::TreeNode>& item) {
-          return item.get() == node;
-        });
+    auto it = base::ranges::find(
+        parent_node->children, node,
+        &std::unique_ptr<NavigationEntryImpl::TreeNode>::get);
     CHECK(it != parent_node->children.end());
     parent_node->children.erase(it);
   }

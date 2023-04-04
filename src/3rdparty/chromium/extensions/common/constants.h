@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -226,22 +226,18 @@ EXTENSIONS_EXPORT extern const int kUnknownWindowId;
 // Matches chrome.windows.WINDOW_ID_CURRENT.
 EXTENSIONS_EXPORT extern const int kCurrentWindowId;
 
-enum ExtensionIcons {
-  EXTENSION_ICON_GIGANTOR = 512,
-  EXTENSION_ICON_EXTRA_LARGE = 256,
-  EXTENSION_ICON_LARGE = 128,
-  EXTENSION_ICON_MEDIUM = 48,
-  EXTENSION_ICON_SMALL = 32,
-  EXTENSION_ICON_SMALLISH = 24,
-  EXTENSION_ICON_BITTY = 16,
-  EXTENSION_ICON_INVALID = 0,
-};
+using ExtensionIcons = int;
+constexpr ExtensionIcons EXTENSION_ICON_GIGANTOR = 512;
+constexpr ExtensionIcons EXTENSION_ICON_EXTRA_LARGE = 256;
+constexpr ExtensionIcons EXTENSION_ICON_LARGE = 128;
+constexpr ExtensionIcons EXTENSION_ICON_MEDIUM = 48;
+constexpr ExtensionIcons EXTENSION_ICON_SMALL = 32;
+constexpr ExtensionIcons EXTENSION_ICON_SMALLISH = 24;
+constexpr ExtensionIcons EXTENSION_ICON_BITTY = 16;
+constexpr ExtensionIcons EXTENSION_ICON_INVALID = 0;
 
 // The extension id of the ChromeVox extension.
 EXTENSIONS_EXPORT extern const char kChromeVoxExtensionId[];
-
-// The extension id of the feedback component extension.
-EXTENSIONS_EXPORT extern const char kFeedbackExtensionId[];
 
 // The extension id of the PDF extension.
 EXTENSIONS_EXPORT extern const char kPdfExtensionId[];
@@ -294,6 +290,9 @@ EXTENSIONS_EXPORT extern const char kGoogleSlidesDemoAppId[];
 // The extension id of the Google Keep application.
 EXTENSIONS_EXPORT extern const char kGoogleKeepAppId[];
 
+// The extension id of the office PWA.
+EXTENSIONS_EXPORT extern const char kOfficePwaAppId[];
+
 // The extension id of the Youtube application.
 EXTENSIONS_EXPORT extern const char kYoutubeAppId[];
 
@@ -334,18 +333,8 @@ EXTENSIONS_EXPORT extern const char kGoogleSlidesAppId[];
 // The extension id of the default Demo Mode Highlights app.
 EXTENSIONS_EXPORT extern const char kHighlightsAppId[];
 
-// The extension id of the atlas Demo Mode Highlights app.
-EXTENSIONS_EXPORT extern const char kHighlightsAtlasAppId[];
-
 // The extension id of the default Demo Mode screensaver app.
 EXTENSIONS_EXPORT extern const char kScreensaverAppId[];
-
-// The extension id of the atlas Demo Mode screensaver app.
-EXTENSIONS_EXPORT extern const char kScreensaverAtlasAppId[];
-
-// The extension id of the krane Demo Mode screensaver app. That app is only
-// run on KRANE-ZDKS devices.
-EXTENSIONS_EXPORT extern const char kScreensaverKraneZdksAppId[];
 
 // The id of the testing extension allowed in the signin profile.
 EXTENSIONS_EXPORT extern const char kSigninProfileTestExtensionId[];
@@ -353,10 +342,19 @@ EXTENSIONS_EXPORT extern const char kSigninProfileTestExtensionId[];
 // The id of the testing extension allowed in guest mode.
 EXTENSIONS_EXPORT extern const char kGuestModeTestExtensionId[];
 
+// The extension id of 2022 Demo Mode Highlights app.
+EXTENSIONS_EXPORT extern const char kNewAttractLoopAppId[];
+
+// The extension id of 2022 Demo Mode screensaver app.
+EXTENSIONS_EXPORT extern const char kNewHighlightsAppId[];
 // Returns true if this app is part of the "system UI". Generally this is UI
 // that that on other operating systems would be considered part of the OS,
 // for example the file manager.
 EXTENSIONS_EXPORT bool IsSystemUIApp(base::StringPiece extension_id);
+
+// Returns true if this app is one of Demo Mode Chrome Apps, including
+// attract loop and highlights apps.
+EXTENSIONS_EXPORT bool IsDemoModeChromeApp(base::StringPiece extension_id);
 #endif
 
 // True if the id matches any of the QuickOffice extension ids.
@@ -378,6 +376,13 @@ EXTENSIONS_EXPORT extern const char* const kHangoutsExtensionIds[6];
 
 // Error message when enterprise policy blocks scripting of webpage.
 EXTENSIONS_EXPORT extern const char kPolicyBlockedScripting[];
+
+// Error message when access to incognito preferences is denied.
+EXTENSIONS_EXPORT extern const char kIncognitoErrorMessage[];
+
+// Error message when setting a pref with "incognito_session_only"
+// scope is denied.
+EXTENSIONS_EXPORT extern const char kIncognitoSessionOnlyErrorMessage[];
 
 // The default block size for hashing used in content verification.
 EXTENSIONS_EXPORT extern const int kContentVerificationDefaultBlockSize;

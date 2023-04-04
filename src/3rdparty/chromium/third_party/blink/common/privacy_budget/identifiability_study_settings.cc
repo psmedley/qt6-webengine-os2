@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -143,6 +143,17 @@ bool IdentifiabilityStudySettings::ShouldSampleType(
     return true;
 
   return provider_->IsTypeAllowed(type);
+}
+
+bool IdentifiabilityStudySettings::ShouldActivelySample() const {
+  if (LIKELY(!is_enabled_))
+    return false;
+  return provider_->ShouldActivelySample();
+}
+
+std::vector<std::string>
+IdentifiabilityStudySettings::FontFamiliesToActivelySample() const {
+  return provider_->FontFamiliesToActivelySample();
 }
 
 }  // namespace blink

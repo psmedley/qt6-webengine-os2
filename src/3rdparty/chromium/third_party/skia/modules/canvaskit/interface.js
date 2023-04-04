@@ -78,6 +78,11 @@ CanvasKit.onRuntimeInitialized = function() {
     return this;
   };
 
+  CanvasKit.Path.prototype.addCircle = function(x, y, r, isCCW) {
+    this._addCircle(x, y, r, !!isCCW);
+    return this;
+  };
+
   CanvasKit.Path.prototype.addOval = function(oval, isCCW, startIndex) {
     if (startIndex === undefined) {
       startIndex = 1;
@@ -360,6 +365,7 @@ CanvasKit.onRuntimeInitialized = function() {
     }
     return this;
   };
+
   // isComplement is optional, defaults to false
   CanvasKit.Path.prototype.trim = function(startT, stopT, isComplement) {
     if (this._trim(startT, stopT, !!isComplement)) {
@@ -390,7 +396,7 @@ CanvasKit.onRuntimeInitialized = function() {
     return this._makeShaderOptions(xTileMode, yTileMode, filterMode, mipmapMode, localMatrixPtr);
   };
 
-  function readPixels(source, srcX, srcY, imageInfo, destMallocObj, bytesPerRow) {
+  function readPixels(source, srcX, srcY, imageInfo, destMallocObj, bytesPerRow, grCtx) {
     if (!bytesPerRow) {
       bytesPerRow = 4 * imageInfo['width'];
       if (imageInfo['colorType'] === CanvasKit.ColorType.RGBA_F16) {
@@ -408,7 +414,13 @@ CanvasKit.onRuntimeInitialized = function() {
       pPtr = CanvasKit._malloc(pBytes);
     }
 
-    if (!source._readPixels(imageInfo, pPtr, bytesPerRow, srcX, srcY)) {
+    var rv;
+    if (grCtx) {
+      rv = source._readPixels(imageInfo, pPtr, bytesPerRow, srcX, srcY, grCtx);
+    } else {
+      rv = source._readPixels(imageInfo, pPtr, bytesPerRow, srcX, srcY);
+    }
+    if (!rv) {
       Debug('Could not read pixels with the given inputs');
       if (!destMallocObj) {
         CanvasKit._free(pPtr);
@@ -444,7 +456,8 @@ CanvasKit.onRuntimeInitialized = function() {
 
   CanvasKit.Image.prototype.readPixels = function(srcX, srcY, imageInfo, destMallocObj,
                                                   bytesPerRow) {
-    return readPixels(this, srcX, srcY, imageInfo, destMallocObj, bytesPerRow);
+    var grCtx = CanvasKit.getCurrentGrDirectContext();
+    return readPixels(this, srcX, srcY, imageInfo, destMallocObj, bytesPerRow, grCtx);
   };
 
   // Accepts an array of four numbers in the range of 0-1 representing a 4f color
@@ -748,6 +761,13 @@ CanvasKit.onRuntimeInitialized = function() {
     this._drawVertices(verts, mode, paint);
   }
 
+  // getDeviceClipBounds returns an SkIRect
+  CanvasKit.Canvas.prototype.getDeviceClipBounds = function(outputRect) {
+    // _getDeviceClipBounds will copy the values into the pointer.
+    this._getDeviceClipBounds(_scratchIRectPtr);
+    return copyIRectFromWasm(_scratchIRect, outputRect);
+  };
+
   // getLocalToDevice returns a 4x4 matrix.
   CanvasKit.Canvas.prototype.getLocalToDevice = function() {
     // _getLocalToDevice will copy the values into the pointer.
@@ -814,9 +834,10 @@ CanvasKit.onRuntimeInitialized = function() {
     return ok;
   };
 
-  CanvasKit.ColorFilter.MakeBlend = function(color4f, mode) {
+  CanvasKit.ColorFilter.MakeBlend = function(color4f, mode, colorSpace) {
     var cPtr = copyColorToWasm(color4f);
-    return CanvasKit.ColorFilter._MakeBlend(cPtr, mode);
+    colorSpace = colorSpace || CanvasKit.ColorSpace.SRGB;
+    return CanvasKit.ColorFilter._MakeBlend(cPtr, mode, colorSpace);
   };
 
   // colorMatrix is an ColorMatrix (e.g. Float32Array of length 20)
@@ -841,12 +862,38 @@ CanvasKit.onRuntimeInitialized = function() {
     return ta.slice();
   };
 
+  CanvasKit.ImageFilter.MakeDropShadow = function(dx, dy, sx, sy, color, input) {
+    var cPtr = copyColorToWasm(color, _scratchColorPtr);
+    return CanvasKit.ImageFilter._MakeDropShadow(dx, dy, sx, sy, cPtr, input);
+  };
+
+  CanvasKit.ImageFilter.MakeDropShadowOnly = function(dx, dy, sx, sy, color, input) {
+    var cPtr = copyColorToWasm(color, _scratchColorPtr);
+    return CanvasKit.ImageFilter._MakeDropShadowOnly(dx, dy, sx, sy, cPtr, input);
+  };
+
+  CanvasKit.ImageFilter.MakeImage = function(img, sampling, srcRect, dstRect) {
+    var srcPtr = copyRectToWasm(srcRect, _scratchFourFloatsAPtr);
+    var dstPtr = copyRectToWasm(dstRect, _scratchFourFloatsBPtr);
+
+    if ('B' in sampling && 'C' in sampling) {
+        return CanvasKit.ImageFilter._MakeImageCubic(img, sampling['B'], sampling['C'], srcPtr, dstPtr);
+    } else {
+        const filter = sampling['filter'];  // 'filter' is a required field
+        let mipmap = CanvasKit.MipmapMode.None;
+        if ('mipmap' in sampling) {         // 'mipmap' is optional
+            mipmap = sampling['mipmap'];
+        }
+        return CanvasKit.ImageFilter._MakeImageOptions(img, filter, mipmap, srcPtr, dstPtr);
+    }
+  };
+
   CanvasKit.ImageFilter.MakeMatrixTransform = function(matrix, sampling, input) {
     var matrPtr = copy3x3MatrixToWasm(matrix);
 
     if ('B' in sampling && 'C' in sampling) {
         return CanvasKit.ImageFilter._MakeMatrixTransformCubic(matrPtr,
-                                                               sampling.B, sampling.C,
+                                                               sampling['B'], sampling['C'],
                                                                input);
     } else {
         const filter = sampling['filter'];  // 'filter' is a required field
@@ -927,7 +974,7 @@ CanvasKit.onRuntimeInitialized = function() {
     return s;
   };
 
-  CanvasKit.Surface.prototype.requestAnimationFrame = function(callback, dirtyRect) {
+  CanvasKit.Surface.prototype._requestAnimationFrameInternal = function(callback, dirtyRect) {
     if (!this._cached_canvas) {
       this._cached_canvas = this.getCanvas();
     }
@@ -942,10 +989,14 @@ CanvasKit.onRuntimeInitialized = function() {
       this.flush(dirtyRect);
     }.bind(this));
   };
+  if (!CanvasKit.Surface.prototype.requestAnimationFrame) {
+    CanvasKit.Surface.prototype.requestAnimationFrame =
+          CanvasKit.Surface.prototype._requestAnimationFrameInternal;
+  }
 
   // drawOnce will dispose of the surface after drawing the frame using the provided
   // callback.
-  CanvasKit.Surface.prototype.drawOnce = function(callback, dirtyRect) {
+  CanvasKit.Surface.prototype._drawOnceInternal = function(callback, dirtyRect) {
     if (!this._cached_canvas) {
       this._cached_canvas = this.getCanvas();
     }
@@ -957,6 +1008,9 @@ CanvasKit.onRuntimeInitialized = function() {
       this.dispose();
     }.bind(this));
   };
+  if (!CanvasKit.Surface.prototype.drawOnce) {
+    CanvasKit.Surface.prototype.drawOnce = CanvasKit.Surface.prototype._drawOnceInternal;
+  }
 
   CanvasKit.PathEffect.MakeDash = function(intervals, phase) {
     if (!phase) {

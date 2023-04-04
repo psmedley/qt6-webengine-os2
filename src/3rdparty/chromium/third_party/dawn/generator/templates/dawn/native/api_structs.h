@@ -49,9 +49,15 @@ namespace {{native_namespace}} {
         {{namespace}}::SType sType = {{namespace}}::SType::Invalid;
     };
 
+    struct ChainedStructOut {
+        ChainedStructOut * nextInChain = nullptr;
+        {{namespace}}::SType sType = {{namespace}}::SType::Invalid;
+    };
+
     {% for type in by_category["structure"] %}
         {% if type.chained %}
-            struct {{as_cppType(type.name)}} : ChainedStruct {
+            {% set chainedStructType = "ChainedStructOut" if type.chained == "out" else "ChainedStruct" %}
+            struct {{as_cppType(type.name)}} : {{chainedStructType}} {
                 {{as_cppType(type.name)}}() {
                     sType = {{namespace}}::SType::{{type.name.CamelCase()}};
                 }
@@ -59,13 +65,15 @@ namespace {{native_namespace}} {
             struct {{as_cppType(type.name)}} {
         {% endif %}
             {% if type.extensible %}
-                ChainedStruct const * nextInChain = nullptr;
+                {% set chainedStructType = "ChainedStructOut" if type.output else "ChainedStruct const" %}
+                {{chainedStructType}} * nextInChain = nullptr;
             {% endif %}
             {% for member in type.members %}
                 {% set member_declaration = as_annotated_frontendType(member) + render_cpp_default_value(member) %}
                 {% if type.chained and loop.first %}
-                    //* Align the first member to ChainedStruct to match the C struct layout.
-                    alignas(ChainedStruct) {{member_declaration}};
+                    //* Align the first member after ChainedStruct to match the C struct layout.
+                    //* It has to be aligned both to its natural and ChainedStruct's alignment.
+                    alignas({{namespace}}::{{as_cppType(type.name)}}::kFirstMemberAlignment) {{member_declaration}};
                 {% else %}
                     {{member_declaration}};
                 {% endif %}

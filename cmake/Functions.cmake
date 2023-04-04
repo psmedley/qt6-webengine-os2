@@ -1,7 +1,12 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 function(assertTargets)
-    qt_parse_all_arguments(arg "add_check_for_support"
-        "" "" "MODULES;TARGETS" "${ARGN}"
+    cmake_parse_arguments(PARSE_ARGV 0 arg
+        "" "" "MODULES;TARGETS"
     )
+    _qt_internal_validate_all_args_are_parsed(arg)
+
     foreach(module ${arg_MODULES})
         if(NOT DEFINED ${module}_SUPPORT)
             set(${module}_SUPPORT ON PARENT_SCOPE)
@@ -33,9 +38,11 @@ endfunction()
 
 # TODO: this should be idealy in qtbase
 function(add_check_for_support)
-    qt_parse_all_arguments(arg "add_check_for_support"
-        "" "" "MODULES;MESSAGE;CONDITION" "${ARGN}"
+    cmake_parse_arguments(PARSE_ARGV 0 arg
+        "" "" "MODULES;MESSAGE;CONDITION"
     )
+    _qt_internal_validate_all_args_are_parsed(arg)
+
     foreach(module ${arg_MODULES})
         if(NOT DEFINED ${module}_SUPPORT)
             set(${module}_SUPPORT ON PARENT_SCOPE)
@@ -178,7 +185,9 @@ endmacro()
 
 function(extend_gn_target target)
     get_target_property(elements ${target} ELEMENTS)
-    qt_parse_all_arguments(GN "extend_gn_target" "" "" "CONDITION;${elements}" "${ARGN}")
+    cmake_parse_arguments(PARSE_ARGV 1 GN "" "" "CONDITION;${elements}")
+    _qt_internal_validate_all_args_are_parsed(GN)
+
     if("x${GN_CONDITION}" STREQUAL x)
         set(GN_CONDITION ON)
     endif()
@@ -190,7 +199,9 @@ function(extend_gn_target target)
 endfunction()
 
 function(extend_gn_list outList)
-    qt_parse_all_arguments(GN "extend_gn_list" "" "" "ARGS;CONDITION" "${ARGN}")
+    cmake_parse_arguments(PARSE_ARGV 1 GN "" "" "ARGS;CONDITION")
+    _qt_internal_validate_all_args_are_parsed(GN)
+
     if("x${GN_CONDITION}" STREQUAL x)
         set(GN_CONDITION ON)
     endif()
@@ -442,9 +453,31 @@ function(add_linker_options target buildDir completeStatic)
                  "$<1:-Wl,--start-group $<$<CONFIG:${config}>:@${archives_rsp}> -Wl,--end-group>"
              )
          endif()
+
+         # we need only the '-L' flags from lflags.rsp, filter them
+         set(lflags_rsp "${buildDir}/${ninjaTarget}_lflags.rsp")
+         set(lflags_filtered_rsp "${buildDir}/${ninjaTarget}_lflags_filtered.rsp")
+         set(lflags_filter_script "${buildDir}/${ninjaTarget}_lflags_filter.cmake")
+         file(GENERATE OUTPUT ${lflags_filter_script}
+              CONTENT "file(STRINGS ${lflags_rsp} lflags)
+                       string(REGEX MATCHALL \"-L.*\" lflags_filtered \${lflags})
+                       file(WRITE ${lflags_filtered_rsp} \${lflags_filtered})"
+              FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+         )
+         add_custom_command(
+            OUTPUT ${lflags_filtered_rsp}
+            COMMAND ${CMAKE_COMMAND} -P ${lflags_filter_script}
+            DEPENDS ${lflags_filter_script} ${lflags_rsp}
+         )
+         add_custom_target(
+            run_${cmakeTarget}_${config}_lflags_filter
+            DEPENDS ${lflags_filtered_rsp}
+         )
+         add_dependencies(${cmakeTarget} run_${cmakeTarget}_${config}_lflags_filter)
+
          # linker here options are just to prevent processing it by cmake
          target_link_libraries(${cmakeTarget} PRIVATE
-             "$<1:-Wl,--no-fatal-warnings $<$<CONFIG:${config}>:@${libs_rsp}> -Wl,--no-fatal-warnings>"
+             "$<1:-Wl,--no-fatal-warnings $<$<CONFIG:${config}>:@${lflags_filtered_rsp}> $<$<CONFIG:${config}>:@${libs_rsp}> -Wl,--no-fatal-warnings>"
          )
     endif()
     if(MACOS)
@@ -456,7 +489,7 @@ function(add_linker_options target buildDir completeStatic)
     endif()
     if(WIN32)
         get_copy_of_response_file(objects_rsp ${target} objects)
-        target_link_options(${cmakeTarget} PRIVATE /DELAYLOAD:mf.dll /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll)
+        target_link_options(${cmakeTarget} PRIVATE /DELAYLOAD:mf.dll /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll /DELAYLOAD:winmm.dll)
         target_link_options(${cmakeTarget} PRIVATE "$<$<CONFIG:${config}>:@${objects_rsp}>")
         if(NOT completeStatic)
             get_copy_of_response_file(archives_rsp ${target} archives)
@@ -628,6 +661,8 @@ function(get_gn_arch result arch)
         set(${result} "mipsel" PARENT_SCOPE)
     elseif(arch STREQUAL "mipsel64")
         set(${result} "mips64el" PARENT_SCOPE)
+    elseif(arch STREQUAL "riscv64")
+        set(${result} "riscv64" PARENT_SCOPE)
     else()
         message(DEBUG "Unsupported architecture: ${arch}")
     endif()
@@ -647,6 +682,8 @@ function(get_v8_arch result targetArch hostArch)
             set(${result} "mipsel" PARENT_SCOPE)
         elseif(hostArch STREQUAL "mipsel64")
             set(${result} "mipsel" PARENT_SCOPE)
+        elseif(hostArch STREQUAL "riscv64")
+            set(${result} "riscv64" PARENT_SCOPE)
         elseif(hostArch IN_LIST list32)
             set(${result} "${hostArch}" PARENT_SCOPE)
         else()
@@ -734,7 +771,9 @@ function(extract_cflag result cflag)
 endfunction()
 
 function(extend_gn_list_cflag outList)
-    qt_parse_all_arguments(GN "extend_gn_list_cflag" "" "" "ARG;CFLAG" "${ARGN}")
+    cmake_parse_arguments(PARSE_ARGV 1 GN "" "" "ARG;CFLAG")
+    _qt_internal_validate_all_args_are_parsed(GN)
+
     extract_cflag(cflag "${GN_CFLAG}")
     if(cflag)
         set(${outList} "${${outList}}" "${GN_ARG}=\"${cflag}\"" PARENT_SCOPE)
@@ -793,7 +832,7 @@ endmacro()
 
 macro(append_build_type_setup)
     list(APPEND gnArgArg
-        use_qt=true
+        is_qtwebengine=true
         init_stack_vars=false
         is_component_build=false
         is_shared=true
@@ -1033,9 +1072,11 @@ macro(append_pkg_config_setup)
 endmacro()
 
 function(add_ninja_command)
-    qt_parse_all_arguments(arg "add_ninja_command"
-        "" "TARGET;OUTPUT;BUILDDIR;MODULE" "BYPRODUCTS" "${ARGN}"
+    cmake_parse_arguments(PARSE_ARGV 0 arg
+        "" "TARGET;OUTPUT;BUILDDIR;MODULE" "BYPRODUCTS"
     )
+    _qt_internal_validate_all_args_are_parsed(arg)
+
     string(REPLACE " " ";" NINJAFLAGS "$ENV{NINJAFLAGS}")
     list(TRANSFORM arg_BYPRODUCTS PREPEND "${arg_BUILDDIR}/")
     add_custom_command(
@@ -1134,9 +1175,10 @@ function(get_config_filenames c_config cxx_config static_config target_config)
 endfunction()
 
 function(add_gn_command)
-    qt_parse_all_arguments(arg "add_gn_command"
-        "" "CMAKE_TARGET;GN_TARGET;MODULE;BUILDDIR" "NINJA_TARGETS;GN_ARGS" "${ARGN}"
+    cmake_parse_arguments(PARSE_ARGV 0 arg
+        "" "CMAKE_TARGET;GN_TARGET;MODULE;BUILDDIR" "NINJA_TARGETS;GN_ARGS"
     )
+    _qt_internal_validate_all_args_are_parsed(arg)
 
     get_config_filenames(cConfigFileName cxxConfigFileName staticConfigFileName targetConfigFileName)
     set(gnArgArgFile ${arg_BUILDDIR}/args.gn)
@@ -1145,7 +1187,7 @@ function(add_gn_command)
     file(WRITE ${gnArgArgFile} ${arg_GN_ARGS})
 
     foreach(ninjaTarget ${arg_NINJA_TARGETS})
-        list(APPEND output ${ninjaTarget}_objects.rsp ${ninjaTarget}_archives.rsp ${ninjaTarget}_libs.rsp)
+        list(APPEND output ${ninjaTarget}_objects.rsp ${ninjaTarget}_archives.rsp ${ninjaTarget}_libs.rsp ${ninjaTarget}_lflags.rsp)
     endforeach()
     list(TRANSFORM output PREPEND "${arg_BUILDDIR}/")
 

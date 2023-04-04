@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,8 @@ PrintBackendCupsIpp::PrintBackendCupsIpp(
 PrintBackendCupsIpp::~PrintBackendCupsIpp() = default;
 
 mojom::ResultCode PrintBackendCupsIpp::EnumeratePrinters(
-    PrinterList* printer_list) {
-  DCHECK(printer_list);
-  printer_list->clear();
+    PrinterList& printer_list) {
+  DCHECK(printer_list.empty());
 
   std::vector<std::unique_ptr<CupsPrinter>> printers;
   if (!cups_connection_->GetDests(printers)) {
@@ -47,7 +46,7 @@ mojom::ResultCode PrintBackendCupsIpp::EnumeratePrinters(
   for (const auto& printer : printers) {
     PrinterBasicInfo basic_info;
     if (printer->ToPrinterInfo(&basic_info)) {
-      printer_list->push_back(basic_info);
+      printer_list.push_back(basic_info);
     }
   }
 

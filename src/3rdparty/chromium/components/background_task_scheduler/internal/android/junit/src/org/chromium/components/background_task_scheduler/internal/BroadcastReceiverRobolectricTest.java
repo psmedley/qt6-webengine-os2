@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.os.BatteryManager;
-import android.os.Build;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -26,7 +25,6 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.components.background_task_scheduler.BackgroundTask;
 import org.chromium.components.background_task_scheduler.BackgroundTaskFactory;
 import org.chromium.components.background_task_scheduler.TaskIds;
@@ -150,7 +148,6 @@ public final class BroadcastReceiverRobolectricTest {
     }
 
     @Test
-    @MinAndroidSdkLevel(Build.VERSION_CODES.M)
     @Feature({"BackgroundTaskScheduler"})
     public void withChargingRequired() throws InterruptedException {
         // Set device in charging mode
@@ -200,7 +197,6 @@ public final class BroadcastReceiverRobolectricTest {
     }
 
     @Test
-    @MinAndroidSdkLevel(Build.VERSION_CODES.L)
     @Feature({"BackgroundTaskScheduler"})
     public void withAnyNetworkRequired() throws InterruptedException {
         mShadowConnectivityManager.setDefaultNetworkActive(true);
@@ -225,7 +221,6 @@ public final class BroadcastReceiverRobolectricTest {
     }
 
     @Test
-    @MinAndroidSdkLevel(Build.VERSION_CODES.M)
     @Feature({"BackgroundTaskScheduler"})
     public void withAnyNetworkRequiredButNoConnectivity() throws InterruptedException {
         mShadowConnectivityManager.setDefaultNetworkActive(false);

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,12 +38,14 @@ BluetoothDelegateImpl::ShowBluetoothScanningPrompt(
   return client_->ShowBluetoothScanningPrompt(frame, event_handler);
 }
 
-void BluetoothDelegateImpl::ShowDeviceCredentialsPrompt(
+void BluetoothDelegateImpl::ShowDevicePairPrompt(
     RenderFrameHost* frame,
     const std::u16string& device_identifier,
-    CredentialsCallback callback) {
-  client_->ShowBluetoothDeviceCredentialsDialog(frame, device_identifier,
-                                                std::move(callback));
+    PairPromptCallback callback,
+    PairingKind pairing_kind,
+    const absl::optional<std::u16string>& pin) {
+  client_->ShowBluetoothDevicePairDialog(
+      frame, device_identifier, std::move(callback), pairing_kind, pin);
 }
 
 WebBluetoothDeviceId BluetoothDelegateImpl::GetWebBluetoothDeviceId(

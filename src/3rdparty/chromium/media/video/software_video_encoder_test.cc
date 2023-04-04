@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/callback_helpers.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,7 +20,9 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/decoder_buffer.h"
+#include "media/base/media_switches.h"
 #include "media/base/mock_media_log.h"
+#include "media/base/video_decoder.h"
 #include "media/base/video_encoder.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
@@ -45,6 +48,10 @@
 
 #if BUILDFLAG(ENABLE_DAV1D_DECODER)
 #include "media/filters/dav1d_video_decoder.h"
+#endif
+
+#if BUILDFLAG(ENABLE_LIBGAV1_DECODER)
+#include "media/filters/gav1_video_decoder.h"
 #endif
 
 namespace media {
@@ -93,9 +100,16 @@ class SoftwareVideoEncoderTest
       decoder_ = std::make_unique<VpxVideoDecoder>();
 #endif
     } else if (codec_ == VideoCodec::kAV1) {
-#if BUILDFLAG(ENABLE_DAV1D_DECODER)
-      decoder_ = std::make_unique<Dav1dVideoDecoder>(&media_log_);
+#if BUILDFLAG(ENABLE_LIBGAV1_DECODER)
+      if (base::FeatureList::IsEnabled(kGav1VideoDecoder)) {
+        decoder_ = std::make_unique<Gav1VideoDecoder>(&media_log_);
+      } else
 #endif
+      {
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
+        decoder_ = std::make_unique<Dav1dVideoDecoder>(&media_log_);
+#endif
+      }
     }
 
     EXPECT_NE(decoder_, nullptr);
@@ -114,17 +128,19 @@ class SoftwareVideoEncoderTest
     auto y = color & 0xFF;
     auto u = (color >> 8) & 0xFF;
     auto v = (color >> 16) & 0xFF;
-    libyuv::I420Rect(
-        frame->data(VideoFrame::kYPlane), frame->stride(VideoFrame::kYPlane),
-        frame->data(VideoFrame::kUPlane), frame->stride(VideoFrame::kUPlane),
-        frame->data(VideoFrame::kVPlane), frame->stride(VideoFrame::kVPlane),
-        0,                               // left
-        0,                               // top
-        frame->visible_rect().width(),   // right
-        frame->visible_rect().height(),  // bottom
-        y,                               // Y color
-        u,                               // U color
-        v);                              // V color
+    libyuv::I420Rect(frame->writable_data(VideoFrame::kYPlane),
+                     frame->stride(VideoFrame::kYPlane),
+                     frame->writable_data(VideoFrame::kUPlane),
+                     frame->stride(VideoFrame::kUPlane),
+                     frame->writable_data(VideoFrame::kVPlane),
+                     frame->stride(VideoFrame::kVPlane),
+                     frame->visible_rect().x(),       // x
+                     frame->visible_rect().y(),       // y
+                     frame->visible_rect().width(),   // width
+                     frame->visible_rect().height(),  // height
+                     y,                               // Y color
+                     u,                               // U color
+                     v);                              // V color
     return frame;
   }
 
@@ -145,12 +161,12 @@ class SoftwareVideoEncoderTest
     auto frame = VideoFrame::CreateFrame(PIXEL_FORMAT_XRGB, size,
                                          gfx::Rect(size), size, timestamp);
 
-    libyuv::ARGBRect(frame->data(VideoFrame::kARGBPlane),
+    libyuv::ARGBRect(frame->writable_data(VideoFrame::kARGBPlane),
                      frame->stride(VideoFrame::kARGBPlane),
-                     0,                               // left
-                     0,                               // top
-                     frame->visible_rect().width(),   // right
-                     frame->visible_rect().height(),  // bottom
+                     frame->visible_rect().x(),       // dst_x
+                     frame->visible_rect().y(),       // dst_y
+                     frame->visible_rect().width(),   // width
+                     frame->visible_rect().height(),  // height
                      color);
 
     return frame;
@@ -259,7 +275,7 @@ class SoftwareVideoEncoderTest
     uint8_t tolerance = 10;
 
     if (frame1.format() != frame2.format() ||
-        frame1.visible_rect() != frame2.visible_rect()) {
+        frame1.visible_rect().size() != frame2.visible_rect().size()) {
       return frame1.coded_size().GetArea();
     }
 
@@ -267,9 +283,9 @@ class SoftwareVideoEncoderTest
     size_t num_planes = VideoFrame::NumPlanes(format);
     gfx::Size visible_size = frame1.visible_rect().size();
     for (size_t plane = 0; plane < num_planes; ++plane) {
-      uint8_t* data1 = frame1.visible_data(plane);
+      const uint8_t* data1 = frame1.visible_data(plane);
       int stride1 = frame1.stride(plane);
-      uint8_t* data2 = frame2.visible_data(plane);
+      const uint8_t* data2 = frame2.visible_data(plane);
       int stride2 = frame2.stride(plane);
       size_t rows = VideoFrame::Rows(plane, format, visible_size.height());
       int row_bytes = VideoFrame::RowBytes(plane, format, visible_size.width());
@@ -470,7 +486,8 @@ TEST_P(SoftwareVideoEncoderTest, EncodeAndDecode) {
     auto original_frame = frames_to_encode[i];
     auto decoded_frame = decoded_frames[i];
     EXPECT_EQ(decoded_frame->timestamp(), original_frame->timestamp());
-    EXPECT_EQ(decoded_frame->visible_rect(), original_frame->visible_rect());
+    EXPECT_EQ(decoded_frame->visible_rect().size(),
+              original_frame->visible_rect().size());
     EXPECT_EQ(decoded_frame->format(), PIXEL_FORMAT_I420);
     if (decoded_frame->format() == original_frame->format()) {
       EXPECT_LE(CountDifferentPixels(*decoded_frame, *original_frame),
@@ -900,6 +917,10 @@ INSTANTIATE_TEST_SUITE_P(VpxTemporalSvc,
 #endif  // ENABLE_LIBVPX
 
 #if BUILDFLAG(ENABLE_LIBAOM)
+#if !BUILDFLAG(ENABLE_AV1_DECODER)
+#error PrepareDecoder() requires an AV1 decoder.
+#endif
+
 SwVideoTestParams kAv1Params[] = {
     {VideoCodec::kAV1, AV1PROFILE_PROFILE_MAIN, PIXEL_FORMAT_I420},
     {VideoCodec::kAV1, AV1PROFILE_PROFILE_MAIN, PIXEL_FORMAT_NV12},

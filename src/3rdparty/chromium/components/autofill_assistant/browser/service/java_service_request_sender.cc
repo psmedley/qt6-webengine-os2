@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,5 +52,7 @@ void JavaServiceRequestSender::OnResponse(
   // Note: it is currently not necessary to mock the response info in ITs.
   std::move(callback_).Run(http_status, response, ResponseInfo{});
 }
+
+void JavaServiceRequestSender::SetDisableRpcSigning(bool disable_rpc_signing) {}
 
 }  // namespace autofill_assistant

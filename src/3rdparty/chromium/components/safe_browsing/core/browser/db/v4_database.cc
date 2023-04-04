@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,6 +157,11 @@ void V4Database::InitializeOnIOSequence() {
   // after its having been detached from the DB sequence in this object's
   // constructor.
   DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
+}
+
+void V4Database::StopOnIO() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
+  weak_factory_on_io_.InvalidateWeakPtrs();
 }
 
 V4Database::~V4Database() {

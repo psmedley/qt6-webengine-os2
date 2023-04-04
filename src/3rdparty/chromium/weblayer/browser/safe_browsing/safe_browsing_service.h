@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ namespace safe_browsing {
 class UrlCheckerDelegate;
 class RealTimeUrlLookupServiceBase;
 class RemoteSafeBrowsingDatabaseManager;
-class SafeBrowsingApiHandler;
+class SafeBrowsingApiHandlerBridge;
 class SafeBrowsingNetworkContext;
 class TriggerManager;
 }  // namespace safe_browsing
@@ -118,7 +118,7 @@ class SafeBrowsingService {
 
   scoped_refptr<UrlCheckerDelegateImpl> safe_browsing_url_checker_delegate_;
 
-  std::unique_ptr<safe_browsing::SafeBrowsingApiHandler>
+  std::unique_ptr<safe_browsing::SafeBrowsingApiHandlerBridge>
       safe_browsing_api_handler_;
 
   std::string user_agent_;

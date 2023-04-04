@@ -1,20 +1,17 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/services/app_service/public/cpp/app_update.h"
 
-#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
-#include "components/services/app_service/public/cpp/app_update.h"
-#include "components/services/app_service/public/cpp/features.h"
 #include "components/services/app_service/public/cpp/intent_filter.h"
 #include "components/services/app_service/public/cpp/permission.h"
 #include "components/services/app_service/public/cpp/run_on_os_login_types.h"
+#include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace apps {
-
 namespace {
 const AppType app_type = AppType::kArc;
 const char app_id[] = "abcdefgh";
@@ -41,11 +38,6 @@ PermissionPtr MakePermission(PermissionType permission_type,
 
 class AppUpdateTest : public testing::Test {
  protected:
-  AppUpdateTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        kAppServiceOnAppUpdateWithoutMojom);
-  }
-
   Readiness expect_readiness_;
   Readiness expect_prior_readiness_;
   bool expect_readiness_changed_;
@@ -86,8 +78,8 @@ class AppUpdateTest : public testing::Test {
   InstallSource expect_install_source_;
   bool expect_install_source_changed_;
 
-  std::string expect_policy_id_;
-  bool expect_policy_id_changed_;
+  std::vector<std::string> expect_policy_ids_;
+  bool expect_policy_ids_changed_;
 
   absl::optional<bool> expect_is_platform_app_;
   bool expect_is_platform_app_changed_;
@@ -139,6 +131,12 @@ class AppUpdateTest : public testing::Test {
 
   AccountId account_id_ = AccountId::FromUserEmail("test@gmail.com");
 
+  absl::optional<uint64_t> expect_app_size_in_bytes_;
+  bool expect_app_size_in_bytes_changed_;
+
+  absl::optional<uint64_t> expect_data_size_in_bytes_;
+  bool expect_data_size_in_bytes_changed_;
+
   void ExpectNoChange() {
     expect_readiness_changed_ = false;
     expect_name_changed_ = false;
@@ -153,7 +151,7 @@ class AppUpdateTest : public testing::Test {
     expect_permissions_changed_ = false;
     expect_install_reason_changed_ = false;
     expect_install_source_changed_ = false;
-    expect_policy_id_changed_ = false;
+    expect_policy_ids_changed_ = false;
     expect_is_platform_app_changed_ = false;
     expect_recommendable_changed_ = false;
     expect_searchable_changed_ = false;
@@ -170,6 +168,8 @@ class AppUpdateTest : public testing::Test {
     expect_window_mode_changed_ = false;
     expect_run_on_os_login_changed_ = false;
     expect_shortcuts_changed_ = false;
+    expect_app_size_in_bytes_changed_ = false;
+    expect_data_size_in_bytes_changed_ = false;
   }
 
   void CheckExpects(const AppUpdate& u) {
@@ -214,8 +214,9 @@ class AppUpdateTest : public testing::Test {
     EXPECT_EQ(expect_install_source_, u.InstallSource());
     EXPECT_EQ(expect_install_source_changed_, u.InstallSourceChanged());
 
-    EXPECT_EQ(expect_policy_id_, u.PolicyId());
-    EXPECT_EQ(expect_policy_id_changed_, u.PolicyIdChanged());
+    EXPECT_THAT(u.PolicyIds(),
+                testing::UnorderedElementsAreArray(expect_policy_ids_));
+    EXPECT_EQ(expect_policy_ids_changed_, u.PolicyIdsChanged());
 
     EXPECT_EQ(expect_is_platform_app_, u.IsPlatformApp());
     EXPECT_EQ(expect_is_platform_app_changed_, u.IsPlatformAppChanged());
@@ -266,6 +267,12 @@ class AppUpdateTest : public testing::Test {
     EXPECT_EQ(expect_shortcuts_changed_, u.ShortcutsChanged());
 
     EXPECT_EQ(account_id_, u.AccountId());
+
+    EXPECT_EQ(expect_app_size_in_bytes_, u.AppSizeInBytes());
+    EXPECT_EQ(expect_app_size_in_bytes_changed_, u.AppSizeInBytesChanged());
+
+    EXPECT_EQ(expect_data_size_in_bytes_, u.DataSizeInBytes());
+    EXPECT_EQ(expect_data_size_in_bytes_changed_, u.DataSizeInBytesChanged());
   }
 
   void TestAppUpdate(App* state, App* delta) {
@@ -288,7 +295,7 @@ class AppUpdateTest : public testing::Test {
     expect_permissions_.clear();
     expect_install_reason_ = InstallReason::kUnknown;
     expect_install_source_ = InstallSource::kUnknown;
-    expect_policy_id_ = "";
+    expect_policy_ids_ = {};
     expect_is_platform_app_ = absl::nullopt;
     expect_recommendable_ = absl::nullopt;
     expect_searchable_ = absl::nullopt;
@@ -303,6 +310,8 @@ class AppUpdateTest : public testing::Test {
     expect_resize_locked_ = absl::nullopt;
     expect_window_mode_ = WindowMode::kUnknown;
     expect_run_on_os_login_ = absl::nullopt;
+    expect_app_size_in_bytes_ = absl::nullopt;
+    expect_data_size_in_bytes_ = absl::nullopt;
     expect_shortcuts_.clear();
     ExpectNoChange();
     CheckExpects(u);
@@ -630,22 +639,23 @@ class AppUpdateTest : public testing::Test {
     // PolicyId tests.
 
     if (state) {
-      state->policy_id = "https://app.site/alpha";
-      expect_policy_id_ = "https://app.site/alpha";
-      expect_policy_id_changed_ = false;
+      state->policy_ids = {"https://app.site/alpha", "https://site.app/alpha"};
+      expect_policy_ids_ = {"https://app.site/alpha", "https://site.app/alpha"};
+      expect_policy_ids_changed_ = false;
       CheckExpects(u);
     }
 
     if (delta) {
-      delta->policy_id = "https://app.site/delta";
-      expect_policy_id_ = "https://app.site/delta";
-      expect_policy_id_changed_ = true;
+      delta->policy_ids = {"https://app.site/delta", "https://site.app/delta"};
+      expect_policy_ids_ = {"https://app.site/delta", "https://site.app/delta"};
+      expect_policy_ids_changed_ = true;
       CheckExpects(u);
     }
 
     if (state) {
       apps::AppUpdate::Merge(state, delta);
-      EXPECT_EQ(expect_policy_id_, state->policy_id);
+      EXPECT_THAT(state->policy_ids,
+                  testing::UnorderedElementsAreArray(expect_policy_ids_));
       ExpectNoChange();
       CheckExpects(u);
     }
@@ -909,14 +919,14 @@ class AppUpdateTest : public testing::Test {
       IntentFilterPtr intent_filter = std::make_unique<IntentFilter>();
 
       ConditionValues scheme_condition_values;
-      scheme_condition_values.push_back(
-          std::make_unique<ConditionValue>("https", PatternMatchType::kNone));
+      scheme_condition_values.push_back(std::make_unique<ConditionValue>(
+          "https", PatternMatchType::kLiteral));
       ConditionPtr scheme_condition = std::make_unique<Condition>(
           ConditionType::kScheme, std::move(scheme_condition_values));
 
       ConditionValues host_condition_values;
       host_condition_values.push_back(std::make_unique<ConditionValue>(
-          "www.google.com", PatternMatchType::kNone));
+          "www.google.com", PatternMatchType::kLiteral));
       auto host_condition = std::make_unique<Condition>(
           ConditionType::kHost, std::move(host_condition_values));
 
@@ -935,15 +945,15 @@ class AppUpdateTest : public testing::Test {
       IntentFilterPtr intent_filter = std::make_unique<IntentFilter>();
 
       ConditionValues scheme_condition_values;
-      scheme_condition_values.push_back(
-          std::make_unique<ConditionValue>("https", PatternMatchType::kNone));
+      scheme_condition_values.push_back(std::make_unique<ConditionValue>(
+          "https", PatternMatchType::kLiteral));
       ConditionPtr scheme_condition = std::make_unique<Condition>(
           ConditionType::kScheme, std::move(scheme_condition_values));
       intent_filter->conditions.push_back(scheme_condition->Clone());
 
       ConditionValues host_condition_values;
       host_condition_values.push_back(std::make_unique<ConditionValue>(
-          "www.abc.com", PatternMatchType::kNone));
+          "www.abc.com", PatternMatchType::kLiteral));
       auto host_condition = std::make_unique<Condition>(
           ConditionType::kHost, std::move(host_condition_values));
       intent_filter->conditions.push_back(host_condition->Clone());
@@ -1072,10 +1082,53 @@ class AppUpdateTest : public testing::Test {
       ExpectNoChange();
       CheckExpects(u);
     }
-  }
 
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
+    // App size in bytes tests.
+
+    if (state) {
+      state->app_size_in_bytes = 17;
+      expect_app_size_in_bytes_ = 17;
+      expect_app_size_in_bytes_changed_ = false;
+      CheckExpects(u);
+    }
+
+    if (delta) {
+      delta->app_size_in_bytes = 42;
+      expect_app_size_in_bytes_ = 42;
+      expect_app_size_in_bytes_changed_ = true;
+      CheckExpects(u);
+    }
+
+    if (state) {
+      apps::AppUpdate::Merge(state, delta);
+      EXPECT_EQ(expect_app_size_in_bytes_, state->app_size_in_bytes);
+      ExpectNoChange();
+      CheckExpects(u);
+    }
+
+    // Data size in bytes tests.
+
+    if (state) {
+      state->data_size_in_bytes = 17;
+      expect_data_size_in_bytes_ = 17;
+      expect_data_size_in_bytes_changed_ = false;
+      CheckExpects(u);
+    }
+
+    if (delta) {
+      delta->data_size_in_bytes = 42;
+      expect_data_size_in_bytes_ = 42;
+      expect_data_size_in_bytes_changed_ = true;
+      CheckExpects(u);
+    }
+
+    if (state) {
+      apps::AppUpdate::Merge(state, delta);
+      EXPECT_EQ(expect_data_size_in_bytes_, state->data_size_in_bytes);
+      ExpectNoChange();
+      CheckExpects(u);
+    }
+  }
 };
 
 TEST_F(AppUpdateTest, StateIsNonNull) {

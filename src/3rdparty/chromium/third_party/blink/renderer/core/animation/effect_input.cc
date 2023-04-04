@@ -49,6 +49,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -409,7 +410,7 @@ bool GetPropertyIndexedKeyframeValues(const v8::Local<v8::Object>& keyframe,
                                       ScriptState* script_state,
                                       ExceptionState& exception_state,
                                       Vector<String>& result) {
-  DCHECK(result.IsEmpty());
+  DCHECK(result.empty());
 
   // By spec, we are only allowed to access a given (property, value) pair once.
   // This is observable by the web client, so we take care to adhere to that.
@@ -593,7 +594,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
     // At this point in the code we have read all the properties we will read
     // from the input object, so it is safe to parse the easing strings. See the
     // note on step 8.2.
-    if (!easings.IsEmpty()) {
+    if (!easings.empty()) {
       // 5.9 If easings has fewer items than property keyframes, repeat the
       // elements in easings successively starting from the beginning of the
       // list until easings has as many items as property keyframes.
@@ -614,7 +615,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
       keyframe->SetEasing(timing_function);
     }
 
-    if (!composite_operations.IsEmpty()) {
+    if (!composite_operations.empty()) {
       // 5.12.2 As with easings, if composite modes has fewer items than
       // property keyframes, repeat the elements in composite modes successively
       // starting from the beginning of the list until composite modes has as

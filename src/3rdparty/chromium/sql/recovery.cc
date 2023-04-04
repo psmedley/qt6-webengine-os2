@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,8 +75,9 @@ Recovery::Recovery(Database* connection)
       recover_db_({
           /*.exclusive_locking =*/ false,
           /*.page_size =*/ db_->page_size(),
+          0, false, false,
           // The interface to the recovery module is a virtual table.
-          /*.enable_virtual_tables_discouraged =*/ true,
+          /*.enable_virtual_tables_discouraged =*/ true
       }) {
   // Files with I/O errors cannot be safely memory-mapped.
   recover_db_.set_mmap_disabled();

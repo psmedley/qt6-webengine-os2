@@ -405,8 +405,8 @@ bool SelectionController::HandleSingleClick(
   }
 
   bool is_handle_visible = false;
-  const bool has_editable_style = HasEditableStyle(*inner_node);
-  if (has_editable_style) {
+  const bool is_editable = IsEditable(*inner_node);
+  if (is_editable) {
     const bool is_text_box_empty =
         !RootEditableElement(*inner_node)->HasChildren();
     const bool not_left_click =
@@ -434,7 +434,7 @@ bool SelectionController::HandleSingleClick(
 
   // SelectionControllerTest_SetCaretAtHitTestResultWithDisconnectedPosition
   // makes the IsValidFor() check fail.
-  if (has_editable_style && event.Event().FromTouch() &&
+  if (is_editable && event.Event().FromTouch() &&
       position_to_use.IsValidFor(*frame_->GetDocument())) {
     frame_->GetTextSuggestionController().HandlePotentialSuggestionTap(
         position_to_use.GetPosition());
@@ -479,7 +479,6 @@ bool SelectionController::HandleTapInsideSelection(
 
 void SelectionController::UpdateSelectionForMouseDrag(
     const HitTestResult& hit_test_result,
-    const PhysicalOffset& drag_start_pos,
     const PhysicalOffset& last_known_mouse_position) {
   if (!mouse_down_may_start_select_)
     return;
@@ -646,7 +645,7 @@ bool SelectionController::SelectClosestWordFromHitTestResult(
     const String word = PlainText(
         range, TextIteratorBehavior::Builder()
                    .SetEmitsObjectReplacementCharacter(
-                       HasEditableStyle(*range.StartPosition().AnchorNode()))
+                       IsEditable(*range.StartPosition().AnchorNode()))
                    .Build());
     if (word.length() >= 1 && word[0] == '\n') {
       // We should not select word from end of line, e.g.
@@ -1024,7 +1023,6 @@ bool SelectionController::HandleMousePressEvent(
 void SelectionController::HandleMouseDraggedEvent(
     const MouseEventWithHitTestResults& event,
     const gfx::Point& mouse_down_pos,
-    const PhysicalOffset& drag_start_pos,
     const PhysicalOffset& last_known_mouse_position) {
   TRACE_EVENT0("blink", "SelectionController::handleMouseDraggedEvent");
 
@@ -1036,10 +1034,9 @@ void SelectionController::HandleMouseDraggedEvent(
     HitTestResult result(request, location);
     frame_->GetDocument()->GetLayoutView()->HitTest(location, result);
 
-    UpdateSelectionForMouseDrag(result, drag_start_pos,
-                                last_known_mouse_position);
+    UpdateSelectionForMouseDrag(result, last_known_mouse_position);
   }
-  UpdateSelectionForMouseDrag(event.GetHitTestResult(), drag_start_pos,
+  UpdateSelectionForMouseDrag(event.GetHitTestResult(),
                               last_known_mouse_position);
 }
 
@@ -1059,8 +1056,7 @@ void SelectionController::UpdateSelectionForMouseDrag(
       view->ConvertFromRootFrame(last_known_mouse_position_in_root_frame));
   HitTestResult result(request, location);
   layout_view->HitTest(location, result);
-  UpdateSelectionForMouseDrag(result, drag_start_pos_in_root_frame,
-                              last_known_mouse_position_in_root_frame);
+  UpdateSelectionForMouseDrag(result, last_known_mouse_position_in_root_frame);
 }
 
 bool SelectionController::HandleMouseReleaseEvent(
@@ -1090,7 +1086,7 @@ bool SelectionController::HandleMouseReleaseEvent(
 
     SelectionInFlatTree::Builder builder;
     Node* node = event.InnerNode();
-    if (node && node->GetLayoutObject() && HasEditableStyle(*node)) {
+    if (node && node->GetLayoutObject() && IsEditable(*node)) {
       const PositionInFlatTreeWithAffinity pos =
           CreateVisiblePosition(
               PositionWithAffinityOfHitTestResult(event.GetHitTestResult()))
@@ -1166,7 +1162,7 @@ bool SelectionController::HandleGestureLongPress(
 
   Node* inner_node = hit_test_result.InnerPossiblyPseudoNode();
   inner_node->GetDocument().UpdateStyleAndLayoutTree();
-  bool inner_node_is_selectable = HasEditableStyle(*inner_node) ||
+  bool inner_node_is_selectable = IsEditable(*inner_node) ||
                                   inner_node->IsTextNode() ||
                                   inner_node->CanStartSelection();
   if (!inner_node_is_selectable)

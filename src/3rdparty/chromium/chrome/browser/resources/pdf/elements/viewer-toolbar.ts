@@ -1,17 +1,17 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
-import 'chrome://resources/cr_elements/icons.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import 'chrome://resources/cr_elements/icons.html.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import 'chrome://resources/polymer/v3_0/paper-progress/paper-progress.js';
-import './icons.js';
+import './icons.html.js';
 import './viewer-download-controls.js';
 import './viewer-page-selector.js';
-import './shared-css.js';
-import './shared-vars.js';
+import './pdf-shared.css.js';
+import './shared-vars.css.js';
 // <if expr="enable_ink">
 import './viewer-annotations-bar.js';
 import './viewer-annotations-mode-dialog.js';
@@ -217,19 +217,19 @@ export class ViewerToolbarElement extends PolymerElement {
     this.dispatchEvent(new CustomEvent('properties-click'));
   }
 
-  getSinglePageAriaChecked_(checked: boolean): string {
+  private getSinglePageAriaChecked_(checked: boolean): string {
     return checked ? 'false' : 'true';
   }
 
-  getTwoPageViewAriaChecked_(checked: boolean): string {
+  private getTwoPageViewAriaChecked_(checked: boolean): string {
     return checked ? 'true' : 'false';
   }
 
-  getShowAnnotationsAriaChecked_(checked: boolean): string {
+  private getShowAnnotationsAriaChecked_(checked: boolean): string {
     return checked ? 'true' : 'false';
   }
 
-  getAriaExpanded_(): string {
+  private getAriaExpanded_(): string {
     return this.sidenavCollapsed ? 'false' : 'true';
   }
 

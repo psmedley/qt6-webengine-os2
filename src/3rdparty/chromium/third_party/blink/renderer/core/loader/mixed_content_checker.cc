@@ -30,6 +30,7 @@
 
 #include "base/containers/contains.h"
 #include "base/feature_list.h"
+#include "base/features.h"
 #include "base/metrics/field_trial_params.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -64,6 +65,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/loader/mixed_content.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -215,12 +217,24 @@ bool IsWebSocketAllowedInWorker(const WorkerFetchContext& fetch_context,
   return settings && settings->GetAllowRunningOfInsecureContent();
 }
 
+bool IsUrlPotentiallyTrustworthy(const KURL& url) {
+  // This saves a copy of the url, which can be expensive for large data URLs.
+  // TODO(crbug.com/1322100): Remove this logic once
+  // network::IsUrlPotentiallyTrustworthy() doesn't copy the URL.
+  if (base::FeatureList::IsEnabled(base::features::kOptimizeDataUrls) &&
+      url.ProtocolIsData()) {
+    DCHECK(network::IsUrlPotentiallyTrustworthy(GURL(url)));
+    return true;
+  }
+  return network::IsUrlPotentiallyTrustworthy(GURL(url));
+}
+
 }  // namespace
 
 static bool IsInsecureUrl(const KURL& url) {
   // |url| is mixed content if it is not a potentially trustworthy URL.
   // See https://w3c.github.io/webappsec-mixed-content/#should-block-response
-  return !network::IsUrlPotentiallyTrustworthy(url);
+  return !IsUrlPotentiallyTrustworthy(url);
 }
 
 static void MeasureStricterVersionOfIsMixedContent(Frame& frame,
@@ -238,7 +252,7 @@ static void MeasureStricterVersionOfIsMixedContent(Frame& frame,
           source->GetDocument(),
           WebFeature::kMixedContentInNonHTTPSFrameThatRestrictsMixedContent);
     }
-  } else if (!network::IsUrlPotentiallyTrustworthy(url) &&
+  } else if (!IsUrlPotentiallyTrustworthy(url) &&
              base::Contains(url::GetSecureSchemes(),
                             origin->Protocol().Ascii())) {
     UseCounter::Count(
@@ -254,7 +268,8 @@ bool RequestIsSubframeSubresource(Frame* frame) {
 // static
 bool MixedContentChecker::IsMixedContent(const SecurityOrigin* security_origin,
                                          const KURL& url) {
-  return IsMixedContent(security_origin->Protocol(), url);
+  return IsMixedContent(
+      security_origin->GetOriginOrPrecursorOriginIfOpaque()->Protocol(), url);
 }
 
 // static
@@ -385,6 +400,7 @@ void MixedContentChecker::Count(
 bool MixedContentChecker::ShouldBlockFetch(
     LocalFrame* frame,
     mojom::blink::RequestContextType request_context,
+    network::mojom::blink::IPAddressSpace target_address_space,
     const KURL& url_before_redirects,
     ResourceRequest::RedirectStatus redirect_status,
     const KURL& url,
@@ -504,6 +520,17 @@ bool MixedContentChecker::ShouldBlockFetch(
       NOTREACHED();
       break;
   };
+
+  // Skip mixed content check for private and local targets.
+  // TODO(lyf): check the IP address space for initiator, only skip when the
+  // initiator is more public.
+  if (RuntimeEnabledFeatures::PrivateNetworkAccessPermissionPromptEnabled()) {
+    if (target_address_space ==
+            network::mojom::blink::IPAddressSpace::kPrivate ||
+        target_address_space == network::mojom::blink::IPAddressSpace::kLocal) {
+      allowed = true;
+    }
+  }
 
   if (reporting_disposition == ReportingDisposition::kReport) {
     frame->GetDocument()->AddConsoleMessage(
@@ -898,7 +925,7 @@ void MixedContentChecker::UpgradeInsecureRequest(
 
   KURL url = resource_request.Url();
 
-  if (!url.ProtocolIs("http") || network::IsUrlPotentiallyTrustworthy(url))
+  if (!url.ProtocolIs("http") || IsUrlPotentiallyTrustworthy(url))
     return;
 
   if (frame_type == mojom::RequestContextFrameType::kNone ||

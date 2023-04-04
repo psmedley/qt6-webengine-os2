@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,10 +30,11 @@ class CreditCardField : public FormField {
   ~CreditCardField() override;
   static std::unique_ptr<FormField> Parse(AutofillScanner* scanner,
                                           const LanguageCode& page_language,
+                                          PatternSource pattern_source,
                                           LogManager* log_manager);
 
  protected:
-  void AddClassifications(FieldCandidatesMap* field_candidates) const override;
+  void AddClassifications(FieldCandidatesMap& field_candidates) const override;
 
  private:
   friend class CreditCardFieldTestBase;
@@ -48,7 +49,8 @@ class CreditCardField : public FormField {
   // to chrome://autofill-internals
   static bool LikelyCardYearSelectField(AutofillScanner* scanner,
                                         LogManager* log_manager,
-                                        const LanguageCode& page_language);
+                                        const LanguageCode& page_language,
+                                        PatternSource pattern_source);
 
   // Returns true if |scanner| points to a <select> field that contains credit
   // card type options.
@@ -60,13 +62,15 @@ class CreditCardField : public FormField {
   // a credit card.
   static bool IsGiftCardField(AutofillScanner* scanner,
                               LogManager* log_manager,
-                              const LanguageCode& page_language);
+                              const LanguageCode& page_language,
+                              PatternSource pattern_source);
 
   // Parses the expiration month/year/date fields. Returns true if it finds
   // something new.
   bool ParseExpirationDate(AutofillScanner* scanner,
                            LogManager* log_manager,
-                           const LanguageCode& page_language);
+                           const LanguageCode& page_language,
+                           PatternSource pattern_source);
 
   // For the combined expiration field we return |exp_year_type_|; otherwise if
   // |expiration_year_| is having year with |max_length| of 2-digits we return

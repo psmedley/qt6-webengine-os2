@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,14 @@ bool StructTraits<network::mojom::NetworkIsolationKeyDataView,
   absl::optional<net::SchemefulSite> top_frame_site, frame_site;
 
   if (!data.ReadTopFrameSite(&top_frame_site) ||
-      !data.ReadFrameSite(&frame_site)) {
+      (net::NetworkIsolationKey::IsFrameSiteEnabled() &&
+       !data.ReadFrameSite(&frame_site))) {
     return false;
   }
 
-  // A key is either fully empty or fully populated.
-  if (top_frame_site.has_value() != frame_site.has_value())
+  // A key is either fully empty or fully populated, or double keyed.
+  if ((top_frame_site.has_value() != frame_site.has_value()) &&
+      net::NetworkIsolationKey::IsFrameSiteEnabled())
     return false;
 
   absl::optional<base::UnguessableToken> nonce;
@@ -35,7 +37,9 @@ bool StructTraits<network::mojom::NetworkIsolationKeyDataView,
     *out = net::NetworkIsolationKey();
   } else {
     *out = net::NetworkIsolationKey(std::move(top_frame_site.value()),
-                                    std::move(frame_site.value()),
+                                    frame_site.has_value()
+                                        ? std::move(frame_site.value())
+                                        : net::SchemefulSite(),
                                     nonce ? &nonce.value() : nullptr);
   }
 

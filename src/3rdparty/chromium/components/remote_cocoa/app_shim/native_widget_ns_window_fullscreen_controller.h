@@ -1,10 +1,11 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_REMOTE_COCOA_APP_SHIM_NATIVE_WIDGET_NS_WINDOW_FULLSCREEN_CONTROLLER_H_
 #define COMPONENTS_REMOTE_COCOA_APP_SHIM_NATIVE_WIDGET_NS_WINDOW_FULLSCREEN_CONTROLLER_H_
 
+#include "base/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -32,13 +33,12 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowFullscreenController {
     virtual void FullscreenControllerTransitionComplete(bool is_fullscreen) = 0;
 
     // Set the window's frame to the specified rectangle. If `animate` is true,
-    // then animate the transition and populate `transition_time` with the time
-    // that it will take for this transition to complete. If `animate` is false,
-    // then populate `transition_time` with zero.
+    // then animate the transition. Runs the `completion_callback` callback once
+    // the animation is complete, or immediately when `animate` is false.
     virtual void FullscreenControllerSetFrame(
         const gfx::Rect& frame,
         bool animate,
-        base::TimeDelta& transition_time) = 0;
+        base::OnceCallback<void()> completion_callback) = 0;
 
     // Call -[NSWindow toggleFullscreen:].
     virtual void FullscreenControllerToggleFullscreen() = 0;
@@ -144,6 +144,9 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowFullscreenController {
   // Set the window's frame back to `windowed_frame_`, and then return to
   // the kWindowed state.
   void RestoreWindowedFrame();
+  // Notifies the client that the fullscreen exit transition has completed after
+  // the frame has been restored to its original position.
+  void OnWindowedFrameRestored();
 
   // Helper function wrapping -[NSWindow toggleFullscreen:].
   void ToggleFullscreen();

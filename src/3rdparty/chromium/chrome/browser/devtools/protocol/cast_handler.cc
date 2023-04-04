@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/ranges/algorithm.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/ui/media_router/media_router_ui_helper.h"
 #include "components/media_router/browser/media_router.h"
@@ -238,10 +239,9 @@ void CastHandler::StartPresentation(
 
 media_router::MediaSink::Id CastHandler::GetSinkIdByName(
     const std::string& sink_name) const {
-  auto it = std::find_if(
-      sinks_.begin(), sinks_.end(),
-      [&sink_name](const media_router::MediaSinkWithCastModes& sink) {
-        return sink.sink.name() == sink_name;
+  auto it = base::ranges::find(
+      sinks_, sink_name, [](const media_router::MediaSinkWithCastModes& sink) {
+        return sink.sink.name();
       });
   return it == sinks_.end() ? media_router::MediaSink::Id() : it->sink.id();
 }
@@ -249,10 +249,7 @@ media_router::MediaSink::Id CastHandler::GetSinkIdByName(
 MediaRoute::Id CastHandler::GetRouteIdForSink(
     const media_router::MediaSink::Id& sink_id) const {
   const auto& routes = routes_observer_->routes();
-  auto it = std::find_if(routes.begin(), routes.end(),
-                         [&sink_id](const MediaRoute& route) {
-                           return route.media_sink_id() == sink_id;
-                         });
+  auto it = base::ranges::find(routes, sink_id, &MediaRoute::media_sink_id);
   return it == routes.end() ? MediaRoute::Id() : it->media_route_id();
 }
 
@@ -269,7 +266,7 @@ void CastHandler::StartObservingForSinks(
 
   if (presentation_url.isJust()) {
     url::Origin frame_origin =
-        web_contents_->GetMainFrame()->GetLastCommittedOrigin();
+        web_contents_->GetPrimaryMainFrame()->GetLastCommittedOrigin();
     std::vector<media_router::MediaSource> sources = {
         media_router::MediaSource(presentation_url.fromJust())};
     query_result_manager_->SetSourcesForCastMode(
@@ -283,13 +280,11 @@ void CastHandler::SendSinkUpdate() {
 
   auto protocol_sinks = std::make_unique<protocol::Array<Sink>>();
   for (const media_router::MediaSinkWithCastModes& sink_with_modes : sinks_) {
-    auto route_it = std::find_if(
-        routes_observer_->routes().begin(), routes_observer_->routes().end(),
-        [&sink_with_modes](const MediaRoute& route) {
-          return route.media_sink_id() == sink_with_modes.sink.id();
-        });
+    auto route_it = base::ranges::find(routes_observer_->routes(),
+                                       sink_with_modes.sink.id(),
+                                       &MediaRoute::media_sink_id);
     std::string session = route_it == routes_observer_->routes().end()
-                              ? ""
+                              ? std::string()
                               : route_it->description();
     std::unique_ptr<Sink> sink = Sink::Create()
                                      .SetName(sink_with_modes.sink.name())
@@ -307,7 +302,7 @@ void CastHandler::OnDesktopMirroringStarted(
     std::unique_ptr<StartDesktopMirroringCallback> callback,
     media_router::mojom::RoutePresentationConnectionPtr connection,
     const media_router::RouteRequestResult& result) {
-  if (result.result_code() == media_router::RouteRequestResult::OK) {
+  if (result.result_code() == media_router::mojom::RouteRequestResultCode::OK) {
     initiated_routes_.insert(result.route()->media_route_id());
     callback->sendSuccess();
   } else {
@@ -319,7 +314,7 @@ void CastHandler::OnTabMirroringStarted(
     std::unique_ptr<StartTabMirroringCallback> callback,
     media_router::mojom::RoutePresentationConnectionPtr connection,
     const media_router::RouteRequestResult& result) {
-  if (result.result_code() == media_router::RouteRequestResult::OK) {
+  if (result.result_code() == media_router::mojom::RouteRequestResultCode::OK) {
     initiated_routes_.insert(result.route()->media_route_id());
     callback->sendSuccess();
   } else {
@@ -331,7 +326,7 @@ void CastHandler::OnPresentationStarted(
     std::unique_ptr<media_router::StartPresentationContext> context,
     media_router::mojom::RoutePresentationConnectionPtr connection,
     const media_router::RouteRequestResult& result) {
-  if (result.result_code() == media_router::RouteRequestResult::OK)
+  if (result.result_code() == media_router::mojom::RouteRequestResultCode::OK)
     initiated_routes_.insert(result.route()->media_route_id());
   context->HandleRouteResponse(std::move(connection), result);
 }

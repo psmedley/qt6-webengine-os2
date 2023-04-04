@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <os/availability.h>
 #include <spawn.h>
 #include <string.h>
-#include <sys/syscall.h>
 #include <sys/wait.h>
 
 #include "base/command_line.h"
@@ -96,21 +95,13 @@ class PosixSpawnFileActions {
 };
 
 int ChangeCurrentThreadDirectory(const char* path) {
-  if (__builtin_available(macOS 10.12, *)) {
-    return pthread_chdir_np(path);
-  } else {
-    return syscall(SYS___pthread_chdir, path);
-  }
+  return pthread_chdir_np(path);
 }
 
 // The recommended way to unset a per-thread cwd is to set a new value to an
 // invalid file descriptor, per libpthread-218.1.3/private/private.h.
 int ResetCurrentThreadDirectory() {
-  if (__builtin_available(macOS 10.12, *)) {
-    return pthread_fchdir_np(-1);
-  } else {
-    return syscall(SYS___pthread_fchdir, -1);
-  }
+  return pthread_fchdir_np(-1);
 }
 
 struct GetAppOutputOptions {
@@ -162,7 +153,7 @@ bool GetAppOutputInternal(const std::vector<std::string>& argv,
     read_this_pass = HANDLE_EINTR(
         read(read_fd.get(), &(*output)[total_bytes_read], kBufferSize));
     if (read_this_pass >= 0) {
-      total_bytes_read += read_this_pass;
+      total_bytes_read += static_cast<size_t>(read_this_pass);
       output->resize(total_bytes_read);
     }
   } while (read_this_pass > 0);

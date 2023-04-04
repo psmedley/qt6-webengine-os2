@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,9 @@
 
 namespace gl {
 
-NativeViewGLSurfaceEGLX11::NativeViewGLSurfaceEGLX11(x11::Window window)
-    : NativeViewGLSurfaceEGL(static_cast<uint32_t>(window), nullptr) {}
+NativeViewGLSurfaceEGLX11::NativeViewGLSurfaceEGLX11(GLDisplayEGL* display,
+                                                     x11::Window window)
+    : NativeViewGLSurfaceEGL(display, static_cast<uint32_t>(window), nullptr) {}
 
 bool NativeViewGLSurfaceEGLX11::Initialize(GLSurfaceFormat format) {
   if (!NativeViewGLSurfaceEGL::Initialize(format))
@@ -46,8 +47,10 @@ void NativeViewGLSurfaceEGLX11::Destroy() {
 }
 
 gfx::SwapResult NativeViewGLSurfaceEGLX11::SwapBuffers(
-    PresentationCallback callback) {
-  auto result = NativeViewGLSurfaceEGL::SwapBuffers(std::move(callback));
+    PresentationCallback callback,
+    FrameData data) {
+  auto result =
+      NativeViewGLSurfaceEGL::SwapBuffers(std::move(callback), std::move(data));
   if (result == gfx::SwapResult::SWAP_FAILED)
     return result;
 

@@ -75,13 +75,9 @@ bool TlsClientHandshaker::CryptoConnect() {
 
   // TODO(b/193650832) Add SetFromConfig to QUIC handshakers and remove reliance
   // on session pointer.
-  const bool permutes_tls_extensions = session()->permutes_tls_extensions();
-  if (!permutes_tls_extensions) {
-    QUIC_DLOG(INFO) << "Disabling TLS extension permutation";
-  }
 #if BORINGSSL_API_VERSION >= 16
   // Ask BoringSSL to randomize the order of TLS extensions.
-  SSL_set_permute_extensions(ssl(), permutes_tls_extensions);
+  SSL_set_permute_extensions(ssl(), true);
 #endif  // BORINGSSL_API_VERSION
 
   // Set the SNI to send, if any.
@@ -236,8 +232,7 @@ bool TlsClientHandshaker::SetTransportParameters() {
   session()->connection()->OnTransportParametersSent(params);
 
   std::vector<uint8_t> param_bytes;
-  return SerializeTransportParameters(session()->connection()->version(),
-                                      params, &param_bytes) &&
+  return SerializeTransportParameters(params, &param_bytes) &&
          SSL_set_quic_transport_params(ssl(), param_bytes.data(),
                                        param_bytes.size()) == 1;
 }
@@ -357,6 +352,24 @@ bool TlsClientHandshaker::encryption_established() const {
   return encryption_established_;
 }
 
+bool TlsClientHandshaker::IsCryptoFrameExpectedForEncryptionLevel(
+    EncryptionLevel level) const {
+  return level != ENCRYPTION_ZERO_RTT;
+}
+
+EncryptionLevel TlsClientHandshaker::GetEncryptionLevelToSendCryptoDataOfSpace(
+    PacketNumberSpace space) const {
+  switch (space) {
+    case INITIAL_DATA:
+      return ENCRYPTION_INITIAL;
+    case HANDSHAKE_DATA:
+      return ENCRYPTION_HANDSHAKE;
+    default:
+      QUICHE_DCHECK(false);
+      return NUM_ENCRYPTION_LEVELS;
+  }
+}
+
 bool TlsClientHandshaker::one_rtt_keys_available() const {
   return state_ >= HANDSHAKE_COMPLETE;
 }
@@ -425,7 +438,7 @@ void TlsClientHandshaker::OnNewTokenReceived(absl::string_view token) {
 
 void TlsClientHandshaker::SetWriteSecret(
     EncryptionLevel level, const SSL_CIPHER* cipher,
-    const std::vector<uint8_t>& write_secret) {
+    absl::Span<const uint8_t> write_secret) {
   if (is_connection_closed()) {
     return;
   }

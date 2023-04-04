@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,8 +31,14 @@ struct CORE_EXPORT PhysicalOffset {
   constexpr PhysicalOffset(LayoutUnit left, LayoutUnit top)
       : left(left), top(top) {}
 
+  // This is deleted to avoid unwanted lossy conversion from float or double to
+  // LayoutUnit or int. Use explicit LayoutUnit constructor for each parameter,
+  // or use FromPointF*() instead.
+  PhysicalOffset(double, double) = delete;
+
   // For testing only. It's defined in core/testing/core_unit_test_helper.h.
-  inline PhysicalOffset(int left, int top);
+  // 'constexpr' is to let compiler detect usage from production code.
+  constexpr PhysicalOffset(int left, int top);
 
   LayoutUnit left;
   LayoutUnit top;

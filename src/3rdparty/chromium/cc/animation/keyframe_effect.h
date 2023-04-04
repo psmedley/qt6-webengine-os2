@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -120,7 +120,7 @@ class CC_ANIMATION_EXPORT KeyframeEffect : public gfx::KeyframeEffect {
   // Returns the maximum scale along any dimension at any destination in active
   // scale animations, or kInvalidScale if there is no active transform
   // animation or the scale cannot be computed.
-  float MaximumScale(ElementListType) const;
+  float MaximumScale(ElementId, ElementListType) const;
 
   // Returns true if there is a keyframe_model that is either currently
   // animating the given property or scheduled to animate this property in the

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,29 +7,28 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "components/optimization_guide/proto/models.pb.h"
 #include "components/segmentation_platform/internal/execution/default_model_manager.h"
-
-using optimization_guide::proto::OptimizationTarget;
+#include "components/segmentation_platform/public/proto/segmentation_platform.pb.h"
 
 namespace segmentation_platform {
 
+using proto::SegmentId;
+
 class HistogramSignalHandler;
-class SegmentInfoDatabase;
+class HistoryServiceObserver;
+class StorageService;
 class UserActionSignalHandler;
-class UkmDataManager;
 
 // Responsible for listening to the metadata updates for the models and
 // registers various signal handlers for the relevant UMA signals specified in
 // the metadata.
 class SignalFilterProcessor {
  public:
-  SignalFilterProcessor(SegmentInfoDatabase* segment_database,
+  SignalFilterProcessor(StorageService* storage_service,
                         UserActionSignalHandler* user_action_signal_handler,
                         HistogramSignalHandler* histogram_signal_handler,
-                        UkmDataManager* ukm_data_manager,
-                        DefaultModelManager* default_model_manager,
-                        const std::vector<OptimizationTarget>& segment_ids);
+                        HistoryServiceObserver* history_observer,
+                        const base::flat_set<SegmentId>& segment_ids);
   ~SignalFilterProcessor();
 
   // Disallow copy/assign.
@@ -50,12 +49,14 @@ class SignalFilterProcessor {
  private:
   void FilterSignals(DefaultModelManager::SegmentInfoList segment_infos);
 
-  raw_ptr<SegmentInfoDatabase> segment_database_;
-  raw_ptr<UserActionSignalHandler> user_action_signal_handler_;
-  raw_ptr<HistogramSignalHandler> histogram_signal_handler_;
-  raw_ptr<UkmDataManager> ukm_data_manager_;
-  raw_ptr<DefaultModelManager> default_model_manager_;
-  std::vector<OptimizationTarget> segment_ids_;
+  // Boolean to only record metrics the first time models are updated.
+  bool is_first_time_model_update_{true};
+
+  const raw_ptr<StorageService> storage_service_;
+  const raw_ptr<UserActionSignalHandler> user_action_signal_handler_;
+  const raw_ptr<HistogramSignalHandler> histogram_signal_handler_;
+  const raw_ptr<HistoryServiceObserver> history_observer_;
+  const base::flat_set<SegmentId> segment_ids_;
 
   base::WeakPtrFactory<SignalFilterProcessor> weak_ptr_factory_{this};
 };

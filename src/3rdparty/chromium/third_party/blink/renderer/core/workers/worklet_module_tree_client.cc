@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,8 @@ void WorkletModuleTreeClient::NotifyModuleTreeLoadFinished(
   }
 
   // Step 5: "Run a module script given script."
-  ScriptEvaluationResult result = module_script->RunScriptAndReturnValue();
+  ScriptEvaluationResult result =
+      module_script->RunScriptOnScriptStateAndReturnValue(script_state_);
 
   auto* global_scope =
       To<WorkletGlobalScope>(ExecutionContext::From(script_state_));

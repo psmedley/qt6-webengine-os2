@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,9 @@ class BookmarkModelTypeProcessor : public syncer::ModelTypeProcessor,
       const syncer::CommitResponseDataList& committed_response_list,
       const syncer::FailedCommitResponseDataList& error_response_list) override;
   void OnUpdateReceived(const sync_pb::ModelTypeState& type_state,
-                        syncer::UpdateResponseDataList updates) override;
+                        syncer::UpdateResponseDataList updates,
+                        absl::optional<sync_pb::GarbageCollectionDirective>
+                            gc_directive) override;
 
   // ModelTypeControllerDelegate implementation.
   void OnSyncStarting(const syncer::DataTypeActivationRequest& request,
@@ -125,7 +127,7 @@ class BookmarkModelTypeProcessor : public syncer::ModelTypeProcessor,
   // since we iterate over child nodes already in the calling sites.
   void AppendNodeAndChildrenForDebugging(const bookmarks::BookmarkNode* node,
                                          int index,
-                                         base::ListValue* all_nodes) const;
+                                         base::Value::List* all_nodes) const;
 
   // Stores the start callback in between OnSyncStarting() and
   // ModelReadyToSync().

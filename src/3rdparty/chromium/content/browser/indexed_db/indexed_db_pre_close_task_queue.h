@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,8 +85,8 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
     friend class IndexedDBPreCloseTaskQueue;
 
     bool set_metadata_was_called_ = false;
-    // Raw pointer is safe because |database_| is owned by the
-    // IndexedDBStorageKeyState.
+    // Raw pointer is safe because `database_` is owned by the
+    // IndexedDBBucketState.
     const raw_ptr<leveldb::DB> database_;
   };
 

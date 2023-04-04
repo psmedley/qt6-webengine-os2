@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,8 @@ StorageInterestGroup::~StorageInterestGroup() = default;
 
 std::ostream& operator<<(std::ostream& out,
                          const StorageInterestGroup::KAnonymityData& kanon) {
-  return out << "KAnonymityData[key=`" << kanon.key << "`, k=" << kanon.k
+  return out << "KAnonymityData[key=`" << kanon.key
+             << "`, is_k_anonymous=" << kanon.is_k_anonymous
              << ", last_updated=`" << kanon.last_updated << "`]";
 }
 

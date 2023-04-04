@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,8 @@
 namespace tracing {
 
 using ObjectId = uint64_t;
-using RootType = ::perfetto::protos::pbzero::HeapGraphRoot_Type;
+using RootType = ::perfetto::protos::pbzero::HeapGraphRoot::Type;
+using HeapGraphRoot = ::perfetto::protos::pbzero::HeapGraphRoot;
 const uint64_t kInvalidObjectId = std::numeric_limits<uint64_t>::max();
 
 // This class takes in a temporary file_path where Java API endpoint

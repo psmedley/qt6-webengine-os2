@@ -567,7 +567,7 @@ inline float normalizedToFloat(T input)
 template <typename T>
 inline T floatToNormalized(float input)
 {
-    if (sizeof(T) > 2)
+    if constexpr (sizeof(T) > 2)
     {
         // float has only a 23 bit mantissa, so we need to do the calculation in double precision
         return static_cast<T>(std::numeric_limits<T>::max() * static_cast<double>(input) + 0.5);
@@ -677,7 +677,7 @@ inline unsigned int average(unsigned int a, unsigned int b)
 
 inline int average(int a, int b)
 {
-    long long average = (static_cast<long long>(a) + static_cast<long long>(b)) / 2ll;
+    long long average = (static_cast<long long>(a) + static_cast<long long>(b)) / 2LL;
     return static_cast<int>(average);
 }
 
@@ -1374,7 +1374,7 @@ inline int32_t WrappingMul(int32_t lhs, int32_t rhs)
     // The multiplication is guaranteed not to overflow.
     int64_t resultWide = lhsWide * rhsWide;
     // Implement the desired wrapping behavior by masking out the high-order 32 bits.
-    resultWide = resultWide & 0xffffffffll;
+    resultWide = resultWide & 0xffffffffLL;
     // Casting to a narrower signed type is fine since the casted value is representable in the
     // narrower type.
     return static_cast<int32_t>(resultWide);

@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,6 +21,8 @@ source_set("common") {
     "gl_ozone_egl.h",
     "gl_surface_egl_readback.cc",
     "gl_surface_egl_readback.h",
+    "native_pixmap_egl_binding.cc",
+    "native_pixmap_egl_binding.h",
     "stub_overlay_manager.cc",
     "stub_overlay_manager.h",
   ]
@@ -34,7 +36,7 @@ source_set("common") {
     "//ui/ozone:ozone_base",
   ]
 
-  if (use_qt) {
+  if (is_qtwebengine) {
     sources -= [
       "gl_surface_egl_readback.cc",
       "gl_surface_egl_readback.h",

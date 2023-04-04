@@ -55,10 +55,7 @@
 namespace blink {
 
 LayoutImage::LayoutImage(Element* element)
-    : LayoutReplaced(element, LayoutSize()),
-      did_increment_visually_non_empty_pixel_count_(false),
-      is_generated_content_(false),
-      image_device_pixel_ratio_(1.0f) {}
+    : LayoutReplaced(element, LayoutSize()) {}
 
 LayoutImage* LayoutImage::CreateAnonymous(PseudoElement& pseudo) {
   LayoutImage* image = MakeGarbageCollected<LayoutImage>(nullptr);
@@ -302,11 +299,11 @@ HTMLMapElement* LayoutImage::ImageMap() const {
 bool LayoutImage::NodeAtPoint(HitTestResult& result,
                               const HitTestLocation& hit_test_location,
                               const PhysicalOffset& accumulated_offset,
-                              HitTestAction hit_test_action) {
+                              HitTestPhase phase) {
   NOT_DESTROYED();
   HitTestResult temp_result(result);
-  bool inside = LayoutReplaced::NodeAtPoint(
-      temp_result, hit_test_location, accumulated_offset, hit_test_action);
+  bool inside = LayoutReplaced::NodeAtPoint(temp_result, hit_test_location,
+                                            accumulated_offset, phase);
 
   if (!inside && result.GetHitTestRequest().ListBased())
     result.Append(temp_result);
@@ -375,15 +372,19 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
     if (SVGImage* svg_image = EmbeddedSVGImage()) {
       svg_image->GetIntrinsicSizingInfo(intrinsic_sizing_info);
 
-      if (auto view_box = ComputeObjectViewBoxRect()) {
+      // Scale for the element's effective zoom (which includes scaling for
+      // device scale) is already applied when computing the view box. If the
+      // element has no view box then it needs to be explicitly applied here.
+      if (auto view_box_size = ComputeObjectViewBoxSizeForIntrinsicSizing()) {
         DCHECK(intrinsic_sizing_info.has_width);
         DCHECK(intrinsic_sizing_info.has_height);
-        intrinsic_sizing_info.size = static_cast<gfx::SizeF>(view_box->size);
+        intrinsic_sizing_info.size = *view_box_size;
+      } else {
+        intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
       }
 
       // Handle zoom & vertical writing modes here, as the embedded SVG document
       // doesn't know about them.
-      intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
       if (StyleRef().GetObjectFit() != EObjectFit::kScaleDown)
         intrinsic_sizing_info.size.Scale(ImageDevicePixelRatio());
 
@@ -467,6 +468,18 @@ void LayoutImage::UpdateAfterLayout() {
   if (auto* image_element = DynamicTo<HTMLImageElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, image_element->IsDefaultIntrinsicSize());
+    image_element->SetAutoSizesUsecounter();
+
+    // Scope to the outermost frame to avoid counting image ads that are
+    // (likely) already in ad iframes. Exclude image ads that are invisible or
+    // too small (e.g. tracking pixels).
+    if (!image_ad_use_counter_recorded_ && image_element->IsAdRelated() &&
+        GetDocument().IsInOutermostMainFrame() &&
+        image_element->LayoutBoxWidth() > 1 &&
+        image_element->LayoutBoxHeight() > 1) {
+      UseCounter::Count(GetDocument(), WebFeature::kImageAd);
+      image_ad_use_counter_recorded_ = true;
+    }
   } else if (auto* video_element = DynamicTo<HTMLVideoElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, video_element->IsDefaultIntrinsicSize());

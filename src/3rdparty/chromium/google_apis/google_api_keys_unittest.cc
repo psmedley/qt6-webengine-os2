@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,14 +21,12 @@
 #include "google_apis/gaia/gaia_switches.h"
 #include "google_apis/google_api_keys.h"
 
-// The Win builders fail (with a linker crash) when trying to link
-// unit_tests, and the Android builders complain about multiply
-// defined symbols (likely they don't do name decoration as well as
-// the Mac and Linux linkers).  Therefore these tests are only built
-// and run on Mac, Linux and Fuchsia, which should provide plenty of coverage
-// since there are no platform-specific bits in this code.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_APPLE) || \
-    BUILDFLAG(IS_FUCHSIA)
+// The Win builders fail (with a linker crash) when trying to link unit_tests,
+// and the Android builders complain about multiply defined symbols (likely they
+// don't do name decoration as well as the Mac and Linux linkers). Building and
+// running on other platforms should provide plenty of coverage since there are
+// no platform-specific bits in this code.
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_WIN)
 
 // We need to include everything included by google_api_keys.cc once
 // at global scope so that things like STL and classes from base don't
@@ -586,5 +584,4 @@ TEST_F(GoogleAPIKeysTest, OverrideAllKeysUsingConfig) {
   GaiaConfig::ResetInstanceForTesting();
 }
 
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_APPLE)
-        // || BUILDFLAG(IS_FUCHSIA)
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_WIN)

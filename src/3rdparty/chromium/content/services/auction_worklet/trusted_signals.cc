@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,13 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/escape.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "content/services/auction_worklet/auction_downloader.h"
 #include "content/services/auction_worklet/auction_v8_helper.h"
 #include "gin/converter.h"
-#include "net/base/escape.h"
 #include "net/base/parse_number.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "url/gurl.h"
@@ -49,7 +50,7 @@ std::string CreateQueryParam(const char* name,
     } else {
       query_param.append(",");
     }
-    query_param.append(net::EscapeQueryParamValue(key, /*use_plus=*/true));
+    query_param.append(base::EscapeQueryParamValue(key, /*use_plus=*/true));
   }
   return query_param;
 }
@@ -116,6 +117,102 @@ std::map<std::string, std::string> ParseChildKeyValueMap(
   return ParseKeyValueMap(v8_helper, named_object_value.As<v8::Object>(), keys);
 }
 
+// Attempts to parse the `priorityVector` value in `per_interest_group_data`,
+// expecting it to be a string-to-number mapping. Writes the parsed mapping to
+// `priority_vector`. Returns true on success. Any case where `priorityVector`
+// exists and is an object is considered a success, even if it's empty, or
+// some/all keys in it are mapped to things other than numbers.
+absl::optional<TrustedSignals::Result::PriorityVector> ParsePriorityVector(
+    AuctionV8Helper* v8_helper,
+    v8::Local<v8::Object> per_interest_group_data) {
+  v8::Local<v8::Value> priority_vector_value;
+  if (!per_interest_group_data
+           ->Get(v8_helper->scratch_context(),
+                 v8_helper->CreateStringFromLiteral("priorityVector"))
+           .ToLocal(&priority_vector_value) ||
+      !priority_vector_value->IsObject() ||
+      // Arrays are considered objects, so check explicitly for them.
+      priority_vector_value->IsArray()) {
+    return absl::nullopt;
+  }
+
+  v8::Local<v8::Object> priority_vector_object =
+      priority_vector_value.As<v8::Object>();
+
+  v8::Local<v8::Array> priority_vector_keys;
+  if (!priority_vector_object->GetOwnPropertyNames(v8_helper->scratch_context())
+           .ToLocal(&priority_vector_keys)) {
+    return absl::nullopt;
+  }
+
+  // Put together a list to construct the returned `flat_map` with, since
+  // insertion is O(n) while construction is O(n log n).
+  std::vector<std::pair<std::string, double>> priority_vector_pairs;
+  for (uint32_t i = 0; i < priority_vector_keys->Length(); ++i) {
+    v8::Local<v8::Value> v8_key;
+    std::string key;
+    if (!priority_vector_keys->Get(v8_helper->scratch_context(), i)
+             .ToLocal(&v8_key) ||
+        !v8_key->IsString() ||
+        !gin::ConvertFromV8(v8_helper->isolate(), v8_key, &key)) {
+      continue;
+    }
+    v8::Local<v8::Value> v8_value;
+    double value;
+    if (!priority_vector_object->Get(v8_helper->scratch_context(), v8_key)
+             .ToLocal(&v8_value) ||
+        !v8_value->IsNumber() ||
+        !v8_value->NumberValue(v8_helper->scratch_context()).To(&value)) {
+      continue;
+    }
+    priority_vector_pairs.emplace_back(std::move(key), value);
+  }
+  return TrustedSignals::Result::PriorityVector(
+      std::move(priority_vector_pairs));
+}
+
+// Attempts to parse the `perInterestGroupData` value in `v8_object`, extracting
+// the `priorityVector` fields of all interest group in `interest_group_names`,
+// and putting them all in the returned PriorityVectorMap.
+TrustedSignals::Result::PriorityVectorMap
+ParsePriorityVectorsInPerInterestGroupMap(
+    AuctionV8Helper* v8_helper,
+    v8::Local<v8::Object> v8_object,
+    const std::set<std::string>& interest_group_names) {
+  v8::Local<v8::Value> per_group_data_value;
+  if (!v8_object
+           ->Get(v8_helper->scratch_context(),
+                 v8_helper->CreateStringFromLiteral("perInterestGroupData"))
+           .ToLocal(&per_group_data_value) ||
+      !per_group_data_value->IsObject()) {
+    return {};
+  }
+  v8::Local<v8::Object> per_group_data_object =
+      per_group_data_value.As<v8::Object>();
+
+  TrustedSignals::Result::PriorityVectorMap out;
+  for (const auto& interest_group_name : interest_group_names) {
+    v8::Local<v8::String> v8_name;
+    if (!v8_helper->CreateUtf8String(interest_group_name).ToLocal(&v8_name))
+      continue;
+
+    v8::Local<v8::Value> per_interest_group_data_value;
+    if (!per_group_data_object->Get(v8_helper->scratch_context(), v8_name)
+             .ToLocal(&per_interest_group_data_value) ||
+        !per_interest_group_data_value->IsObject()) {
+      continue;
+    }
+
+    v8::Local<v8::Object> per_interest_group_data =
+        per_interest_group_data_value.As<v8::Object>();
+    absl::optional<TrustedSignals::Result::PriorityVector> priority_vector =
+        ParsePriorityVector(v8_helper, per_interest_group_data);
+    if (priority_vector)
+      out.emplace(interest_group_name, std::move(*priority_vector));
+  }
+  return out;
+}
+
 // Takes a list of keys, a map of strings to JSON strings and creates a
 // corresponding v8::Object from the entries with the provided keys. `keys` must
 // not be empty.
@@ -144,9 +241,11 @@ v8::Local<v8::Object> CreateObjectFromMap(
 }  // namespace
 
 TrustedSignals::Result::Result(
+    std::map<std::string, base::flat_map<std::string, double>> priority_vectors,
     std::map<std::string, std::string> bidder_json_data,
     absl::optional<uint32_t> data_version)
-    : bidder_json_data_(std::move(bidder_json_data)),
+    : priority_vectors_(std::move(priority_vectors)),
+      bidder_json_data_(std::move(bidder_json_data)),
       data_version_(data_version) {}
 
 TrustedSignals::Result::Result(
@@ -156,6 +255,16 @@ TrustedSignals::Result::Result(
     : render_url_json_data_(std::move(render_url_json_data)),
       ad_component_json_data_(std::move(ad_component_json_data)),
       data_version_(data_version) {}
+
+const TrustedSignals::Result::PriorityVector*
+TrustedSignals::Result::GetPriorityVector(
+    const std::string& interest_group_name) const {
+  DCHECK(priority_vectors_.has_value());
+  auto result = priority_vectors_->find(interest_group_name);
+  if (result == priority_vectors_->end())
+    return nullptr;
+  return &result->second;
+}
 
 v8::Local<v8::Object> TrustedSignals::Result::GetBiddingSignals(
     AuctionV8Helper* v8_helper,
@@ -191,8 +300,8 @@ v8::Local<v8::Object> TrustedSignals::Result::GetScoringSignals(
   if (!ad_component_render_urls.empty()) {
     v8::Local<v8::Object> ad_components_v8_object = CreateObjectFromMap(
         ad_component_render_urls, *ad_component_json_data_, v8_helper, context);
-    bool result = v8_helper->InsertValue("adComponentRenderUrls",
-                                         ad_components_v8_object, out);
+    result = v8_helper->InsertValue("adComponentRenderUrls",
+                                    ad_components_v8_object, out);
     DCHECK(result);
   }
 
@@ -203,23 +312,33 @@ TrustedSignals::Result::~Result() = default;
 
 std::unique_ptr<TrustedSignals> TrustedSignals::LoadBiddingSignals(
     network::mojom::URLLoaderFactory* url_loader_factory,
+    std::set<std::string> interest_group_names,
     std::set<std::string> bidding_signals_keys,
     const std::string& hostname,
     const GURL& trusted_bidding_signals_url,
+    absl::optional<uint16_t> experiment_group_id,
     scoped_refptr<AuctionV8Helper> v8_helper,
     LoadSignalsCallback load_signals_callback) {
-  DCHECK(!bidding_signals_keys.empty());
+  DCHECK(!interest_group_names.empty());
 
-  std::unique_ptr<TrustedSignals> trusted_signals = base::WrapUnique(
-      new TrustedSignals(std::move(bidding_signals_keys),
-                         /*render_urls=*/absl::nullopt,
-                         /*ad_component_render_urls=*/absl::nullopt,
-                         trusted_bidding_signals_url, std::move(v8_helper),
-                         std::move(load_signals_callback)));
+  std::unique_ptr<TrustedSignals> trusted_signals =
+      base::WrapUnique(new TrustedSignals(
+          std::move(interest_group_names), std::move(bidding_signals_keys),
+          /*render_urls=*/absl::nullopt,
+          /*ad_component_render_urls=*/absl::nullopt,
+          trusted_bidding_signals_url, std::move(v8_helper),
+          std::move(load_signals_callback)));
 
-  std::string query_params =
-      "hostname=" + net::EscapeQueryParamValue(hostname, /*use_plus=*/true) +
-      CreateQueryParam("keys", *trusted_signals->bidding_signals_keys_);
+  std::string query_params = base::StrCat(
+      {"hostname=", base::EscapeQueryParamValue(hostname, /*use_plus=*/true),
+       CreateQueryParam("keys", *trusted_signals->bidding_signals_keys_),
+       CreateQueryParam("interestGroupNames",
+                        *trusted_signals->interest_group_names_)});
+  if (experiment_group_id.has_value()) {
+    base::StrAppend(&query_params,
+                    {"&experimentGroupId=",
+                     base::NumberToString(experiment_group_id.value())});
+  }
   GURL full_signals_url =
       SetQueryParam(trusted_bidding_signals_url, query_params);
   base::UmaHistogramCounts100000(
@@ -236,21 +355,28 @@ std::unique_ptr<TrustedSignals> TrustedSignals::LoadScoringSignals(
     std::set<std::string> ad_component_render_urls,
     const std::string& hostname,
     const GURL& trusted_scoring_signals_url,
+    absl::optional<uint16_t> experiment_group_id,
     scoped_refptr<AuctionV8Helper> v8_helper,
     LoadSignalsCallback load_signals_callback) {
   DCHECK(!render_urls.empty());
 
   std::unique_ptr<TrustedSignals> trusted_signals =
       base::WrapUnique(new TrustedSignals(
+          /*interest_group_names=*/absl::nullopt,
           /*bidding_signals_keys=*/absl::nullopt, std::move(render_urls),
           std::move(ad_component_render_urls), trusted_scoring_signals_url,
           std::move(v8_helper), std::move(load_signals_callback)));
 
-  std::string query_params =
-      "hostname=" + net::EscapeQueryParamValue(hostname, /*use_plus=*/true) +
-      CreateQueryParam("renderUrls", *trusted_signals->render_urls_) +
-      CreateQueryParam("adComponentRenderUrls",
-                       *trusted_signals->ad_component_render_urls_);
+  std::string query_params = base::StrCat(
+      {"hostname=", base::EscapeQueryParamValue(hostname, /*use_plus=*/true),
+       CreateQueryParam("renderUrls", *trusted_signals->render_urls_),
+       CreateQueryParam("adComponentRenderUrls",
+                        *trusted_signals->ad_component_render_urls_)});
+  if (experiment_group_id.has_value()) {
+    base::StrAppend(&query_params,
+                    {"&experimentGroupId=",
+                     base::NumberToString(experiment_group_id.value())});
+  }
   GURL full_signals_url =
       SetQueryParam(trusted_scoring_signals_url, query_params);
   base::UmaHistogramCounts100000(
@@ -262,13 +388,15 @@ std::unique_ptr<TrustedSignals> TrustedSignals::LoadScoringSignals(
 }
 
 TrustedSignals::TrustedSignals(
+    absl::optional<std::set<std::string>> interest_group_names,
     absl::optional<std::set<std::string>> bidding_signals_keys,
     absl::optional<std::set<std::string>> render_urls,
     absl::optional<std::set<std::string>> ad_component_render_urls,
     const GURL& trusted_signals_url,
     scoped_refptr<AuctionV8Helper> v8_helper,
     LoadSignalsCallback load_signals_callback)
-    : bidding_signals_keys_(std::move(bidding_signals_keys)),
+    : interest_group_names_(std::move(interest_group_names)),
+      bidding_signals_keys_(std::move(bidding_signals_keys)),
       render_urls_(std::move(render_urls)),
       ad_component_render_urls_(std::move(ad_component_render_urls)),
       trusted_signals_url_(trusted_signals_url),
@@ -278,8 +406,9 @@ TrustedSignals::TrustedSignals(
   DCHECK(load_signals_callback_);
 
   // Either this should be for bidding signals or scoring signals.
-  DCHECK(bidding_signals_keys_ || (render_urls_ && ad_component_render_urls_));
-  DCHECK(!bidding_signals_keys_ ||
+  DCHECK((interest_group_names_ && bidding_signals_keys_) ||
+         (render_urls_ && ad_component_render_urls_));
+  DCHECK((!interest_group_names_ && !bidding_signals_keys_) ||
          (!render_urls_ && !ad_component_render_urls_));
 }
 
@@ -288,6 +417,7 @@ TrustedSignals::~TrustedSignals() = default;
 void TrustedSignals::StartDownload(
     network::mojom::URLLoaderFactory* url_loader_factory,
     const GURL& full_signals_url) {
+  download_start_time_ = base::TimeTicks::Now();
   auction_downloader_ = std::make_unique<AuctionDownloader>(
       url_loader_factory, full_signals_url, AuctionDownloader::MimeType::kJson,
       base::BindOnce(&TrustedSignals::OnDownloadComplete,
@@ -305,19 +435,21 @@ void TrustedSignals::OnDownloadComplete(
   // over to the parser on the V8 thread.
   v8_helper_->v8_runner()->PostTask(
       FROM_HERE,
-      base::BindOnce(&TrustedSignals::HandleDownloadResultOnV8Thread,
-                     v8_helper_, trusted_signals_url_,
-                     std::move(bidding_signals_keys_), std::move(render_urls_),
-                     std::move(ad_component_render_urls_), std::move(body),
-                     std::move(headers), std::move(error_msg),
-                     base::SequencedTaskRunnerHandle::Get(),
-                     weak_ptr_factory.GetWeakPtr()));
+      base::BindOnce(
+          &TrustedSignals::HandleDownloadResultOnV8Thread, v8_helper_,
+          trusted_signals_url_, std::move(interest_group_names_),
+          std::move(bidding_signals_keys_), std::move(render_urls_),
+          std::move(ad_component_render_urls_), std::move(body),
+          std::move(headers), std::move(error_msg),
+          base::SequencedTaskRunnerHandle::Get(), weak_ptr_factory.GetWeakPtr(),
+          base::TimeTicks::Now() - download_start_time_));
 }
 
 // static
 void TrustedSignals::HandleDownloadResultOnV8Thread(
     scoped_refptr<AuctionV8Helper> v8_helper,
     const GURL& signals_url,
+    absl::optional<std::set<std::string>> interest_group_names,
     absl::optional<std::set<std::string>> bidding_signals_keys,
     absl::optional<std::set<std::string>> render_urls,
     absl::optional<std::set<std::string>> ad_component_render_urls,
@@ -325,7 +457,8 @@ void TrustedSignals::HandleDownloadResultOnV8Thread(
     scoped_refptr<net::HttpResponseHeaders> headers,
     absl::optional<std::string> error_msg,
     scoped_refptr<base::SequencedTaskRunner> user_thread_task_runner,
-    base::WeakPtr<TrustedSignals> weak_instance) {
+    base::WeakPtr<TrustedSignals> weak_instance,
+    base::TimeDelta download_time) {
   if (!body) {
     PostCallbackToUserThread(std::move(user_thread_task_runner), weak_instance,
                              nullptr, std::move(error_msg));
@@ -372,13 +505,44 @@ void TrustedSignals::HandleDownloadResultOnV8Thread(
     // Handle bidding signals case.
     base::UmaHistogramCounts10M(
         "Ads.InterestGroup.Net.ResponseSizeBytes.TrustedBidding", body->size());
-    result = base::MakeRefCounted<Result>(
-        ParseKeyValueMap(v8_helper.get(), v8_object, *bidding_signals_keys),
-        maybe_data_version);
+    base::UmaHistogramTimes("Ads.InterestGroup.Net.DownloadTime.TrustedBidding",
+                            download_time);
+    int format_version = 1;
+    std::string format_version_string;
+    if (headers &&
+        headers->GetNormalizedHeader("X-fledge-bidding-signals-format-version",
+                                     &format_version_string)) {
+      if (!base::StringToInt(format_version_string, &format_version) ||
+          (format_version != 1 && format_version != 2)) {
+        std::string error = base::StringPrintf(
+            "Rejecting load of %s due to unrecognized Format-Version header: "
+            "%s",
+            signals_url.spec().c_str(), format_version_string.c_str());
+        PostCallbackToUserThread(std::move(user_thread_task_runner),
+                                 weak_instance, nullptr, std::move(error));
+        return;
+      }
+    }
+    if (format_version == 1) {
+      result = base::MakeRefCounted<Result>(
+          /*priority_vectors=*/TrustedSignals::Result::PriorityVectorMap(),
+          ParseKeyValueMap(v8_helper.get(), v8_object, *bidding_signals_keys),
+          maybe_data_version);
+    } else {
+      DCHECK_EQ(format_version, 2);
+      result = base::MakeRefCounted<Result>(
+          ParsePriorityVectorsInPerInterestGroupMap(v8_helper.get(), v8_object,
+                                                    *interest_group_names),
+          ParseChildKeyValueMap(v8_helper.get(), v8_object, "keys",
+                                *bidding_signals_keys),
+          maybe_data_version);
+    }
   } else {
     // Handle scoring signals case.
     base::UmaHistogramCounts10M(
         "Ads.InterestGroup.Net.ResponseSizeBytes.TrustedScoring", body->size());
+    base::UmaHistogramTimes("Ads.InterestGroup.Net.DownloadTime.TrustedScoring",
+                            download_time);
     result = base::MakeRefCounted<Result>(
         ParseChildKeyValueMap(v8_helper.get(), v8_object, "renderUrls",
                               *render_urls),

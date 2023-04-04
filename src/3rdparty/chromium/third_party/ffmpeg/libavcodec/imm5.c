@@ -83,11 +83,10 @@ static av_cold int imm5_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int imm5_decode_frame(AVCodecContext *avctx, void *data,
+static int imm5_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                              int *got_frame, AVPacket *avpkt)
 {
     IMM5Context *ctx = avctx->priv_data;
-    AVFrame *frame = data;
     AVCodecContext *codec_avctx = ctx->h264_avctx;
     int ret;
 
@@ -180,14 +179,13 @@ static av_cold int imm5_close(AVCodecContext *avctx)
 
 const FFCodec ff_imm5_decoder = {
     .p.name         = "imm5",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Infinity IMM5"),
+    CODEC_LONG_NAME("Infinity IMM5"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_IMM5,
     .init           = imm5_init,
-    .decode         = imm5_decode_frame,
+    FF_CODEC_DECODE_CB(imm5_decode_frame),
     .close          = imm5_close,
     .flush          = imm5_flush,
     .priv_data_size = sizeof(IMM5Context),
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
-                      FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

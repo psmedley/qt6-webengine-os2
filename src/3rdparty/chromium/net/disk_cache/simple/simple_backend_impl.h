@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,7 @@ class NET_EXPORT_PRIVATE SimpleBackendImpl : public Backend,
   // Note: only pass non-nullptr for |file_tracker| if you don't want the global
   // one (which things other than tests would want). |file_tracker| must outlive
   // the backend and all the entries, including their asynchronous close.
+  // |Init()| must be called to finish the initialization process.
   SimpleBackendImpl(
       scoped_refptr<BackendFileOperationsFactory> file_operations_factory,
       const base::FilePath& path,
@@ -79,16 +80,14 @@ class NET_EXPORT_PRIVATE SimpleBackendImpl : public Backend,
   void SetTaskRunnerForTesting(
       scoped_refptr<base::SequencedTaskRunner> task_runner);
 
-  net::Error Init(CompletionOnceCallback completion_callback);
+  // Finishes initialization. Always asynchronous.
+  void Init(CompletionOnceCallback completion_callback);
 
   // Sets the maximum size for the total amount of data stored by this instance.
   bool SetMaxSize(int64_t max_bytes);
 
   // Returns the maximum file size permitted in this backend.
   int64_t MaxFileSize() const override;
-
-  // Flush our SequencedWorkerPool.
-  static void FlushWorkerPoolForTesting();
 
   // The entry for |entry_hash| is being doomed; the backend will not attempt
   // run new operations for this |entry_hash| until the Doom is completed.

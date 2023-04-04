@@ -16,23 +16,31 @@
 #define PLATFORM_BASE_MEDIUM_ENVIRONMENT_H_
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <string>
+#include <utility>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
+#include "internal/platform/uuid.h"
 #ifndef NO_WEBRTC
 #include "internal/platform/implementation/webrtc.h"
 #endif
 #include "internal/platform/byte_array.h"
 #include "internal/platform/feature_flags.h"
+#include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/wifi_lan.h"
-#include "internal/platform/listeners.h"
+#include "internal/platform/mutex.h"
 #include "internal/platform/nsd_service_info.h"
 #include "internal/platform/single_thread_executor.h"
+#include "internal/platform/wifi_hotspot_credential.h"
 
 namespace location {
 namespace nearby {
@@ -59,7 +67,7 @@ class MediumEnvironment {
       api::BleMedium::DiscoveredPeripheralCallback;
   using BleAcceptedConnectionCallback =
       api::BleMedium::AcceptedConnectionCallback;
-  using BleScanCallback = api::ble_v2::BleMedium::ScanCallback;
+  using BleScanCallback = api::ble_v2::BleMedium::ScanningCallback;
 #ifndef NO_WEBRTC
   using OnSignalingMessageCallback =
       api::WebRtcSignalingMessenger::OnSignalingMessageCallback;
@@ -68,6 +76,11 @@ class MediumEnvironment {
 #endif
   using WifiLanDiscoveredServiceCallback =
       api::WifiLanMedium::DiscoveredServiceCallback;
+
+  struct BleV2MediumStatus {
+    bool is_advertising;
+    bool is_scanning;
+  };
 
   MediumEnvironment(const MediumEnvironment&) = delete;
   MediumEnvironment& operator=(const MediumEnvironment&) = delete;
@@ -100,7 +113,7 @@ class MediumEnvironment {
   // If enabled_notifications is false, future event notifications will not be
   // sent to registered instances. This is useful for protocol shutdown,
   // where we no longer care about notifications, and where notifications may
-  // otherwise be delivered after the notification source or target lifeteme has
+  // otherwise be delivered after the notification source or target lifetime has
   // ended, and cause undefined behavior.
   void Sync(bool enable_notifications = true);
 
@@ -112,7 +125,7 @@ class MediumEnvironment {
                                       api::BluetoothAdapter::ScanMode mode);
 
   // Adds medium-related info to allow for adapter discovery to work.
-  // This provides acccess to this medium from other mediums, when protocol
+  // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
   void RegisterBluetoothMedium(api::BluetoothClassicMedium& medium,
                                api::BluetoothAdapter& medium_adapter);
@@ -165,7 +178,7 @@ class MediumEnvironment {
   absl::Duration GetPeerConnectionLatency();
 
   // Adds medium-related info to allow for scanning/advertising to work.
-  // This provides acccess to this medium from other mediums, when protocol
+  // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
   void RegisterBleMedium(api::BleMedium& medium);
 
@@ -205,7 +218,7 @@ class MediumEnvironment {
                                          const std::string& service_id);
 
   // Adds medium-related info to allow for scanning/advertising to work.
-  // This provides acccess to this medium from other mediums, when protocol
+  // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
   // The registered `medium` must refer to a valid instance that outlives this
   // object.
@@ -226,14 +239,45 @@ class MediumEnvironment {
   // This should be called when discoverable state changes.
   // The `callback` argument should be non-empty if `enabled` is true or empty
   // if `enabled` is false.
-  void UpdateBleV2MediumForScanning(bool enabled, BleScanCallback callback,
+  void UpdateBleV2MediumForScanning(bool enabled,
+                                    const Uuid& scanning_service_uuid,
+                                    std::uint32_t internal_session_id,
+                                    BleScanCallback callback,
                                     api::ble_v2::BleMedium& medium);
+
+  // Inserts the BLE GATT characteristic and its value BleAdvertisement byte
+  // array.
+  void InsertBleV2MediumGattCharacteristics(
+      const api::ble_v2::GattCharacteristic& characteristic,
+      const ByteArray& gatt_advertisement_byte);
+
+  // Clears the map `gatt_advertisement_bytes_`.
+  void ClearBleV2MediumGattCharacteristics();
+
+  // Discover `service_uuid` and `characteristic_uuids`. This is to save the
+  // matched `gatt_advertisement_bytes_` to the
+  // `discovered_gatt_advertisement_bytes_`.
+  bool DiscoverBleV2MediumGattCharacteristics(
+      const Uuid& service_uuid, const std::vector<Uuid>& characteristic_uuids);
+
+  // Reads the BLE GATT characteristic value. If the GATT characteristic is not
+  // existed, return empty byte array.
+  ByteArray ReadBleV2MediumGattCharacteristics(
+      const api::ble_v2::GattCharacteristic& characteristic);
+
+  // Clears the map `discovered_gatt_advertisement_bytes_`.
+  void ClearBleV2MediumGattCharacteristicsForDiscovery();
 
   // Removes medium-related info. This should correspond to device power off.
   void UnregisterBleV2Medium(api::ble_v2::BleMedium& mediumum);
 
+  // Collects the status for the given BleMedium. Mainly used in unit tests
+  // to verify if the BleMedum is in expected status after opeartions.
+  absl::optional<BleV2MediumStatus> GetBleV2MediumStatus(
+      const api::ble_v2::BleMedium& medium);
+
   // Adds medium-related info to allow for discovery/advertising to work.
-  // This provides acccess to this medium from other mediums, when protocol
+  // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
   void RegisterWifiLanMedium(api::WifiLanMedium& medium);
 
@@ -265,6 +309,26 @@ class MediumEnvironment {
   // port, or nullptr.
   api::WifiLanMedium* GetWifiLanMedium(const std::string& ip_address, int port);
 
+  // Adds medium-related info to allow for start/connect Hotspot to work.
+  // This provides access to this medium from other mediums, when protocol
+  // expects they should communicate.
+  void RegisterWifiHotspotMedium(api::WifiHotspotMedium& medium);
+
+  // Returns WifiSpot medium that matches ssid or IP address with the role of
+  // the Medium, or return nullptr.
+  api::WifiHotspotMedium* GetWifiHotspotMedium(absl::string_view ssid,
+                                               absl::string_view ip_address);
+
+  // Updates credential and Medium role(AP or STA) to indicate the current
+  // medium is exposing Start Hotspot event.
+  void UpdateWifiHotspotMediumForStartOrConnect(
+      api::WifiHotspotMedium& medium, HotspotCredentials* hotspot_credentials,
+      bool is_ap, bool enabled);
+
+  // Removes medium-related info. This should correspond to device stopped or
+  // disconnected.
+  void UnregisterWifiHotspotMedium(api::WifiHotspotMedium& medium);
+
   void SetFeatureFlags(const FeatureFlags::Flags& flags);
 
  private:
@@ -284,10 +348,13 @@ class MediumEnvironment {
   };
 
   struct BleV2MediumContext {
-    BleScanCallback scan_callback = {};
-    api::ble_v2::BlePeripheral* ble_peripheral = nullptr;
+    absl::flat_hash_map<std::pair<Uuid, std::uint32_t>, BleScanCallback>
+        scan_callback_map;
+    // using the same ble peripheral for different advertisement.
+    api::ble_v2::BlePeripheral* ble_peripheral;
     api::ble_v2::BleAdvertisementData advertisement_data;
     bool advertising = false;
+    bool scanning = false;
   };
 
   struct WifiLanMediumContext {
@@ -298,6 +365,14 @@ class MediumEnvironment {
         discovered_callbacks;
     // discovered service vs service type map.
     absl::flat_hash_map<std::string, NsdServiceInfo> discovered_services;
+  };
+
+  struct WifiHotspotMediumContext {
+    // Set to "true" for Medium act as SoftAP role; "false" for STA role
+    bool is_ap = true;
+    // Set "true" when SoftAP is started or STA is connected
+    bool is_active = false;
+    HotspotCredentials* hotspot_credentials;
   };
 
   // This is a singleton object, for which destructor will never be called.
@@ -319,7 +394,7 @@ class MediumEnvironment {
                                    bool fast_advertisement, bool enabled);
 
   void OnBleV2PeripheralStateChanged(
-      bool enabled, BleV2MediumContext& context,
+      bool enabled, BleV2MediumContext& context, const Uuid& service_id,
       const api::ble_v2::BleAdvertisementData& ble_advertisement_data,
       api::ble_v2::BlePeripheral& peripheral);
 
@@ -345,6 +420,12 @@ class MediumEnvironment {
   absl::flat_hash_map<api::BleMedium*, BleMediumContext> ble_mediums_;
   absl::flat_hash_map<api::ble_v2::BleMedium*, BleV2MediumContext>
       ble_v2_mediums_;
+  absl::flat_hash_map<api::ble_v2::GattCharacteristic,
+                      location::nearby::ByteArray>
+      gatt_advertisement_bytes_;
+  absl::flat_hash_map<api::ble_v2::GattCharacteristic,
+                      location::nearby::ByteArray>
+      discovered_gatt_advertisement_bytes_;
 
 #ifndef NO_WEBRTC
   // Maps peer id to callback for receiving signaling messages.
@@ -358,6 +439,10 @@ class MediumEnvironment {
 
   absl::flat_hash_map<api::WifiLanMedium*, WifiLanMediumContext>
       wifi_lan_mediums_;
+
+  Mutex mutex_;
+  absl::flat_hash_map<api::WifiHotspotMedium*, WifiHotspotMediumContext>
+      wifi_hotspot_mediums_ ABSL_GUARDED_BY(mutex_);
 
   bool use_valid_peer_connection_ = true;
   absl::Duration peer_connection_latency_ = absl::ZeroDuration();

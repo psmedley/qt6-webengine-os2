@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,12 +104,13 @@ TEST_F(NGFragmentItemTest, CopyMove) {
 
   // To test moving ink overflow, add an ink overflow to |move_of_line|.
   PhysicalRect not_small_ink_overflow_rect(0, 0, 5000, 100);
-  move_of_line.ink_overflow_type_ = move_of_line.ink_overflow_.SetContents(
-      move_of_line.InkOverflowType(), not_small_ink_overflow_rect,
-      line_item->Size());
-  EXPECT_EQ(move_of_line.InkOverflowType(), NGInkOverflow::kContents);
+  move_of_line.ink_overflow_type_ =
+      static_cast<int>(move_of_line.ink_overflow_.SetContents(
+          move_of_line.InkOverflowType(), not_small_ink_overflow_rect,
+          line_item->Size()));
+  EXPECT_EQ(move_of_line.InkOverflowType(), NGInkOverflow::Type::kContents);
   NGFragmentItem move_of_line2(std::move(move_of_line));
-  EXPECT_EQ(move_of_line2.InkOverflowType(), NGInkOverflow::kContents);
+  EXPECT_EQ(move_of_line2.InkOverflowType(), NGInkOverflow::Type::kContents);
   EXPECT_EQ(move_of_line2.InkOverflow(), not_small_ink_overflow_rect);
 
   // Test copying a text item.
@@ -454,6 +455,38 @@ TEST_F(NGFragmentItemTest, LineFragmentId) {
               line_index + NGFragmentItem::kInitialLineFragmentId);
   }
   EXPECT_EQ(line_index, 6u);
+}
+
+TEST_F(NGFragmentItemTest, Outline) {
+  LoadAhem();
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    #target {
+      font-family: Ahem;
+      font-size: 10px;
+      width: 200px;
+    }
+    .inline-box {
+      border: 5px solid blue;
+    }
+    .inline-block {
+      display: inline-block;
+    }
+    </style>
+    <div id="target">
+      <span class="inline-box">
+        <span class="inline-block">X<span>
+      </span>
+    </div>
+  )HTML");
+  auto* target = To<LayoutBlockFlow>(GetLayoutObjectByElementId("target"));
+  Vector<PhysicalRect> rects = target->OutlineRects(
+      nullptr, PhysicalOffset(), NGOutlineType::kIncludeBlockVisualOverflow);
+  EXPECT_THAT(rects,
+              testing::ElementsAre(
+                  PhysicalRect(0, 0, 200, 10),   // <div id="target">
+                  PhysicalRect(5, 0, 10, 10),    // <span class="inline-box">
+                  PhysicalRect(5, 0, 10, 10)));  // <span class="inline-block">
 }
 
 // Various nodes/elements to test insertions.

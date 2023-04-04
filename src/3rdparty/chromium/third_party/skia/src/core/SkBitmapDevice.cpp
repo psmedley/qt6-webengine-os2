@@ -18,7 +18,6 @@
 #include "include/core/SkSurface.h"
 #include "include/core/SkVertices.h"
 #include "src/core/SkDraw.h"
-#include "src/core/SkGlyphRun.h"
 #include "src/core/SkImageFilterCache.h"
 #include "src/core/SkImageFilter_Base.h"
 #include "src/core/SkRasterClip.h"
@@ -26,6 +25,7 @@
 #include "src/core/SkStrikeCache.h"
 #include "src/core/SkTLazy.h"
 #include "src/image/SkImage_Base.h"
+#include "src/text/GlyphRun.h"
 
 struct Bounder {
     SkRect  fBounds;
@@ -118,6 +118,8 @@ public:
             fDraw.fRC = &dev->fRCStack.rc();
             fOrigin.set(0, 0);
         }
+
+        fDraw.fProps = &fDevice->surfaceProps();
     }
 
     bool needsTiling() const { return fNeedsTiling; }
@@ -215,10 +217,7 @@ SkBitmapDevice::SkBitmapDevice(const SkBitmap& bitmap)
         : INHERITED(bitmap.info(), SkSurfaceProps())
         , fBitmap(bitmap)
         , fRCStack(bitmap.width(), bitmap.height())
-        , fGlyphPainter(this->surfaceProps(),
-                        bitmap.colorType(),
-                        bitmap.colorSpace(),
-                        SkStrikeCache::GlobalStrikeCache()) {
+        , fGlyphPainter(this->surfaceProps(), bitmap.colorType(), bitmap.colorSpace()) {
     SkASSERT(valid_for_bitmap_device(bitmap.info(), nullptr));
 }
 
@@ -232,10 +231,7 @@ SkBitmapDevice::SkBitmapDevice(const SkBitmap& bitmap, const SkSurfaceProps& sur
         , fBitmap(bitmap)
         , fRasterHandle(hndl)
         , fRCStack(bitmap.width(), bitmap.height())
-        , fGlyphPainter(this->surfaceProps(),
-                        bitmap.colorType(),
-                        bitmap.colorSpace(),
-                        SkStrikeCache::GlobalStrikeCache()) {
+        , fGlyphPainter(this->surfaceProps(), bitmap.colorType(), bitmap.colorSpace()) {
     SkASSERT(valid_for_bitmap_device(bitmap.info(), nullptr));
 }
 
@@ -522,10 +518,11 @@ void SkBitmapDevice::drawImageRect(const SkImage* image, const SkRect* src, cons
 }
 
 void SkBitmapDevice::onDrawGlyphRunList(SkCanvas* canvas,
-                                        const SkGlyphRunList& glyphRunList,
-                                        const SkPaint& paint) {
+                                        const sktext::GlyphRunList& glyphRunList,
+                                        const SkPaint& initialPaint,
+                                        const SkPaint& drawingPaint) {
     SkASSERT(!glyphRunList.hasRSXForm());
-    LOOP_TILER( drawGlyphRunList(canvas, &fGlyphPainter, glyphRunList, paint), nullptr )
+    LOOP_TILER( drawGlyphRunList(canvas, &fGlyphPainter, glyphRunList, drawingPaint), nullptr )
 }
 
 void SkBitmapDevice::drawVertices(const SkVertices* vertices,
@@ -541,7 +538,7 @@ void SkBitmapDevice::drawVertices(const SkVertices* vertices,
 }
 
 #ifdef SK_ENABLE_SKSL
-void SkBitmapDevice::drawCustomMesh(SkCustomMesh, sk_sp<SkBlender>, const SkPaint&) {
+void SkBitmapDevice::drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) {
     // TODO: Implement
 }
 #endif

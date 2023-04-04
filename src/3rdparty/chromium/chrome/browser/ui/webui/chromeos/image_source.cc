@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,9 +85,9 @@ void ImageSource::StartDataRequestAfterPathExists(
   }
 }
 
-std::string ImageSource::GetMimeType(const std::string& path) {
+std::string ImageSource::GetMimeType(const GURL& url) {
   std::string mime_type;
-  std::string ext = base::FilePath(path).Extension();
+  std::string ext = base::FilePath(url.path_piece()).Extension();
   if (!ext.empty())
     net::GetWellKnownMimeTypeFromExtension(ext.substr(1), &mime_type);
   return mime_type;

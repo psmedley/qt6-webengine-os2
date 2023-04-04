@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,22 +70,6 @@ TEST_F(WidgetDelegateTest, ClientViewFactoryCanReplaceClientView) {
   auto client =
       base::WrapUnique<ClientView>(delegate->CreateClientView(nullptr));
   EXPECT_EQ(tracker.view(), client.get());
-}
-
-TEST_F(WidgetDelegateTest,
-       NonClientFrameViewFactoryCanReplaceNonClientFrameView) {
-  ViewTracker tracker;
-
-  auto delegate = std::make_unique<WidgetDelegate>();
-  delegate->SetNonClientFrameViewFactory(
-      base::BindLambdaForTesting([&tracker](Widget* widget) {
-        auto view = std::make_unique<NonClientFrameView>();
-        tracker.SetView(view.get());
-        return view;
-      }));
-
-  auto nonclient = delegate->CreateNonClientFrameView(nullptr);
-  EXPECT_EQ(tracker.view(), nonclient.get());
 }
 
 TEST_F(WidgetDelegateTest, OverlayViewFactoryCanReplaceOverlayView) {

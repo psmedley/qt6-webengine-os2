@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,10 +45,10 @@ extern const ui::ClassProperty<int32_t>* const kGhostWindowSessionIdKey;
 COMPONENT_EXPORT(APP_RESTORE)
 extern const ui::ClassProperty<std::string*>* const kLacrosWindowId;
 
-// A property key indicating whether a window was launched from full restore.
+// A property key indicating whether a window was launched from app restore.
 // These windows will not be activatable until they are shown.
 COMPONENT_EXPORT(APP_RESTORE)
-extern const ui::ClassProperty<bool>* const kLaunchedFromFullRestoreKey;
+extern const ui::ClassProperty<bool>* const kLaunchedFromAppRestoreKey;
 
 // A property key to add the window to a hidden container, if the ARC task is
 // not created when the window is initialized.

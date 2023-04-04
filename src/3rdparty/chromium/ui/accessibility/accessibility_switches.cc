@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,5 +74,8 @@ bool IsExperimentalAccessibilityPlatformUIAEnabled() {
 // Optionally disable AXMenuList, which makes the internal pop-up menu
 // UI for a select element directly accessible.
 const char kDisableAXMenuList[] = "disable-ax-menu-list";
+
+const char kGenerateAccessibilityTestExpectations[] =
+    "generate-accessibility-test-expectations";
 
 }  // namespace switches

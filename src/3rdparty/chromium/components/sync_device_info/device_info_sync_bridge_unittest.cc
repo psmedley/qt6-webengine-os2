@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -33,9 +34,9 @@
 #include "components/sync/protocol/entity_specifics.pb.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "components/sync/protocol/sync_enums.pb.h"
-#include "components/sync/test/model/mock_model_type_change_processor.h"
-#include "components/sync/test/model/model_type_store_test_util.h"
-#include "components/sync/test/model/test_matchers.h"
+#include "components/sync/test/mock_model_type_change_processor.h"
+#include "components/sync/test/model_type_store_test_util.h"
+#include "components/sync/test/test_matchers.h"
 #include "components/sync_device_info/device_info_prefs.h"
 #include "components/sync_device_info/device_info_util.h"
 #include "components/sync_device_info/local_device_info_util.h"
@@ -49,7 +50,6 @@
 namespace syncer {
 namespace {
 
-using base::OneShotTimer;
 using sync_pb::DeviceInfoSpecifics;
 using sync_pb::EntitySpecifics;
 using sync_pb::ModelTypeState;
@@ -77,6 +77,9 @@ const int kLocalSuffix = 0;
 
 const sync_pb::SyncEnums_DeviceType kLocalDeviceType =
     sync_pb::SyncEnums_DeviceType_TYPE_LINUX;
+const DeviceInfo::OsType kLocalDeviceOS = DeviceInfo::OsType::kLinux;
+const DeviceInfo::FormFactor kLocalDeviceFormFactor =
+    DeviceInfo::FormFactor::kDesktop;
 
 MATCHER_P(HasDeviceInfo, expected, "") {
   return arg.device_info().SerializeAsString() == expected.SerializeAsString();
@@ -87,8 +90,10 @@ MATCHER_P(EqualsProto, expected, "") {
 }
 
 MATCHER_P(ModelEqualsSpecifics, expected_specifics, "") {
-  if (expected_specifics.has_sharing_fields() != arg.sharing_info().has_value())
+  if (expected_specifics.has_sharing_fields() !=
+      arg.sharing_info().has_value()) {
     return false;
+  }
 
   if (expected_specifics.has_sharing_fields()) {
     auto& expected_fields = expected_specifics.sharing_fields();
@@ -110,16 +115,16 @@ MATCHER_P(ModelEqualsSpecifics, expected_specifics, "") {
     }
 
     for (int i = 0; i < expected_fields.enabled_features_size(); ++i) {
-      if (!arg_info.enabled_features.count(expected_fields.enabled_features(i)))
+      if (!arg_info.enabled_features.count(
+              expected_fields.enabled_features(i))) {
         return false;
+      }
     }
   }
 
-  ModelTypeSet expected_data_types;
-  for (const int field_number :
-       expected_specifics.invalidation_fields().interested_data_type_ids()) {
-    expected_data_types.Put(GetModelTypeFromSpecificsFieldNumber(field_number));
-  }
+  ModelTypeSet expected_data_types =
+      GetModelTypeSetFromSpecificsFieldNumberList(
+          expected_specifics.invalidation_fields().interested_data_type_ids());
   if (expected_data_types != arg.interested_data_types()) {
     return false;
   }
@@ -381,9 +386,9 @@ class TestLocalDeviceInfoProvider : public MutableLocalDeviceInfoProvider {
         sharing_enabled_features{SharingEnabledFeaturesForSuffix(kLocalSuffix)};
     local_device_info_ = std::make_unique<DeviceInfo>(
         cache_guid, session_name, ChromeVersionForSuffix(kLocalSuffix),
-        SyncUserAgentForSuffix(kLocalSuffix), kLocalDeviceType,
-        SigninScopedDeviceIdForSuffix(kLocalSuffix), manufacturer_name,
-        model_name, full_hardware_class, base::Time(),
+        SyncUserAgentForSuffix(kLocalSuffix), kLocalDeviceType, kLocalDeviceOS,
+        kLocalDeviceFormFactor, SigninScopedDeviceIdForSuffix(kLocalSuffix),
+        manufacturer_name, model_name, full_hardware_class, base::Time(),
         DeviceInfoUtil::GetPulseInterval(),
         /*send_tab_to_self_receiving_enabled=*/true,
         DeviceInfo::SharingInfo(
@@ -478,8 +483,9 @@ class DeviceInfoSyncBridgeTest : public testing::Test,
 
   ~DeviceInfoSyncBridgeTest() override {
     // Some tests may never initialize the bridge.
-    if (bridge_)
+    if (bridge_) {
       bridge_->RemoveObserver(this);
+    }
 
     // Force all remaining (store) tasks to execute so we don't leak memory.
     base::RunLoop().RunUntilIdle();
@@ -1734,6 +1740,48 @@ TEST_F(DeviceInfoSyncBridgeTest, ShouldUploadOutdatedLocalDeviceInfo) {
   EXPECT_CALL(*processor(), Put);
 
   WaitForReadyToSync();
+}
+
+TEST_F(DeviceInfoSyncBridgeTest, ShouldDeriveOSfromDeviceType) {
+  const DeviceInfoSpecifics local_specifics = CreateLocalDeviceSpecifics();
+  WriteToStoreWithMetadata({local_specifics}, StateWithEncryption("ekn"));
+  InitializeAndPump();
+
+  // Test LINUX desktop device info.
+  EXPECT_EQ(bridge()->GetDeviceInfo(local_specifics.cache_guid())->os_type(),
+            kLocalDeviceOS);
+  EXPECT_THAT(
+      bridge()->GetDeviceInfo(local_specifics.cache_guid())->form_factor(),
+      kLocalDeviceFormFactor);
+
+  // Test Android phone device info.
+  {
+    DeviceInfoSpecifics remote_specifics = CreateSpecifics(1);
+    remote_specifics.set_device_type(sync_pb::SyncEnums_DeviceType_TYPE_PHONE);
+    bridge()->ApplySyncChanges(bridge()->CreateMetadataChangeList(),
+                               EntityAddList({remote_specifics}));
+    EXPECT_THAT(
+        bridge()->GetDeviceInfo(remote_specifics.cache_guid())->os_type(),
+        DeviceInfo::OsType::kAndroid);
+    EXPECT_THAT(
+        bridge()->GetDeviceInfo(remote_specifics.cache_guid())->form_factor(),
+        DeviceInfo::FormFactor::kPhone);
+  }
+
+  // Test IOS phone device info specifying the manufacturer.
+  {
+    DeviceInfoSpecifics remote_specifics = CreateSpecifics(1);
+    remote_specifics.set_manufacturer("Apple Inc.");
+    remote_specifics.set_device_type(sync_pb::SyncEnums_DeviceType_TYPE_PHONE);
+    bridge()->ApplySyncChanges(bridge()->CreateMetadataChangeList(),
+                               EntityAddList({remote_specifics}));
+    EXPECT_THAT(
+        bridge()->GetDeviceInfo(remote_specifics.cache_guid())->os_type(),
+        DeviceInfo::OsType::kIOS);
+    EXPECT_THAT(
+        bridge()->GetDeviceInfo(remote_specifics.cache_guid())->form_factor(),
+        DeviceInfo::FormFactor::kPhone);
+  }
 }
 
 }  // namespace

@@ -16,15 +16,22 @@
 
 #include <string>
 
+#include "src/tint/ast/variable.h"
 #include "src/tint/debug.h"
+#include "src/tint/sem/variable.h"
+#include "src/tint/symbol_table.h"
 #include "src/tint/utils/hash.h"
 
 TINT_INSTANTIATE_TYPEINFO(tint::sem::Array);
 
 namespace tint::sem {
 
+const char* Array::kErrExpectedConstantCount =
+    "array size is an override-expression, when expected a constant-expression.\n"
+    "Was the SubstituteOverride transform run?";
+
 Array::Array(const Type* element,
-             uint32_t count,
+             ArrayCount count,
              uint32_t align,
              uint32_t size,
              uint32_t stride,
@@ -35,49 +42,51 @@ Array::Array(const Type* element,
       size_(size),
       stride_(stride),
       implicit_stride_(implicit_stride),
-      constructible_(count > 0  // Runtime-sized arrays are not constructible
-                     && element->IsConstructible()) {
-  TINT_ASSERT(Semantic, element_);
+      // Only constant-expression sized arrays are constructible
+      constructible_(std::holds_alternative<ConstantArrayCount>(count) &&
+                     element->IsConstructible()) {
+    TINT_ASSERT(Semantic, element_);
 }
 
 size_t Array::Hash() const {
-  return utils::Hash(TypeInfo::Of<Array>().full_hashcode, count_, align_, size_,
-                     stride_);
+    return utils::Hash(TypeInfo::Of<Array>().full_hashcode, count_, align_, size_, stride_);
 }
 
 bool Array::Equals(const sem::Type& other) const {
-  if (auto* o = other.As<Array>()) {
-    // Note: implicit_stride is not part of the type_name string as this is
-    // derived from the element type
-    return o->element_ == element_ && o->count_ == count_ &&
-           o->align_ == align_ && o->size_ == size_ && o->stride_ == stride_;
-  }
-  return false;
+    if (auto* o = other.As<Array>()) {
+        // Note: implicit_stride is not part of the type_name string as this is
+        // derived from the element type
+        return o->element_ == element_ && o->count_ == count_ && o->align_ == align_ &&
+               o->size_ == size_ && o->stride_ == stride_;
+    }
+    return false;
 }
 
 bool Array::IsConstructible() const {
-  return constructible_;
+    return constructible_;
 }
 
 std::string Array::FriendlyName(const SymbolTable& symbols) const {
-  std::ostringstream out;
-  if (!IsStrideImplicit()) {
-    out << "@stride(" << stride_ << ") ";
-  }
-  out << "array<" << element_->FriendlyName(symbols);
-  if (!IsRuntimeSized()) {
-    out << ", " << count_;
-  }
-  out << ">";
-  return out.str();
+    std::ostringstream out;
+    if (!IsStrideImplicit()) {
+        out << "@stride(" << stride_ << ") ";
+    }
+    out << "array<" << element_->FriendlyName(symbols);
+    if (auto* const_count = std::get_if<ConstantArrayCount>(&count_)) {
+        out << ", " << const_count->value;
+    } else if (auto* override_count = std::get_if<OverrideArrayCount>(&count_)) {
+        out << ", " << symbols.NameFor(override_count->variable->Declaration()->symbol);
+    }
+    out << ">";
+    return out.str();
 }
 
 uint32_t Array::Align() const {
-  return align_;
+    return align_;
 }
 
 uint32_t Array::Size() const {
-  return size_;
+    return size_;
 }
 
 }  // namespace tint::sem

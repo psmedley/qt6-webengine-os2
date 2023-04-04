@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/base_export.h"
 #include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/trace_event/builtin_categories.h"
 #include "base/trace_event/common/trace_event_common.h"
 #include "base/trace_event/trace_category.h"
@@ -41,8 +42,8 @@ class BASE_EXPORT CategoryRegistry {
     TraceCategory* end() const { return end_; }
 
    private:
-    TraceCategory* const begin_;
-    TraceCategory* const end_;
+    const raw_ptr<TraceCategory> begin_;
+    const raw_ptr<TraceCategory> end_;
   };
 
   // Known categories.
@@ -108,7 +109,7 @@ class BASE_EXPORT CategoryRegistry {
   using CategoryInitializerFn = void (*)(TraceCategory*);
 
   // The max number of trace categories that can be recorded.
-  static constexpr size_t kMaxCategories = 300;
+  static constexpr size_t kMaxCategories = 350;
 
   // Checks that there is enough space for all builtin categories.
   static_assert(BuiltinCategories::Size() <= kMaxCategories,

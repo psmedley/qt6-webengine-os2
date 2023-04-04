@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,13 +39,10 @@ class FakeProfileOAuth2TokenServiceDelegate
   // Overriden to make sure it works on Android.
   bool RefreshTokenIsAvailable(const CoreAccountId& account_id) const override;
 
-  GoogleServiceAuthError GetAuthError(
-      const CoreAccountId& account_id) const override;
-  void UpdateAuthError(const CoreAccountId& account_id,
-                       const GoogleServiceAuthError& error) override;
   std::vector<CoreAccountId> GetAccounts() const override;
   void RevokeAllCredentials() override;
-  void LoadCredentials(const CoreAccountId& primary_account_id) override;
+  void LoadCredentials(const CoreAccountId& primary_account_id,
+                       bool is_syncing) override;
   void UpdateCredentials(const CoreAccountId& account_id,
                          const std::string& refresh_token) override;
   void RevokeCredentials(const CoreAccountId& account_id) override;
@@ -67,16 +64,7 @@ class FakeProfileOAuth2TokenServiceDelegate
     fix_request_if_possible_ = value;
   }
 
-  const net::BackoffEntry* BackoffEntry() const override;
-
  private:
-  struct AccountInfo {
-    AccountInfo(const std::string& refresh_token);
-
-    const std::string refresh_token;
-    GoogleServiceAuthError error;
-  };
-
   void IssueRefreshTokenForUser(const CoreAccountId& account_id,
                                 const std::string& token);
 
@@ -88,13 +76,11 @@ class FakeProfileOAuth2TokenServiceDelegate
   // A given account ID appears at most once in this list.
   std::list<CoreAccountId> account_ids_;
 
-  // Maps account ids to info.
-  std::map<CoreAccountId, std::unique_ptr<AccountInfo>> refresh_tokens_;
+  // Maps account ids to tokens.
+  std::map<CoreAccountId, std::string> refresh_tokens_;
 
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_factory_;
   bool fix_request_if_possible_ = false;
-
-  net::BackoffEntry backoff_entry_;
 };
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_FAKE_PROFILE_OAUTH2_TOKEN_SERVICE_DELEGATE_H_

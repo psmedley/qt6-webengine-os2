@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,16 +33,6 @@ class StubIconLoader : public IconLoader {
       int32_t size_hint_in_dip,
       bool allow_placeholder_icon,
       apps::LoadIconCallback callback) override;
-
-  // TODO(crbug.com/1253250): Will be removed soon.
-  std::unique_ptr<IconLoader::Releaser> LoadIconFromIconKey(
-      apps::mojom::AppType app_type,
-      const std::string& app_id,
-      apps::mojom::IconKeyPtr icon_key,
-      apps::mojom::IconType icon_type,
-      int32_t size_hint_in_dip,
-      bool allow_placeholder_icon,
-      apps::mojom::Publisher::LoadIconCallback callback) override;
 
   int NumLoadIconFromIconKeyCalls();
 

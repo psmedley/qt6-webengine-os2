@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -87,10 +87,11 @@ ScriptPromise Worklet::addModule(ScriptState* script_state,
   // loading.
   GetExecutionContext()
       ->GetTaskRunner(TaskType::kInternalLoading)
-      ->PostTask(FROM_HERE,
-                 WTF::Bind(&Worklet::FetchAndInvokeScript, WrapPersistent(this),
-                           module_url_record, options->credentials(),
-                           WrapPersistent(pending_tasks)));
+      ->PostTask(
+          FROM_HERE,
+          WTF::BindOnce(&Worklet::FetchAndInvokeScript, WrapPersistent(this),
+                        module_url_record, options->credentials(),
+                        WrapPersistent(pending_tasks)));
   return promise;
 }
 
@@ -138,9 +139,10 @@ void Worklet::FetchAndInvokeScript(const KURL& module_url_record,
               ->Fetcher()
               ->GetProperties()
               .GetFetchClientSettingsObject());
-  // Worklets don't support resource timing APIs yet.
+
   auto* outside_resource_timing_notifier =
-      MakeGarbageCollected<NullWorkerResourceTimingNotifier>();
+      WorkerResourceTimingNotifierImpl::CreateForInsideResourceFetcher(
+          *GetExecutionContext());
 
   // Specify TaskType::kInternalLoading because it's commonly used for module
   // loading.

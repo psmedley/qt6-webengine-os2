@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ class CC_EXPORT TileSizeCalculator {
     gfx::Size default_tile_size;
     gfx::Size layer_content_bounds;
 
-    bool operator==(const AffectingParams& other);
+    bool operator==(const AffectingParams& other) const;
   };
 
   PictureLayerImpl* layer_impl() const { return layer_impl_; }

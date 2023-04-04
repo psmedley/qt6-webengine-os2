@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -118,6 +118,8 @@ component("gamepad") {
     sources += [
       "gamepad_platform_data_fetcher_android.cc",
       "gamepad_platform_data_fetcher_android.h",
+      "haptic_gamepad_android.cc",
+      "haptic_gamepad_android.h",
     ]
     deps += [ ":jni_headers" ]
   }
@@ -187,6 +189,7 @@ static_library("test_helpers") {
       "test_support/fake_iraw_game_controller.h",
       "test_support/fake_winrt_wgi_environment.cc",
       "test_support/fake_winrt_wgi_environment.h",
+      "test_support/wgi_test_error_code.h",
     ]
   }
 }
@@ -205,6 +208,8 @@ if (is_android) {
     ]
     deps = [
       "//base:base_java",
+      "//base:jni_java",
+      "//build/android:build_java",
       "//third_party/androidx:androidx_annotation_annotation_java",
     ]
     annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]

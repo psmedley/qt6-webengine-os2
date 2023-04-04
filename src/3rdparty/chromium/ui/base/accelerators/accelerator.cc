@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -300,12 +300,10 @@ std::u16string Accelerator::GetShortcutText() const {
   // intended to be removed when the menu system moved to MenuItemView. That was
   // crbug.com/2822, closed in 2010. Can we finally remove all of this?
   if (adjust_shortcut_for_rtl) {
-    int key_length = static_cast<int>(shortcut_rtl.length());
-    DCHECK_GT(key_length, 0);
+    DCHECK_GT(shortcut_rtl.length(), 0u);
     shortcut_rtl.append(u"+");
 
-    // Subtracting the size of the shortcut key and 1 for the '+' sign.
-    shortcut_rtl.append(shortcut, 0, shortcut.length() - key_length - 1);
+    shortcut_rtl.append(shortcut, 0, shortcut.length() - shortcut_rtl.length());
     shortcut.swap(shortcut_rtl);
   }
 #endif  // BUILDFLAG(IS_MAC)
@@ -343,15 +341,11 @@ std::u16string Accelerator::KeyCodeToMacSymbol() const {
     case VKEY_NEXT:
       return u"⇟";  // U+21DF, DOWNWARDS ARROW WITH DOUBLE STROKE
     case VKEY_HOME:
-      if (base::mac::IsAtLeastOS10_13() && base::i18n::IsRTL()) {
-        return u"↗";  // U+2197, NORTH EAST ARROW
-      }
-      return u"↖";  // U+2196, NORTH WEST ARROW
+      return base::i18n::IsRTL() ? u"↗"   // U+2197, NORTH EAST ARROW
+                                 : u"↖";  // U+2196, NORTH WEST ARROW
     case VKEY_END:
-      if (base::mac::IsAtLeastOS10_13() && base::i18n::IsRTL()) {
-        return u"↙";  // U+2199, SOUTH WEST ARROW
-      }
-      return u"↘";  // U+2198, SOUTH EAST ARROW
+      return base::i18n::IsRTL() ? u"↙"   // U+2199, SOUTH WEST ARROW
+                                 : u"↘";  // U+2198, SOUTH EAST ARROW
     case VKEY_TAB:
       return u"⇥";  // U+21E5, RIGHTWARDS ARROW TO BAR
     // Mac has a shift-tab icon ("⇤", U+21E4, LEFTWARDS ARROW TO BAR) but we
@@ -455,7 +449,7 @@ std::u16string Accelerator::ApplyLongFormModifiers(
     result = ApplyModifierToAcceleratorString(result, IDS_APP_SHIFT_KEY);
 
   // Note that we use 'else-if' in order to avoid using Ctrl+Alt as a shortcut.
-  // See http://blogs.msdn.com/oldnewthing/archive/2004/03/29/101121.aspx for
+  // See https://devblogs.microsoft.com/oldnewthing/20040329-00/?p=40003 for
   // more information.
   if (IsCtrlDown())
     result = ApplyModifierToAcceleratorString(result, IDS_APP_CTRL_KEY);
@@ -465,7 +459,7 @@ std::u16string Accelerator::ApplyLongFormModifiers(
   if (IsCmdDown()) {
 #if BUILDFLAG(IS_MAC)
     result = ApplyModifierToAcceleratorString(result, IDS_APP_COMMAND_KEY);
-#elif BUILDFLAG(IS_CHROMEOS_ASH)
+#elif BUILDFLAG(IS_CHROMEOS)
     result = ApplyModifierToAcceleratorString(result, IDS_APP_SEARCH_KEY);
 #elif BUILDFLAG(IS_WIN)
     result = ApplyModifierToAcceleratorString(result, IDS_APP_WINDOWS_KEY);

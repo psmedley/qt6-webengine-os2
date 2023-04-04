@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,6 +8,8 @@ android_library("java") {
   sources = [
     "java/src/org/chromium/components/browser_ui/widget/AlwaysDismissedDialog.java",
     "java/src/org/chromium/components/browser_ui/widget/BoundedLinearLayout.java",
+    "java/src/org/chromium/components/browser_ui/widget/CheckBoxWithDescription.java",
+    "java/src/org/chromium/components/browser_ui/widget/ChromeTransitionDrawable.java",
     "java/src/org/chromium/components/browser_ui/widget/ClipDrawableProgressBar.java",
     "java/src/org/chromium/components/browser_ui/widget/CompositeTouchDelegate.java",
     "java/src/org/chromium/components/browser_ui/widget/ContextMenuDialog.java",
@@ -59,6 +61,7 @@ android_library("java") {
     "java/src/org/chromium/components/browser_ui/widget/displaystyle/ViewResizer.java",
     "java/src/org/chromium/components/browser_ui/widget/dragreorder/DragReorderableListAdapter.java",
     "java/src/org/chromium/components/browser_ui/widget/dragreorder/DragStateDelegate.java",
+    "java/src/org/chromium/components/browser_ui/widget/gesture/BackPressHandler.java",
     "java/src/org/chromium/components/browser_ui/widget/gesture/SwipeGestureListener.java",
     "java/src/org/chromium/components/browser_ui/widget/highlight/PulseDrawable.java",
     "java/src/org/chromium/components/browser_ui/widget/highlight/PulseInterpolator.java",
@@ -108,6 +111,7 @@ android_library("java") {
     "java/src/org/chromium/components/browser_ui/widget/text/VerticallyFixedEditText.java",
     "java/src/org/chromium/components/browser_ui/widget/textbubble/ArrowBubbleDrawable.java",
     "java/src/org/chromium/components/browser_ui/widget/textbubble/TextBubble.java",
+    "java/src/org/chromium/components/browser_ui/widget/textbubble/TextBubbleBackPressHandler.java",
     "java/src/org/chromium/components/browser_ui/widget/tile/TileView.java",
     "java/src/org/chromium/components/browser_ui/widget/tile/TileViewBinder.java",
     "java/src/org/chromium/components/browser_ui/widget/tile/TileViewCoordinator.java",
@@ -121,11 +125,17 @@ android_library("java") {
     "//components/browser_ui/styles/android:java",
     "//components/browser_ui/util/android:java",
     "//components/embedder_support/android:util_java",
-    "//third_party/android_deps:android_support_v7_appcompat_java",
+    "//third_party/android_deps:com_android_support_support_annotations_java",
     "//third_party/android_deps:material_design_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_appcompat_appcompat_java",
     "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
     "//third_party/androidx:androidx_coordinatorlayout_coordinatorlayout_java",
+    "//third_party/androidx:androidx_core_core_java",
+    "//third_party/androidx:androidx_interpolator_interpolator_java",
+    "//third_party/androidx:androidx_recyclerview_recyclerview_java",
+    "//third_party/androidx:androidx_vectordrawable_vectordrawable_animated_java",
+    "//third_party/androidx:androidx_vectordrawable_vectordrawable_java",
     "//ui/android:ui_java",
     "//url:gurl_java",
   ]
@@ -223,6 +233,7 @@ android_resources("java_resources") {
     "java/res/drawable/list_item_icon_modern_bg.xml",
     "java/res/drawable/list_item_icon_modern_bg_rect.xml",
     "java/res/drawable/modern_toolbar_tablet_text_box_background.xml",
+    "java/res/drawable/oval_surface_0.xml",
     "java/res/drawable/query_tile_overlay.xml",
     "java/res/drawable/search_toolbar_modern_bg.xml",
     "java/res/drawable/tile_view_highlight.xml",
@@ -230,6 +241,7 @@ android_resources("java_resources") {
     "java/res/drawable/tile_view_highlight_plain.xml",
     "java/res/layout/app_menu_divider.xml",
     "java/res/layout/app_menu_layout.xml",
+    "java/res/layout/checkbox_with_description.xml",
     "java/res/layout/date_divided_adapter_header_view_holder.xml",
     "java/res/layout/dialog_control_description.xml",
     "java/res/layout/divider_preference.xml",
@@ -257,6 +269,7 @@ android_resources("java_resources") {
     "java/res/layout/tile_no_text_view_condensed.xml",
     "java/res/layout/tile_view_modern.xml",
     "java/res/layout/tile_view_modern_condensed.xml",
+    "java/res/layout/title_and_description_layout.xml",
     "java/res/values-ldrtl/values.xml",
     "java/res/values-night/colors.xml",
     "java/res/values-night/dimens.xml",
@@ -291,14 +304,16 @@ android_library("test_support_java") {
     "//base:base_java_test_support",
     "//content/public/test/android:content_java_test_support",
     "//third_party/androidx:androidx_recyclerview_recyclerview_java",
+    "//third_party/hamcrest:hamcrest_core_java",
     "//third_party/hamcrest:hamcrest_library_java",
   ]
 }
 
-android_library("javatests") {
+android_library("unit_device_javatests") {
   testonly = true
 
   sources = [
+    "java/src/org/chromium/components/browser_ui/widget/CheckBoxWithDescriptionTest.java",
     "java/src/org/chromium/components/browser_ui/widget/DualControlLayoutTest.java",
     "java/src/org/chromium/components/browser_ui/widget/MoreProgressButtonTest.java",
     "java/src/org/chromium/components/browser_ui/widget/PromoDialogRenderTest.java",
@@ -314,7 +329,6 @@ android_library("javatests") {
     "java/src/org/chromium/components/browser_ui/widget/highlight/ViewHighlighterTest.java",
     "java/src/org/chromium/components/browser_ui/widget/listmenu/ListMenuButtonTest.java",
     "java/src/org/chromium/components/browser_ui/widget/listmenu/ListMenuRenderTest.java",
-    "java/src/org/chromium/components/browser_ui/widget/promo/PromoCardCoordinatorTest.java",
     "java/src/org/chromium/components/browser_ui/widget/promo/PromoCardImpressionTest.java",
     "java/src/org/chromium/components/browser_ui/widget/promo/PromoCardViewRenderTest.java",
     "java/src/org/chromium/components/browser_ui/widget/scrim/ScrimTest.java",
@@ -332,7 +346,6 @@ android_library("javatests") {
     "//third_party/android_support_test_runner:rules_java",
     "//third_party/android_support_test_runner:runner_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
-    "//third_party/androidx:androidx_appcompat_appcompat_java",
     "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
     "//third_party/androidx:androidx_core_core_java",
     "//third_party/androidx:androidx_test_runner_java",
@@ -355,6 +368,13 @@ android_resources("java_test_resources") {
     "test/java/res/drawable-xxhdpi/promo_dialog_test_drawable.png",
     "test/java/res/drawable-xxxhdpi/promo_dialog_test_drawable.png",
     "test/java/res/drawable/promo_dialog_test_vector.xml",
+    "test/java/res/drawable/test_ic_arrow_downward_black_24dp.xml",
+    "test/java/res/drawable/test_ic_arrow_forward_black_24dp.xml",
+    "test/java/res/drawable/test_ic_info_outline_black_24dp.xml",
+    "test/java/res/drawable/test_ic_more_vert_black_24dp.xml",
+    "test/java/res/drawable/test_ic_refresh_black_24dp.xml",
+    "test/java/res/drawable/test_ic_star_border_black_24dp.xml",
+    "test/java/res/drawable/test_ic_vintage_filter.xml",
     "test/java/res/drawable/test_illustration.xml",
     "test/java/res/drawable/test_logo_avatar_anonymous.xml",
     "test/java/res/layout/dual_control_test_layout.xml",
@@ -371,27 +391,25 @@ android_resources("java_test_resources") {
   ]
 }
 
-java_library("junit") {
-  # Skip platform checks since Robolectric depends on requires_android targets.
-  bypass_platform_checks = true
-  testonly = true
+robolectric_library("junit") {
   sources = [
+    "java/src/org/chromium/components/browser_ui/widget/ChromeTransitionDrawableTest.java",
     "java/src/org/chromium/components/browser_ui/widget/CompositeTouchDelegateUnitTest.java",
     "java/src/org/chromium/components/browser_ui/widget/ContextMenuDialogUnitTest.java",
     "java/src/org/chromium/components/browser_ui/widget/InsetObserverViewTest.java",
     "java/src/org/chromium/components/browser_ui/widget/RoundedCornerOutlineProviderUnitTest.java",
     "java/src/org/chromium/components/browser_ui/widget/gesture/SwipeGestureListenerTest.java",
+    "java/src/org/chromium/components/browser_ui/widget/promo/PromoCardCoordinatorUnitTest.java",
     "java/src/org/chromium/components/browser_ui/widget/selectable_list/SelectionDelegateTest.java",
     "java/src/org/chromium/components/browser_ui/widget/tile/TileViewBinderTest.java",
   ]
   deps = [
     ":java",
-    "//base:base_java",
     "//base:base_java_test_support",
     "//base:base_junit_test_support",
     "//base/test:test_support_java",
-    "//third_party/android_deps:robolectric_all_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_test_core_java",
     "//third_party/androidx:androidx_test_runner_java",
     "//third_party/junit",
     "//third_party/mockito:mockito_java",

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -281,6 +281,9 @@ class MEDIA_EXPORT MediaPlayerBridge {
 
   // Listener object that listens to all the media player events.
   std::unique_ptr<MediaPlayerListener> listener_;
+
+  // Pending playback rate while player is preparing.
+  absl::optional<double> pending_playback_rate_;
 
   // Weak pointer passed to `listener_` for callbacks.
   // NOTE: Weak pointers must be invalidated before all other member variables.

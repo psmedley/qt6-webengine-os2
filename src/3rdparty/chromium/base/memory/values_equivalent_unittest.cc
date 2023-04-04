@@ -1,9 +1,10 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/memory/values_equivalent.h"
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,7 +68,7 @@ TEST(ValuesEquivalentTest, CapitalGetPtr) {
     const int* Get() const { return pointer_; }
 
    private:
-    int* pointer_ = nullptr;
+    raw_ptr<int> pointer_ = nullptr;
   };
 
   auto a = 1234;

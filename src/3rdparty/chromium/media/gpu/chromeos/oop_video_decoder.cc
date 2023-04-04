@@ -1,15 +1,25 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/gpu/chromeos/oop_video_decoder.h"
 
 #include "base/memory/ptr_util.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/gpu/macros.h"
 #include "media/mojo/common/mojo_decoder_buffer_converter.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/components/cdm_factory_daemon/stable_cdm_context_impl.h"
+#endif
+
+#if BUILDFLAG(USE_VAAPI)
+#include "media/gpu/vaapi/vaapi_wrapper.h"
+#endif  // BUILDFLAG(USE_VAAPI)
 
 // Throughout this file, we have sprinkled many CHECK()s to assert invariants
 // that should hold regardless of the behavior of the remote decoder or
@@ -69,11 +79,11 @@ namespace media {
 
 // static
 std::unique_ptr<VideoDecoderMixin> OOPVideoDecoder::Create(
-    std::unique_ptr<MediaLog> media_log,
-    scoped_refptr<base::SequencedTaskRunner> decoder_task_runner,
-    base::WeakPtr<VideoDecoderMixin::Client> client,
     mojo::PendingRemote<stable::mojom::StableVideoDecoder>
-        pending_remote_decoder) {
+        pending_remote_decoder,
+    std::unique_ptr<media::MediaLog> media_log,
+    scoped_refptr<base::SequencedTaskRunner> decoder_task_runner,
+    base::WeakPtr<VideoDecoderMixin::Client> client) {
   // TODO(b/171813538): make the destructor of this class (as well as the
   // destructor of sister class VaapiVideoDecoder) public so the explicit
   // argument can be removed from this call to base::WrapUnique().
@@ -83,7 +93,7 @@ std::unique_ptr<VideoDecoderMixin> OOPVideoDecoder::Create(
 }
 
 OOPVideoDecoder::OOPVideoDecoder(
-    std::unique_ptr<MediaLog> media_log,
+    std::unique_ptr<media::MediaLog> media_log,
     scoped_refptr<base::SequencedTaskRunner> decoder_task_runner,
     base::WeakPtr<VideoDecoderMixin::Client> client,
     mojo::PendingRemote<stable::mojom::StableVideoDecoder>
@@ -129,11 +139,13 @@ OOPVideoDecoder::OOPVideoDecoder(
   stable_video_frame_handle_releaser_remote_.set_disconnect_handler(
       base::BindOnce(&OOPVideoDecoder::Stop, base::Unretained(this)));
 
+  DCHECK(!stable_media_log_receiver_.is_bound());
+
   CHECK(!has_error_);
   // TODO(b/171813538): plumb the remaining parameters.
   remote_decoder_->Construct(
       client_receiver_.BindNewEndpointAndPassRemote(),
-      mojo::PendingRemote<stable::mojom::MediaLog>(),
+      stable_media_log_receiver_.BindNewPipeAndPassRemote(),
       std::move(stable_video_frame_handle_releaser_receiver),
       std::move(remote_consumer_handle), gfx::ColorSpace());
 }
@@ -155,7 +167,7 @@ void OOPVideoDecoder::Initialize(const VideoDecoderConfig& config,
                                  InitCB init_cb,
                                  const OutputCB& output_cb,
                                  const WaitingCB& waiting_cb) {
-  VLOGF(2);
+  DVLOGF(2) << config.AsHumanReadableString();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   CHECK(!init_cb_);
@@ -168,26 +180,38 @@ void OOPVideoDecoder::Initialize(const VideoDecoderConfig& config,
     return;
   }
 
-  // TODO(b/171813538): implement the re-initialization logic. The client can
-  // call Initialize() multiple times. This implies properly asserting the
-  // invariant imposed by media::VideoDecoder::Initialize(): "No VideoDecoder
-  // calls should be made before |init_cb| is executed."
-  if (output_cb_) {
-    // TODO(b/171813538): create specific error code for this decoder.
-    std::move(init_cb).Run(DecoderStatus::Codes::kFailed);
+  mojo::PendingRemote<stable::mojom::StableCdmContext>
+      pending_remote_stable_cdm_context;
+  if (config.is_encrypted()) {
+#if BUILDFLAG(IS_CHROMEOS)
+    if (!cdm_context || !cdm_context->GetChromeOsCdmContext()) {
+      std::move(init_cb).Run(DecoderStatus::Codes::kUnsupportedEncryptionMode);
+      return;
+    }
+    mojo::PendingReceiver<stable::mojom::StableCdmContext> cdm_receiver;
+    pending_remote_stable_cdm_context =
+        cdm_receiver.InitWithNewPipeAndPassRemote();
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<chromeos::StableCdmContextImpl>(cdm_context),
+        std::move(cdm_receiver));
+#if BUILDFLAG(USE_VAAPI)
+    // We need to signal that for AMD we will do transcryption on the GPU side.
+    // Then on the other end we just make transcryption a no-op.
+    needs_transcryption_ = (VaapiWrapper::GetImplementationType() ==
+                            VAImplementation::kMesaGallium);
+#endif  // BUILDFLAG(USE_VAAPI)
+#else
+    std::move(init_cb).Run(DecoderStatus::Codes::kUnsupportedEncryptionMode);
     return;
+#endif  // BUILDFLAG(IS_CHROMEOS)
   }
 
   init_cb_ = std::move(init_cb);
   output_cb_ = output_cb;
   waiting_cb_ = waiting_cb;
 
-  // TODO(b/171813538): plumb protected content.
-  mojo::PendingRemote<stable::mojom::StableCdmContext>
-      pending_remote_cdm_context;
-
   remote_decoder_->Initialize(config, low_delay,
-                              std::move(pending_remote_cdm_context),
+                              std::move(pending_remote_stable_cdm_context),
                               base::BindOnce(&OOPVideoDecoder::OnInitializeDone,
                                              weak_this_factory_.GetWeakPtr()));
 }
@@ -200,8 +224,12 @@ void OOPVideoDecoder::OnInitializeDone(const DecoderStatus& status,
 
   CHECK(!has_error_);
 
-  if (!status.is_ok() || (decoder_type != VideoDecoderType::kVaapi &&
-                          decoder_type != VideoDecoderType::kV4L2)) {
+  if (!status.is_ok() ||
+      (decoder_type != VideoDecoderType::kVda &&
+       decoder_type != VideoDecoderType::kVaapi &&
+       decoder_type != VideoDecoderType::kV4L2) ||
+      (decoder_type_ != VideoDecoderType::kUnknown &&
+       decoder_type_ != decoder_type)) {
     Stop();
     return;
   }
@@ -211,7 +239,7 @@ void OOPVideoDecoder::OnInitializeDone(const DecoderStatus& status,
 
 void OOPVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                              DecodeCB decode_cb) {
-  VLOGF(2);
+  DVLOGF(4);
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   CHECK(!init_cb_);
@@ -255,6 +283,7 @@ void OOPVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 void OOPVideoDecoder::OnDecodeDone(uint64_t decode_id,
                                    bool is_flushing,
                                    const DecoderStatus& status) {
+  DVLOGF(4);
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   CHECK(!has_error_);
@@ -282,7 +311,7 @@ void OOPVideoDecoder::OnDecodeDone(uint64_t decode_id,
 }
 
 void OOPVideoDecoder::Reset(base::OnceClosure reset_cb) {
-  VLOGF(2);
+  DVLOGF(2);
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   CHECK(!init_cb_);
@@ -329,6 +358,7 @@ void OOPVideoDecoder::Stop() {
   base::WeakPtr<OOPVideoDecoder> weak_this = weak_this_factory_.GetWeakPtr();
 
   client_receiver_.reset();
+  stable_media_log_receiver_.reset();
   remote_decoder_.reset();
   mojo_decoder_buffer_writer_.reset();
   stable_video_frame_handle_releaser_remote_.reset();
@@ -394,17 +424,24 @@ bool OOPVideoDecoder::IsPlatformDecoder() const {
 }
 
 bool OOPVideoDecoder::NeedsTranscryption() {
-  return false;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return needs_transcryption_;
 }
 
 void OOPVideoDecoder::OnVideoFrameDecoded(
     const scoped_refptr<VideoFrame>& frame,
     bool can_read_without_stalling,
     const base::UnguessableToken& release_token) {
-  VLOGF(2);
+  DVLOGF(4);
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   CHECK(!has_error_);
+
+  if (init_cb_) {
+    VLOGF(2) << "Received a decoded frame while waiting for initialization";
+    Stop();
+    return;
+  }
 
   // The destruction observer will be called after the client releases the
   // video frame. BindToCurrentLoop() is used to make sure that the WeakPtr
@@ -419,13 +456,21 @@ void OOPVideoDecoder::OnVideoFrameDecoded(
 }
 
 void OOPVideoDecoder::OnWaiting(WaitingReason reason) {
-  VLOGF(2);
+  DVLOGF(4);
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   CHECK(!has_error_);
 
   if (waiting_cb_)
     waiting_cb_.Run(reason);
+}
+
+void OOPVideoDecoder::AddLogRecord(const MediaLogRecord& event) {
+  VLOGF(2);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (media_log_)
+    media_log_->AddLogRecord(std::make_unique<media::MediaLogRecord>(event));
 }
 
 }  // namespace media

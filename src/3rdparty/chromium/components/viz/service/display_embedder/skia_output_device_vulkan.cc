@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/ipc/common/gpu_surface_lookup.h"
+#include "gpu/vulkan/vulkan_fence_helper.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
 #include "gpu/vulkan/vulkan_implementation.h"
 #include "gpu/vulkan/vulkan_surface.h"
@@ -68,13 +69,9 @@ SkiaOutputDeviceVulkan::~SkiaOutputDeviceVulkan() {
   if (UNLIKELY(!vulkan_surface_))
     return;
 
-  {
-    base::ScopedBlockingCall scoped_blocking_call(
-        FROM_HERE, base::BlockingType::MAY_BLOCK);
-    vkQueueWaitIdle(context_provider_->GetDeviceQueue()->GetVulkanQueue());
-  }
-
-  vulkan_surface_->Destroy();
+  auto* fence_helper = context_provider_->GetDeviceQueue()->GetFenceHelper();
+  fence_helper->EnqueueVulkanObjectCleanupForSubmittedWork(
+      std::move(vulkan_surface_));
 }
 
 #if BUILDFLAG(IS_WIN)
@@ -286,6 +283,7 @@ bool SkiaOutputDeviceVulkan::Initialize() {
                                            gpu::VulkanSurface::FORMAT_RGBA_32);
   if (UNLIKELY(!result)) {
     LOG(ERROR) << "Failed to initialize vulkan surface.";
+    vulkan_surface->Destroy();
     return false;
   }
   vulkan_surface_ = std::move(vulkan_surface);

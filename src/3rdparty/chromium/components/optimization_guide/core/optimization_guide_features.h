@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,43 +12,45 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/time/time.h"
+#include "components/optimization_guide/core/page_content_annotation_type.h"
 #include "components/optimization_guide/proto/hints.pb.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "net/nqe/effective_connection_type.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
-class PrefService;
-
 namespace optimization_guide {
 namespace features {
 
-extern const base::Feature kOptimizationHints;
-extern const base::Feature kOptimizationHintsFieldTrials;
-extern const base::Feature kRemoteOptimizationGuideFetching;
-extern const base::Feature kRemoteOptimizationGuideFetchingAnonymousDataConsent;
-extern const base::Feature kContextMenuPerformanceInfoAndRemoteHintFetching;
-extern const base::Feature kOptimizationTargetPrediction;
-extern const base::Feature kOptimizationGuideModelDownloading;
-extern const base::Feature kPageContentAnnotations;
-extern const base::Feature kPageEntitiesPageContentAnnotations;
-extern const base::Feature kPageVisibilityPageContentAnnotations;
-extern const base::Feature kPageEntitiesModelBypassFilters;
-extern const base::Feature kPageTextExtraction;
-extern const base::Feature kPushNotifications;
-extern const base::Feature kOptimizationGuideMetadataValidation;
-extern const base::Feature kPageTopicsBatchAnnotations;
-extern const base::Feature kPageVisibilityBatchAnnotations;
-extern const base::Feature kPageEntitiesModelResetOnShutdown;
-extern const base::Feature kPageEntitiesModelBypassFilters;
-extern const base::Feature kUseLocalPageEntitiesMetadataProvider;
-extern const base::Feature kBatchAnnotationsValidation;
-extern const base::Feature kPreventLongRunningPredictionModels;
+BASE_DECLARE_FEATURE(kOptimizationHints);
+BASE_DECLARE_FEATURE(kRemoteOptimizationGuideFetching);
+BASE_DECLARE_FEATURE(kRemoteOptimizationGuideFetchingAnonymousDataConsent);
+BASE_DECLARE_FEATURE(kContextMenuPerformanceInfoAndRemoteHintFetching);
+BASE_DECLARE_FEATURE(kOptimizationTargetPrediction);
+BASE_DECLARE_FEATURE(kOptimizationGuideModelDownloading);
+BASE_DECLARE_FEATURE(kPageContentAnnotations);
+BASE_DECLARE_FEATURE(kPageEntitiesPageContentAnnotations);
+BASE_DECLARE_FEATURE(kPageVisibilityPageContentAnnotations);
+BASE_DECLARE_FEATURE(kPageEntitiesModelBypassFilters);
+BASE_DECLARE_FEATURE(kPageTextExtraction);
+BASE_DECLARE_FEATURE(kPushNotifications);
+BASE_DECLARE_FEATURE(kOptimizationGuideMetadataValidation);
+BASE_DECLARE_FEATURE(kPageTopicsBatchAnnotations);
+BASE_DECLARE_FEATURE(kPageVisibilityBatchAnnotations);
+BASE_DECLARE_FEATURE(kPageEntitiesModelResetOnShutdown);
+BASE_DECLARE_FEATURE(kPageEntitiesModelBypassFilters);
+BASE_DECLARE_FEATURE(kUseLocalPageEntitiesMetadataProvider);
+BASE_DECLARE_FEATURE(kPageContentAnnotationsValidation);
+BASE_DECLARE_FEATURE(kPreventLongRunningPredictionModels);
+BASE_DECLARE_FEATURE(kOverrideNumThreadsForModelExecution);
+BASE_DECLARE_FEATURE(kOptGuideEnableXNNPACKDelegateWithTFLite);
+BASE_DECLARE_FEATURE(kRemotePageMetadata);
+BASE_DECLARE_FEATURE(kOptimizationHintsComponent);
 
 // Enables use of task runner with trait CONTINUE_ON_SHUTDOWN for page content
 // annotations on-device models.
-extern const base::Feature
-    kOptimizationGuideUseContinueOnShutdownForPageContentAnnotations;
+BASE_DECLARE_FEATURE(
+    kOptimizationGuideUseContinueOnShutdownForPageContentAnnotations);
 
 // The grace period duration for how long to give outstanding page text dump
 // requests to respond after DidFinishLoad.
@@ -90,8 +92,8 @@ bool IsOptimizationTargetPredictionEnabled();
 bool IsOptimizationHintsEnabled();
 
 // Returns true if the feature to fetch from the remote Optimization Guide
-// Service is enabled.
-bool IsRemoteFetchingEnabled(PrefService* pref_service);
+// Service is enabled. This controls the fetching of both hints and models.
+bool IsRemoteFetchingEnabled();
 
 // Returns true if the feature to fetch data for users that have consented to
 // anonymous data collection is enabled but are not Data Saver users.
@@ -203,13 +205,11 @@ base::TimeDelta PredictionModelFetchStartupDelay();
 // refresh models.
 base::TimeDelta PredictionModelFetchInterval();
 
-// The timeout for executing models, if enabled.
-absl::optional<base::TimeDelta> ModelExecutionTimeout();
+// Whether to use the model execution watchdog.
+bool IsModelExecutionWatchdogEnabled();
 
-// Returns a set of field trial name hashes that can be sent in the request to
-// the remote Optimization Guide Service if the client is in one of the
-// specified field trials.
-base::flat_set<uint32_t> FieldTrialNameHashesAllowedForFetch();
+// The default timeout for the watchdog to use if none is given by the caller.
+base::TimeDelta ModelExecutionWatchdogDefaultTimeout();
 
 // Whether the ability to download models is enabled.
 bool IsModelDownloadingEnabled();
@@ -221,12 +221,9 @@ bool IsUnrestrictedModelDownloadingEnabled();
 // Returns whether the feature to annotate page content is enabled.
 bool IsPageContentAnnotationEnabled();
 
-// Returns the max size that should be requested for a page content text dump.
-uint64_t MaxSizeForPageContentTextDump();
-
-// Returns whether the title should always be annotated instead of a page
-// content text dump.
-bool ShouldAnnotateTitleInsteadOfPageContent();
+// Whether search metadata should be persisted for non-Google searches, as
+// identified by the TemplateURLService.
+bool ShouldPersistSearchMetadataForNonGoogleSearches();
 
 // Whether we should write content annotations to History Service.
 bool ShouldWriteContentAnnotationsToHistoryService();
@@ -247,9 +244,13 @@ bool ShouldExecutePageEntitiesModelOnPageContent(const std::string& locale);
 // for a user using |locale| as their browser language.
 bool ShouldExecutePageVisibilityModelOnPageContent(const std::string& locale);
 
-// Returns whether page entities should be retrieved from the remote
+// Returns whether page metadata should be retrieved from the remote
 // Optimization Guide service.
-bool RemotePageEntitiesEnabled();
+bool RemotePageMetadataEnabled();
+
+// Returns the minimum score associated with a category for it to be persisted.
+// Will be a value from 0 to 100, inclusive.
+int GetMinimumPageCategoryScoreToPersist();
 
 // The time to wait beyond the onload event before sending the hints request for
 // link predictions.
@@ -280,22 +281,31 @@ bool UseLocalPageEntitiesMetadataProvider();
 // immediately after requested.
 size_t AnnotateVisitBatchSize();
 
-// Whether the batch annotation validation feature is enabled.
-bool BatchAnnotationsValidationEnabled();
+// Whether the page content annotation validation feature or command line flag
+// is enabled for the given annotation type.
+bool PageContentAnnotationValidationEnabledForType(AnnotationType type);
 
-// The time period between browser start and running a running batch annotation
-// validation.
-base::TimeDelta BatchAnnotationValidationStartupDelay();
+// The time period between browser start and running a running page content
+// annotation validation.
+base::TimeDelta PageContentAnnotationValidationStartupDelay();
 
-// The size of batches to run for validation.
-size_t BatchAnnotationsValidationBatchSize();
-
-// True if the batch annotations feature should use the PageTopics annotation
-// type instead of ContentVisibility.
-bool BatchAnnotationsValidationUsePageTopics();
+// The size of batches to run for page content validation.
+size_t PageContentAnnotationsValidationBatchSize();
 
 // The maximum size of the visit annotation cache.
 size_t MaxVisitAnnotationCacheSize();
+
+// Returns the number of threads to use for model inference on the given
+// optimization target.
+absl::optional<int> OverrideNumThreadsForOptTarget(
+    proto::OptimizationTarget opt_target);
+
+// Whether XNNPACK should be used with TFLite, on platforms where it is
+// supported. This is a no-op on unsupported platforms.
+bool TFLiteXNNPACKDelegateEnabled();
+
+// Whether to check the pref for whether a previous component version failed.
+bool ShouldCheckFailedComponentVersionPref();
 
 }  // namespace features
 }  // namespace optimization_guide

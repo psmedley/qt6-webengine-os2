@@ -1,6 +1,7 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 
 /**
  * @fileoverview Base class for Web Components that don't use Polymer.
@@ -8,9 +9,13 @@
  * chrome/test/data/webui/js/custom_element_test.js
  */
 
+function emptyHTML(): string|TrustedHTML {
+  return window.trustedTypes ? window.trustedTypes.emptyHTML : '';
+}
+
 export class CustomElement extends HTMLElement {
-  static get template(): string {
-    return '';
+  static get template() {
+    return emptyHTML();
   }
 
   constructor() {
@@ -18,8 +23,11 @@ export class CustomElement extends HTMLElement {
 
     this.attachShadow({mode: 'open'});
     const template = document.createElement('template');
-    template.innerHTML =
-        (this.constructor as typeof CustomElement).template || '';
+    const html =
+        (this.constructor as typeof CustomElement).template || emptyHTML();
+    // This is a workaround for the fact that the innerHTML setter only accepts
+    // a string and not TrustedHTML.
+    template.innerHTML = html as unknown as string;
     this.shadowRoot!.appendChild(template.content.cloneNode(true));
   }
 

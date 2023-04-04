@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,8 @@ class AccessibilityModeTest : public ContentBrowserTest {
  protected:
   const BrowserAccessibility* FindNode(ax::mojom::Role role,
                                        const std::string& name) {
-    const BrowserAccessibility* root = GetManager()->GetRoot();
+    const BrowserAccessibility* root =
+        GetManager()->GetBrowserAccessibilityRoot();
     CHECK(root);
     return FindNodeInSubtree(*root, role, name);
   }
@@ -78,7 +79,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest, AccessibilityModeComplete) {
   AccessibilityNotificationWaiter waiter(shell()->web_contents());
   web_contents()->AddAccessibilityMode(ui::kAXModeComplete);
   EXPECT_TRUE(web_contents()->GetAccessibilityMode() == ui::kAXModeComplete);
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
   EXPECT_NE(nullptr, GetManager());
 }
 
@@ -91,7 +92,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest,
   web_contents()->AddAccessibilityMode(ui::kAXModeWebContentsOnly);
   EXPECT_TRUE(web_contents()->GetAccessibilityMode() ==
               ui::kAXModeWebContentsOnly);
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
   // No BrowserAccessibilityManager expected for this mode.
   EXPECT_EQ(nullptr, GetManager());
 }
@@ -103,13 +104,13 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest, AddingModes) {
   web_contents()->AddAccessibilityMode(ui::kAXModeWebContentsOnly);
   EXPECT_TRUE(web_contents()->GetAccessibilityMode() ==
               ui::kAXModeWebContentsOnly);
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
   EXPECT_EQ(nullptr, GetManager());
 
   AccessibilityNotificationWaiter waiter2(shell()->web_contents());
   web_contents()->AddAccessibilityMode(ui::kAXModeComplete);
   EXPECT_TRUE(web_contents()->GetAccessibilityMode() == ui::kAXModeComplete);
-  waiter2.WaitForNotification();
+  ASSERT_TRUE(waiter2.WaitForNotification());
   EXPECT_NE(nullptr, GetManager());
 }
 
@@ -125,7 +126,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest,
                                          ax::mojom::Event::kLoadComplete);
   GURL url("data:text/html,<p>Para</p>");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
 
   const BrowserAccessibility* text =
       FindNode(ax::mojom::Role::kStaticText, "Para");
@@ -150,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest,
       ax::mojom::Event::kLoadComplete);
   GURL url("data:text/html,<p>Para</p>");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
 
   const BrowserAccessibility* text =
       FindNode(ax::mojom::Role::kStaticText, "Para");
@@ -168,7 +169,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest, AddScreenReaderModeFlag) {
       ax::mojom::Event::kLoadComplete);
   GURL url("data:text/html,<input aria-label=Foo placeholder=Bar>");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
 
   const BrowserAccessibility* textbox =
       FindNode(ax::mojom::Role::kTextField, "Foo");
@@ -181,7 +182,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest, AddScreenReaderModeFlag) {
                                           ax::mojom::Event::kLoadComplete);
   content::testing::ScopedContentAXModeSetter ax_mode_setter(
       ui::AXMode::kScreenReader);
-  waiter2.WaitForNotification();
+  ASSERT_TRUE(waiter2.WaitForNotification());
 
   const BrowserAccessibility* textbox2 =
       FindNode(ax::mojom::Role::kTextField, "Foo");
@@ -200,14 +201,14 @@ IN_PROC_BROWSER_TEST_F(AccessibilityModeTest,
   web_contents()->AddAccessibilityMode(ui::kAXModeWebContentsOnly);
   EXPECT_TRUE(web_contents()->GetAccessibilityMode() ==
               ui::kAXModeWebContentsOnly);
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
   EXPECT_EQ(nullptr, GetManager());
 
   AccessibilityNotificationWaiter waiter2(shell()->web_contents());
   web_contents()->SetAccessibilityMode(ui::AXMode());
   web_contents()->AddAccessibilityMode(ui::kAXModeComplete);
   EXPECT_TRUE(web_contents()->GetAccessibilityMode() == ui::kAXModeComplete);
-  waiter2.WaitForNotification();
+  ASSERT_TRUE(waiter2.WaitForNotification());
   EXPECT_NE(nullptr, GetManager());
 }
 

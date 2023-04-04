@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -197,9 +197,8 @@ DecodeStatus VP9VaapiVideoDecoderDelegate::SubmitDecode(
     seg_param.chroma_ac_quant_scale = seg.uv_dequant[i][1];
   }
 
-  // Always re-create |encoded_data| because reusing the buffer causes horrific
-  // artifacts in decoded buffers. TODO(b/169725321): This seems to be a driver
-  // bug, fix it and reuse the buffer.
+  // Create VASliceData buffer |encoded_data| every frame so that decoding can
+  // be more asynchronous than reusing the buffer.
   std::unique_ptr<ScopedVABuffer> encoded_data;
 
   std::vector<std::pair<VABufferID, VaapiWrapper::VABufferDescriptor>> buffers =

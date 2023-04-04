@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -127,11 +128,10 @@ TEST_F(ApplyStyleCommandTest, JustifyRightWithSVGForeignObject) {
       ->Apply();
   EXPECT_EQ(
       "<svg>"
-      "<foreignObject>"
-      "<div style=\"text-align: right;\">|1</div>"
+      "<foreignObject>|1"
       "</foreignObject>"
       "<foreignObject>"
-      "<div style=\"text-align: right;\">2</div><b></b>"
+      " 2<b></b>"
       "</foreignObject>"
       "</svg>",
       GetSelectionTextFromBody());

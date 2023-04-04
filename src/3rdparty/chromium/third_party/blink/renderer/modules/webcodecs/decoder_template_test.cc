@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,8 +86,7 @@ VideoDecoder* DecoderTemplateTest<VideoDecoder>::CreateDecoder(
     ScriptState* script_state,
     const VideoDecoderInit* init,
     ExceptionState& exception_state) {
-  return MakeGarbageCollected<VideoDecoder>(script_state, init,
-                                            exception_state);
+  return VideoDecoder::Create(script_state, init, exception_state);
 }
 
 using DecoderTemplateImplementations =

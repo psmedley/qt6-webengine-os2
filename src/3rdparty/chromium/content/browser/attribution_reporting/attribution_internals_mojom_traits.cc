@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,14 +52,14 @@ bool UnionTraits<ReportIDDataView, AttributionReport::Id>::Read(
     ReportIDDataView data,
     AttributionReport::Id* out) {
   switch (data.tag()) {
-    case ReportIDDataView::Tag::EVENT_LEVEL_ID: {
+    case ReportIDDataView::Tag::kEventLevelId: {
       AttributionReport::EventLevelData::Id event_level_id;
       if (!data.ReadEventLevelId(&event_level_id))
         return false;
       *out = event_level_id;
       return true;
     }
-    case ReportIDDataView::Tag::AGGREGATABLE_ATTRIBUTION_ID: {
+    case ReportIDDataView::Tag::kAggregatableAttributionId: {
       AttributionReport::AggregatableAttributionData::Id
           aggregatable_attribution_id;
       if (!data.ReadAggregatableAttributionId(&aggregatable_attribution_id))
@@ -75,10 +75,10 @@ ReportIDDataView::Tag
 UnionTraits<ReportIDDataView, AttributionReport::Id>::GetTag(
     const AttributionReport::Id& id) {
   switch (AttributionReport::GetReportType(id)) {
-    case AttributionReport::ReportType::kEventLevel:
-      return ReportIDDataView::Tag::EVENT_LEVEL_ID;
-    case AttributionReport::ReportType::kAggregatableAttribution:
-      return ReportIDDataView::Tag::AGGREGATABLE_ATTRIBUTION_ID;
+    case AttributionReport::Type::kEventLevel:
+      return ReportIDDataView::Tag::kEventLevelId;
+    case AttributionReport::Type::kAggregatableAttribution:
+      return ReportIDDataView::Tag::kAggregatableAttributionId;
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,5 @@ GpuMemoryBufferHandle GpuMemoryBufferHandle::Clone() const {
 }
 
 void GpuMemoryBuffer::SetColorSpace(const ColorSpace& color_space) {}
-
-void GpuMemoryBuffer::SetHDRMetadata(const HDRMetadata& hdr_metadata) {}
 
 }  // namespace gfx

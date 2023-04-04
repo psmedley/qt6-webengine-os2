@@ -1,10 +1,11 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_TRANSITION_PSEUDO_ELEMENT_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_TRANSITION_PSEUDO_ELEMENT_DATA_H_
 
+#include "base/check_op.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
@@ -51,7 +52,7 @@ class TransitionPseudoElementData final
 inline bool TransitionPseudoElementData::HasPseudoElements() const {
   return transition_ || transition_outgoing_image_ ||
          transition_incoming_image_ || transition_image_wrapper_ ||
-         !transition_containers_.IsEmpty();
+         !transition_containers_.empty();
 }
 
 inline void TransitionPseudoElementData::ClearPseudoElements() {

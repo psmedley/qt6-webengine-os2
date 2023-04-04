@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "content/common/content_export.h"
 #include "gin/public/isolate_holder.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -56,16 +57,19 @@ class DebugCommandQueue;
 // the thread represented by the `v8_runner` argument to Create(). It's the
 // caller's responsibility to ensure that all other methods are used from the v8
 // runner.
-class AuctionV8Helper
+class CONTENT_EXPORT AuctionV8Helper
     : public base::RefCountedDeleteOnSequence<AuctionV8Helper> {
  public:
   // Timeout for script execution.
   static const base::TimeDelta kScriptTimeout;
 
+  // Controls how much RunScript() actually executes; see there for more.
+  enum class ExecMode { kTopLevelAndFunction, kFunctionOnly };
+
   // Helper class to set up v8 scopes to use Isolate. All methods expect a
   // FullIsolateScope to be have been created on the current thread, and a
   // context to be entered.
-  class FullIsolateScope {
+  class CONTENT_EXPORT FullIsolateScope {
    public:
     explicit FullIsolateScope(AuctionV8Helper* v8_helper);
     explicit FullIsolateScope(const FullIsolateScope&) = delete;
@@ -83,7 +87,7 @@ class AuctionV8Helper
   //
   // This class is thread-safe, except SetResumeCallback must be used from V8
   // thread.
-  class DebugId : public base::RefCountedThreadSafe<DebugId> {
+  class CONTENT_EXPORT DebugId : public base::RefCountedThreadSafe<DebugId> {
    public:
     explicit DebugId(AuctionV8Helper* v8_helper);
 
@@ -128,6 +132,11 @@ class AuctionV8Helper
   scoped_refptr<base::SequencedTaskRunner> v8_runner() const {
     return v8_runner_;
   }
+
+  // Note: `callback` will be called on `v8_runner()`. This method may be called
+  // on the creation thread if done before any non-initialization work on v8
+  // thread begins.
+  void SetDestroyedCallback(base::OnceClosure callback);
 
   v8::Isolate* isolate() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -222,14 +231,18 @@ class AuctionV8Helper
   // functions contained within the context, so is likely not safe to use in
   // other contexts without sanitization.
   //
+  // If `exec_mode` is kTopLevelAndFunction, the script body itself will be run.
+  // This should normally happen at least the first time the script is run in
+  // the given context.
+  //
+  // Regardless of the mode, function `function_name` will be called passing in
+  // `args` as arguments.
+  //
   // If `debug_id` is not nullptr, and a debugger connection has been
   // instantiated, will notify debugger of `context`.
   //
   // Assumes passed in context is the active context. Passed in context must be
   // using the Helper's isolate.
-  //
-  // Running this multiple times in the same context will re-load the entire
-  // script file in the context, and then run the script again.
   //
   // If `script_timeout` has no value, kScriptTimeout will be used as the
   // default timeout.
@@ -239,6 +252,7 @@ class AuctionV8Helper
       v8::Local<v8::Context> context,
       v8::Local<v8::UnboundScript> script,
       const DebugId* debug_id,
+      ExecMode exec_mode,
       base::StringPiece function_name,
       base::span<v8::Local<v8::Value>> args,
       absl::optional<base::TimeDelta> script_timeout,
@@ -352,6 +366,8 @@ class AuctionV8Helper
       GUARDED_BY_CONTEXT(sequence_checker_);
   std::unique_ptr<v8_inspector::V8Inspector> v8_inspector_
       GUARDED_BY_CONTEXT(sequence_checker_);
+
+  base::OnceClosure destroyed_callback_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

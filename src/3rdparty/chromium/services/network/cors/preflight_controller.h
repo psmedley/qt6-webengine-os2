@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/component_export.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/memory/raw_ptr.h"
+#include "base/types/expected.h"
 #include "base/types/strong_alias.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/cors/preflight_cache.h"
@@ -39,6 +40,21 @@ extern const char kPreflightErrorHistogramName[];
 // Name of a histogram that records suppressed preflight errors, aka warnings.
 extern const char kPreflightWarningHistogramName[];
 
+// Dictates how the PreflightController should treat PNA preflights.
+//
+// TODO(https://crbug.com/1268378): Remove this once enforcement is always on.
+enum class PrivateNetworkAccessPreflightBehavior {
+  // Enforce the presence of PNA headers for PNA preflights.
+  kEnforce,
+
+  // Check for PNA headers, but do not fail the request in case of error.
+  // Instead, only report a warning to DevTools.
+  kWarn,
+
+  // Same as `kWarn`, also apply a short timeout to PNA preflights.
+  kWarnWithTimeout,
+};
+
 // A class to manage CORS-preflight, making a CORS-preflight request, checking
 // its result, and owning a CORS-preflight cache.
 class COMPONENT_EXPORT(NETWORK_SERVICE) PreflightController final {
@@ -65,11 +81,11 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) PreflightController final {
       const mojom::URLResponseHead& head,
       const ResourceRequest& original_request,
       bool tainted,
-      EnforcePrivateNetworkAccessHeader enforce_private_network_access_header,
+      PrivateNetworkAccessPreflightBehavior private_network_access_behavior,
       absl::optional<CorsErrorStatus>* detected_error_status);
 
   // Checks CORS aceess on the CORS-preflight response parameters for testing.
-  static absl::optional<CorsErrorStatus> CheckPreflightAccessForTesting(
+  static base::expected<void, CorsErrorStatus> CheckPreflightAccessForTesting(
       const GURL& response_url,
       const int response_status_code,
       const absl::optional<std::string>& allow_origin_header,
@@ -92,7 +108,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) PreflightController final {
       const ResourceRequest& resource_request,
       WithTrustedHeaderClient with_trusted_header_client,
       NonWildcardRequestHeadersSupport non_wildcard_request_headers_support,
-      EnforcePrivateNetworkAccessHeader enforce_private_network_access_header,
+      PrivateNetworkAccessPreflightBehavior private_network_access_behavior,
       bool tainted,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,
       mojom::URLLoaderFactory* loader_factory,

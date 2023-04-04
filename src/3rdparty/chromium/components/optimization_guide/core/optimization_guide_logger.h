@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,17 @@
 #include <string>
 
 #include "base/containers/circular_deque.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/time/time.h"
+#include "components/optimization_guide/core/optimization_guide_common.mojom.h"
 #include "components/optimization_guide/core/optimization_guide_decision.h"
 #include "components/optimization_guide/proto/common_types.pb.h"
 #include "url/gurl.h"
 
-#define OPTIMIZATION_GUIDE_LOGGER(optimization_guide_logger)     \
-  OptimizationGuideLogger::LogMessageBuilder(__FILE__, __LINE__, \
+#define OPTIMIZATION_GUIDE_LOGGER(log_source, optimization_guide_logger)     \
+  OptimizationGuideLogger::LogMessageBuilder(log_source, __FILE__, __LINE__, \
                                              optimization_guide_logger)
 
 // Interface to record the debug logs and send it to be shown in the
@@ -25,10 +27,12 @@ class OptimizationGuideLogger {
  public:
   class Observer : public base::CheckedObserver {
    public:
-    virtual void OnLogMessageAdded(base::Time event_time,
-                                   const std::string& source_file,
-                                   int source_line,
-                                   const std::string& message) = 0;
+    virtual void OnLogMessageAdded(
+        base::Time event_time,
+        optimization_guide_common::mojom::LogSource log_source,
+        const std::string& source_file,
+        int source_line,
+        const std::string& message) = 0;
   };
   OptimizationGuideLogger();
   ~OptimizationGuideLogger();
@@ -39,6 +43,7 @@ class OptimizationGuideLogger {
   void AddObserver(OptimizationGuideLogger::Observer* observer);
   void RemoveObserver(OptimizationGuideLogger::Observer* observer);
   void OnLogMessageAdded(base::Time event_time,
+                         optimization_guide_common::mojom::LogSource log_source,
                          const std::string& source_file,
                          int source_line,
                          const std::string& message);
@@ -50,7 +55,8 @@ class OptimizationGuideLogger {
   // command-line switch or the internals page.
   class LogMessageBuilder {
    public:
-    LogMessageBuilder(const std::string& source_file,
+    LogMessageBuilder(optimization_guide_common::mojom::LogSource log_source,
+                      const std::string& source_file,
                       int source_line,
                       OptimizationGuideLogger* optimization_guide_logger);
     ~LogMessageBuilder();
@@ -70,22 +76,25 @@ class OptimizationGuideLogger {
         optimization_guide::proto::OptimizationTarget optimization_target);
 
    private:
-    std::string source_file_;
-    int source_line_;
+    const optimization_guide_common::mojom::LogSource log_source_;
+    const std::string source_file_;
+    const int source_line_;
     std::vector<std::string> messages_;
-    OptimizationGuideLogger* optimization_guide_logger_;
+    raw_ptr<OptimizationGuideLogger> optimization_guide_logger_;
   };
 
  private:
   struct LogMessage {
     LogMessage(base::Time event_time,
+               optimization_guide_common::mojom::LogSource log_source,
                const std::string& source_file,
                int source_line,
                const std::string& message);
-    base::Time event_time;
-    std::string source_file;
-    int source_line;
-    std::string message;
+    const base::Time event_time;
+    const optimization_guide_common::mojom::LogSource log_source;
+    const std::string source_file;
+    const int source_line;
+    const std::string message;
   };
 
   // Contains the most recent log messages. Messages are queued up only when

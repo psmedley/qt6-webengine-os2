@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,14 +39,13 @@ namespace {
 
 const char kUserEmail[] = "test@google.com";
 
-void FakeRunCheckNotRegister(
-    chromeos::attestation::AttestationKeyType key_type,
-    Profile* profile,
-    ash::attestation::TpmChallengeKeyCallback callback,
-    const std::string& challenge,
-    bool register_key,
-    const std::string& key_name_for_spkac,
-    const absl::optional<::attestation::DeviceTrustSignals>& signals) {
+void FakeRunCheckNotRegister(ash::attestation::AttestationKeyType key_type,
+                             Profile* profile,
+                             ash::attestation::TpmChallengeKeyCallback callback,
+                             const std::string& challenge,
+                             bool register_key,
+                             const std::string& key_name_for_spkac,
+                             const absl::optional<std::string>& signals) {
   EXPECT_FALSE(register_key);
   std::move(callback).Run(
       ash::attestation::TpmChallengeKeyResult::MakeChallengeResponse(
@@ -138,9 +137,8 @@ class EPKChallengeKeyTestBase : public BrowserWithTestWindowTest {
                        extensions::api_test_utils::NONE);
     EXPECT_TRUE(function->GetError().empty())
         << "Unexpected error: " << function->GetError();
-    if (function->GetResultList() &&
-        !function->GetResultList()->GetListDeprecated().empty()) {
-      return function->GetResultList()->GetListDeprecated()[0].Clone();
+    if (function->GetResultList() && !function->GetResultList()->empty()) {
+      return (*function->GetResultList())[0].Clone();
     }
     return base::Value();
   }

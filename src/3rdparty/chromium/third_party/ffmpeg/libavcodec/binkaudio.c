@@ -264,7 +264,7 @@ static int decode_block(BinkAudioContext *s, float **out, int use_dct,
             j = ch;
             for (i = 0; i < s->overlap_len; i++, j += channels)
                 out[ch + ch_offset][i] = (s->previous[ch + ch_offset][i] * (count - j) +
-                                      out[ch + ch_offset][i] *          j) / count;
+                                                  out[ch + ch_offset][i] *          j) / count;
         }
         memcpy(s->previous[ch + ch_offset], &out[ch + ch_offset][s->frame_len - s->overlap_len],
                s->overlap_len * sizeof(*s->previous[ch + ch_offset]));
@@ -301,8 +301,10 @@ static int binkaudio_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 again:
     if (!s->pkt->data) {
         ret = ff_decode_get_packet(avctx, s->pkt);
-        if (ret < 0)
+        if (ret < 0) {
+            s->ch_offset = 0;
             return ret;
+        }
 
         if (s->pkt->size < 4) {
             av_log(avctx, AV_LOG_ERROR, "Packet is too small\n");
@@ -365,28 +367,28 @@ static void decode_flush(AVCodecContext *avctx)
 
 const FFCodec ff_binkaudio_rdft_decoder = {
     .p.name         = "binkaudio_rdft",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Bink Audio (RDFT)"),
+    CODEC_LONG_NAME("Bink Audio (RDFT)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_BINKAUDIO_RDFT,
     .priv_data_size = sizeof(BinkAudioContext),
     .init           = decode_init,
     .flush          = decode_flush,
     .close          = decode_end,
-    .receive_frame  = binkaudio_receive_frame,
+    FF_CODEC_RECEIVE_FRAME_CB(binkaudio_receive_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 
 const FFCodec ff_binkaudio_dct_decoder = {
     .p.name         = "binkaudio_dct",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Bink Audio (DCT)"),
+    CODEC_LONG_NAME("Bink Audio (DCT)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_BINKAUDIO_DCT,
     .priv_data_size = sizeof(BinkAudioContext),
     .init           = decode_init,
     .flush          = decode_flush,
     .close          = decode_end,
-    .receive_frame  = binkaudio_receive_frame,
+    FF_CODEC_RECEIVE_FRAME_CB(binkaudio_receive_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

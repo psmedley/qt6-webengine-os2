@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -444,13 +444,10 @@ ResultExpr RestrictPtrace() {
   return Switch(request)
       .CASES((
 #if !defined(__aarch64__)
-                 PTRACE_GETREGS, PTRACE_GETFPREGS,
-#if defined(TRACE_GET_THREAD_AREA)
-                 PTRACE_GET_THREAD_AREA,
-#endif
+                 PTRACE_GETREGS, PTRACE_GETFPREGS, PTRACE_GET_THREAD_AREA,
                  PTRACE_GETREGSET,
 #endif
-#if defined(__arm__) && defined (PTRACE_GETVFPREGS)
+#if defined(__arm__)
                  PTRACE_GETVFPREGS,
 #endif
                  PTRACE_PEEKDATA, PTRACE_ATTACH, PTRACE_DETACH),
@@ -467,6 +464,13 @@ ResultExpr RestrictPtrace() {
 ResultExpr RestrictPkeyAllocFlags() {
   const Arg<int> flags(0);
   return If(flags == 0, Allow()).Else(CrashSIGSYS());
+}
+
+ResultExpr RestrictGoogle3Threading(int sysno) {
+  DCHECK(sysno == __NR_getitimer || sysno == __NR_setitimer);
+
+  const Arg<int> which(0);
+  return If(which == ITIMER_PROF, Allow()).Else(Error(EPERM));
 }
 
 }  // namespace sandbox.

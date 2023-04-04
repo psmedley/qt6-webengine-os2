@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/fuchsia/process_context.h"
 #include "base/memory/ptr_util.h"
+#include "gpu/vulkan/vulkan_device_queue.h"
 #include "third_party/angle/src/common/fuchsia_egl/fuchsia_egl.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/native_pixmap.h"
@@ -56,18 +57,20 @@ class GLOzoneEGLScenic : public GLOzoneEGL {
 
   // GLOzone:
   scoped_refptr<gl::GLSurface> CreateViewGLSurface(
+      gl::GLDisplay* display,
       gfx::AcceleratedWidget window) override {
     // GL rendering to Flatland views is not supported. This function is
     // used only for unittests. Return an off-screen surface, so the tests pass.
     // TODO(crbug.com/1271760): Use Vulkan in unittests and remove this hack.
-    return gl::InitializeGLSurface(
-        base::MakeRefCounted<gl::SurfacelessEGL>(gfx::Size(100, 100)));
+    return gl::InitializeGLSurface(base::MakeRefCounted<gl::SurfacelessEGL>(
+        display->GetAs<gl::GLDisplayEGL>(), gfx::Size(100, 100)));
   }
 
   scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
+      gl::GLDisplay* display,
       const gfx::Size& size) override {
-    return gl::InitializeGLSurface(
-        base::MakeRefCounted<gl::SurfacelessEGL>(size));
+    return gl::InitializeGLSurface(base::MakeRefCounted<gl::SurfacelessEGL>(
+        display->GetAs<gl::GLDisplayEGL>(), size));
   }
 
   gl::EGLDisplayPlatform GetNativeDisplay() override {
@@ -168,13 +171,14 @@ std::unique_ptr<SurfaceOzoneCanvas> ScenicSurfaceFactory::CreateCanvasForWidget(
 
 scoped_refptr<gfx::NativePixmap> ScenicSurfaceFactory::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
-    VkDevice vk_device,
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
     absl::optional<gfx::Size> framebuffer_size) {
   DCHECK(!framebuffer_size || framebuffer_size == size);
 
+  VkDevice vk_device = device_queue->GetVulkanDevice();
   if (widget != gfx::kNullAcceleratedWidget &&
       usage == gfx::BufferUsage::SCANOUT) {
     // The usage SCANOUT is for a primary plane buffer.
@@ -188,18 +192,18 @@ scoped_refptr<gfx::NativePixmap> ScenicSurfaceFactory::CreateNativePixmap(
   if (!collection)
     return nullptr;
 
-  return collection->CreateNativePixmap(0);
+  return collection->CreateNativePixmap(0, size);
 }
 
 void ScenicSurfaceFactory::CreateNativePixmapAsync(
     gfx::AcceleratedWidget widget,
-    VkDevice vk_device,
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
     NativePixmapCallback callback) {
   std::move(callback).Run(
-      CreateNativePixmap(widget, vk_device, size, format, usage));
+      CreateNativePixmap(widget, device_queue, size, format, usage));
 }
 
 scoped_refptr<gfx::NativePixmap>
@@ -213,7 +217,7 @@ ScenicSurfaceFactory::CreateNativePixmapFromHandle(
   if (!collection)
     return nullptr;
 
-  return collection->CreateNativePixmap(handle.buffer_index);
+  return collection->CreateNativePixmap(handle.buffer_index, size);
 }
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -221,7 +225,7 @@ std::unique_ptr<gpu::VulkanImplementation>
 ScenicSurfaceFactory::CreateVulkanImplementation(bool use_swiftshader,
                                                  bool allow_protected_memory) {
   return std::make_unique<ui::VulkanImplementationScenic>(
-      this, &sysmem_buffer_manager_, allow_protected_memory);
+      this, &sysmem_buffer_manager_, use_swiftshader, allow_protected_memory);
 }
 #endif
 

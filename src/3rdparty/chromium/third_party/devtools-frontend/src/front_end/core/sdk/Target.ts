@@ -7,7 +7,7 @@ import * as Host from '../host/host.js';
 import * as Platform from '../platform/platform.js';
 import * as ProtocolClient from '../protocol_client/protocol_client.js';
 import type * as Protocol from '../../generated/protocol.js';
-import type {TargetManager} from './TargetManager.js';
+import {type TargetManager} from './TargetManager.js';
 import {SDKModel} from './SDKModel.js';
 
 export class Target extends ProtocolClient.InspectorBackend.TargetBase {
@@ -41,7 +41,7 @@ export class Target extends ProtocolClient.InspectorBackend.TargetBase {
             Capability.Log | Capability.Network | Capability.Target | Capability.Tracing | Capability.Emulation |
             Capability.Input | Capability.Inspector | Capability.Audits | Capability.WebAuthn | Capability.IO |
             Capability.Media;
-        if (!parentTarget) {
+        if (parentTarget?.type() !== Type.Frame) {
           // This matches backend exposing certain capabilities only for the main frame.
           this.#capabilitiesMask |=
               Capability.DeviceEmulation | Capability.ScreenCapture | Capability.Security | Capability.ServiceWorker;
@@ -52,7 +52,7 @@ export class Target extends ProtocolClient.InspectorBackend.TargetBase {
       case Type.ServiceWorker:
         this.#capabilitiesMask = Capability.JS | Capability.Log | Capability.Network | Capability.Target |
             Capability.Inspector | Capability.IO;
-        if (!parentTarget) {
+        if (parentTarget?.type() !== Type.Frame) {
           this.#capabilitiesMask |= Capability.Browser;
         }
         break;
@@ -61,8 +61,8 @@ export class Target extends ProtocolClient.InspectorBackend.TargetBase {
             Capability.IO | Capability.Media | Capability.Inspector;
         break;
       case Type.Worker:
-        this.#capabilitiesMask =
-            Capability.JS | Capability.Log | Capability.Network | Capability.Target | Capability.IO | Capability.Media;
+        this.#capabilitiesMask = Capability.JS | Capability.Log | Capability.Network | Capability.Target |
+            Capability.IO | Capability.Media | Capability.Emulation;
         break;
       case Type.Node:
         this.#capabilitiesMask = Capability.JS;
@@ -72,6 +72,9 @@ export class Target extends ProtocolClient.InspectorBackend.TargetBase {
         break;
       case Type.Browser:
         this.#capabilitiesMask = Capability.Target | Capability.IO;
+        break;
+      case Type.Tab:
+        this.#capabilitiesMask = Capability.Target;
         break;
     }
     this.#typeInternal = type;
@@ -174,7 +177,7 @@ export class Target extends ProtocolClient.InspectorBackend.TargetBase {
     this.#inspectedURLInternal = inspectedURL;
     const parsedURL = Common.ParsedURL.ParsedURL.fromString(inspectedURL);
     this.#inspectedURLName = parsedURL ? parsedURL.lastPathComponentWithFragment() : '#' + this.#idInternal;
-    if (!this.parentTarget()) {
+    if (this.parentTarget()?.type() !== Type.Frame) {
       Host.InspectorFrontendHost.InspectorFrontendHostInstance.inspectedURLChanged(
           inspectedURL || Platform.DevToolsPath.EmptyUrlString);
     }
@@ -227,6 +230,7 @@ export enum Type {
   Node = 'node',
   Browser = 'browser',
   AuctionWorklet = 'auction-worklet',
+  Tab = 'tab',
 }
 
 // TODO(crbug.com/1167717): Make this a const enum again

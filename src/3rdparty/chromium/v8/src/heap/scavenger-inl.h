@@ -5,13 +5,23 @@
 #ifndef V8_HEAP_SCAVENGER_INL_H_
 #define V8_HEAP_SCAVENGER_INL_H_
 
+#include "src/codegen/assembler-inl.h"
 #include "src/heap/evacuation-allocator-inl.h"
 #include "src/heap/incremental-marking-inl.h"
+#include "src/heap/marking-state-inl.h"
 #include "src/heap/memory-chunk.h"
+#include "src/heap/new-spaces.h"
+#include "src/heap/objects-visiting-inl.h"
+#include "src/heap/pretenuring-handler-inl.h"
 #include "src/heap/scavenger.h"
 #include "src/objects/map.h"
+#include "src/objects/objects-body-descriptors-inl.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/slots-inl.h"
+
+#ifdef V8_ENABLE_INNER_POINTER_RESOLUTION_OSB
+#include "src/heap/object-start-bitmap-inl.h"
+#endif  // V8_ENABLE_INNER_POINTER_RESOLUTION_OSB
 
 namespace v8 {
 namespace internal {
@@ -98,14 +108,16 @@ bool Scavenger::MigrateObject(Map map, HeapObject source, HeapObject target,
   }
 
   if (V8_UNLIKELY(is_logging_)) {
-    heap()->OnMoveEvent(target, source, size);
+    heap()->OnMoveEvent(source, target, size);
   }
 
   if (is_incremental_marking_ &&
-      promotion_heap_choice != kPromoteIntoSharedHeap) {
+      (promotion_heap_choice != kPromoteIntoSharedHeap || mark_shared_heap_)) {
     heap()->incremental_marking()->TransferColor(source, target);
   }
-  heap()->UpdateAllocationSite(map, source, &local_pretenuring_feedback_);
+  pretenuring_handler_->UpdateAllocationSite(map, source,
+                                             &local_pretenuring_feedback_);
+
   return true;
 }
 
@@ -123,8 +135,7 @@ CopyAndForwardResult Scavenger::SemiSpaceCopyObject(
 
   HeapObject target;
   if (allocation.To(&target)) {
-    DCHECK(heap()->incremental_marking()->non_atomic_marking_state()->IsWhite(
-        target));
+    DCHECK(heap()->non_atomic_marking_state()->IsWhite(target));
     const bool self_success =
         MigrateObject(map, object, target, object_size, kPromoteIntoLocalHeap);
     if (!self_success) {
@@ -172,8 +183,7 @@ CopyAndForwardResult Scavenger::PromoteObject(Map map, THeapObjectSlot slot,
 
   HeapObject target;
   if (allocation.To(&target)) {
-    DCHECK(heap()->incremental_marking()->non_atomic_marking_state()->IsWhite(
-        target));
+    DCHECK(heap()->non_atomic_marking_state()->IsWhite(target));
     const bool self_success =
         MigrateObject(map, object, target, object_size, promotion_heap_choice);
     if (!self_success) {
@@ -245,7 +255,8 @@ SlotCallbackResult Scavenger::EvacuateObjectDefault(
   SLOW_DCHECK(static_cast<size_t>(object_size) <=
               MemoryChunkLayout::AllocatableMemoryInDataPage());
 
-  if (!heap()->ShouldBePromoted(object.address())) {
+  if (!SemiSpaceNewSpace::From(heap()->new_space())
+           ->ShouldBePromoted(object.address())) {
     // A semi-space copy may fail due to fragmentation. In that case, we
     // try to promote the object.
     result = SemiSpaceCopyObject(map, slot, object, object_size, object_fields);
@@ -529,7 +540,7 @@ int ScavengeVisitor::VisitEphemeronHashTable(Map map,
                                              EphemeronHashTable table) {
   // Register table with the scavenger, so it can take care of the weak keys
   // later. This allows to only iterate the tables' values, which are treated
-  // as strong independetly of whether the key is live.
+  // as strong independently of whether the key is live.
   scavenger_->AddEphemeronHashTable(table);
   for (InternalIndex i : table.IterateEntries()) {
     ObjectSlot value_slot =

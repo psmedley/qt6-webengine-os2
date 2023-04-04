@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/strings/string_piece_forward.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/data_model/autofill_data_model.h"
 #include "url/gurl.h"
@@ -123,13 +124,17 @@ class CreditCard : public AutofillDataModel {
   // Returns string of dots for hidden card information.
   static std::u16string GetMidlineEllipsisDots(size_t num_dots);
 
+  // Returns whether the card is a local card.
+  static bool IsLocalCard(const CreditCard* card);
+
   // Network issuer strings are defined at the bottom of this file, e.g.
   // kVisaCard.
   void SetNetworkForMaskedCard(base::StringPiece network);
 
   // AutofillDataModel:
   AutofillMetadata GetMetadata() const override;
-  bool SetMetadata(const AutofillMetadata metadata) override;
+  double GetRankingScore(base::Time current_time) const override;
+  bool SetMetadata(const AutofillMetadata& metadata) override;
   // Returns whether the card is deletable: if it is expired and has not been
   // used for longer than |kDisusedCreditCardDeletionTimeDelta|.
   bool IsDeletable() const override;
@@ -245,8 +250,16 @@ class CreditCard : public AutofillDataModel {
   // Returns whether the card is expired based on |current_time|.
   bool IsExpired(const base::Time& current_time) const;
 
+  // Returns whether the card is a masked card. Such cards will only have
+  // the last 4 digits of the card number.
+  bool masked() const;
+
   // Whether the card expiration date should be updated.
   bool ShouldUpdateExpiration() const;
+
+  // Complete = contains number, expiration date and name on card.
+  // Valid = unexpired with valid number format.
+  bool IsCompleteValidCard() const;
 
   const std::string& billing_address_id() const { return billing_address_id_; }
   void set_billing_address_id(const std::string& id) {
@@ -270,11 +283,11 @@ class CreditCard : public AutofillDataModel {
 
   // Various display functions.
 
-  // Card preview summary, for example: "Nickname/Network - ****1234",
-  // ", 01/2020".
-  const std::pair<std::u16string, std::u16string> LabelPieces() const;
+  // Card preview summary, for example: "Nickname/Network - ****1234 John
+  // Smith".
+  std::pair<std::u16string, std::u16string> LabelPieces() const;
   // Like LabelPieces, but appends the two pieces together.
-  const std::u16string Label() const;
+  std::u16string Label() const;
   // The last four digits of the card number (or possibly less if there aren't
   // enough characters).
   std::u16string LastFourDigits() const;
@@ -306,6 +319,11 @@ class CreditCard : public AutofillDataModel {
   std::u16string CardIdentifierStringForAutofillDisplay(
       std::u16string customized_nickname = std::u16string(),
       int obfuscation_length = 4) const;
+  // A name to identify this card. It is the nickname if available, or the
+  // product description. If neither are available, it falls back to the issuer
+  // network.
+  std::u16string CardNameForAutofillDisplay(
+      const std::u16string& customized_nickname = std::u16string()) const;
 
 #if BUILDFLAG(IS_ANDROID)
   // Label for the card to be displayed in the manual filling view on Android.

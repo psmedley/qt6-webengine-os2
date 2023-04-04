@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task/task_runner_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "cc/paint/skia_paint_canvas.h"
@@ -26,8 +25,8 @@
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_provider_util.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
+#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/libyuv/include/libyuv.h"
@@ -243,20 +242,22 @@ VideoTrackRecorderImpl::CodecEnumerator::CodecEnumerator(
 
 VideoTrackRecorderImpl::CodecEnumerator::~CodecEnumerator() = default;
 
-media::VideoCodecProfile
+std::pair<media::VideoCodecProfile, bool>
 VideoTrackRecorderImpl::CodecEnumerator::FindSupportedVideoCodecProfile(
     CodecId codec,
     media::VideoCodecProfile profile) const {
   const auto profiles = supported_profiles_.find(codec);
   if (profiles == supported_profiles_.end()) {
-    return media::VIDEO_CODEC_PROFILE_UNKNOWN;
+    return {media::VIDEO_CODEC_PROFILE_UNKNOWN, false};
   }
   for (const auto& p : profiles->value) {
     if (p.profile == profile) {
-      return profile;
+      const bool vbr_support =
+          p.rate_control_modes & media::VideoEncodeAccelerator::kVariableMode;
+      return {profile, vbr_support};
     }
   }
-  return media::VIDEO_CODEC_PROFILE_UNKNOWN;
+  return {media::VIDEO_CODEC_PROFILE_UNKNOWN, false};
 }
 
 VideoTrackRecorderImpl::CodecId
@@ -267,13 +268,17 @@ VideoTrackRecorderImpl::CodecEnumerator::GetPreferredCodecId() const {
   return preferred_codec_id_;
 }
 
-media::VideoCodecProfile
+std::pair<media::VideoCodecProfile, bool>
 VideoTrackRecorderImpl::CodecEnumerator::GetFirstSupportedVideoCodecProfile(
     CodecId codec) const {
   const auto profile = supported_profiles_.find(codec);
-  return profile == supported_profiles_.end()
-             ? media::VIDEO_CODEC_PROFILE_UNKNOWN
-             : profile->value.front().profile;
+  if (profile == supported_profiles_.end())
+    return {media::VIDEO_CODEC_PROFILE_UNKNOWN, false};
+
+  const auto& supported_profile = profile->value.front();
+  const bool vbr_support = supported_profile.rate_control_modes &
+                           media::VideoEncodeAccelerator::kVariableMode;
+  return {supported_profile.profile, vbr_support};
 }
 
 media::VideoEncodeAccelerator::SupportedProfiles
@@ -304,7 +309,7 @@ VideoTrackRecorderImpl::Counter::GetWeakPtr() {
 
 VideoTrackRecorderImpl::Encoder::Encoder(
     const OnEncodedVideoCB& on_encoded_video_cb,
-    int32_t bits_per_second,
+    uint32_t bits_per_second,
     scoped_refptr<base::SequencedTaskRunner> main_task_runner,
     scoped_refptr<base::SequencedTaskRunner> encoding_task_runner)
     : main_task_runner_(std::move(main_task_runner)),
@@ -320,7 +325,7 @@ VideoTrackRecorderImpl::Encoder::Encoder(
   if (encoding_task_runner_)
     return;
 
-  encoding_thread_ = Thread::CreateThread(
+  encoding_thread_ = NonMainThread::CreateThread(
       ThreadCreationParams(ThreadType::kVideoEncoderThread));
 
   encoding_task_runner_ = encoding_thread_->GetTaskRunner();
@@ -332,10 +337,13 @@ VideoTrackRecorderImpl::Encoder::~Encoder() {
     origin_task_runner_->DeleteSoon(FROM_HERE,
                                     std::move(num_frames_in_encode_));
   }
-  if (encoder_thread_context_ &&
-      !encoding_task_runner_->RunsTasksInCurrentSequence()) {
-    encoding_task_runner_->DeleteSoon(FROM_HERE,
-                                      std::move(encoder_thread_context_));
+  if (!encoding_task_runner_->RunsTasksInCurrentSequence()) {
+    if (encoder_thread_context_) {
+      encoding_task_runner_->DeleteSoon(FROM_HERE,
+                                        std::move(encoder_thread_context_));
+    }
+    if (video_renderer_)
+      encoding_task_runner_->DeleteSoon(FROM_HERE, std::move(video_renderer_));
   }
 }
 
@@ -386,8 +394,8 @@ void VideoTrackRecorderImpl::Encoder::StartFrameEncode(
     }
   }
   frame->AddDestructionObserver(media::BindToCurrentLoop(
-      WTF::Bind(&VideoTrackRecorderImpl::Counter::DecreaseCount,
-                num_frames_in_encode_->GetWeakPtr())));
+      WTF::BindOnce(&VideoTrackRecorderImpl::Counter::DecreaseCount,
+                    num_frames_in_encode_->GetWeakPtr())));
   num_frames_in_encode_->IncreaseCount();
 
   PostCrossThreadTask(
@@ -402,6 +410,30 @@ void VideoTrackRecorderImpl::Encoder::RetrieveFrameOnEncodingTaskRunner(
   DCHECK_CALLED_ON_VALID_SEQUENCE(encoding_sequence_checker_);
 
   scoped_refptr<media::VideoFrame> frame;
+
+  const bool is_opaque = media::IsOpaque(video_frame->format());
+  if (media::IsRGB(video_frame->format()) && video_frame->IsMappable()) {
+    // It's a mapped RGB frame, no readback needed,
+    // all we need is to convert RGB to I420
+    auto visible_rect = video_frame->visible_rect();
+    frame = frame_pool_.CreateFrame(
+        is_opaque ? media::PIXEL_FORMAT_I420 : media::PIXEL_FORMAT_I420A,
+        visible_rect.size(), visible_rect, visible_rect.size(),
+        video_frame->timestamp());
+
+    if (!frame ||
+        !media::ConvertAndScaleFrame(*video_frame, *frame, resize_buffer_)
+             .is_ok()) {
+      // Send black frames (yuv = {0, 127, 127}).
+      DLOG(ERROR) << "Can't convert RGB to I420";
+      frame = media::VideoFrame::CreateColorFrame(
+          video_frame->visible_rect().size(), 0u, 0x80, 0x80,
+          video_frame->timestamp());
+    }
+
+    EncodeOnEncodingTaskRunner(std::move(frame), capture_timestamp);
+    return;
+  }
 
   // |encoder_thread_context_| is null if the GPU process has crashed or isn't
   // there
@@ -448,8 +480,6 @@ void VideoTrackRecorderImpl::Encoder::RetrieveFrameOnEncodingTaskRunner(
                                old_visible_size.width());
     }
 
-    const bool is_opaque = media::IsOpaque(video_frame->format());
-
     frame = frame_pool_.CreateFrame(
         is_opaque ? media::PIXEL_FORMAT_I420 : media::PIXEL_FORMAT_I420A,
         new_visible_size, gfx::Rect(new_visible_size), new_visible_size,
@@ -482,29 +512,30 @@ void VideoTrackRecorderImpl::Encoder::RetrieveFrameOnEncodingTaskRunner(
 #else
     const uint32_t source_pixel_format = libyuv::FOURCC_ARGB;
 #endif
-    if (libyuv::ConvertToI420(static_cast<uint8_t*>(pixmap.writable_addr()),
-                              pixmap.computeByteSize(),
-                              frame->visible_data(media::VideoFrame::kYPlane),
-                              frame->stride(media::VideoFrame::kYPlane),
-                              frame->visible_data(media::VideoFrame::kUPlane),
-                              frame->stride(media::VideoFrame::kUPlane),
-                              frame->visible_data(media::VideoFrame::kVPlane),
-                              frame->stride(media::VideoFrame::kVPlane),
-                              0 /* crop_x */, 0 /* crop_y */, pixmap.width(),
-                              pixmap.height(), old_visible_size.width(),
-                              old_visible_size.height(),
-                              MediaVideoRotationToRotationMode(video_rotation),
-                              source_pixel_format) != 0) {
+    if (libyuv::ConvertToI420(
+            static_cast<uint8_t*>(pixmap.writable_addr()),
+            pixmap.computeByteSize(),
+            frame->GetWritableVisibleData(media::VideoFrame::kYPlane),
+            frame->stride(media::VideoFrame::kYPlane),
+            frame->GetWritableVisibleData(media::VideoFrame::kUPlane),
+            frame->stride(media::VideoFrame::kUPlane),
+            frame->GetWritableVisibleData(media::VideoFrame::kVPlane),
+            frame->stride(media::VideoFrame::kVPlane), 0 /* crop_x */,
+            0 /* crop_y */, pixmap.width(), pixmap.height(),
+            old_visible_size.width(), old_visible_size.height(),
+            MediaVideoRotationToRotationMode(video_rotation),
+            source_pixel_format) != 0) {
       DLOG(ERROR) << "Error converting frame to I420";
       return;
     }
     if (!is_opaque) {
       // Alpha has the same alignment for both ABGR and ARGB.
-      libyuv::ARGBExtractAlpha(static_cast<uint8_t*>(pixmap.writable_addr()),
-                               static_cast<int>(pixmap.rowBytes()) /* stride */,
-                               frame->visible_data(media::VideoFrame::kAPlane),
-                               frame->stride(media::VideoFrame::kAPlane),
-                               pixmap.width(), pixmap.height());
+      libyuv::ARGBExtractAlpha(
+          static_cast<uint8_t*>(pixmap.writable_addr()),
+          static_cast<int>(pixmap.rowBytes()) /* stride */,
+          frame->GetWritableVisibleData(media::VideoFrame::kAPlane),
+          frame->stride(media::VideoFrame::kAPlane), pixmap.width(),
+          pixmap.height());
     }
   }
 
@@ -552,13 +583,12 @@ VideoTrackRecorderImpl::Encoder::ConvertToI420ForSoftwareEncoder(
       media::VideoPixelFormat::PIXEL_FORMAT_I420, frame->coded_size(),
       frame->visible_rect(), frame->natural_size(), frame->timestamp());
   auto ret = libyuv::NV12ToI420(
-      static_cast<const uint8_t*>(frame->data(0)), frame->stride(0),
-      static_cast<const uint8_t*>(frame->data(1)), frame->stride(1),
-      i420_frame->data(media::VideoFrame::kYPlane),
+      frame->data(0), frame->stride(0), frame->data(1), frame->stride(1),
+      i420_frame->writable_data(media::VideoFrame::kYPlane),
       i420_frame->stride(media::VideoFrame::kYPlane),
-      i420_frame->data(media::VideoFrame::kUPlane),
+      i420_frame->writable_data(media::VideoFrame::kUPlane),
       i420_frame->stride(media::VideoFrame::kUPlane),
-      i420_frame->data(media::VideoFrame::kVPlane),
+      i420_frame->writable_data(media::VideoFrame::kVPlane),
       i420_frame->stride(media::VideoFrame::kVPlane),
       frame->coded_size().width(), frame->coded_size().height());
   if (ret)
@@ -611,7 +641,7 @@ VideoTrackRecorderImpl::VideoTrackRecorderImpl(
     MediaStreamComponent* track,
     OnEncodedVideoCB on_encoded_video_cb,
     base::OnceClosure on_track_source_ended_cb,
-    int32_t bits_per_second,
+    uint32_t bits_per_second,
     scoped_refptr<base::SequencedTaskRunner> main_task_runner)
     : VideoTrackRecorder(std::move(on_track_source_ended_cb)),
       track_(track),
@@ -619,7 +649,7 @@ VideoTrackRecorderImpl::VideoTrackRecorderImpl(
       main_task_runner_(std::move(main_task_runner)) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(main_sequence_checker_);
   DCHECK(track_);
-  DCHECK(track_->Source()->GetType() == MediaStreamSource::kTypeVideo);
+  DCHECK(track_->GetSourceType() == MediaStreamSource::kTypeVideo);
 
   initialize_encoder_cb_ = WTF::BindRepeating(
       &VideoTrackRecorderImpl::InitializeEncoder, weak_factory_.GetWeakPtr(),
@@ -668,7 +698,7 @@ void VideoTrackRecorderImpl::OnVideoFrameForTesting(
 void VideoTrackRecorderImpl::InitializeEncoder(
     CodecProfile codec_profile,
     const OnEncodedVideoCB& on_encoded_video_cb,
-    int32_t bits_per_second,
+    uint32_t bits_per_second,
     bool allow_vea_encoder,
     scoped_refptr<media::VideoFrame> video_frame,
     std::vector<scoped_refptr<media::VideoFrame>> /*scaled_video_frames*/,
@@ -677,7 +707,7 @@ void VideoTrackRecorderImpl::InitializeEncoder(
   DCHECK_CALLED_ON_VALID_SEQUENCE(main_sequence_checker_);
 
   // Scaled video frames are currently ignored.
-  auto on_encoder_support_known_cb = WTF::Bind(
+  auto on_encoder_support_known_cb = WTF::BindOnce(
       &VideoTrackRecorderImpl::InitializeEncoderOnEncoderSupportKnown,
       weak_factory_.GetWeakPtr(), codec_profile, on_encoded_video_cb,
       bits_per_second, allow_vea_encoder, std::move(video_frame), capture_time);
@@ -697,7 +727,7 @@ void VideoTrackRecorderImpl::InitializeEncoder(
 void VideoTrackRecorderImpl::InitializeEncoderOnEncoderSupportKnown(
     CodecProfile codec_profile,
     const OnEncodedVideoCB& on_encoded_video_cb,
-    int32_t bits_per_second,
+    uint32_t bits_per_second,
     bool allow_vea_encoder,
     scoped_refptr<media::VideoFrame> frame,
     base::TimeTicks capture_time) {
@@ -719,7 +749,7 @@ void VideoTrackRecorderImpl::InitializeEncoderOnEncoderSupportKnown(
     UMA_HISTOGRAM_BOOLEAN("Media.MediaRecorder.VEAUsed", true);
     UmaHistogramForCodec(true, codec_profile.codec_id);
 
-    const auto vea_profile =
+    const auto [vea_profile, vbr_supported] =
         codec_profile.profile
             ? GetCodecEnumerator()->FindSupportedVideoCodecProfile(
                   codec_profile.codec_id, *codec_profile.profile)
@@ -728,12 +758,16 @@ void VideoTrackRecorderImpl::InitializeEncoderOnEncoderSupportKnown(
 
     bool use_import_mode =
         frame->storage_type() == media::VideoFrame::STORAGE_GPU_MEMORY_BUFFER;
+    // VBR encoding is preferred.
+    media::Bitrate::Mode bitrate_mode = vbr_supported
+                                            ? media::Bitrate::Mode::kVariable
+                                            : media::Bitrate::Mode::kConstant;
     encoder_ = VEAEncoder::Create(
         on_encoded_video_cb,
         media::BindToCurrentLoop(WTF::BindRepeating(
             &VideoTrackRecorderImpl::OnError, weak_factory_.GetWeakPtr())),
-        bits_per_second, vea_profile, codec_profile.level, input_size,
-        use_import_mode, main_task_runner_);
+        bitrate_mode, bits_per_second, vea_profile, codec_profile.level,
+        input_size, use_import_mode, main_task_runner_);
   } else {
     // TODO(b/227350897): remove once codec histogram is verified working
     UMA_HISTOGRAM_BOOLEAN("Media.MediaRecorder.VEAUsed", false);
@@ -780,10 +814,8 @@ void VideoTrackRecorderImpl::OnError() {
 
 void VideoTrackRecorderImpl::ConnectToTrack(
     const VideoCaptureDeliverFrameCB& callback) {
-  auto* video_track =
-      static_cast<MediaStreamVideoTrack*>(track_->GetPlatformTrack());
-  video_track->AddSink(this, callback, MediaStreamVideoSink::IsSecure::kNo,
-                       MediaStreamVideoSink::UsesAlpha::kDefault);
+  track_->AddSink(this, callback, MediaStreamVideoSink::IsSecure::kNo,
+                  MediaStreamVideoSink::UsesAlpha::kDefault);
 }
 
 void VideoTrackRecorderImpl::DisconnectFromTrack() {

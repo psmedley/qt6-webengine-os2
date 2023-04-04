@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,11 @@ void SessionMetricsRecorder::DidStartSession() {
   if (last_video_codec_ != VideoCodec::kUnknown)
     RecordVideoConfiguration();
   RecordTrackConfiguration();
+}
+
+void SessionMetricsRecorder::StartSessionFailed(
+    mojom::RemotingStartFailReason reason) {
+  UMA_HISTOGRAM_ENUMERATION("Media.Remoting.SessionStartFailedReason", reason);
 }
 
 void SessionMetricsRecorder::WillStopSession(StopTrigger trigger) {

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@
 namespace media {
 namespace mp4 {
 
-static const uint8_t kAnnexBStartCode[] = {0, 0, 0, 1};
-static const int kAnnexBStartCodeSize = 4;
+static constexpr uint8_t kAnnexBStartCode[] = {0, 0, 0, 1};
+static constexpr int kAnnexBStartCodeSize = 4;
 
 static bool ConvertAVCToAnnexBInPlaceForLengthSize4(std::vector<uint8_t>* buf) {
   const size_t kLengthSize = 4;

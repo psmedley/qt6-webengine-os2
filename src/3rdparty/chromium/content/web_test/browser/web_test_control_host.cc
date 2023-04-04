@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <queue>
@@ -27,6 +26,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -94,6 +94,7 @@
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/page_state/page_state.h"
 #include "third_party/blink/public/common/page_state/page_state_serialization.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/common/unique_name/unique_name_helper.h"
 #include "ui/base/ui_base_switches.h"
@@ -101,6 +102,7 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/select_file_dialog_factory.h"
 #include "ui/shell_dialogs/select_file_policy.h"
+#include "url/gurl.h"
 #include "url/url_constants.h"
 
 #if BUILDFLAG(IS_MAC)
@@ -126,7 +128,7 @@ std::string DumpFrameState(const blink::ExplodedFrameState& frame_state,
     result.append(indent, ' ');
   }
 
-  std::string url = web_test_string_util::NormalizeWebTestURL(
+  std::string url = web_test_string_util::NormalizeWebTestURLForTextOutput(
       base::UTF16ToUTF8(frame_state.url_string.value_or(std::u16string())));
   result.append(url);
   if (frame_state.target && !frame_state.target->empty()) {
@@ -139,24 +141,24 @@ std::string DumpFrameState(const blink::ExplodedFrameState& frame_state,
   result.append("\n");
 
   std::vector<blink::ExplodedFrameState> sorted_children = frame_state.children;
-  std::sort(
-      sorted_children.begin(), sorted_children.end(),
-      [](const blink::ExplodedFrameState& lhs,
-         const blink::ExplodedFrameState& rhs) {
-        // Child nodes should always have a target (aka unique name).
-        DCHECK(lhs.target);
-        DCHECK(rhs.target);
-        std::string lhs_name =
-            blink::UniqueNameHelper::ExtractStableNameForTesting(
-                base::UTF16ToUTF8(*lhs.target));
-        std::string rhs_name =
-            blink::UniqueNameHelper::ExtractStableNameForTesting(
-                base::UTF16ToUTF8(*rhs.target));
-        if (!base::EqualsCaseInsensitiveASCII(lhs_name, rhs_name))
-          return base::CompareCaseInsensitiveASCII(lhs_name, rhs_name) < 0;
+  std::sort(sorted_children.begin(), sorted_children.end(),
+            [](const blink::ExplodedFrameState& lhs,
+               const blink::ExplodedFrameState& rhs) {
+              // Child nodes should always have a target (aka unique name).
+              DCHECK(lhs.target);
+              DCHECK(rhs.target);
+              std::string lhs_name =
+                  blink::UniqueNameHelper::ExtractStableNameForTesting(
+                      base::UTF16ToUTF8(*lhs.target));
+              std::string rhs_name =
+                  blink::UniqueNameHelper::ExtractStableNameForTesting(
+                      base::UTF16ToUTF8(*rhs.target));
+              if (!base::EqualsCaseInsensitiveASCII(lhs_name, rhs_name))
+                return base::CompareCaseInsensitiveASCII(lhs_name, rhs_name) <
+                       0;
 
-        return lhs.item_sequence_number < rhs.item_sequence_number;
-      });
+              return lhs.item_sequence_number < rhs.item_sequence_number;
+            });
   for (const auto& child : sorted_children)
     result += DumpFrameState(child, indent + 4, false);
 
@@ -217,7 +219,7 @@ std::string DumpFailLoad(WebContents* web_contents,
   if (!result)
     return std::string();
 
-  std::string log = (web_contents->GetMainFrame() == render_frame_host)
+  std::string log = (web_contents->GetPrimaryMainFrame() == render_frame_host)
                         ? "main frame "
                         : "frame ";
   std::string name = GetFrameNameFromBrowserForWebTests(render_frame_host);
@@ -249,7 +251,6 @@ void ApplyWebTestDefaultPreferences(blink::web_pref::WebPreferences* prefs) {
   prefs->allow_universal_access_from_file_urls = false;
   prefs->dom_paste_enabled = true;
   prefs->javascript_can_access_clipboard = true;
-  prefs->xslt_enabled = true;
   prefs->tabs_to_links = false;
   prefs->hyperlink_auditing_enabled = false;
   prefs->allow_running_insecure_content = false;
@@ -459,10 +460,10 @@ class WebTestControlHost::WebTestWindowObserver : WebContentsObserver {
     // have a set of RenderFrames already, and we need to notify about them
     // here.
     web_contents->ForEachRenderFrameHost(
-        base::BindLambdaForTesting([&](RenderFrameHost* render_frame_host) {
+        [&](RenderFrameHost* render_frame_host) {
           if (render_frame_host->IsRenderFrameLive())
             RenderFrameCreated(render_frame_host);
-        }));
+        });
   }
 
  private:
@@ -532,6 +533,7 @@ bool WebTestControlHost::PrepareForWebTest(const TestInfo& test_info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   current_working_directory_ = test_info.current_working_directory;
   expected_pixel_hash_ = test_info.expected_pixel_hash;
+  wpt_print_mode_ = test_info.wpt_print_mode;
   bool is_devtools_js_test = false;
   test_url_ = WebTestDevToolsBindings::MapTestURLIfNeeded(test_info.url,
                                                           &is_devtools_js_test);
@@ -544,7 +546,7 @@ bool WebTestControlHost::PrepareForWebTest(const TestInfo& test_info) {
     printer_->set_capture_text_only(false);
   printer_->reset();
 
-  accumulated_web_test_runtime_flags_changes_.DictClear();
+  accumulated_web_test_runtime_flags_changes_.clear();
   web_test_runtime_flags_.Reset();
   main_window_render_view_hosts_.clear();
   main_window_render_process_hosts_.clear();
@@ -567,6 +569,9 @@ bool WebTestControlHost::PrepareForWebTest(const TestInfo& test_info) {
     WebContentsObserver::Observe(main_window_->web_contents());
 
     default_prefs_ = main_window_->web_contents()->GetOrCreateWebPreferences();
+    default_accept_languages_ = main_window_->web_contents()
+                                    ->GetMutableRendererPrefs()
+                                    ->accept_languages;
   } else {
     // Set a different size first to reset the possibly inconsistent state
     // caused by the previous test using unfortunate synchronous resize mode.
@@ -575,9 +580,13 @@ bool WebTestControlHost::PrepareForWebTest(const TestInfo& test_info) {
     // size. See http://crbug.com/1011191 for more details.
     // TODO(crbug.com/309760): This resize to half-size could go away if
     // testRunner.useUnfortunateSynchronousResizeMode() goes away.
+    main_window_->web_contents()->GetRenderWidgetHostView()->DisableAutoResize(
+        gfx::Size());
     main_window_->ResizeWebContentForTests(
         gfx::ScaleToCeiledSize(window_size, 0.5f, 1));
     main_window_->ResizeWebContentForTests(window_size);
+
+    SetAcceptLanguages(default_accept_languages_);
 
     main_window_->web_contents()->SetWebPreferences(default_prefs_);
 
@@ -596,7 +605,7 @@ bool WebTestControlHost::PrepareForWebTest(const TestInfo& test_info) {
   // we update the |test_phase_| here allowing us to now track the RenderFrames
   // in that window, and call HandleNewRenderFrameHost() explicitly.
   test_phase_ = DURING_TEST;
-  HandleNewRenderFrameHost(main_window_->web_contents()->GetMainFrame());
+  HandleNewRenderFrameHost(main_window_->web_contents()->GetPrimaryMainFrame());
 
   if (is_devtools_protocol_test) {
     devtools_protocol_test_bindings_ =
@@ -612,7 +621,7 @@ bool WebTestControlHost::PrepareForWebTest(const TestInfo& test_info) {
   main_window_->ActivateContents(main_window_->web_contents());
 
   RenderViewHost* main_render_view_host =
-      main_window_->web_contents()->GetMainFrame()->GetRenderViewHost();
+      main_window_->web_contents()->GetPrimaryMainFrame()->GetRenderViewHost();
   {
     TRACE_EVENT0("shell", "WebTestControlHost::PrepareForWebTest::Flush");
     // Round-trip through the InputHandler mojom interface to the compositor
@@ -794,8 +803,8 @@ void WebTestControlHost::InitiateCaptureDump(
   if (!renderer_dump_result_->layout) {
     DCHECK_EQ(0, waiting_for_layout_dumps_);
 
-    main_window_->web_contents()->GetMainFrame()->ForEachRenderFrameHost(
-        base::BindLambdaForTesting([&](RenderFrameHost* render_frame_host) {
+    main_window_->web_contents()->GetPrimaryMainFrame()->ForEachRenderFrameHost(
+        [&](RenderFrameHost* render_frame_host) {
           if (!render_frame_host->IsRenderFrameLive())
             return;
 
@@ -805,7 +814,7 @@ void WebTestControlHost::InitiateCaptureDump(
                   base::BindOnce(&WebTestControlHost::OnDumpFrameLayoutResponse,
                                  weak_factory_.GetWeakPtr(),
                                  render_frame_host->GetFrameTreeNodeId()));
-        }));
+        });
   }
 
   if (capture_pixels) {
@@ -832,7 +841,7 @@ void WebTestControlHost::InitiateCaptureDump(
 
 void WebTestControlHost::TestFinishedInSecondaryRenderer() {
   GetWebTestRenderThreadRemote(main_window_->web_contents()
-                                   ->GetMainFrame()
+                                   ->GetPrimaryMainFrame()
                                    ->GetRenderViewHost()
                                    ->GetProcess())
       ->TestFinishedFromSecondaryRenderer();
@@ -925,20 +934,18 @@ WebTestControlHost::Node* WebTestControlHost::BuildFrameTree(
     WebContents* web_contents) {
   // Returns a Node for a given RenderFrameHost, or nullptr if doesn't exist.
   auto node_for_frame = [this](RenderFrameHost* rfh) {
-    auto it = std::find_if(
-        composite_all_frames_node_storage_.begin(),
-        composite_all_frames_node_storage_.end(),
-        [rfh](auto& node) { return node->render_frame_host == rfh; });
+    auto it = base::ranges::find(composite_all_frames_node_storage_, rfh,
+                                 &Node::render_frame_host);
     return it == composite_all_frames_node_storage_.end() ? nullptr : it->get();
   };
 
   //  Collect all live frames in web_contents.
   std::vector<RenderFrameHost*> frames;
-  web_contents->GetMainFrame()->ForEachRenderFrameHost(
-      base::BindLambdaForTesting([&](RenderFrameHost* render_frame_host) {
+  web_contents->GetPrimaryMainFrame()->ForEachRenderFrameHost(
+      [&](RenderFrameHost* render_frame_host) {
         if (render_frame_host->IsRenderFrameLive())
           frames.push_back(render_frame_host);
-      }));
+      });
 
   // Add all of the frames to storage.
   for (auto* frame : frames) {
@@ -1196,6 +1203,7 @@ void WebTestControlHost::HandleNewRenderFrameHost(RenderFrameHost* frame) {
         base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kAllowExternalPages);
     params->expected_pixel_hash = expected_pixel_hash_;
+    params->wpt_print_mode = wpt_print_mode_;
     params->protocol_mode = protocol_mode_;
 
     GetWebTestRenderFrameRemote(frame)->SetTestConfiguration(std::move(params),
@@ -1230,9 +1238,9 @@ void WebTestControlHost::OnTestFinished() {
     main_window_->web_contents()->ExitFullscreen(/*will_cause_resize=*/false);
   devtools_bindings_.reset();
   devtools_protocol_test_bindings_.reset();
-  accumulated_web_test_runtime_flags_changes_.DictClear();
+  accumulated_web_test_runtime_flags_changes_.clear();
   web_test_runtime_flags_.Reset();
-  work_queue_states_.DictClear();
+  work_queue_states_.clear();
 
   ShellBrowserContext* browser_context =
       ShellContentBrowserClient::Get()->browser_context();
@@ -1268,14 +1276,14 @@ void WebTestControlHost::OnDumpFrameLayoutResponse(int frame_tree_node_id,
 
   // Stitch the frame-specific results in the right order.
   std::string stitched_layout_dump;
-  web_contents()->GetMainFrame()->ForEachRenderFrameHost(
-      base::BindLambdaForTesting([&](RenderFrameHost* render_frame_host) {
+  web_contents()->GetPrimaryMainFrame()->ForEachRenderFrameHost(
+      [&](RenderFrameHost* render_frame_host) {
         auto it = frame_to_layout_dump_map_.find(
             render_frame_host->GetFrameTreeNodeId());
         if (it != frame_to_layout_dump_map_.end()) {
           stitched_layout_dump.append(it->second);
         }
-      }));
+      });
 
   layout_dump_.emplace(std::move(stitched_layout_dump));
   ReportResults();
@@ -1348,10 +1356,6 @@ void WebTestControlHost::OnImageDump(const std::string& actual_pixel_hash,
     std::vector<unsigned char> png;
 
     bool discard_transparency = true;
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kForceOverlayFullscreenVideo)) {
-      discard_transparency = false;
-    }
     if (web_test_runtime_flags().dump_drag_image())
       discard_transparency = false;
 
@@ -1428,45 +1432,45 @@ void WebTestControlHost::SetPermission(const std::string& name,
                                        blink::mojom::PermissionStatus status,
                                        const GURL& origin,
                                        const GURL& embedding_origin) {
-  content::PermissionType type;
+  blink::PermissionType type;
   if (name == "midi") {
-    type = PermissionType::MIDI;
+    type = blink::PermissionType::MIDI;
   } else if (name == "midi-sysex") {
-    type = PermissionType::MIDI_SYSEX;
+    type = blink::PermissionType::MIDI_SYSEX;
   } else if (name == "push-messaging" || name == "notifications") {
-    type = PermissionType::NOTIFICATIONS;
+    type = blink::PermissionType::NOTIFICATIONS;
   } else if (name == "geolocation") {
-    type = PermissionType::GEOLOCATION;
+    type = blink::PermissionType::GEOLOCATION;
   } else if (name == "protected-media-identifier") {
-    type = PermissionType::PROTECTED_MEDIA_IDENTIFIER;
+    type = blink::PermissionType::PROTECTED_MEDIA_IDENTIFIER;
   } else if (name == "background-sync") {
-    type = PermissionType::BACKGROUND_SYNC;
+    type = blink::PermissionType::BACKGROUND_SYNC;
   } else if (name == "accessibility-events") {
-    type = PermissionType::ACCESSIBILITY_EVENTS;
+    type = blink::PermissionType::ACCESSIBILITY_EVENTS;
   } else if (name == "clipboard-read-write") {
-    type = PermissionType::CLIPBOARD_READ_WRITE;
+    type = blink::PermissionType::CLIPBOARD_READ_WRITE;
   } else if (name == "clipboard-sanitized-write") {
-    type = PermissionType::CLIPBOARD_SANITIZED_WRITE;
+    type = blink::PermissionType::CLIPBOARD_SANITIZED_WRITE;
   } else if (name == "payment-handler") {
-    type = PermissionType::PAYMENT_HANDLER;
+    type = blink::PermissionType::PAYMENT_HANDLER;
   } else if (name == "accelerometer" || name == "gyroscope" ||
              name == "magnetometer" || name == "ambient-light-sensor") {
-    type = PermissionType::SENSORS;
+    type = blink::PermissionType::SENSORS;
   } else if (name == "background-fetch") {
-    type = PermissionType::BACKGROUND_FETCH;
+    type = blink::PermissionType::BACKGROUND_FETCH;
   } else if (name == "periodic-background-sync") {
-    type = PermissionType::PERIODIC_BACKGROUND_SYNC;
+    type = blink::PermissionType::PERIODIC_BACKGROUND_SYNC;
   } else if (name == "wake-lock-screen") {
-    type = PermissionType::WAKE_LOCK_SCREEN;
+    type = blink::PermissionType::WAKE_LOCK_SCREEN;
   } else if (name == "wake-lock-system") {
-    type = PermissionType::WAKE_LOCK_SYSTEM;
+    type = blink::PermissionType::WAKE_LOCK_SYSTEM;
   } else if (name == "nfc") {
-    type = PermissionType::NFC;
+    type = blink::PermissionType::NFC;
   } else if (name == "storage-access") {
-    type = PermissionType::STORAGE_ACCESS_GRANT;
+    type = blink::PermissionType::STORAGE_ACCESS_GRANT;
   } else {
     NOTREACHED();
-    type = PermissionType::NOTIFICATIONS;
+    type = blink::PermissionType::NOTIFICATIONS;
   }
 
   WebTestContentBrowserClient::Get()
@@ -1508,7 +1512,8 @@ class FakeSelectFileDialog : public ui::SelectFileDialog {
                       int file_type_index,
                       const base::FilePath::StringType& default_extension,
                       gfx::NativeWindow owning_window,
-                      void* params) override {
+                      void* params,
+                      const GURL* caller) override {
     listener_->FileSelected(result_, 0, params);
   }
 
@@ -1661,12 +1666,12 @@ void WebTestControlHost::SimulateWebContentIndexDelete(const std::string& id) {
 }
 
 void WebTestControlHost::WebTestRuntimeFlagsChanged(
-    base::Value changed_web_test_runtime_flags) {
+    base::Value::Dict changed_web_test_runtime_flags) {
   const int render_process_id = receiver_bindings_.current_context();
 
   // Stash the accumulated changes for future, not-yet-created renderers.
-  accumulated_web_test_runtime_flags_changes_.MergeDictionary(
-      &changed_web_test_runtime_flags);
+  accumulated_web_test_runtime_flags_changes_.Merge(
+      changed_web_test_runtime_flags.Clone());
   web_test_runtime_flags_.tracked_dictionary().ApplyUntrackedChanges(
       accumulated_web_test_runtime_flags_changes_);
 
@@ -1734,11 +1739,11 @@ void WebTestControlHost::WorkItemAdded(mojom::WorkItemPtr work_item) {
 void WebTestControlHost::RequestWorkItem() {
   DCHECK(main_window_);
   RenderProcessHost* main_frame_process = main_window_->web_contents()
-                                              ->GetMainFrame()
+                                              ->GetPrimaryMainFrame()
                                               ->GetRenderViewHost()
                                               ->GetProcess();
   if (work_queue_.empty()) {
-    work_queue_states_.SetBoolPath(kDictKeyWorkQueueHasItems, false);
+    work_queue_states_.SetByDottedPath(kDictKeyWorkQueueHasItems, false);
     GetWebTestRenderThreadRemote(main_frame_process)
         ->ReplicateWorkQueueStates(work_queue_states_.Clone());
   } else {
@@ -1749,8 +1754,31 @@ void WebTestControlHost::RequestWorkItem() {
 }
 
 void WebTestControlHost::WorkQueueStatesChanged(
-    base::Value changed_work_queue_states) {
-  work_queue_states_.MergeDictionary(&changed_work_queue_states);
+    base::Value::Dict changed_work_queue_states) {
+  work_queue_states_.Merge(std::move(changed_work_queue_states));
+}
+
+void WebTestControlHost::SetAcceptLanguages(
+    const std::string& accept_languages) {
+  if (web_contents()->GetMutableRendererPrefs()->accept_languages ==
+      accept_languages) {
+    return;
+  }
+
+  web_contents()->GetMutableRendererPrefs()->accept_languages =
+      accept_languages;
+  web_contents()->SyncRendererPrefs();
+}
+
+void WebTestControlHost::EnableAutoResize(const gfx::Size& min_size,
+                                          const gfx::Size& max_size) {
+  web_contents()->GetRenderWidgetHostView()->EnableAutoResize(min_size,
+                                                              max_size);
+}
+
+void WebTestControlHost::DisableAutoResize(const gfx::Size& new_size) {
+  web_contents()->GetRenderWidgetHostView()->DisableAutoResize(new_size);
+  main_window_->ResizeWebContentForTests(new_size);
 }
 
 void WebTestControlHost::GoToOffset(int offset) {
@@ -1798,11 +1826,12 @@ void WebTestControlHost::PrepareRendererForNextWebTest() {
   // that the test page does not remain in the back/forward cache after the
   // test.
   BackForwardCache::DisableForRenderFrameHost(
-      web_contents->GetMainFrame(),
+      web_contents->GetPrimaryMainFrame(),
       BackForwardCache::DisabledReason(
-          {BackForwardCache::DisabledSource::kTesting, 0,
-           "disabled for web_test not to cache the test page after the test "
-           "ends."}));
+          BackForwardCache::DisabledSource::kTesting, 0,
+          "disabled for web_test not to cache the test page after the test "
+          "ends.",
+          /*context=*/"", "disabled"));
 
   // Flush all the back/forward cache to avoid side effects in the next test.
   for (auto* shell : Shell::windows()) {
@@ -1846,7 +1875,7 @@ void WebTestControlHost::DidFinishNavigation(NavigationHandle* navigation) {
   content::WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(main_window_->web_contents());
   RenderProcessHost* main_rfh_process =
-      web_contents->GetMainFrame()->GetProcess();
+      web_contents->GetPrimaryMainFrame()->GetProcess();
   GetWebTestRenderThreadRemote(main_rfh_process)->ResetRendererAfterWebTest();
 
   PrepareRendererForNextWebTestDone();
@@ -1860,8 +1889,9 @@ void WebTestControlHost::PrepareRendererForNextWebTestDone() {
     if (!check_for_leaked_windows_)
       CloseTestOpenedWindows();
 
-    RenderViewHost* rvh =
-        main_window_->web_contents()->GetMainFrame()->GetRenderViewHost();
+    RenderViewHost* rvh = main_window_->web_contents()
+                              ->GetPrimaryMainFrame()
+                              ->GetRenderViewHost();
     RenderProcessHost* rph = rvh->GetProcess();
     CHECK(rph->GetProcess().IsValid());
     leak_detector_->TryLeakDetection(

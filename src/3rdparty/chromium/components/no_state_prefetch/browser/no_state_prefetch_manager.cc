@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <functional>
 #include <string>
 #include <utility>
@@ -25,6 +24,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
 #include "base/task/single_thread_task_runner.h"
@@ -374,8 +374,8 @@ std::unique_ptr<base::DictionaryValue> NoStatePrefetchManager::CopyAsValue()
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   auto dict_value = std::make_unique<base::DictionaryValue>();
-  dict_value->SetKey("history", base::Value::FromUniquePtrValue(
-                                    prerender_history_->CopyEntriesAsValue()));
+  dict_value->GetDict().Set("history",
+                            prerender_history_->CopyEntriesAsValue());
   dict_value->SetKey(
       "active", base::Value::FromUniquePtrValue(GetActivePrerendersAsValue()));
   dict_value->SetBoolKey("enabled",
@@ -869,12 +869,10 @@ void NoStatePrefetchManager::SetPrefetchFinalStatusForUrl(
 
 bool NoStatePrefetchManager::HasRecentlyPrefetchedUrlForTesting(
     const GURL& url) {
-  return std::any_of(prefetches_.cbegin(), prefetches_.cend(),
-                     [url](const NavigationRecord& r) {
-                       return r.url == url &&
-                              r.final_status ==
-                                  FINAL_STATUS_NOSTATE_PREFETCH_FINISHED;
-                     });
+  return base::ranges::any_of(prefetches_, [url](const NavigationRecord& r) {
+    return r.url == url &&
+           r.final_status == FINAL_STATUS_NOSTATE_PREFETCH_FINISHED;
+  });
 }
 
 void NoStatePrefetchManager::OnPrefetchUsed(const GURL& url) {
@@ -931,7 +929,8 @@ NoStatePrefetchManager::GetActivePrerendersAsValue() const {
   for (const auto& prefetch : active_prefetches_) {
     auto prefetch_value = prefetch->contents()->GetAsValue();
     if (prefetch_value)
-      list_value->Append(std::move(prefetch_value));
+      list_value->GetList().Append(
+          base::Value::FromUniquePtrValue(std::move(prefetch_value)));
   }
   return list_value;
 }
@@ -956,7 +955,6 @@ void NoStatePrefetchManager::SkipNoStatePrefetchContentsAndMaybePreconnect(
     return;
 
   if (final_status == FINAL_STATUS_LOW_END_DEVICE ||
-      final_status == FINAL_STATUS_CELLULAR_NETWORK ||
       final_status == FINAL_STATUS_DUPLICATE ||
       final_status == FINAL_STATUS_TOO_MANY_PROCESSES) {
     MaybePreconnect(origin, url);

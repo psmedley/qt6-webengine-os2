@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,12 @@ class HttpAuthFilter;
 // regarding URL actions (e.g., sending the default credentials to a server).
 class NET_EXPORT_PRIVATE URLSecurityManager {
  public:
-  URLSecurityManager() {}
+  URLSecurityManager() = default;
 
   URLSecurityManager(const URLSecurityManager&) = delete;
   URLSecurityManager& operator=(const URLSecurityManager&) = delete;
 
-  virtual ~URLSecurityManager() {}
+  virtual ~URLSecurityManager() = default;
 
   // Creates a platform-dependent instance of URLSecurityManager.
   //

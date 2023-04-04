@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,7 @@ class ProcessesEventRouter : public task_manager::TaskManagerObserver {
 
   void DispatchEvent(events::HistogramValue histogram_value,
                      const std::string& event_name,
-                     std::vector<base::Value> event_args) const;
+                     base::Value::List event_args) const;
 
   // Determines whether there is a registered listener for the specified event.
   // It helps to avoid collecting data if no one is interested in it.

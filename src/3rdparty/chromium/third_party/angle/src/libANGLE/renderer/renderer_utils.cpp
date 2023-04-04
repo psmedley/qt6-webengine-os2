@@ -24,6 +24,82 @@
 #include "platform/Feature.h"
 
 #include <string.h>
+#include <cctype>
+
+namespace angle
+{
+namespace
+{
+// For the sake of feature name matching, underscore is ignored, and the names are matched
+// case-insensitive.  This allows feature names to be overriden both in snake_case (previously used
+// by ANGLE) and camelCase.  The second string (user-provided name) can end in `*` for wildcard
+// matching.
+bool FeatureNameMatch(const std::string &a, const std::string &b)
+{
+    size_t ai = 0;
+    size_t bi = 0;
+
+    while (ai < a.size() && bi < b.size())
+    {
+        if (a[ai] == '_')
+        {
+            ++ai;
+        }
+        if (b[bi] == '_')
+        {
+            ++bi;
+        }
+        if (b[bi] == '*' && bi + 1 == b.size())
+        {
+            // If selected feature name ends in wildcard, match it.
+            return true;
+        }
+        if (std::tolower(a[ai++]) != std::tolower(b[bi++]))
+        {
+            return false;
+        }
+    }
+
+    return ai == a.size() && bi == b.size();
+}
+}  // anonymous namespace
+
+// FeatureSetBase implementation
+void FeatureSetBase::overrideFeatures(const std::vector<std::string> &featureNames, bool enabled)
+{
+    for (const std::string &name : featureNames)
+    {
+        const bool hasWildcard = name.back() == '*';
+        for (auto iter : members)
+        {
+            const std::string &featureName = iter.first;
+            FeatureInfo *feature           = iter.second;
+
+            if (!FeatureNameMatch(featureName, name))
+            {
+                continue;
+            }
+
+            feature->enabled = enabled;
+
+            // If name has a wildcard, try to match it with all features.  Otherwise, bail on first
+            // match, as names are unique.
+            if (!hasWildcard)
+            {
+                break;
+            }
+        }
+    }
+}
+
+void FeatureSetBase::populateFeatureList(FeatureList *features) const
+{
+    for (FeatureMap::const_iterator it = members.begin(); it != members.end(); it++)
+    {
+        features->push_back(it->second);
+    }
+}
+}  // namespace angle
 
 namespace rx
 {
@@ -225,8 +301,21 @@ void SetFloatUniformMatrixFast(unsigned int arrayElementOffset,
 
     memcpy(targetData, valueData, matrixSize * count);
 }
-
 }  // anonymous namespace
+
+bool IsRotatedAspectRatio(SurfaceRotation rotation)
+{
+    switch (rotation)
+    {
+        case SurfaceRotation::Rotated90Degrees:
+        case SurfaceRotation::Rotated270Degrees:
+        case SurfaceRotation::FlippedRotated90Degrees:
+        case SurfaceRotation::FlippedRotated270Degrees:
+            return true;
+        default:
+            return false;
+    }
+}
 
 void RotateRectangle(const SurfaceRotation rotation,
                      const bool flipY,
@@ -987,9 +1076,22 @@ void LogFeatureStatus(const angle::FeatureSetBase &features,
 {
     for (const std::string &name : featureNames)
     {
-        if (features.getFeatures().find(name) != features.getFeatures().end())
+        const bool hasWildcard = name.back() == '*';
+        for (auto iter : features.getFeatures())
         {
-            INFO() << "Feature: " << name << (enabled ? " enabled" : " disabled");
+            const std::string &featureName = iter.first;
+
+            if (!angle::FeatureNameMatch(featureName, name))
+            {
+                continue;
+            }
+
+            INFO() << "Feature: " << featureName << (enabled ? " enabled" : " disabled");
+
+            if (!hasWildcard)
+            {
+                break;
+            }
         }
     }
 }
@@ -1012,6 +1114,7 @@ void ApplyFeatureOverrides(angle::FeatureSetBase *features, const egl::DisplaySt
     std::vector<std::string> overridesDisabled =
         angle::GetCachedStringsFromEnvironmentVarOrAndroidProperty(
             kAngleFeatureOverridesDisabledEnvName, kAngleFeatureOverridesDisabledPropertyName, ":");
+
     features->overrideFeatures(overridesEnabled, true);
     LogFeatureStatus(*features, overridesEnabled, true);
 

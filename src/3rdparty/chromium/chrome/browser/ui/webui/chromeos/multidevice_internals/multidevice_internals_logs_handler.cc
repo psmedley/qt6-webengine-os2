@@ -1,13 +1,13 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/multidevice_internals/multidevice_internals_logs_handler.h"
 
-#include "ash/components/multidevice/logging/log_buffer.h"
 #include "base/bind.h"
 #include "base/i18n/time_formatting.h"
 #include "base/values.h"
+#include "chromeos/ash/components/multidevice/logging/log_buffer.h"
 
 namespace chromeos {
 
@@ -24,15 +24,15 @@ const char kLogMessageSeverityKey[] = "severity";
 
 // Converts |log_message| to a raw dictionary value used as a JSON argument to
 // JavaScript functions.
-base::Value LogMessageToDictionary(const LogBuffer::LogMessage& log_message) {
-  base::Value dictionary(base::Value::Type::DICTIONARY);
-  dictionary.SetStringKey(kLogMessageTextKey, log_message.text);
-  dictionary.SetStringKey(
-      kLogMessageTimeKey,
-      base::TimeFormatTimeOfDayWithMilliseconds(log_message.time));
-  dictionary.SetStringKey(kLogMessageFileKey, log_message.file);
-  dictionary.SetIntKey(kLogMessageLineKey, log_message.line);
-  dictionary.SetIntKey(kLogMessageSeverityKey, log_message.severity);
+base::Value::Dict LogMessageToDictionary(
+    const LogBuffer::LogMessage& log_message) {
+  base::Value::Dict dictionary;
+  dictionary.Set(kLogMessageTextKey, log_message.text);
+  dictionary.Set(kLogMessageTimeKey,
+                 base::TimeFormatTimeOfDayWithMilliseconds(log_message.time));
+  dictionary.Set(kLogMessageFileKey, log_message.file);
+  dictionary.Set(kLogMessageLineKey, log_message.line);
+  dictionary.Set(kLogMessageSeverityKey, log_message.severity);
   return dictionary;
 }
 
@@ -43,7 +43,7 @@ MultideviceLogsHandler::MultideviceLogsHandler() {}
 MultideviceLogsHandler::~MultideviceLogsHandler() = default;
 
 void MultideviceLogsHandler::RegisterMessages() {
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "getMultideviceLogMessages",
       base::BindRepeating(&MultideviceLogsHandler::HandleGetLogMessages,
                           base::Unretained(this)));
@@ -57,10 +57,11 @@ void MultideviceLogsHandler::OnJavascriptDisallowed() {
   observation_.Reset();
 }
 
-void MultideviceLogsHandler::HandleGetLogMessages(const base::ListValue* args) {
+void MultideviceLogsHandler::HandleGetLogMessages(
+    const base::Value::List& args) {
   AllowJavascript();
-  const base::Value& callback_id = args->GetListDeprecated()[0];
-  base::Value list(base::Value::Type::LIST);
+  const base::Value& callback_id = args[0];
+  base::Value::List list;
   for (const auto& log : *LogBuffer::GetInstance()->logs()) {
     list.Append(LogMessageToDictionary(log));
   }

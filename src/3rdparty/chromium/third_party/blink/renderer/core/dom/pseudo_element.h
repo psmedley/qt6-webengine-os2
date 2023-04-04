@@ -66,7 +66,7 @@ class CORE_EXPORT PseudoElement : public Element {
   scoped_refptr<ComputedStyle> LayoutStyleForDisplayContents(
       const ComputedStyle&);
 
-  static const AtomicString& PseudoElementNameForEvents(PseudoId);
+  static AtomicString PseudoElementNameForEvents(Element*);
   static bool IsWebExposed(PseudoId, const Node*);
 
   // Pseudo element are not allowed to be the inner node for hit testing. Find
@@ -99,7 +99,7 @@ class CORE_EXPORT PseudoElement : public Element {
   const AtomicString document_transition_tag_;
 };
 
-const QualifiedName& PseudoElementTagName(PseudoId);
+CORE_EXPORT const QualifiedName& PseudoElementTagName(PseudoId);
 
 bool PseudoElementLayoutObjectIsNeeded(const ComputedStyle* pseudo_style,
                                        const Element* originating_element);

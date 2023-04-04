@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,6 +37,7 @@ extensions_api_schema_files_ = [
   "mime_handler_view_guest_internal.json",
   "mojo_private.idl",
   "networking_private.idl",
+  "offscreen.idl",
   "power.idl",
   "printer_provider.idl",
   "printer_provider_internal.idl",
@@ -77,12 +78,11 @@ if (is_chromeos_ash) {
     "diagnostics.idl",
     "lock_screen_data.idl",
     "media_perception_private.idl",
-    "vpn_provider.idl",
     "webcam_private.idl",
   ]
 }
 
-if (use_qt) {
+if (is_qtwebengine) {
   extensions_api_schema_files_ -= [
     "bluetooth.idl",
     "bluetooth_low_energy.idl",

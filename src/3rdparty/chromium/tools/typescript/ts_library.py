@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import io
 
 _CWD = os.getcwd()
 _HERE_DIR = os.path.dirname(__file__)
@@ -18,13 +19,35 @@ import node
 import node_modules
 
 
-def _write_tsconfig_json(gen_dir, tsconfig):
+def _write_tsconfig_json(gen_dir, tsconfig, tsconfig_file):
   if not os.path.exists(gen_dir):
     os.makedirs(gen_dir)
 
-  with open(os.path.join(gen_dir, 'tsconfig.json'), 'w') as generated_tsconfig:
+  with open(os.path.join(gen_dir, tsconfig_file), 'w') as generated_tsconfig:
     json.dump(tsconfig, generated_tsconfig, indent=2)
   return
+
+
+def _validate_tsconfig_json(tsconfig, tsconfig_file):
+  if 'compilerOptions' in tsconfig and \
+      'composite' in tsconfig['compilerOptions']:
+    return False, f'Invalid |composite| flag detected in {tsconfig_file}.' + \
+        ' Use the dedicated |composite=true| attribute in ts_library() ' + \
+        'instead.'
+  return True, None
+
+
+def _is_sourcemap_enabled(tsconfig):
+  if 'compilerOptions' in tsconfig:
+    if 'sourceMap' in tsconfig['compilerOptions'] and \
+        tsconfig['compilerOptions']['sourceMap']:
+      return True
+
+    if 'inlineSourceMap' in tsconfig['compilerOptions'] and \
+        tsconfig['compilerOptions']['inlineSourceMap']:
+      return True
+
+  return False
 
 
 def main(argv):
@@ -39,6 +62,7 @@ def main(argv):
   parser.add_argument('--manifest_excludes', nargs='*')
   parser.add_argument('--definitions', nargs='*')
   parser.add_argument('--composite', action='store_true')
+  parser.add_argument('--output_suffix', required=True)
   args = parser.parse_args(argv)
 
   root_dir = os.path.relpath(args.root_dir, args.gen_dir)
@@ -51,12 +75,30 @@ def main(argv):
       if args.tsconfig_base is not None \
       else os.path.relpath(TSCONFIG_BASE_PATH, args.gen_dir)
 
+  tsconfig_base_file = os.path.normpath(
+      os.path.join(args.gen_dir, tsconfig['extends']))
+
   tsconfig['compilerOptions'] = collections.OrderedDict()
+
+  with io.open(tsconfig_base_file, encoding='utf-8', mode='r') as f:
+    tsconfig_base = json.loads(f.read())
+
+    is_tsconfig_valid, error = _validate_tsconfig_json(tsconfig_base,
+                                                       tsconfig_base_file)
+    if not is_tsconfig_valid:
+      raise AssertionError(error)
+
+    # If "sourceMap" or "inlineSourceMap" option have been provided in the
+    # tsconfig file, include the "sourceRoot" key.
+    if _is_sourcemap_enabled(tsconfig_base):
+      tsconfig['compilerOptions']['sourceRoot'] = os.path.realpath(
+          os.path.join(_CWD, args.gen_dir, root_dir))
+
   tsconfig['compilerOptions']['rootDir'] = root_dir
   tsconfig['compilerOptions']['outDir'] = out_dir
 
   if args.composite:
-    tsbuildinfo_name = 'tsconfig.tsbuildinfo'
+    tsbuildinfo_name = f'tsconfig_{args.output_suffix}.tsbuildinfo'
     tsconfig['compilerOptions']['composite'] = True
     tsconfig['compilerOptions']['declaration'] = True
     tsconfig['compilerOptions']['tsBuildInfoFile'] = tsbuildinfo_name
@@ -80,7 +122,8 @@ def main(argv):
   if args.deps is not None:
     tsconfig['references'] = [{'path': dep} for dep in args.deps]
 
-  _write_tsconfig_json(args.gen_dir, tsconfig)
+  tsconfig_file = f'tsconfig_{args.output_suffix}.json'
+  _write_tsconfig_json(args.gen_dir, tsconfig, tsconfig_file)
 
   # Detect and delete obsolete files that can cause build problems.
   if args.in_files is not None:
@@ -116,7 +159,7 @@ def main(argv):
   try:
     node.RunNode([
         node_modules.PathToTypescript(), '--project',
-        os.path.join(args.gen_dir, 'tsconfig.json')
+        os.path.join(args.gen_dir, tsconfig_file)
     ])
   finally:
     if args.composite:
@@ -136,8 +179,9 @@ def main(argv):
         os.remove(tsbuildinfo_path)
 
   if args.in_files is not None:
-    with open(os.path.join(args.gen_dir, 'tsconfig.manifest'), 'w') \
-        as manifest_file:
+
+    manifest_path = os.path.join(args.gen_dir, f'{args.output_suffix}.manifest')
+    with open(manifest_path, 'w') as manifest_file:
       manifest_data = {}
       manifest_data['base_dir'] = args.out_dir
       manifest_files = args.in_files

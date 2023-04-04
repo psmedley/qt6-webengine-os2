@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "services/device/binder_overrides.h"
-#include "services/device/bluetooth/bluetooth_system_factory.h"
+#include "services/device/compute_pressure/pressure_manager_impl.h"
 #include "services/device/device_posture/device_posture_platform_provider.h"
 #include "services/device/device_posture/device_posture_provider_impl.h"
 #include "services/device/fingerprint/fingerprint.h"
@@ -180,6 +180,12 @@ void DeviceService::OverrideGeolocationContextBinderForTesting(
   internal::GetGeolocationContextBinderOverride() = std::move(binder);
 }
 
+// static
+void DeviceService::OverridePressureManagerBinderForTesting(
+    PressureManagerBinder binder) {
+  internal::GetPressureManagerBinderOverride() = std::move(binder);
+}
+
 void DeviceService::BindBatteryMonitor(
     mojo::PendingReceiver<mojom::BatteryMonitor> receiver) {
 #if BUILDFLAG(IS_ANDROID)
@@ -187,6 +193,19 @@ void DeviceService::BindBatteryMonitor(
 #else
   BatteryMonitorImpl::Create(std::move(receiver));
 #endif
+}
+
+void DeviceService::BindPressureManager(
+    mojo::PendingReceiver<mojom::PressureManager> receiver) {
+  const auto& binder_override = internal::GetPressureManagerBinderOverride();
+  if (binder_override) {
+    binder_override.Run(std::move(receiver));
+    return;
+  }
+
+  if (!pressure_manager_)
+    pressure_manager_ = PressureManagerImpl::Create();
+  pressure_manager_->Bind(std::move(receiver));
 }
 
 #if BUILDFLAG(IS_ANDROID)
@@ -229,11 +248,6 @@ void DeviceService::BindHidManager(
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-void DeviceService::BindBluetoothSystemFactory(
-    mojo::PendingReceiver<mojom::BluetoothSystemFactory> receiver) {
-  BluetoothSystemFactory::CreateFactory(std::move(receiver));
-}
-
 void DeviceService::BindMtpManager(
     mojo::PendingReceiver<mojom::MtpManager> receiver) {
   if (!mtp_device_manager_)

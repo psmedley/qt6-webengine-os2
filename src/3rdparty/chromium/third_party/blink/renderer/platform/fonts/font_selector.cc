@@ -1,11 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/fonts/font_selector.h"
 
 #include "build/build_config.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/platform/fonts/alternate_font_family.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
@@ -33,10 +33,13 @@ AtomicString FontSelector::FamilyNameFromSettings(
     return g_empty_atom;
 
   if (IsWebkitBodyFamily(font_description)) {
-    // TODO(crbug.com/1065468): Remove this counter when it's no longer
-    // necessary.
-    UseCounter::Count(use_counter,
-                      WebFeature::kFontSelectorCSSFontFamilyWebKitPrefixBody);
+    // TODO(yosin): We should make |use_counter| available for font threads.
+    if (use_counter) {
+      // TODO(crbug.com/1065468): Remove this counter when it's no longer
+      // necessary.
+      UseCounter::Count(use_counter,
+                        WebFeature::kFontSelectorCSSFontFamilyWebKitPrefixBody);
+    }
   } else if (generic_family_name == font_family_names::kWebkitStandard &&
              !generic_family.FamilyIsGeneric()) {
     // -webkit-standard is set internally only with a kGenericFamily type in
@@ -45,8 +48,11 @@ AtomicString FontSelector::FamilyNameFromSettings(
     return g_empty_atom;
   }
 #if BUILDFLAG(IS_ANDROID)
-  // TODO(crbug.com/1228189): Android does not have pre-installed math font.
-  // https://github.com/googlefonts/noto-fonts/issues/330
+  // Noto Sans Math provides mathematical glyphs on Android but it does not
+  // contain any OpenType MATH table required for math layout.
+  // See https://github.com/googlefonts/noto-fonts/issues/330
+  // TODO(crbug.com/1228189): Should we still try and select a math font based
+  // on the presence of glyphs for math code points or a MATH table?
   if (font_description.GenericFamily() == FontDescription::kStandardFamily ||
       font_description.GenericFamily() == FontDescription::kWebkitBodyFamily ||
       generic_family_name == font_family_names::kWebkitStandard) {
@@ -80,11 +86,9 @@ AtomicString FontSelector::FamilyNameFromSettings(
     return settings.Fixed(script);
   if (generic_family_name == font_family_names::kWebkitStandard)
     return settings.Standard(script);
-  // TODO(crbug.com/1228189): Add preference with per-OS default values instead
-  // of hardcoding this string.
   if (RuntimeEnabledFeatures::CSSFontFamilyMathEnabled() &&
       generic_family_name == font_family_names::kMath)
-    return "Latin Modern Math";
+    return settings.Math(script);
 #endif  // BUILDFLAG(IS_ANDROID)
   return g_empty_atom;
 }

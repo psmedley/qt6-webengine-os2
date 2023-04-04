@@ -32,7 +32,7 @@ import * as Platform from '../../core/platform/platform.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import type {ConsoleViewMessage} from './ConsoleViewMessage.js';
+import {type ConsoleViewMessage} from './ConsoleViewMessage.js';
 
 interface SelectionModel {
   item: number;
@@ -240,7 +240,8 @@ export class ConsoleViewport {
   private updateFocusedItem(focusLastChild?: boolean): void {
     const selectedElement = this.renderedElementAt(this.virtualSelectedIndex);
     const changed = this.lastSelectedElement !== selectedElement;
-    const containerHasFocus = this.contentElementInternal === this.element.ownerDocument.deepActiveElement();
+    const containerHasFocus =
+        this.contentElementInternal === Platform.DOMUtilities.deepActiveElement(this.element.ownerDocument);
     if (this.lastSelectedElement && changed) {
       this.lastSelectedElement.classList.remove('console-selected');
     }

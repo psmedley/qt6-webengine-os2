@@ -1,12 +1,12 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/app_restore/desk_template_read_handler.h"
 
 #include "ash/constants/app_types.h"
-#include "ash/constants/ash_features.h"
 #include "base/bind.h"
+#include "base/containers/adapters.h"
 #include "base/files/file_path.h"
 #include "base/no_destructor.h"
 #include "components/app_restore/app_launch_info.h"
@@ -62,9 +62,6 @@ void DeskTemplateReadHandler::SetRestoreData(
   DCHECK_EQ(arc_read_handler_.count(launch_id), 0u);
 
   restore_data_[launch_id] = std::move(restore_data);
-
-  if (!ash::features::AreDesksTemplatesEnabled())
-    return;
 
   // Set up mapping from restore window IDs to launch ID. Create an ARC read
   // handler and add restore data to it if we have at least one ARC app.
@@ -169,6 +166,10 @@ int32_t DeskTemplateReadHandler::GetArcRestoreWindowIdForSessionId(
   return handler ? handler->GetArcRestoreWindowIdForSessionId(session_id) : 0;
 }
 
+bool DeskTemplateReadHandler::IsKnownArcSessionId(int32_t session_id) const {
+  return session_id_to_launch_id_.contains(session_id);
+}
+
 void DeskTemplateReadHandler::OnWindowInitialized(aura::Window* window) {
   // If there isn't restore data for ARC apps, we don't need to handle ARC app
   // windows restoration.
@@ -224,6 +225,9 @@ void DeskTemplateReadHandler::OnTaskCreated(const std::string& app_id,
                                             int32_t task_id,
                                             int32_t session_id) {
   int32_t launch_id = GetLaunchIdForArcSessionId(session_id);
+  // If the task's `session_id` isn't one we are tracking, then this task has
+  // not been created from a desk template launch. When this is the case, we
+  // don't track the task id.
   if (launch_id == 0)
     return;
 
@@ -263,13 +267,12 @@ ArcReadHandler* DeskTemplateReadHandler::GetArcReadHandlerForLaunch(
 RestoreData* DeskTemplateReadHandler::GetMostRecentRestoreDataForApp(
     const std::string& app_id) {
   // Go from newest to oldest.
-  for (auto it = restore_data_.rbegin(); it != restore_data_.rend(); ++it) {
-    auto& restore_data = it->second;
+  for (const auto& entry : base::Reversed(restore_data_)) {
+    const std::unique_ptr<RestoreData>& restore_data = entry.second;
     if (restore_data->app_id_to_launch_list().count(app_id)) {
       return restore_data.get();
     }
   }
   return nullptr;
 }
-
 }  // namespace app_restore

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -887,10 +887,10 @@ class ChannelAssociatedGroupController
       client->NotifyError(reason);
     } else {
       endpoint->task_runner()->PostTask(
-          FROM_HERE,
-          base::BindOnce(&ChannelAssociatedGroupController::
-                             NotifyEndpointOfErrorOnEndpointThread,
-                         this, endpoint->id(), base::Unretained(endpoint)));
+          FROM_HERE, base::BindOnce(&ChannelAssociatedGroupController::
+                                        NotifyEndpointOfErrorOnEndpointThread,
+                                    this, endpoint->id(),
+                                    base::UnsafeDanglingUntriaged(endpoint)));
     }
   }
 

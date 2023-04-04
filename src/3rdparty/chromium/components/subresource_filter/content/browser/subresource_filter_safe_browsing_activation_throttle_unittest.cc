@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -923,7 +923,7 @@ TEST_P(SubresourceFilterSafeBrowsingActivationThrottleParamTest,
   SimulateStartAndExpectProceed(url);
   navigation_simulator()->SetReferrer(blink::mojom::Referrer::New(
       RenderViewHostTestHarness::web_contents()
-          ->GetMainFrame()
+          ->GetPrimaryMainFrame()
           ->GetLastCommittedURL(),
       network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin));
   SimulateCommitAndExpectProceed();

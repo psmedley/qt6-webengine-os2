@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,6 @@ Profiler* Profiler::Create(ScriptState* script_state,
                            ExceptionState& exception_state) {
   auto* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context);
-  DCHECK(
-      RuntimeEnabledFeatures::ExperimentalJSProfilerEnabled(execution_context));
 
   Performance* performance = nullptr;
   bool can_profile = false;
@@ -56,13 +54,13 @@ void Profiler::Trace(Visitor* visitor) const {
   EventTargetWithInlineData::Trace(visitor);
 }
 
-void Profiler::Dispose() {
+void Profiler::DisposeAsync() {
   if (profiler_group_) {
-    // It's safe to touch |profiler_group_| in Profiler's destructor as
+    // It's safe to touch |profiler_group_| in Profiler's pre-finalizer as
     // |profiler_group_| is guaranteed to outlive the Profiler, if set. This is
     // due to ProfilerGroup nulling out this field for all attached Profilers
     // prior to destruction.
-    profiler_group_->CancelProfiler(this);
+    profiler_group_->CancelProfilerAsync(script_state_, this);
     profiler_group_ = nullptr;
   }
 }

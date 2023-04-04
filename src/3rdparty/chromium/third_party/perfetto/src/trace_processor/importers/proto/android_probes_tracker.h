@@ -31,12 +31,20 @@ class TraceProcessorContext;
 
 class AndroidProbesTracker : public Destructible {
  public:
-  explicit AndroidProbesTracker(TraceProcessorContext*);
+  explicit AndroidProbesTracker(TraceStorage*);
   ~AndroidProbesTracker() override;
+
+  // For EnergyBreakdown Descriptor specifications
+  struct EnergyConsumerSpecs {
+    StringId name;
+    StringId type;
+    int32_t ordinal;
+  };
 
   static AndroidProbesTracker* GetOrCreate(TraceProcessorContext* context) {
     if (!context->android_probes_tracker) {
-      context->android_probes_tracker.reset(new AndroidProbesTracker(context));
+      context->android_probes_tracker.reset(
+          new AndroidProbesTracker(context->storage.get()));
     }
     return static_cast<AndroidProbesTracker*>(
         context->android_probes_tracker.get());
@@ -51,21 +59,49 @@ class AndroidProbesTracker : public Destructible {
     seen_packages_.emplace(std::move(package_name));
   }
 
-  base::Optional<StringId> GetPowerRailName(uint32_t index) {
-    if (index >= power_rails_strs_id_.size())
+  base::Optional<TrackId> GetPowerRailTrack(uint32_t index) {
+    if (index >= power_rail_tracks_.size())
       return base::nullopt;
-    return power_rails_strs_id_[index];
+    TrackId track_id = power_rail_tracks_[index];
+    return track_id == kInvalidTrackId ? base::nullopt
+                                       : base::make_optional(track_id);
   }
 
-  void SetPowerRailName(uint32_t index, StringId name) {
-    if (power_rails_strs_id_.size() <= index)
-      power_rails_strs_id_.resize(index + 1);
-    power_rails_strs_id_[index] = name;
+  void SetPowerRailTrack(uint32_t index, TrackId track_id) {
+    if (power_rail_tracks_.size() <= index)
+      power_rail_tracks_.resize(index + 1, kInvalidTrackId);
+    power_rail_tracks_[index] = track_id;
+  }
+
+  base::Optional<EnergyConsumerSpecs> GetEnergyBreakdownDescriptor(
+      int32_t consumer_id) {
+    auto it = energy_consumer_descriptors_.find(consumer_id);
+    // Didn't receive the descriptor
+    if (it == energy_consumer_descriptors_.end()) {
+      return base::nullopt;
+    }
+    return it->second;
+  }
+
+  void SetEnergyBreakdownDescriptor(int32_t consumer_id,
+                                    StringId name,
+                                    StringId type,
+                                    int32_t ordinal) {
+    auto it_consumer_descriptor =
+        energy_consumer_descriptors_.find(consumer_id);
+
+    // Either descriptor was repeated or it came after per uid data.
+    if (it_consumer_descriptor != energy_consumer_descriptors_.end())
+      return;
+
+    energy_consumer_descriptors_[consumer_id] =
+        EnergyConsumerSpecs{name, type, ordinal};
   }
 
  private:
   std::set<std::string> seen_packages_;
-  std::vector<StringId> power_rails_strs_id_;
+  std::vector<TrackId> power_rail_tracks_;
+  std::unordered_map<int32_t, EnergyConsumerSpecs> energy_consumer_descriptors_;
 };
 
 }  // namespace trace_processor

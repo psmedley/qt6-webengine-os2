@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_FOCUSGROUP_CONTROLLER_UTILS_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/focusgroup_flags.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class Element;
+class GridFocusgroupStructureInfo;
 class KeyboardEvent;
-
-enum FocusgroupFlags : uint8_t;
 
 enum class FocusgroupDirection {
   kNone,
@@ -21,6 +21,11 @@ enum class FocusgroupDirection {
   kBackwardVertical,
   kForwardHorizontal,
   kForwardVertical,
+};
+
+enum class FocusgroupType {
+  kGrid,
+  kLinear,
 };
 
 class CORE_EXPORT FocusgroupControllerUtils {
@@ -40,15 +45,22 @@ class CORE_EXPORT FocusgroupControllerUtils {
                                       FocusgroupFlags focusgroup,
                                       FocusgroupDirection direction);
 
-  static Element* FindNearestFocusgroupAncestor(const Element* element);
+  static Element* FindNearestFocusgroupAncestor(const Element* element,
+                                                FocusgroupType type);
   static Element* NextElement(const Element* current, bool skip_subtree);
   static Element* PreviousElement(const Element* current);
   static Element* LastElementWithin(const Element* current);
-  static bool IsFocusgroupItem(const Element* element);
+
   static Element* AdjustElementOutOfUnrelatedFocusgroup(
       Element* element,
       Element* stop_ancestor,
       FocusgroupDirection direction);
+
+  static bool IsFocusgroupItem(const Element* element);
+  static bool IsGridFocusgroupItem(const Element* element);
+
+  static GridFocusgroupStructureInfo*
+  CreateGridFocusgroupStructureInfoForGridRoot(Element* root);
 };
 
 }  // namespace blink

@@ -1,53 +1,57 @@
 export const description = `
-Execution Tests for the 'inverseSqrt' builtin function
+Execution tests for the 'inverseSqrt' builtin function
+
+S is AbstractFloat, f32, f16
+T is S or vecN<S>
+@const fn inverseSqrt(e: T ) -> T
+Returns the reciprocal of sqrt(e). Component-wise when T is a vector.
 `;
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { ulpThreshold } from '../../../../../util/compare.js';
-import { kBit, kValue } from '../../../../../util/constants.js';
-import { f32, f32Bits, TypeF32 } from '../../../../../util/conversion.js';
+import { kValue } from '../../../../../util/constants.js';
+import { TypeF32 } from '../../../../../util/conversion.js';
+import { inverseSqrtInterval } from '../../../../../util/f32_interval.js';
 import { biasedRange, linearRange } from '../../../../../util/math.js';
-import { Case, Config, run } from '../../expression.js';
+import { allInputSources, Case, makeUnaryToF32IntervalCase, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
 
 export const g = makeTestGroup(GPUTest);
 
-g.test('f32')
-  .uniqueId('84fc180ad82c5618')
-  .specURL('https://www.w3.org/TR/2021/WD-WGSL-20210929/#float-builtin-functions')
-  .desc(
-    `
-inverseSqrt:
-T is f32 or vecN<f32> inverseSqrt(e: T ) -> T Returns the reciprocal of sqrt(e). Component-wise when T is a vector. (GLSLstd450InverseSqrt)
-
-Please read the following guidelines before contributing:
-https://github.com/gpuweb/cts/blob/main/docs/plan_autogen.md
-`
-  )
+g.test('abstract_float')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`abstract float tests`)
   .params(u =>
-    u
-      .combine('storageClass', ['uniform', 'storage_r', 'storage_rw'] as const)
-      .combine('vectorize', [undefined, 2, 3, 4] as const)
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+  )
+  .unimplemented();
+
+g.test('f32')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`f32 tests`)
+  .params(u =>
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    // [1]: Need to decide what the ground-truth is.
     const makeCase = (x: number): Case => {
-      return { input: f32(x), expected: f32(1 / Math.sqrt(x)) };
+      return makeUnaryToF32IntervalCase(x, inverseSqrtInterval);
     };
 
-    // Well defined cases
     const cases: Array<Case> = [
-      { input: f32Bits(kBit.f32.infinity.positive), expected: f32(0) },
-      { input: f32(1), expected: f32(1) },
       // 0 < x <= 1 linearly spread
-      ...linearRange(kValue.f32.positive.min, 1, 100).map(x => makeCase(x)),
+      ...linearRange(kValue.f32.positive.min, 1, 100),
       // 1 <= x < 2^32, biased towards 1
-      ...biasedRange(1, 2 ** 32, 1000).map(x => makeCase(x)),
-    ];
+      ...biasedRange(1, 2 ** 32, 1000),
+    ].map(x => makeCase(x));
 
-    const cfg: Config = t.params;
-    cfg.cmpFloats = ulpThreshold(2);
-    run(t, builtin('inverseSqrt'), [TypeF32], TypeF32, cfg, cases);
+    await run(t, builtin('inverseSqrt'), [TypeF32], TypeF32, t.params, cases);
   });
+
+g.test('f16')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`f16 tests`)
+  .params(u =>
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+  )
+  .unimplemented();

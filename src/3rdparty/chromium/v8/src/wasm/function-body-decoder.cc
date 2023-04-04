@@ -4,10 +4,6 @@
 
 #include "src/wasm/function-body-decoder.h"
 
-#include "src/codegen/assembler-inl.h"
-#include "src/flags/flags.h"
-#include "src/handles/handles.h"
-#include "src/objects/objects-inl.h"
 #include "src/utils/ostreams.h"
 #include "src/wasm/decoder.h"
 #include "src/wasm/function-body-decoder-impl.h"
@@ -20,52 +16,47 @@ namespace v8 {
 namespace internal {
 namespace wasm {
 
-namespace value_type_reader {
-HeapType consume_heap_type(Decoder* decoder, const WasmModule* module,
-                           const WasmFeatures& enabled) {
-  uint32_t length;
-  HeapType result = value_type_reader::read_heap_type<Decoder::kFullValidation>(
-      decoder, decoder->pc(), &length, module, enabled);
-  decoder->consume_bytes(length, "heap type");
-  return result;
-}
-}  // namespace value_type_reader
-
 bool DecodeLocalDecls(const WasmFeatures& enabled, BodyLocalDecls* decls,
                       const WasmModule* module, const byte* start,
-                      const byte* end) {
+                      const byte* end, Zone* zone) {
   WasmFeatures no_features = WasmFeatures::None();
-  Zone* zone = decls->type_list.get_allocator().zone();
+  constexpr FixedSizeSignature<ValueType, 0, 0> kNoSig;
   WasmDecoder<Decoder::kFullValidation> decoder(
-      zone, module, enabled, &no_features, nullptr, start, end, 0);
+      zone, module, enabled, &no_features, &kNoSig, start, end, 0);
   uint32_t length;
-  if (decoder.DecodeLocals(decoder.pc(), &length, 0) < 0) {
+  decoder.DecodeLocals(decoder.pc(), &length);
+  if (decoder.failed()) {
     decls->encoded_size = 0;
     return false;
   }
   DCHECK(decoder.ok());
   decls->encoded_size = length;
-  // Copy the decoded locals types into {decls->type_list}.
-  DCHECK(decls->type_list.empty());
-  decls->type_list = std::move(decoder.local_types_);
+  // Copy the decoded locals types into {decls->local_types}.
+  DCHECK_NULL(decls->local_types);
+  decls->num_locals = decoder.num_locals_;
+  decls->local_types = decoder.local_types_;
   return true;
 }
 
+BytecodeIterator::BytecodeIterator(const byte* start, const byte* end)
+    : Decoder(start, end) {}
+
 BytecodeIterator::BytecodeIterator(const byte* start, const byte* end,
-                                   BodyLocalDecls* decls)
+                                   BodyLocalDecls* decls, Zone* zone)
     : Decoder(start, end) {
-  if (decls != nullptr) {
-    if (DecodeLocalDecls(WasmFeatures::All(), decls, nullptr, start, end)) {
-      pc_ += decls->encoded_size;
-      if (pc_ > end_) pc_ = end_;
-    }
+  DCHECK_NOT_NULL(decls);
+  DCHECK_NOT_NULL(zone);
+  if (DecodeLocalDecls(WasmFeatures::All(), decls, nullptr, start, end, zone)) {
+    pc_ += decls->encoded_size;
+    if (pc_ > end_) pc_ = end_;
   }
 }
 
-DecodeResult VerifyWasmCode(AccountingAllocator* allocator,
-                            const WasmFeatures& enabled,
-                            const WasmModule* module, WasmFeatures* detected,
-                            const FunctionBody& body) {
+DecodeResult ValidateFunctionBody(AccountingAllocator* allocator,
+                                  const WasmFeatures& enabled,
+                                  const WasmModule* module,
+                                  WasmFeatures* detected,
+                                  const FunctionBody& body) {
   Zone zone(allocator, ZONE_NAME);
   WasmFullDecoder<Decoder::kFullValidation, EmptyInterface> decoder(
       &zone, module, enabled, detected, body);
@@ -154,19 +145,19 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
   }
 
   // Print the local declarations.
-  BodyLocalDecls decls(&zone);
-  BytecodeIterator i(body.start, body.end, &decls);
+  BodyLocalDecls decls;
+  BytecodeIterator i(body.start, body.end, &decls, &zone);
   if (body.start != i.pc() && print_locals == kPrintLocals) {
     os << "// locals:";
-    if (!decls.type_list.empty()) {
-      ValueType type = decls.type_list[0];
+    if (decls.num_locals > 0) {
+      ValueType type = decls.local_types[0];
       uint32_t count = 0;
-      for (size_t pos = 0; pos < decls.type_list.size(); ++pos) {
-        if (decls.type_list[pos] == type) {
+      for (size_t pos = 0; pos < decls.num_locals; ++pos) {
+        if (decls.local_types[pos] == type) {
           ++count;
         } else {
           os << " " << count << " " << type.name();
-          type = decls.type_list[pos];
+          type = decls.local_types[pos];
           count = 1;
         }
       }
@@ -221,7 +212,7 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
     os << RawOpcodeName(opcode) << ",";
 
     if (opcode == kExprLoop || opcode == kExprIf || opcode == kExprBlock ||
-        opcode == kExprTry || opcode == kExprLet) {
+        opcode == kExprTry) {
       if (i.pc()[1] & 0x80) {
         uint32_t temp_length;
         ValueType type =
@@ -259,8 +250,7 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
       case kExprLoop:
       case kExprIf:
       case kExprBlock:
-      case kExprTry:
-      case kExprLet: {
+      case kExprTry: {
         BlockTypeImmediate<Decoder::kNoValidation> imm(WasmFeatures::All(), &i,
                                                        i.pc() + 1, module);
         os << " @" << i.pc_offset();

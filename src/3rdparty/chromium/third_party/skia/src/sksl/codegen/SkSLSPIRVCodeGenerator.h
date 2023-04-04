@@ -25,10 +25,9 @@
 #include "src/sksl/ir/SkSLVariable.h"
 #include "src/sksl/spirv.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <stack>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -102,17 +101,13 @@ public:
         virtual void store(SpvId value, OutputStream& out) = 0;
     };
 
-    SPIRVCodeGenerator(const Context* context,
-                       const Program* program,
-                       OutputStream* out)
+    SPIRVCodeGenerator(const Context* context, const Program* program, OutputStream* out)
             : INHERITED(context, program, out)
-            , fDefaultLayout(MemoryLayout::k140_Standard)
+            , fDefaultLayout(MemoryLayout::Standard::k140)
             , fCapabilities(0)
             , fIdCount(1)
             , fCurrentBlock(0)
-            , fSynthetics(fContext, /*builtin=*/true) {
-        this->setupIntrinsics();
-    }
+            , fSynthetics(/*builtin=*/true) {}
 
     bool generateCode() override;
 
@@ -120,7 +115,8 @@ private:
     enum IntrinsicOpcodeKind {
         kGLSL_STD_450_IntrinsicOpcodeKind,
         kSPIRV_IntrinsicOpcodeKind,
-        kSpecial_IntrinsicOpcodeKind
+        kSpecial_IntrinsicOpcodeKind,
+        kInvalid_IntrinsicOpcodeKind,
     };
 
     enum SpecialIntrinsic {
@@ -138,6 +134,8 @@ private:
         kStep_SpecialIntrinsic,
         kSubpassLoad_SpecialIntrinsic,
         kTexture_SpecialIntrinsic,
+        kTextureGrad_SpecialIntrinsic,
+        kTextureLod_SpecialIntrinsic,
     };
 
     enum class Precision {
@@ -151,8 +149,6 @@ private:
         std::unique_ptr<SPIRVCodeGenerator::LValue> lvalue;
     };
 
-    void setupIntrinsics();
-
     /**
      * Pass in the type to automatically add a RelaxedPrecision decoration for the id when
      * appropriate, or null to never add one.
@@ -160,8 +156,6 @@ private:
     SpvId nextId(const Type* type);
 
     SpvId nextId(Precision precision);
-
-    const Type& getActualType(const Type& type);
 
     SpvId getType(const Type& type);
 
@@ -174,7 +168,7 @@ private:
     SpvId getPointerType(const Type& type, const MemoryLayout& layout,
                          SpvStorageClass_ storageClass);
 
-    std::vector<SpvId> getAccessChain(const Expression& expr, OutputStream& out);
+    SkTArray<SpvId> getAccessChain(const Expression& expr, OutputStream& out);
 
     void writeLayout(const Layout& layout, SpvId target, Position pos);
 
@@ -218,7 +212,7 @@ private:
 
     void writeGLSLExtendedInstruction(const Type& type, SpvId id, SpvId floatInst,
                                       SpvId signedInst, SpvId unsignedInst,
-                                      const std::vector<SpvId>& args, OutputStream& out);
+                                      const SkTArray<SpvId>& args, OutputStream& out);
 
     /**
      * Promotes an expression to a vector. If the expression is already a vector with vectorSize
@@ -234,7 +228,7 @@ private:
      * returns (vec2(float), vec2). It is an error to use mismatched vector sizes, e.g. (float,
      * vec2, vec3).
      */
-    std::vector<SpvId> vectorize(const ExpressionArray& args, OutputStream& out);
+    SkTArray<SpvId> vectorize(const ExpressionArray& args, OutputStream& out);
 
     SpvId writeSpecialIntrinsic(const FunctionCall& c, SpecialIntrinsic kind, OutputStream& out);
 
@@ -291,8 +285,6 @@ private:
 
     SpvId writeConstructorCompoundCast(const ConstructorCompoundCast& c, OutputStream& out);
 
-    SpvId writeComposite(const std::vector<SpvId>& arguments, const Type& type, OutputStream& out);
-
     SpvId writeFieldAccess(const FieldAccess& f, OutputStream& out);
 
     SpvId writeSwizzle(const Swizzle& swizzle, OutputStream& out);
@@ -332,9 +324,6 @@ private:
     SpvId writeBinaryOperation(const Type& resultType, const Type& operandType, SpvId lhs,
                                SpvId rhs, SpvOp_ ifFloat, SpvOp_ ifInt, SpvOp_ ifUInt,
                                SpvOp_ ifBool, OutputStream& out);
-
-    SpvId writeBinaryOperation(const BinaryExpression& expr, SpvOp_ ifFloat, SpvOp_ ifInt,
-                               SpvOp_ ifUInt, OutputStream& out);
 
     SpvId writeReciprocal(const Type& type, SpvId value, OutputStream& out);
 
@@ -384,8 +373,6 @@ private:
 
     void writeString(std::string_view s, OutputStream& out);
 
-    void writeLabel(SpvId id, OutputStream& out);
-
     void writeInstruction(SpvOp_ opCode, OutputStream& out);
 
     void writeInstruction(SpvOp_ opCode, std::string_view string, OutputStream& out);
@@ -423,8 +410,8 @@ private:
     struct Word;
     // 8 Words is enough for nearly all instructions (except variable-length instructions like
     // OpAccessChain or OpConstantComposite).
-    using Words = SkSTArray<8, Word>;
-    SpvId writeInstruction(SpvOp_ opCode, const SkTArray<Word>& words, OutputStream& out);
+    using Words = SkSTArray<8, Word, true>;
+    SpvId writeInstruction(SpvOp_ opCode, const SkTArray<Word, true>& words, OutputStream& out);
 
     struct Instruction {
         SpvId                  fOp;
@@ -435,7 +422,7 @@ private:
         struct Hash;
     };
 
-    static Instruction BuildInstructionKey(SpvOp_ opCode, const SkTArray<Word>& words);
+    static Instruction BuildInstructionKey(SpvOp_ opCode, const SkTArray<Word, true>& words);
 
     // The writeOpXxxxx calls will simplify and deduplicate ops where possible.
     SpvId writeOpConstantTrue(const Type& type);
@@ -446,15 +433,54 @@ private:
     SpvId writeOpCompositeExtract(const Type& type, SpvId base, int component, OutputStream& out);
     SpvId writeOpCompositeExtract(const Type& type, SpvId base, int componentA, int componentB,
                                   OutputStream& out);
+    SpvId writeOpLoad(SpvId type, Precision precision, SpvId pointer, OutputStream& out);
+    void writeOpStore(SpvStorageClass_ storageClass, SpvId pointer, SpvId value, OutputStream& out);
 
     // Converts the provided SpvId(s) into an array of scalar OpConstants, if it can be done.
     bool toConstants(SpvId value, SkTArray<SpvId>* constants);
     bool toConstants(SkSpan<const SpvId> values, SkTArray<SpvId>* constants);
 
     // Extracts the requested component SpvId from a composite instruction, if it can be done.
-    SpvId toComponent(const Instruction& instr, int component);
+    Instruction* resultTypeForInstruction(const Instruction& instr);
+    int numComponentsForVecInstruction(const Instruction& instr);
+    SpvId toComponent(SpvId id, int component);
 
-    void pruneReachableOps(size_t numReachableOps);
+    struct ConditionalOpCounts {
+        size_t numReachableOps;
+        size_t numStoreOps;
+    };
+    ConditionalOpCounts getConditionalOpCounts();
+    void pruneConditionalOps(ConditionalOpCounts ops);
+
+    enum StraightLineLabelType {
+        // Use "BranchlessBlock" for blocks which are never explicitly branched-to at all. This
+        // happens at the start of a function, or when we find unreachable code.
+        kBranchlessBlock,
+
+        // Use "BranchIsOnPreviousLine" when writing a label that comes immediately after its
+        // associated branch. Example usage:
+        // - SPIR-V does not implicitly fall through from one block to the next, so you may need to
+        //   use an OpBranch to explicitly jump to the next block, even when they are adjacent in
+        //   the code.
+        // - The block immediately following an OpBranchConditional or OpSwitch.
+        kBranchIsOnPreviousLine,
+    };
+
+    enum BranchingLabelType {
+        // Use "BranchIsAbove" for labels which are referenced by OpBranch or OpBranchConditional
+        // ops that are above the label in the code--i.e., the branch skips forward in the code.
+        kBranchIsAbove,
+
+        // Use "BranchIsBelow" for labels which are referenced by OpBranch or OpBranchConditional
+        // ops below the label in the code--i.e., the branch jumps backward in the code.
+        kBranchIsBelow,
+
+        // Use "BranchesOnBothSides" for labels which have branches coming from both directions.
+        kBranchesOnBothSides,
+    };
+    void writeLabel(SpvId label, StraightLineLabelType type, OutputStream& out);
+    void writeLabel(SpvId label, BranchingLabelType type, ConditionalOpCounts ops,
+                    OutputStream& out);
 
     bool isDead(const Variable& var) const;
 
@@ -491,7 +517,7 @@ private:
         int32_t unsignedOp;
         int32_t boolOp;
     };
-    SkTHashMap<IntrinsicKind, Intrinsic> fIntrinsicMap;
+    Intrinsic getIntrinsic(IntrinsicKind) const;
     SkTHashMap<const FunctionDeclaration*, SpvId> fFunctionMap;
     SkTHashMap<const Variable*, SpvId> fVariableMap;
     SkTHashMap<const Type*, SpvId> fStructMap;
@@ -507,6 +533,7 @@ private:
     // it back to its source).
     SkTHashMap<Instruction, SpvId, Instruction::Hash> fOpCache;  // maps instruction -> SpvId
     SkTHashMap<SpvId, Instruction> fSpvIdCache;                  // maps SpvId -> instruction
+    SkTHashMap<SpvId, SpvId> fStoreCache;                        // maps ptr SpvId -> value SpvId
 
     // "Reachable" ops are instructions which can safely be accessed from the current block.
     // For instance, if our SPIR-V contains `%3 = OpFAdd %1 %2`, we would be able to access and
@@ -515,12 +542,18 @@ private:
     // depending on the if condition, we may or may not have actually done that computation). The
     // same logic applies to other control-flow blocks as well. Once an instruction becomes
     // unreachable, we remove it from both op-caches.
-    std::vector<SpvId> fReachableOps;
+    SkTArray<SpvId> fReachableOps;
+
+    // The "store-ops" list contains a running list of all the pointers in the store cache. If a
+    // store occurs inside of a conditional block, once that block exits, we no longer know what is
+    // stored in that particular SpvId. At that point, we must remove any associated entry from the
+    // store cache.
+    SkTArray<SpvId> fStoreOps;
 
     // label of the current block, or 0 if we are not in a block
     SpvId fCurrentBlock;
-    std::stack<SpvId> fBreakTarget;
-    std::stack<SpvId> fContinueTarget;
+    SkTArray<SpvId> fBreakTarget;
+    SkTArray<SpvId> fContinueTarget;
     bool fWroteRTFlip = false;
     // holds variables synthesized during output, for lifetime purposes
     SymbolTable fSynthetics;

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -119,7 +119,7 @@ void NtpBackgroundHandler::HandleGetBackgrounds(const base::Value::List& args) {
     list_value.Append(std::move(element));
   }
 
-  ResolveJavascriptCallback(callback_id, base::Value(std::move(list_value)));
+  ResolveJavascriptCallback(callback_id, list_value);
 }
 
 void NtpBackgroundHandler::HandleSetBackground(const base::Value::List& args) {

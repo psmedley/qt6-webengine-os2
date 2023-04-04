@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -179,6 +179,10 @@ class TestWebFeedSurface : public TestSurfaceBase {
  public:
   explicit TestWebFeedSurface(FeedStream* stream = nullptr);
 };
+class TestChannelSurface : public TestSurfaceBase {
+ public:
+  explicit TestChannelSurface(FeedStream* stream = nullptr, std::string = "");
+};
 
 class TestImageFetcher : public ImageFetcher {
  public:
@@ -304,6 +308,10 @@ class TestFeedNetwork : public FeedNetwork {
     auto iter = api_request_count_.find(request_type);
     return iter == api_request_count_.end() ? 0 : iter->second;
   }
+  std::map<NetworkRequestType, int> GetApiRequestCounts() const {
+    return api_request_count_;
+  }
+
   int GetActionRequestCount() const;
   int GetFollowRequestCount() const {
     return GetApiRequestCount<FollowWebFeedDiscoverApi>();
@@ -316,6 +324,9 @@ class TestFeedNetwork : public FeedNetwork {
   }
   int GetListFollowedWebFeedsRequestCount() const {
     return GetApiRequestCount<ListWebFeedsDiscoverApi>();
+  }
+  int GetWebFeedListContentsCount() const {
+    return GetApiRequestCount<WebFeedListContentsDiscoverApi>();
   }
 
   std::vector<NetworkRequestType> sent_request_types() const {
@@ -409,7 +420,7 @@ class TestMetricsReporter : public MetricsReporter {
                     bool loaded_new_content_from_network,
                     base::TimeDelta stored_content_age,
                     const ContentStats& content_stats,
-                    const RequestMetadata& request_metadata,
+                    ContentOrder content_order,
                     std::unique_ptr<LoadLatencyTimes> latencies) override;
   void OnLoadMoreBegin(const StreamType& stream_type,
                        SurfaceId surface_id) override;
@@ -458,6 +469,7 @@ class FeedApiTest : public testing::Test, public FeedStream::Delegate {
   DisplayMetrics GetDisplayMetrics() override;
   std::string GetLanguageTag() override;
   bool IsAutoplayEnabled() override;
+  TabGroupEnabledState GetTabGroupEnabledState() override;
   void ClearAll() override;
   AccountInfo GetAccountInfo() override;
   void PrefetchImage(const GURL& url) override;
@@ -473,6 +485,9 @@ class FeedApiTest : public testing::Test, public FeedStream::Delegate {
   std::unique_ptr<StreamModel> CreateStreamModel();
   bool IsTaskQueueIdle() const;
   void WaitForIdleTaskQueue();
+  // Fast forwards the task environment enough for the in-memory model to
+  // auto-unload, which will only take place if there are no attached surfaces.
+  void WaitForModelToAutoUnload();
   void UnloadModel(const StreamType& stream_type);
   void FollowWebFeed(const WebFeedPageInformation page_info);
 
@@ -547,7 +562,8 @@ class FeedNetworkEndpointTest
       public ::testing::WithParamInterface<::testing::tuple<bool, bool>> {
  public:
   static bool GetDiscoFeedEnabled() { return ::testing::get<0>(GetParam()); }
-  static bool GetWebFeedUsesFeedQueryRequests() {
+  // Whether Feed-Query is used instead, as request in snippets-internals.
+  static bool GetUseFeedQueryRequests() {
     return ::testing::get<1>(GetParam());
   }
 };

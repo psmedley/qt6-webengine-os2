@@ -2,10 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "xfa/fwl/cfwl_edit.h"
+
+#include <memory>
+
 #include "core/fxcrt/widestring.h"
+#include "core/fxge/cfx_defaultrenderdevice.h"
+#include "public/fpdf_ext.h"
 #include "public/fpdf_formfill.h"
 #include "public/fpdf_fwlevent.h"
 #include "testing/embedder_test.h"
+#include "testing/embedder_test_environment.h"
 #include "testing/embedder_test_timer_handling_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/xfa_js_embedder_test.h"
@@ -22,10 +29,20 @@ class CFWLEditEmbedderTest : public XFAJSEmbedderTest {
   void SetUp() override {
     EmbedderTest::SetUp();
     SetDelegate(&delegate_);
+
+    // Arbitrary, picked nice even number, 2020-09-13 12:26:40.
+    FSDK_SetTimeFunction([]() -> time_t { return 1600000000; });
+    FSDK_SetLocaltimeFunction([](const time_t* t) { return gmtime(t); });
   }
 
   void TearDown() override {
-    UnloadPage(page());
+    FSDK_SetTimeFunction(nullptr);
+    FSDK_SetLocaltimeFunction(nullptr);
+    // TODO(crbug.com/pdfium/11): A page might not have been loaded if a test
+    // is skipped at runtime. This check for a non-null page should be able to
+    // removed once none of the tests are being skipped for Skia.
+    if (page())
+      UnloadPage(page());
     EmbedderTest::TearDown();
   }
 
@@ -39,7 +56,7 @@ class CFWLEditEmbedderTest : public XFAJSEmbedderTest {
   EmbedderTestTimerHandlingDelegate delegate() const { return delegate_; }
 
  private:
-  FPDF_PAGE page_;
+  FPDF_PAGE page_ = nullptr;
   EmbedderTestTimerHandlingDelegate delegate_;
 };
 
@@ -66,13 +83,11 @@ TEST_F(CFWLEditEmbedderTest, LeftClickMouseSelection) {
   EXPECT_STREQ(L"defgh", WideString::FromUTF16LE(buf, len).c_str());
 }
 
-// TODO(crbug.com/pdfium/11): Fix this test and enable.
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#define MAYBE_DragMouseSelection DISABLED_DragMouseSelection
-#else
-#define MAYBE_DragMouseSelection DragMouseSelection
-#endif
-TEST_F(CFWLEditEmbedderTest, MAYBE_DragMouseSelection) {
+TEST_F(CFWLEditEmbedderTest, DragMouseSelection) {
+  // TODO(crbug.com/pdfium/11): Fix this test and enable for Skia variants.
+  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    return;
+
   CreateAndInitializeFormPDF("xfa/email_recommended.pdf");
   FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
   for (size_t i = 0; i < 10; ++i)
@@ -98,13 +113,11 @@ TEST_F(CFWLEditEmbedderTest, MAYBE_DragMouseSelection) {
   }
 }
 
-// TODO(crbug.com/pdfium/11): Fix this test and enable.
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#define MAYBE_SimpleFill DISABLED_SimpleFill
-#else
-#define MAYBE_SimpleFill SimpleFill
-#endif
-TEST_F(CFWLEditEmbedderTest, MAYBE_SimpleFill) {
+TEST_F(CFWLEditEmbedderTest, SimpleFill) {
+  // TODO(crbug.com/pdfium/11): Fix this test and enable for Skia variants.
+  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    return;
+
   CreateAndInitializeFormPDF("xfa/email_recommended.pdf");
   const char kBlankMD5[] = "8dda78a3afaf9f7b5210eb81cacc4600";
   {
@@ -124,14 +137,11 @@ TEST_F(CFWLEditEmbedderTest, MAYBE_SimpleFill) {
   }
 }
 
-// TODO(crbug.com/pdfium/11): Fix this test and enable.
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#define MAYBE_FillWithNewLineWithoutMultiline \
-  DISABLED_FillWithNewLineWithoutMultiline
-#else
-#define MAYBE_FillWithNewLineWithoutMultiline FillWithNewLineWithoutMultiline
-#endif
-TEST_F(CFWLEditEmbedderTest, MAYBE_FillWithNewLineWithoutMultiline) {
+TEST_F(CFWLEditEmbedderTest, FillWithNewLineWithoutMultiline) {
+  // TODO(crbug.com/pdfium/11): Fix this test and enable for Skia variants.
+  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    return;
+
   CreateAndInitializeFormPDF("xfa/email_recommended.pdf");
   FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
   for (size_t i = 0; i < 5; ++i)
@@ -198,29 +208,57 @@ TEST_F(CFWLEditEmbedderTest, DISABLED_FillWithNewLineWithMultiline) {
   }
 }
 
-// TODO(crbug.com/pdfium/11): Fix this test and enable.
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#define MAYBE_DateTimePickerTest DISABLED_DateTimePickerTest
-#else
-#define MAYBE_DateTimePickerTest DateTimePickerTest
-#endif
-TEST_F(CFWLEditEmbedderTest, MAYBE_DateTimePickerTest) {
-  CreateAndInitializeFormPDF("xfa/xfa_date_time_edit.pdf");
-  FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
+TEST_F(CFWLEditEmbedderTest, DateTimePickerTest) {
+  // TODO(crbug.com/pdfium/11): Fix this test and enable for Skia variants.
+  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    return;
 
-  const char kFilledMD5[] = "1036b8837a9dba75c6bd8f9347ae2eb2";
+  CreateAndInitializeFormPDF("xfa/xfa_date_time_edit.pdf");
+
+  // Give focus to date time widget, creating down-arrow button.
+  FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
+  FORM_OnLButtonUp(form_handle(), page(), 0, 115, 58);
+  const char kSelectedMD5[] = "1036b8837a9dba75c6bd8f9347ae2eb2";
   {
     ScopedFPDFBitmap page_bitmap =
         RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
-    CompareBitmap(page_bitmap.get(), 612, 792, kFilledMD5);
+    CompareBitmap(page_bitmap.get(), 612, 792, kSelectedMD5);
+  }
+
+  // Click down-arrow button, bringing up calendar widget.
+  FORM_OnLButtonDown(form_handle(), page(), 0, 446, 54);
+  FORM_OnLButtonUp(form_handle(), page(), 0, 446, 54);
+  {
+    ScopedFPDFBitmap page_bitmap =
+        RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
+
+    // TODO(tsepez): hermetic fonts.
+    // const char kCalendarOpenMD5[] = "02de64e7e83c82c1ef0ae484d671a51d";
+    // CompareBitmap(page_bitmap.get(), 612, 792, kCalendarOpenMD5);
+  }
+
+  // Click on date on calendar, putting result into field as text.
+  FORM_OnLButtonDown(form_handle(), page(), 0, 100, 162);
+  FORM_OnLButtonUp(form_handle(), page(), 0, 100, 162);
+  {
+    ScopedFPDFBitmap page_bitmap =
+        RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
+
+    // TODO(tsepez): hermetic fonts.
+    // const char kFilledMD5[] = "1bce66c11f1c87b8d639ce0076ac36d3";
+    // CompareBitmap(page_bitmap.get(), 612, 792, kFilledMD5);
   }
 }
 
 TEST_F(CFWLEditEmbedderTest, ImageEditTest) {
+  // TODO(crbug.com/pdfium/11): Fix this test and enable for Skia variants.
+  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    return;
+
   CreateAndInitializeFormPDF("xfa/xfa_image_edit.pdf");
   FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
 
-  const char kFilledMD5[] = "1940568c9ba33bac5d0b1ee9558c76b3";
+  const char kFilledMD5[] = "101cf6223fa2403fba4c413a8310ab02";
   {
     ScopedFPDFBitmap page_bitmap =
         RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
@@ -228,20 +266,52 @@ TEST_F(CFWLEditEmbedderTest, ImageEditTest) {
   }
 }
 
-// TODO(crbug.com/pdfium/11): Fix this test and enable.
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#define MAYBE_ComboBoxTest DISABLED_ComboBoxTest
-#else
-#define MAYBE_ComboBoxTest ComboBoxTest
-#endif
-TEST_F(CFWLEditEmbedderTest, MAYBE_ComboBoxTest) {
-  CreateAndInitializeFormPDF("xfa/xfa_combobox.pdf");
-  FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
+TEST_F(CFWLEditEmbedderTest, ComboBoxTest) {
+  // TODO(crbug.com/pdfium/11): Fix this test and enable for Skia variants.
+  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    return;
 
-  const char kFilledMD5[] = "dad642ae8a5afce2591ffbcabbfc58dd";
+  CreateAndInitializeFormPDF("xfa/xfa_combobox.pdf");
+
+  // Give focus to widget.
+  FORM_OnLButtonDown(form_handle(), page(), 0, 115, 58);
+  FORM_OnLButtonUp(form_handle(), page(), 0, 115, 58);
   {
     ScopedFPDFBitmap page_bitmap =
         RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
+    const char kFilledMD5[] = "dad642ae8a5afce2591ffbcabbfc58dd";
     CompareBitmap(page_bitmap.get(), 612, 792, kFilledMD5);
+  }
+
+  // Click on down-arrow button, dropdown list appears.
+  FORM_OnLButtonDown(form_handle(), page(), 0, 438, 53);
+  FORM_OnLButtonUp(form_handle(), page(), 0, 438, 53);
+  {
+    ScopedFPDFBitmap page_bitmap =
+        RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
+    // TODO(tsepez): hermetic fonts.
+    // const char kFilledMD5[] = "dad642ae8a5afce2591ffbcabbfc58dd";
+    // CompareBitmap(page_bitmap.get(), 612, 792, kFilledMD5);
+  }
+
+  // Enter drop-down list, selection highlighted.
+  FORM_OnMouseMove(form_handle(), page(), 0, 253, 107);
+  {
+    ScopedFPDFBitmap page_bitmap =
+        RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
+    // TODO(tsepez): hermetic fonts.
+    // const char kFilledMD5[] = "dad642ae8a5afce2591ffbcabbfc58dd";
+    // CompareBitmap(page_bitmap.get(), 612, 792, kFilledMD5);
+  }
+
+  // Click on selection, putting result into field.
+  FORM_OnLButtonDown(form_handle(), page(), 0, 253, 107);
+  FORM_OnLButtonUp(form_handle(), page(), 0, 253, 107);
+  {
+    ScopedFPDFBitmap page_bitmap =
+        RenderLoadedPageWithFlags(page(), FPDF_ANNOT);
+    // TODO(tsepez): hermetic fonts.
+    // const char kFilledMD5[] = "dad642ae8a5afce2591ffbcabbfc58dd";
+    // CompareBitmap(page_bitmap.get(), 612, 792, kFilledMD5);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,12 +75,8 @@ GetOpenXrInputProfilesMap() {
             {"Oculus Rift S",
              {"oculus-touch-v2", "oculus-touch",
               "generic-trigger-squeeze-thumbstick"}},
-            {"Quest",
+            {"Oculus Quest",
              {"oculus-touch-v2", "oculus-touch",
-              "generic-trigger-squeeze-thumbstick"}},
-            // Name currently reported by OpenXR for the Quest 2
-            {"Miramar",
-             {"oculus-touch-v3", "oculus-touch-v2", "oculus-touch",
               "generic-trigger-squeeze-thumbstick"}},
             // Oculus says this will soon be the name OpenXR reports
             {"Oculus Quest2",
@@ -113,8 +109,7 @@ GetOpenXrInputProfilesMap() {
 
           // Vive Cosmos
           {OpenXrInteractionProfileType::kViveCosmos,
-           {{"",
-             {"htc-vive-cosmos", "generic-trigger-squeeze-thumbstick"}}}},
+           {{"", {"htc-vive-cosmos", "generic-trigger-squeeze-thumbstick"}}}},
       });
   return *kInputProfilesMap;
 }

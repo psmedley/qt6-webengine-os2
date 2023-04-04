@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@ class SkiaOutputDeviceWebView : public SkiaOutputDevice {
   sk_sp<SkSurface> sk_surface_;
 
   gfx::Size size_;
-  gfx::ColorSpace color_space_;
+  sk_sp<SkColorSpace> sk_color_space_;
   unsigned int last_frame_buffer_object_ = -1;
 
   base::WeakPtrFactory<SkiaOutputDeviceWebView> weak_ptr_factory_{this};

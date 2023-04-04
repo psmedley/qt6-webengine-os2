@@ -40,7 +40,11 @@
 namespace blink {
 
 CSSFontSelector::CSSFontSelector(const TreeScope& tree_scope)
-    : tree_scope_(&tree_scope) {
+    : CSSFontSelectorBase(
+          tree_scope.GetDocument().GetExecutionContext()->GetTaskRunner(
+              TaskType::kInternalDefault)),
+      tree_scope_(&tree_scope) {
+  DCHECK(tree_scope.GetDocument().GetExecutionContext()->IsContextThread());
   DCHECK(tree_scope.GetDocument().GetFrame());
   generic_font_family_settings_ = tree_scope.GetDocument()
                                       .GetFrame()
@@ -57,7 +61,8 @@ CSSFontSelector::CSSFontSelector(const TreeScope& tree_scope)
 CSSFontSelector::~CSSFontSelector() = default;
 
 UseCounter* CSSFontSelector::GetUseCounter() const {
-  return GetExecutionContext();
+  auto* const context = GetExecutionContext();
+  return context && context->IsContextThread() ? context : nullptr;
 }
 
 void CSSFontSelector::RegisterForInvalidationCallbacks(
@@ -75,8 +80,7 @@ void CSSFontSelector::DispatchInvalidationCallbacks(
     FontInvalidationReason reason) {
   font_face_cache_->IncrementVersion();
 
-  HeapVector<Member<FontSelectorClient>> clients;
-  CopyToVector(clients_, clients);
+  HeapVector<Member<FontSelectorClient>> clients(clients_);
   for (auto& client : clients) {
     if (client) {
       client->FontsNeedUpdate(this, reason);
@@ -137,7 +141,7 @@ scoped_refptr<FontData> CSSFontSelector::GetFontData(
   // handed the generic font family name.
   AtomicString settings_family_name =
       FamilyNameFromSettings(request_description, font_family);
-  if (settings_family_name.IsEmpty())
+  if (settings_family_name.empty())
     return nullptr;
 
   ReportFontFamilyLookupByGenericFamily(
@@ -148,7 +152,7 @@ scoped_refptr<FontData> CSSFontSelector::GetFontData(
       FontCache::Get().GetFontData(request_description, settings_family_name);
 
   ReportFontLookupByUniqueOrFamilyName(settings_family_name,
-                                       request_description, font_data.get());
+                                       request_description, font_data);
 
   return font_data;
 }
@@ -163,6 +167,10 @@ void CSSFontSelector::UpdateGenericFontFamilySettings(Document& document) {
 
 FontMatchingMetrics* CSSFontSelector::GetFontMatchingMetrics() const {
   return GetDocument().GetFontMatchingMetrics();
+}
+
+bool CSSFontSelector::IsAlive() const {
+  return tree_scope_;
 }
 
 void CSSFontSelector::Trace(Visitor* visitor) const {

@@ -1,12 +1,17 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_video_frame_pool.h"
 
+#include "base/feature_list.h"
+#include "base/system/sys_info.h"
+#include "build/build_config.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
+#include "gpu/command_buffer/client/raster_interface.h"
 #include "gpu/command_buffer/client/shared_image_interface.h"
 #include "media/base/video_frame.h"
 #include "media/renderers/video_frame_rgba_to_yuva_converter.h"
@@ -14,6 +19,7 @@
 #include "media/video/renderable_gpu_memory_buffer_video_frame_pool.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_provider_wrapper.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
@@ -117,11 +123,6 @@ bool WebGraphicsContext3DVideoFramePool::CopyRGBATextureToVideoFrame(
     const gpu::MailboxHolder& src_mailbox_holder,
     const gfx::ColorSpace& dst_color_space,
     FrameReadyCallback callback) {
-  // Issue `callback` with a nullptr VideoFrame if we return early.
-  base::ScopedClosureRunner failure_runner(WTF::Bind(
-      [](FrameReadyCallback* callback) { std::move(*callback).Run(nullptr); },
-      base::Unretained(&callback)));
-
   if (!weak_context_provider_)
     return false;
   auto* context_provider = weak_context_provider_->ContextProvider();
@@ -131,22 +132,65 @@ bool WebGraphicsContext3DVideoFramePool::CopyRGBATextureToVideoFrame(
   if (!raster_context_provider)
     return false;
 
-  scoped_refptr<media::VideoFrame> dst_frame =
-      pool_->MaybeCreateVideoFrame(src_size, dst_color_space);
+#if BUILDFLAG(IS_WIN)
+  // CopyRGBATextureToVideoFrame below needs D3D shared images on Windows so
+  // early out before creating the GMB since it's going to fail anyway.
+  if (!context_provider->GetCapabilities().shared_image_d3d)
+    return false;
+#endif  // BUILDFLAG(IS_WIN)
+
+  auto dst_frame = pool_->MaybeCreateVideoFrame(src_size, dst_color_space);
   if (!dst_frame)
     return false;
 
-  gpu::SyncToken copy_done_sync_token;
+  auto* ri = raster_context_provider->RasterInterface();
+  DCHECK(ri);
+  unsigned query_id = 0;
+  ri->GenQueriesEXT(1, &query_id);
+
+#if BUILDFLAG(IS_WIN)
+  // On Windows, GMB data read will do synchronization on its own.
+  // No need for GL_COMMANDS_COMPLETED_CHROMIUM QueryEXT.
+  GLenum queryTarget = GL_COMMANDS_ISSUED_CHROMIUM;
+#else
+  // QueryEXT functions are used to make sure that CopyRGBATextureToVideoFrame()
+  // texture copy is complete before we access GMB data.
+  GLenum queryTarget = GL_COMMANDS_COMPLETED_CHROMIUM;
+#endif
+  ri->BeginQueryEXT(queryTarget, query_id);
+
   const bool copy_succeeded = media::CopyRGBATextureToVideoFrame(
       raster_context_provider, src_format, src_size, src_color_space,
-      src_surface_origin, src_mailbox_holder, dst_frame.get(),
-      copy_done_sync_token);
-  if (!copy_succeeded)
+      src_surface_origin, src_mailbox_holder, dst_frame.get());
+  if (!copy_succeeded) {
+    ri->DeleteQueriesEXT(1, &query_id);
     return false;
+  }
 
-  IgnoreResult(failure_runner.Release());
-  raster_context_provider->ContextSupport()->SignalSyncToken(
-      copy_done_sync_token, base::BindOnce(std::move(callback), dst_frame));
+  ri->EndQueryEXT(queryTarget);
+
+  auto on_query_done_cb =
+      [](scoped_refptr<media::VideoFrame> frame,
+         base::WeakPtr<blink::WebGraphicsContext3DProviderWrapper> ctx_wrapper,
+         unsigned query_id, FrameReadyCallback callback) {
+        if (ctx_wrapper) {
+          if (auto* ctx_provider = ctx_wrapper->ContextProvider()) {
+            if (auto* ri_provider = ctx_provider->RasterContextProvider()) {
+              auto* ri = ri_provider->RasterInterface();
+              ri->DeleteQueriesEXT(1, &query_id);
+            }
+          }
+        }
+        std::move(callback).Run(std::move(frame));
+      };
+
+  auto* context_support = raster_context_provider->ContextSupport();
+  DCHECK(context_support);
+  context_support->SignalQuery(
+      query_id,
+      base::BindOnce(on_query_done_cb, dst_frame, weak_context_provider_,
+                     query_id, std::move(callback)));
+
   return true;
 }
 
@@ -173,6 +217,31 @@ void ApplyMetadataAndRunCallback(
   std::move(orig_callback).Run(std::move(wrapped));
 }
 
+CONSTINIT const base::Feature kGpuMemoryBufferReadbackFromTexture(
+             "GpuMemoryBufferReadbackFromTexture",
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
+
+#if BUILDFLAG(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+bool IsRK3399Board() {
+  const std::string board = base::SysInfo::GetLsbReleaseBoard();
+  const char* kRK3399Boards[] = {
+      "bob",
+      "kevin",
+      "rainier",
+      "scarlet",
+  };
+  for (const char* b : kRK3399Boards) {
+    if (board.find(b) == 0u)  // if |board| starts with |b|.
+      return true;
+  }
+  return false;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
 }  // namespace
 
 bool WebGraphicsContext3DVideoFramePool::ConvertVideoFrame(
@@ -212,8 +281,22 @@ bool WebGraphicsContext3DVideoFramePool::ConvertVideoFrame(
           ? kTopLeft_GrSurfaceOrigin
           : kBottomLeft_GrSurfaceOrigin,
       src_video_frame->mailbox_holder(0), dst_color_space,
-      WTF::Bind(ApplyMetadataAndRunCallback, src_video_frame,
-                std::move(callback)));
+      WTF::BindOnce(ApplyMetadataAndRunCallback, src_video_frame,
+                    std::move(callback)));
+}
+
+// static
+bool WebGraphicsContext3DVideoFramePool::
+    IsGpuMemoryBufferReadbackFromTextureEnabled() {
+#if BUILDFLAG(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+  // The GL driver used on RK3399 has a problem to enable One copy canvas
+  // capture. See b/238144592.
+  // TODO(b/239503724): Remove this code when RK3399 reaches EOL.
+  if (IsRK3399Board())
+    return false;
+#endif  // BUILDFLAG(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+
+  return base::FeatureList::IsEnabled(kGpuMemoryBufferReadbackFromTexture);
 }
 
 }  // namespace blink

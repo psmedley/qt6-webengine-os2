@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,8 +43,8 @@ class CONTENT_EXPORT XRRuntimeManagerImpl
       public device::VRDeviceProviderClient {
  public:
   friend base::RefCounted<XRRuntimeManagerImpl>;
-  static constexpr auto kRefCountPreference =
-      base::subtle::kStartRefCountFromOneTag;
+
+  REQUIRE_ADOPTION_FOR_REFCOUNTED_TYPE();
 
   friend XRRuntimeManagerTest;
   XRRuntimeManagerImpl(const XRRuntimeManagerImpl&) = delete;
@@ -73,9 +73,6 @@ class CONTENT_EXPORT XRRuntimeManagerImpl
   // runtime or if there's no active immersive session.
   BrowserXRRuntimeImpl* GetCurrentlyPresentingImmersiveRuntime();
 
-  device::mojom::VRDisplayInfoPtr GetCurrentVRDisplayInfo(
-      VRServiceImpl* service);
-
   // Returns true if another service is presenting. Returns false if this
   // service is presenting, or if nobody is presenting.
   bool IsOtherClientPresenting(VRServiceImpl* service);
@@ -97,7 +94,6 @@ class CONTENT_EXPORT XRRuntimeManagerImpl
   // VRDeviceProviderClient implementation
   void AddRuntime(
       device::mojom::XRDeviceId id,
-      device::mojom::VRDisplayInfoPtr info,
       device::mojom::XRDeviceDataPtr device_data,
       mojo::PendingRemote<device::mojom::XRRuntime> runtime) override;
   void RemoveRuntime(device::mojom::XRDeviceId id) override;

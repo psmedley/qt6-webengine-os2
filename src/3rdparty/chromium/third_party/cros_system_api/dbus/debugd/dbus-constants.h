@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Copyright 2015 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@ const char kCupsAddManuallyConfiguredPrinter[] =
     "CupsAddManuallyConfiguredPrinter";
 const char kCupsAddAutoConfiguredPrinter[] = "CupsAddAutoConfiguredPrinter";
 const char kCupsRemovePrinter[] = "CupsRemovePrinter";
+const char kCupsRetrievePpd[] = "CupsRetrievePpd";
 const char kDumpDebugLogs[] = "DumpDebugLogs";
 const char kGetInterfaces[] = "GetInterfaces";
 const char kGetNetworkStatus[] = "GetNetworkStatus";
@@ -31,8 +32,8 @@ const char kSystraceStatus[] = "SystraceStatus";
 const char kGetLog[] = "GetLog";
 const char kGetAllLogs[] = "GetAllLogs";
 const char kGetBigFeedbackLogs[] = "GetBigFeedbackLogs";
+const char kGetFeedbackLogsV2[] = "GetFeedbackLogsV2";
 const char kKstaledSetRatio[] = "KstaledSetRatio";
-const char kGetJournalLog[] = "GetJournalLog";
 const char kTestICMP[] = "TestICMP";
 const char kTestICMPWithOptions[] = "TestICMPWithOptions";
 const char kLogKernelTaskStates[] = "LogKernelTaskStates";
@@ -54,6 +55,10 @@ const char kGetU2fFlags[] = "GetU2fFlags";
 const char kSetSchedulerConfiguration[] = "SetSchedulerConfiguration";
 const char kSetSchedulerConfigurationV2[] = "SetSchedulerConfigurationV2";
 const char kSwapSetParameter[] = "SwapSetParameter";
+const char kSwapZramEnableWriteback[] = "SwapZramEnableWriteback";
+const char kSwapZramMarkIdle[] = "SwapZramMarkIdle";
+const char kSwapZramSetWritebackLimit[] = "SwapZramSetWritebackLimit";
+const char kSwapZramWriteback[] = "InitiateSwapZramWriteback";
 const char kBackupArcBugReport[] = "BackupArcBugReport";
 const char kDeleteArcBugReportBackup[] = "DeleteArcBugReportBackup";
 const char kKernelFeatureList[] = "KernelFeatureList";
@@ -67,6 +72,14 @@ const char kPacketCaptureStopSignal[] = "PacketCaptureStop";
 
 // Properties.
 const char kCrashSenderTestMode[] = "CrashSenderTestMode";
+
+// ZramWritebackMode contains the allowed modes of operation
+// for zram writeback.
+enum ZramWritebackMode {
+  WRITEBACK_IDLE = 0x001,
+  WRITEBACK_HUGE = 0x002,
+  WRITEBACK_HUGE_IDLE = 0x004,
+};
 
 // Values.
 enum DevFeatureFlag {
@@ -123,6 +136,21 @@ enum DRMSnapshotType {
   DRMSnapshotType_MODETEST = 1,
 };
 
+// FeedbackLogType contains the enum representation of different log categories
+// debugd/src/log_tool.h reads from.
+enum FeedbackLogType {
+  ARC_BUG_REPORT = 0,
+  CONNECTIVITY_REPORT = 1,
+  VERBOSE_COMMAND_LOGS = 2,
+  COMMAND_LOGS = 3,
+  FEEDBACK_LOGS = 4,
+  BLUETOOTH_BQR = 5,
+  LSB_RELEASE_INFO = 6,
+  PERF_DATA = 7,
+  OS_RELEASE_INFO = 8,
+  VAR_LOG_FILES = 9,
+};
+
 // Debug log keys which should be substituted in the system info dialog.
 const char kIwlwifiDumpKey[] = "iwlwifi_dump";
 
@@ -141,6 +169,7 @@ constexpr char kG2f[] = "g2f";
 constexpr char kVerbose[] = "verbose";
 constexpr char kUserKeys[] = "user_keys";
 constexpr char kAllowlistData[] = "allowlist_data";
+constexpr char kCorpProtocol[] = "corp_protocol";
 }  // namespace u2f_flags
 
 }  // namespace debugd

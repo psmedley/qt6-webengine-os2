@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -136,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(SnapshotAXTreeFencedFrameBrowserTest,
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(shell()->web_contents());
 
-  RenderFrameHostImpl* primary_rfh = web_contents->GetMainFrame();
+  RenderFrameHostImpl* primary_rfh = web_contents->GetPrimaryMainFrame();
   std::vector<FencedFrame*> fenced_frames = primary_rfh->GetFencedFrames();
   EXPECT_EQ(1u, fenced_frames.size());
 

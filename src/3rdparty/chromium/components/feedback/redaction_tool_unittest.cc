@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,8 @@ const StringWithRedaction kStringsWithRedactions[] = {
      "aaaaaaaa [SSID=<SSID: 1>]aaaaa", PIIType::kSSID},
     {"aaaaaaaahttp://tets.comaaaaaaa",  // URL.
      "aaaaaaaa<URL: 1>", PIIType::kURL},
-    {"u:object_r:system_data_file:s0:c512,c768",  // No PII, it is an SELinux context.
+    {"u:object_r:system_data_file:s0:c512,c768",  // No PII, it is an SELinux
+                                                  // context.
      "u:object_r:system_data_file:s0:c512,c768", PIIType::kNone},
     {"aaaaaemail@example.comaaa",  // Email address.
      "<email: 1>", PIIType::kEmail},
@@ -112,6 +113,8 @@ const StringWithRedaction kStringsWithRedactions[] = {
      "255.300.255.255", PIIType::kNone},
     {"3-1.2.3.4",  // USB path, not an IP address.
      "3-1.2.3.4", PIIType::kNone},
+    {"Revision: 81600.0000.00.29.19.16_DO",  // Modem firmware
+     "Revision: 81600.0000.00.29.19.16_DO", PIIType::kNone},
     {"aaaa123.123.45.4aaa",  // IP address.
      "aaaa<IPv4: 23>aaa", PIIType::kIPAddress},
     {"11:11;11::11",  // IP address.
@@ -180,8 +183,12 @@ const StringWithRedaction kStringsWithRedactions[] = {
      "<URL: 2>", PIIType::kURL},
     {"chrome-extension://nkoccljplnhpfnfiajclkommnmllphnl/foobar.js?bar=x",
      "<URL: 3>", PIIType::kURL},  // Potentially PII in parameter.
+    {"isolated-app://airugqztij5biqquuk3mfwpsaibuegaqcitgfchwuosuofdjabzqaaac/",
+     "<URL: 4>", PIIType::kURL},  // URL
     {"/root/27540283740a0897ab7c8de0f809add2bacde78f/foo",
-     "/root/<HASH:2754 1>/foo", PIIType::kHash},  // Hash string.
+     "/root/<HASH:2754 1>/foo", PIIType::kStableIdentifier},  // Hash string.
+    {"B3mcFTkQAHofv94DDTUuVJGGEI/BbzsyDncplMCR2P4=", "<UID: 1>",
+     PIIType::kStableIdentifier},
 #if BUILDFLAG(IS_CHROMEOS_ASH)    // We only redact Android paths on Chrome OS.
     // Allowed android storage path.
     {"112K\t/home/root/deadbeef1234/android-data/data/system_de",
@@ -361,6 +368,16 @@ TEST_F(RedactionToolTest, RedactCustomPatterns) {
             RedactCustomPatterns("ssid=\"LittleTsunami\""));
   EXPECT_EQ("* SSID=<SSID: 5>", RedactCustomPatterns("* SSID=agnagna"));
 
+  EXPECT_EQ("Specifier: <ArcNetworkFactory#1> SSID: <SSID: 6>",
+            RedactCustomPatterns(
+                "Specifier: <ArcNetworkFactory#1> SSID: \"GoogleGuest\""));
+  EXPECT_EQ("Specifier: <ArcNetworkFactory#1> SSID: <SSID: 7>",
+            RedactCustomPatterns(
+                "Specifier: <ArcNetworkFactory#1> SSID: 'GoogleGuest'"));
+  EXPECT_EQ("Specifier: <ArcNetworkFactory#1> SSID: <SSID: 8>",
+            RedactCustomPatterns(
+                "Specifier: <ArcNetworkFactory#1> SSID: GoogleGuest"));
+
   EXPECT_EQ("SerialNumber: <Serial: 1>",
             RedactCustomPatterns("SerialNumber: 1217D7EF"));
   EXPECT_EQ("serial  number: <Serial: 2>",
@@ -430,6 +447,26 @@ TEST_F(RedactionToolTest, RedactCustomPatterns) {
   // USB Path - not an actual IPv4 Address
   EXPECT_EQ("4-3.3.3.3", RedactCustomPatterns("4-3.3.3.3"));
 
+  // ModemManager modem firmware revisions - not actual IPv4 Addresses
+  EXPECT_EQ("Revision: 81600.0000.00.29.19.16_DO",
+            RedactCustomPatterns("Revision: 81600.0000.00.29.19.16_DO"));
+  EXPECT_EQ("Revision: 11.608.09.01.21",
+            RedactCustomPatterns("Revision: 11.608.09.01.21"));
+  EXPECT_EQ("Revision: 11.208.09.01.21",
+            RedactCustomPatterns("Revision: 11.208.09.01.21"));
+  EXPECT_EQ("Revision: BD_3GHAP673A4V1.0.0B02",
+            RedactCustomPatterns("Revision: BD_3GHAP673A4V1.0.0B02"));
+  EXPECT_EQ("Revision: 2.5.21Hd (Date: Jun 17 2008, Time: 12:30:47)",
+            RedactCustomPatterns(
+                "Revision: 2.5.21Hd (Date: Jun 17 2008, Time: 12:30:47)"));
+  EXPECT_EQ(
+      "Revision: 9.5.05.01-02  [2006-10-20 17:19:09]",
+      RedactCustomPatterns("Revision: 9.5.05.01-02  [2006-10-20 17:19:09]"));
+  EXPECT_EQ("Revision: LQA0021.1.1_M573A",
+            RedactCustomPatterns("Revision: LQA0021.1.1_M573A"));
+  EXPECT_EQ("Revision: 10.10.10.10",
+            RedactCustomPatterns("Revision: 10.10.10.10"));
+
   EXPECT_EQ("<URL: 1>", RedactCustomPatterns("http://example.com/foo?test=1"));
   EXPECT_EQ("Foo <URL: 2> Bar",
             RedactCustomPatterns("Foo http://192.168.0.1/foo?test=1#123 Bar"));
@@ -468,11 +505,11 @@ TEST_F(RedactionToolTest, RedactCustomPatternWithContext) {
   // The PIIType for the CustomPatternWithAlias is not relevant, only for
   // testing.
   const CustomPatternWithAlias kPattern1 = {"ID", "(\\b(?i)id:? ')(\\d+)(')",
-                                            PIIType::kUUID};
+                                            PIIType::kStableIdentifier};
   const CustomPatternWithAlias kPattern2 = {"ID", "(\\b(?i)id=')(\\d+)(')",
-                                            PIIType::kUUID};
+                                            PIIType::kStableIdentifier};
   const CustomPatternWithAlias kPattern3 = {"IDG", "(\\b(?i)idg=')(\\d+)(')",
-                                            PIIType::kCellID};
+                                            PIIType::kLocationInfo};
   EXPECT_EQ("", RedactCustomPatternWithContext("", kPattern1));
   EXPECT_EQ("foo\nbar\n",
             RedactCustomPatternWithContext("foo\nbar\n", kPattern1));
@@ -543,15 +580,23 @@ TEST_F(RedactionToolTest, RedactAndKeepSelected) {
   // will be redacted with the URL or Android storage path that they're part of.
   std::string redaction_output_mac_and_hashes;
   for (const auto& s : kStringsWithRedactions) {
-    if (s.pii_type == PIIType::kMACAddress || s.pii_type == PIIType::kHash) {
+    if (s.pii_type == PIIType::kMACAddress ||
+        s.pii_type == PIIType::kStableIdentifier) {
       redaction_output_mac_and_hashes.append(s.pre_redaction).append("\n");
     } else {
       redaction_output_mac_and_hashes.append(s.post_redaction).append("\n");
     }
   }
-  EXPECT_EQ(redaction_output_mac_and_hashes,
+  EXPECT_EQ(
+      redaction_output_mac_and_hashes,
+      redactor_.RedactAndKeepSelected(
+          redaction_input, {PIIType::kMACAddress, PIIType::kStableIdentifier}));
+}
+
+TEST_F(RedactionToolTest, RedactUid) {
+  EXPECT_EQ("<UID: 1>",
             redactor_.RedactAndKeepSelected(
-                redaction_input, {PIIType::kMACAddress, PIIType::kHash}));
+                "B3mcFTkQAHofv94DDTUuVJGGEI/BbzsyDncplMCR2P4=", {}));
 }
 
 TEST_F(RedactionToolTest, RedactAndKeepSelectedHashes) {
@@ -603,7 +648,10 @@ TEST_F(RedactionToolTest, DetectPII) {
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
         {PIIType::kSSID, {"123aaaaaa"}},
         {PIIType::kURL,
-         {"http://tets.comaaaaaaa", "chrome://resources/f?user=bar",
+         {"http://tets.comaaaaaaa",
+          "isolated-app://"
+          "airugqztij5biqquuk3mfwpsaibuegaqcitgfchwuosuofdjabzqaaac/",
+          "chrome://resources/f?user=bar",
           "chrome-extension://nkoccljplnhpfnfiajclkommnmllphnl/"
           "foobar.js?bar=x"}},
         {PIIType::kEmail, {"aaaaaemail@example.comaaa"}},
@@ -652,7 +700,10 @@ TEST_F(RedactionToolTest, DetectPII) {
              "::0101:ffff:c0a8:640a",
          }},
         {PIIType::kMACAddress, {"aa:aa:aa:aa:aa:aa"}}, {
-      PIIType::kHash, { "27540283740a0897ab7c8de0f809add2bacde78f" }
+      PIIType::kStableIdentifier, {
+        "27540283740a0897ab7c8de0f809add2bacde78f",
+        "B3mcFTkQAHofv94DDTUuVJGGEI/BbzsyDncplMCR2P4=",
+      }
     }
   };
 

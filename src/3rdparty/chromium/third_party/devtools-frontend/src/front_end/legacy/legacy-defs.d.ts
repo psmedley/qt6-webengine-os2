@@ -60,10 +60,6 @@ declare namespace Adb {
   type NetworkDiscoveryConfig = string[];
 }
 
-interface Document {
-  deepActiveElement(): Element|null;
-}
-
 interface HTMLElement {
   createChild(tagName: string, className?: string, content?: string): HTMLElement;
   totalOffset(): {left: number, top: number};
@@ -112,7 +108,6 @@ interface Node {
 }
 
 declare function isEnterOrSpaceKey(event: Event): boolean;
-declare function isEscKey(event: Event): boolean;
 declare function onInvokeElement(element: Element, callback: (event: Event) => void): void;
 
 // The following types exist in Chrome but were removed for various reasons
@@ -126,8 +121,8 @@ interface DOMError {
 }
 
 interface ShadowRoot {
-  elementFromPoint(x: number, y: number): Element | null;
-  getSelection(): Selection | null;
+  elementFromPoint(x: number, y: number): Element|null;
+  getSelection(): Selection|null;
 }
 
 interface HTMLDialogElement {

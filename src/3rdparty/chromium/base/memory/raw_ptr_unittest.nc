@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include <tuple>  // for std::ignore
 #include <type_traits>  // for std::remove_pointer_t
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/memory/raw_ptr.h"
 
 namespace {
@@ -23,7 +25,7 @@ struct PmfTest {
   int Func(char, double) const { return 11; }
 };
 
-#if defined(NCTEST_AUTO_DOWNCAST)  // [r"no viable conversion from 'raw_ptr<\(anonymous namespace\)::Producer>' to 'raw_ptr<\(anonymous namespace\)::DerivedProducer>'"]
+#if defined(NCTEST_AUTO_DOWNCAST)  // [r"no viable conversion from 'raw_ptr<Producer>' to 'raw_ptr<DerivedProducer>'"]
 
 void WontCompile() {
   Producer f;
@@ -31,7 +33,7 @@ void WontCompile() {
   raw_ptr<DerivedProducer> derived_ptr = ptr;
 }
 
-#elif defined(NCTEST_STATIC_DOWNCAST)  // [r"no matching conversion for static_cast from 'raw_ptr<\(anonymous namespace\)::Producer>' to 'raw_ptr<\(anonymous namespace\)::DerivedProducer>'"]
+#elif defined(NCTEST_STATIC_DOWNCAST)  // [r"no matching conversion for static_cast from 'raw_ptr<Producer>' to 'raw_ptr<DerivedProducer>'"]
 
 void WontCompile() {
   Producer f;
@@ -40,7 +42,7 @@ void WontCompile() {
       static_cast<raw_ptr<DerivedProducer>>(ptr);
 }
 
-#elif defined(NCTEST_AUTO_REF_DOWNCAST)  // [r"non-const lvalue reference to type 'raw_ptr<\(anonymous namespace\)::DerivedProducer>' cannot bind to a value of unrelated type 'raw_ptr<\(anonymous namespace\)::Producer>'"]
+#elif defined(NCTEST_AUTO_REF_DOWNCAST)  // [r"non-const lvalue reference to type 'raw_ptr<DerivedProducer>' cannot bind to a value of unrelated type 'raw_ptr<Producer>'"]
 
 void WontCompile() {
   Producer f;
@@ -48,7 +50,7 @@ void WontCompile() {
   raw_ptr<DerivedProducer>& derived_ptr = ptr;
 }
 
-#elif defined(NCTEST_STATIC_REF_DOWNCAST)  // [r"non-const lvalue reference to type 'raw_ptr<\(anonymous namespace\)::DerivedProducer>' cannot bind to a value of unrelated type 'raw_ptr<\(anonymous namespace\)::Producer>'"]
+#elif defined(NCTEST_STATIC_REF_DOWNCAST)  // [r"non-const lvalue reference to type 'raw_ptr<DerivedProducer>' cannot bind to a value of unrelated type 'raw_ptr<Producer>'"]
 
 void WontCompile() {
   Producer f;
@@ -57,14 +59,14 @@ void WontCompile() {
       static_cast<raw_ptr<DerivedProducer>&>(ptr);
 }
 
-#elif defined(NCTEST_AUTO_DOWNCAST_FROM_RAW) // [r"no viable conversion from '\(anonymous namespace\)::Producer \*' to 'raw_ptr<\(anonymous namespace\)::DerivedProducer>'"]
+#elif defined(NCTEST_AUTO_DOWNCAST_FROM_RAW) // [r"no viable conversion from 'Producer \*' to 'raw_ptr<DerivedProducer>'"]
 
 void WontCompile() {
   Producer f;
   raw_ptr<DerivedProducer> ptr = &f;
 }
 
-#elif defined(NCTEST_UNRELATED_FROM_RAW) // [r"no viable conversion from '\(anonymous namespace\)::DerivedProducer \*' to 'raw_ptr<\(anonymous namespace\)::Unrelated>'"]
+#elif defined(NCTEST_UNRELATED_FROM_RAW) // [r"no viable conversion from 'DerivedProducer \*' to 'raw_ptr<Unrelated>'"]
 
 void WontCompile() {
   DerivedProducer f;
@@ -108,6 +110,19 @@ void WontCompile() {
 
 void WontCompile() {
   [[maybe_unused]] raw_ptr<int> ptr = std::make_unique<int>(2).get();
+}
+
+#elif defined(NCTEST_BINDING_RAW_PTR_PARAMETER) // [r"base::Bind\(\) target functor has a parameter of type raw_ptr<T>."]
+
+void WontCompile() {
+  raw_ptr<int> ptr = new int(3);
+
+  // Make sure that we are not allowed to bind a function with a raw_ptr<T>
+  // parameter type.
+  auto callback = base::BindOnce(
+      [](raw_ptr<int> ptr) {
+      },
+      ptr);
 }
 
 #endif

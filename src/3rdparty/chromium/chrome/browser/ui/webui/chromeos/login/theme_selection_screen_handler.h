@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,13 @@ class ThemeSelectionScreenView
   constexpr static StaticOobeScreenId kScreenId{"theme-selection",
                                                 "ThemeSelectionScreen"};
 
+  inline constexpr static char kAutoMode[] = "auto";
+  inline constexpr static char kDarkMode[] = "dark";
+  inline constexpr static char kLightMode[] = "light";
+
   virtual ~ThemeSelectionScreenView() = default;
 
-  virtual void Show() = 0;
+  virtual void Show(const std::string& mode) = 0;
 };
 
 class ThemeSelectionScreenHandler : public ThemeSelectionScreenView,
@@ -43,7 +47,7 @@ class ThemeSelectionScreenHandler : public ThemeSelectionScreenView,
   ~ThemeSelectionScreenHandler() override;
 
   // ThemeSelectionScreenView implementation
-  void Show() override;
+  void Show(const std::string& mode) override;
 
   // BaseScreenHandler implementation
   void DeclareLocalizedValues(

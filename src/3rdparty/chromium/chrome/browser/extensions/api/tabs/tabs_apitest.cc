@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/prerender_test_util.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
@@ -82,30 +83,32 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiNewTabTest, Tabs) {
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kHomePageIsNewTabPage, true);
 
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "crud.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "crud.html"}))
       << message_;
 }
 
 // TODO(crbug.com/1177118) Re-enable test
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, DISABLED_TabAudible) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "audible.html"}))
+  ASSERT_TRUE(
+      RunExtensionTest("tabs/basics", {.extension_url = "audible.html"}))
       << message_;
 }
 
 // http://crbug.com/521410
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, DISABLED_TabMuted) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "muted.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "muted.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, Tabs2) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "crud2.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "crud2.html"}))
       << message_;
 }
 
 // crbug.com/149924
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, DISABLED_TabDuplicate) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "duplicate.html"}))
+  ASSERT_TRUE(
+      RunExtensionTest("tabs/basics", {.extension_url = "duplicate.html"}))
       << message_;
 }
 
@@ -115,17 +118,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabSize) {
   // below if possible.
   ui::ScopedDisableClientSideDecorationsForTest scoped_disabled_csd;
 
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "tab_size.html"}))
+  ASSERT_TRUE(
+      RunExtensionTest("tabs/basics", {.extension_url = "tab_size.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabUpdate) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "update.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "update.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabPinned) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "pinned.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "pinned.html"}))
       << message_;
 }
 
@@ -136,49 +140,50 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabPinned) {
 #define MAYBE_TabMove TabMove
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, MAYBE_TabMove) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "move.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "move.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabEvents) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "events.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "events.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabRelativeURLs) {
   ASSERT_TRUE(
-      RunExtensionTest("tabs/basics", {.page_url = "relative_urls.html"}))
+      RunExtensionTest("tabs/basics", {.extension_url = "relative_urls.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabQuery) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "query.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "query.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabHighlight) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "highlight.html"}))
+  ASSERT_TRUE(
+      RunExtensionTest("tabs/basics", {.extension_url = "highlight.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabCrashBrowser) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "crash.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "crash.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabOpener) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "opener.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "opener.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabRemove) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "remove.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.extension_url = "remove.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, TabRemoveMultiple) {
-  ASSERT_TRUE(
-      RunExtensionTest("tabs/basics", {.page_url = "remove-multiple.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics",
+                               {.extension_url = "remove-multiple.html"}))
       << message_;
 }
 
@@ -350,8 +355,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, IncognitoDisabledByPref) {
 #define MAYBE_GetViewsOfCreatedPopup GetViewsOfCreatedPopup
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, MAYBE_GetViewsOfCreatedPopup) {
-  ASSERT_TRUE(
-      RunExtensionTest("tabs/basics", {.page_url = "get_views_popup.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics",
+                               {.extension_url = "get_views_popup.html"}))
       << message_;
 }
 
@@ -362,13 +367,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, MAYBE_GetViewsOfCreatedPopup) {
 #define MAYBE_GetViewsOfCreatedWindow GetViewsOfCreatedWindow
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, MAYBE_GetViewsOfCreatedWindow) {
-  ASSERT_TRUE(
-      RunExtensionTest("tabs/basics", {.page_url = "get_views_window.html"}))
+  ASSERT_TRUE(RunExtensionTest("tabs/basics",
+                               {.extension_url = "get_views_window.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabTest, OnUpdatedDiscardedState) {
-  ASSERT_TRUE(RunExtensionTest("tabs/basics", {.page_url = "discarded.html"}))
+  ASSERT_TRUE(
+      RunExtensionTest("tabs/basics", {.extension_url = "discarded.html"}))
       << message_;
 }
 
@@ -458,12 +464,34 @@ IN_PROC_BROWSER_TEST_P(IncognitoExtensionApiTabTest, Tabs) {
       extensions::ExtensionTabUtil::GetWindowId(incognito_browser));
 
   EXPECT_TRUE(RunExtensionTest(
-      "tabs/basics", {.page_url = "incognito.html", .custom_arg = args.c_str()},
+      "tabs/basics",
+      {.extension_url = "incognito.html", .custom_arg = args.c_str()},
       {.allow_in_incognito = is_incognito_enabled}))
       << message_;
 }
 
 INSTANTIATE_TEST_SUITE_P(All, IncognitoExtensionApiTabTest, testing::Bool());
+
+class ExtensionApiTabPrerenderingTest : public ExtensionApiTabTest {
+ public:
+  ExtensionApiTabPrerenderingTest()
+      : prerender_helper_(base::BindRepeating(
+            &ExtensionApiTabPrerenderingTest::GetWebContents,
+            base::Unretained(this))) {}
+  ~ExtensionApiTabPrerenderingTest() override = default;
+
+  content::WebContents* GetWebContents() {
+    return browser()->tab_strip_model()->GetWebContentsAt(0);
+  }
+
+ private:
+  content::test::PrerenderTestHelper prerender_helper_;
+};
+
+// TODO(crbug.com/1352966): Flaky on multiple platforms.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTabPrerenderingTest, DISABLED_Prerendering) {
+  ASSERT_TRUE(RunExtensionTest("tabs/prerendering")) << message_;
+}
 
 // Adding a new test? Awesome. But API tests are the old hotness. The new
 // hotness is extension_function_test_utils. See tabs_test.cc for an example.

@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -29,7 +30,6 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "net/base/escape.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "ui/accessibility/platform/inspect/ax_api_type.h"
 #include "ui/accessibility/platform/inspect/ax_tree_formatter.h"
@@ -113,8 +113,9 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   do {
     // Dump the event logs, running them through any filters specified
     // in the HTML file.
-    auto [go_results, event_logs] = CaptureEvents(base::BindOnce(
-        &ExecuteScriptAndGetValue, web_contents->GetMainFrame(), "go()"));
+    auto [go_results, event_logs] = CaptureEvents(
+        base::BindOnce(&ExecuteScriptAndGetValue,
+                       web_contents->GetPrimaryMainFrame(), "go()"));
     run_go_again = go_results.is_bool() && go_results.GetBool();
     // Save a copy of the final accessibility tree (as a text dump); we'll
     // log this for the user later if the test fails.
@@ -123,7 +124,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
     for (auto& event_log : event_logs) {
       if (AXTreeFormatter::MatchesPropertyFilters(scenario_.property_filters,
                                                   event_log, true)) {
-        result.push_back(net::EscapeNonASCII(event_log));
+        result.push_back(base::EscapeNonASCII(event_log));
       }
     }
 
@@ -159,6 +160,9 @@ void DumpAccessibilityEventsTest::RunEventTest(
   RunTest(event_file, "accessibility/event");
 }
 
+class DumpAccessibilityEventsTestExceptUIA
+    : public DumpAccessibilityEventsTest {};
+
 // Parameterize the tests so that each test-pass is run independently.
 struct DumpAccessibilityEventsTestPassToString {
   std::string operator()(
@@ -170,11 +174,19 @@ struct DumpAccessibilityEventsTestPassToString {
 INSTANTIATE_TEST_SUITE_P(
     All,
     DumpAccessibilityEventsTest,
-    ::testing::ValuesIn(DumpAccessibilityTestHelper::EventTestPasses()),
+    ::testing::ValuesIn(ui::AXInspectTestHelper::EventTestPasses()),
+    DumpAccessibilityEventsTestPassToString());
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    DumpAccessibilityEventsTestExceptUIA,
+    ::testing::ValuesIn(DumpAccessibilityTestBase::EventTestPassesExceptUIA()),
     DumpAccessibilityEventsTestPassToString());
 
 // This test suite is empty on some OSes.
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(DumpAccessibilityEventsTest);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    DumpAccessibilityEventsTestExceptUIA);
 
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
                        AccessibilityEventsAriaAtomicChanged) {
@@ -587,6 +599,17 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
 }
 
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaExpandedAndCollapsed) {
+  RunEventTest(FILE_PATH_LITERAL("aria-expanded-and-collapsed.html"));
+}
+
+IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaExpandedAndCollapsedReparenting) {
+  RunEventTest(
+      FILE_PATH_LITERAL("aria-expanded-and-collapsed-reparenting.html"));
+}
+
+IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
                        AccessibilityEventsAriaHiddenDescendants) {
   RunEventTest(FILE_PATH_LITERAL("aria-hidden-descendants.html"));
 }
@@ -790,6 +813,13 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("live-region-remove.html"));
 }
 
+IN_PROC_BROWSER_TEST_P(
+    DumpAccessibilityEventsTest,
+    AccessibilityEventsLiveRegionChangeOnFreshlyUnignoredNode) {
+  RunEventTest(
+      FILE_PATH_LITERAL("live-region-change-on-freshly-unignored-node.html"));
+}
+
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
                        AccessibilityEventsMenuListCollapse) {
   RunEventTest(FILE_PATH_LITERAL("menulist-collapse.html"));
@@ -810,12 +840,18 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
   AccessibilityEventsMenuListExpand
 #endif
 
-// TODO(crbug.com/1230894): locks up with popup open, only on Mac
+// TODO(crbug.com/1230894): locks up with popup open, only on Mac. Default
+// action on selected HTML:option doesn't work, so no events are fired, and
+// the test times out.
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_AccessibilityEventsMenuListNext \
   DISABLED_AccessibilityEventsMenuListNext
+#define MAYBE_AccessibilityEventsMenuWithOptgroupListNext \
+  DISABLED_AccessibilityEventsMenuWithOptgroupListNext
 #else
 #define MAYBE_AccessibilityEventsMenuListNext AccessibilityEventsMenuListNext
+#define MAYBE_AccessibilityEventsMenuWithOptgroupListNext \
+  AccessibilityEventsMenuWithOptgroupListNext
 #endif
 
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
@@ -828,13 +864,14 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("menulist-focus.html"));
 }
 
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
+// TODO(crbug.com/1327652): disabled on UIA
+IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTestExceptUIA,
                        MAYBE_AccessibilityEventsMenuListNext) {
   RunEventTest(FILE_PATH_LITERAL("menulist-next.html"));
 }
 
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
-                       AccessibilityEventsMenuWithOptgroupListNext) {
+IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTestExceptUIA,
+                       MAYBE_AccessibilityEventsMenuWithOptgroupListNext) {
   RunEventTest(FILE_PATH_LITERAL("menulist-with-optgroup-next.html"));
 }
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityEventsTest,
@@ -872,10 +909,11 @@ class NavigationApiDumpAccessibilityEventsTest
   }
 };
 
+// TODO(crbug.com/1327652): disabled on UIA.
 INSTANTIATE_TEST_SUITE_P(
     All,
     NavigationApiDumpAccessibilityEventsTest,
-    ::testing::ValuesIn(DumpAccessibilityTestHelper::EventTestPasses()),
+    ::testing::ValuesIn(DumpAccessibilityTestBase::EventTestPassesExceptUIA()),
     DumpAccessibilityEventsTestPassToString());
 
 // This test suite is empty on some OSes.
@@ -887,8 +925,16 @@ IN_PROC_BROWSER_TEST_P(NavigationApiDumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("navigation-api.html"));
 }
 
+// TODO(crbug.com/1369754): Failing on linux/mac/win multiple builders.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+#define MAYBE_AccessibilityEventsImmediateRefresh \
+  DISABLED_AccessibilityEventsImmediateRefresh
+#else
+#define MAYBE_AccessibilityEventsImmediateRefresh \
+  AccessibilityEventsImmediateRefresh
+#endif
 IN_PROC_BROWSER_TEST_P(NavigationApiDumpAccessibilityEventsTest,
-                       AccessibilityEventsImmediateRefresh) {
+                       MAYBE_AccessibilityEventsImmediateRefresh) {
   RunEventTest(FILE_PATH_LITERAL("immediate-refresh.html"));
 }
 

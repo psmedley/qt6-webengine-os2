@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,9 @@
 #include "testing/gtest/include/gtest/gtest-spi.h"  // IWYU pragma: export
 #include "testing/gtest/include/gtest/gtest.h"      // IWYU pragma: export
 
-namespace quiche {
-namespace test {
+namespace quiche::test {
 
-class QuicheTest : public ::testing::Test {
+class QuicheTestImpl : public ::testing::Test {
  private:
   QuicFlagChecker checker_;
   QuicFlagSaverImpl saver_;  // Save/restore all QUIC flag values.
@@ -41,8 +40,7 @@ class ScopedEnvironmentForThreadsImpl {
 
 std::string QuicheGetCommonSourcePathImpl();
 
-}  // namespace test
-}  // namespace quiche
+}  // namespace quiche::test
 
 #if GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
 #define EXPECT_QUICHE_DEBUG_DEATH_IMPL(condition, message) \

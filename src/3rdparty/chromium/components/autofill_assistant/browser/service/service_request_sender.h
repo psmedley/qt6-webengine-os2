@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ class ServiceRequestSender {
   struct ResponseInfo {
     // The number of bytes transmitted over the network, before decoding. Can be
     // -1 in case of interrupted downloads.
-    size_t encoded_body_length = 0;
+    int64_t encoded_body_length = 0;
   };
 
   using ResponseCallback =
@@ -47,6 +47,8 @@ class ServiceRequestSender {
                            AuthMode auth_mode,
                            ResponseCallback response_callback,
                            RpcType rpc_type) = 0;
+
+  virtual void SetDisableRpcSigning(bool disable_rpc_signing) = 0;
 };
 
 }  // namespace autofill_assistant

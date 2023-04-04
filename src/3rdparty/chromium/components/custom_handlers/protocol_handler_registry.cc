@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/notreached.h"
 #include "base/observer_list.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/custom_handlers/pref_names.h"
@@ -28,6 +29,7 @@
 #include "net/url_request/url_request.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/url_util_qt.h"
+#include "url/url_util.h"
 
 using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
@@ -65,6 +67,21 @@ GURL TranslateUrl(
 }  // namespace
 
 // ProtocolHandlerRegistry -----------------------------------------------------
+
+std::unique_ptr<ProtocolHandlerRegistry> ProtocolHandlerRegistry::Create(
+    PrefService* prefs,
+    std::unique_ptr<Delegate> delegate) {
+  auto registry =
+      std::make_unique<ProtocolHandlerRegistry>(prefs, std::move(delegate));
+
+  // If installing defaults, they must be installed prior calling
+  // InitProtocolSettings.
+  registry->InstallPredefinedHandlers();
+
+  registry->InitProtocolSettings();
+
+  return registry;
+}
 
 ProtocolHandlerRegistry::ProtocolHandlerRegistry(
     PrefService* prefs,
@@ -165,17 +182,11 @@ bool ProtocolHandlerRegistry::IsDefault(const ProtocolHandler& handler) const {
   return GetHandlerFor(handler.protocol()) == handler;
 }
 
-void ProtocolHandlerRegistry::InstallDefaultsForChromeOS() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // Only chromeos has default protocol handlers at this point.
-  AddPredefinedHandler(ProtocolHandler::CreateProtocolHandler(
-      "mailto",
-      GURL("https://mail.google.com/mail/?extsrc=mailto&amp;url=%s")));
-  AddPredefinedHandler(ProtocolHandler::CreateProtocolHandler(
-      "webcal", GURL("https://www.google.com/calendar/render?cid=%s")));
-#else
-  NOTREACHED();  // this method should only ever be called in chromeos.
-#endif
+void ProtocolHandlerRegistry::InstallPredefinedHandlers() {
+  for (const auto& [scheme, handler] : url::GetPredefinedHandlerSchemes()) {
+    AddPredefinedHandler(
+        ProtocolHandler::CreateProtocolHandler(scheme, GURL(handler)));
+  }
 }
 
 void ProtocolHandlerRegistry::InitProtocolSettings() {
@@ -503,7 +514,7 @@ void ProtocolHandlerRegistry::PromoteHandler(const ProtocolHandler& handler) {
   DCHECK(IsRegistered(handler));
   auto p = protocol_handlers_.find(handler.protocol());
   ProtocolHandlerList& list = p->second;
-  list.erase(std::find(list.begin(), list.end(), handler));
+  list.erase(base::ranges::find(list, handler));
   list.insert(list.begin(), handler);
 }
 
@@ -631,16 +642,16 @@ ProtocolHandlerRegistry::GetHandlersFromPref(const char* pref_name) const {
     return result;
   }
 
-  const base::Value* handlers = prefs_->GetList(pref_name);
-  if (handlers) {
-    for (const auto& list_item : handlers->GetList()) {
-      if (const base::Value::Dict* encoded_handler = list_item.GetIfDict()) {
-        if (ProtocolHandler::IsValidDict(*encoded_handler)) {
-          result.push_back(encoded_handler);
-        }
+  const base::Value::List& handlers = prefs_->GetList(pref_name);
+
+  for (const auto& list_item : handlers) {
+    if (const base::Value::Dict* encoded_handler = list_item.GetIfDict()) {
+      if (ProtocolHandler::IsValidDict(*encoded_handler)) {
+        result.push_back(encoded_handler);
       }
     }
   }
+
   return result;
 #else
   NOTREACHED();
@@ -705,7 +716,7 @@ void ProtocolHandlerRegistry::EraseHandler(const ProtocolHandler& handler,
 
 void ProtocolHandlerRegistry::EraseHandler(const ProtocolHandler& handler,
                                            ProtocolHandlerList* list) {
-  list->erase(std::find(list->begin(), list->end(), handler));
+  list->erase(base::ranges::find(*list, handler));
 }
 
 #if !defined(TOOLKIT_QT)

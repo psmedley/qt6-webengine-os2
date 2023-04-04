@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -779,7 +779,7 @@ TEST_F(BluetoothSerialPortImplTest, Close) {
   EXPECT_CALL(mock_socket(), Disconnect(_)).WillOnce(RunOnceCallback<0>());
 
   base::RunLoop close_loop;
-  serial_port->Close(close_loop.QuitClosure());
+  serial_port->Close(/*flush=*/false, close_loop.QuitClosure());
   close_loop.Run();
 
   base::RunLoop disconnect_loop;

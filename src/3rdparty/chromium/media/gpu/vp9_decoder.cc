@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "media/base/limits.h"
@@ -33,7 +34,7 @@ bool GetSpatialLayerFrameSize(const DecoderBuffer& decoder_buffer,
 // due to we want keep returning false to MediaCapability.
 #if BUILDFLAG(IS_WIN)
       base::FeatureList::IsEnabled(media::kD3D11Vp9kSVCHWDecoding);
-#elif defined(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+#elif BUILDFLAG(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
       // V4L2 stateless API decoder is not capable of decoding VP9 k-SVC stream.
       false;
 #else
@@ -85,9 +86,20 @@ bool IsValidBitDepth(uint8_t bit_depth, VideoCodecProfile profile) {
   }
 }
 
-bool IsYUV420Sequence(const Vp9FrameHeader& frame_header) {
-  // Spec 7.2.2
-  return frame_header.subsampling_x == 1u && frame_header.subsampling_y == 1u;
+VideoChromaSampling GetVP9ChromaSampling(const Vp9FrameHeader& frame_header) {
+  // Spec section 7.2.2
+  uint8_t subsampling_x = frame_header.subsampling_x;
+  uint8_t subsampling_y = frame_header.subsampling_y;
+  if (subsampling_x == 0 && subsampling_y == 0) {
+    return VideoChromaSampling::k444;
+  } else if (subsampling_x == 1u && subsampling_y == 0u) {
+    return VideoChromaSampling::k422;
+  } else if (subsampling_x == 1u && subsampling_y == 1u) {
+    return VideoChromaSampling::k420;
+  } else {
+    DLOG(WARNING) << "Unknown chroma sampling format.";
+    return VideoChromaSampling::kUnknown;
+  }
 }
 }  // namespace
 
@@ -265,7 +277,15 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
                << ", profile=" << GetProfileName(new_profile);
       return kDecodeError;
     }
-    if (!IsYUV420Sequence(*curr_frame_hdr_)) {
+    VideoChromaSampling new_chroma_sampling =
+        GetVP9ChromaSampling(*curr_frame_hdr_);
+    if (new_chroma_sampling != chroma_sampling_) {
+      chroma_sampling_ = new_chroma_sampling;
+      base::UmaHistogramEnumeration(
+          "Media.PlatformVideoDecoding.ChromaSampling", chroma_sampling_);
+    }
+
+    if (chroma_sampling_ != VideoChromaSampling::k420) {
       DVLOG(1) << "Only YUV 4:2:0 is supported";
       return kDecodeError;
     }
@@ -406,6 +426,10 @@ VideoCodecProfile VP9Decoder::GetProfile() const {
 
 uint8_t VP9Decoder::GetBitDepth() const {
   return bit_depth_;
+}
+
+VideoChromaSampling VP9Decoder::GetChromaSampling() const {
+  return chroma_sampling_;
 }
 
 size_t VP9Decoder::GetRequiredNumOfPictures() const {

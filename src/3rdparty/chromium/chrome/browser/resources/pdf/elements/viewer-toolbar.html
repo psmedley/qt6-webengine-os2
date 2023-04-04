@@ -246,14 +246,13 @@
   <div id="end">
   <if expr="enable_ink">
     <template is="dom-if" if="[[pdfAnnotationsEnabled]]">
-      <cr-icon-button id="annotate" iron-icon="pdf:create"
+      <cr-icon-button id="annotate" iron-icon="cr:create"
           on-click="onAnnotationClick_"
           aria-label="$i18n{tooltipAnnotate}"
           disabled="[[!annotationsAvailable]]"
           title="$i18n{tooltipAnnotate}"></cr-icon-button>
     </template>
   </if>
-<!-- to do (mibrunin): Check if we can enable these buttons for Qt WebEngine
     <viewer-download-controls id="downloads"
         has-edits="[[hasEdits]]"
         has-entered-annotation-mode="[[hasEnteredAnnotationMode]]"
@@ -263,7 +262,6 @@
         hidden="[[!printingEnabled]]" title="$i18n{tooltipPrint}"
         aria-label="$i18n{tooltipPrint}" on-click="onPrintClick_">
     </cr-icon-button>
--->
     <cr-icon-button id="more" iron-icon="cr:more-vert"
         title="$i18n{moreActions}" aria-label="$i18n{moreActions}"
         on-click="onMoreClick_"></cr-icon-button>

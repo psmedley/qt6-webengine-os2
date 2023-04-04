@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -148,8 +148,8 @@ class ChromeURLDataManagerWebUITrustedTypesTest
       public testing::WithParamInterface<const char*> {
  public:
   ChromeURLDataManagerWebUITrustedTypesTest() {
-    std::vector<base::Feature> enabled_features;
-#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_CHROMEOS_LACROS)
+    std::vector<base::test::FeatureRef> enabled_features;
+#if !BUILDFLAG(IS_CHROMEOS)
     if (GetParam() == std::string("chrome://welcome"))
       enabled_features.push_back(welcome::kForceEnabled);
 #endif
@@ -220,7 +220,6 @@ static constexpr const char* const kChromeUrls[] = {
     "chrome://dino",
     // TODO(crbug.com/1113446): Test failure due to excessive output.
     // "chrome://discards",
-    "chrome://domain-reliability-internals",
     "chrome://download-internals",
     "chrome://downloads",
     "chrome://extensions",
@@ -296,7 +295,6 @@ static constexpr const char* const kChromeUrls[] = {
 #endif
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     "chrome://account-manager-error",
-    "chrome://account-manager-welcome",
     "chrome://account-migration-welcome",
     "chrome://add-supervision",
     // TODO(crbug.com/1102129): DCHECK failure in
@@ -317,11 +315,10 @@ static constexpr const char* const kChromeUrls[] = {
     "chrome://linux-proxy-config",
     "chrome://multidevice-setup",
     "chrome://network",
-    // TODO(crbug.com/1329058): Eliminate chrome://oobe/login
-    "chrome://oobe/login",
     "chrome://os-credits",
     "chrome://os-settings",
     "chrome://power",
+    "chrome://projector",
     "chrome://proximity-auth/proximity_auth.html",
     "chrome://set-time",
     "chrome://slow",
@@ -341,6 +338,8 @@ static constexpr const char* const kChromeUrls[] = {
 #if !BUILDFLAG(IS_MAC)
     "chrome://sandbox",
     "chrome://nacl",
+#endif
+#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_CHROMEOS_LACROS)
     // TODO(https://crbug.com/1219651): this test is flaky on mac.
     "chrome://bluetooth-internals",
 #endif

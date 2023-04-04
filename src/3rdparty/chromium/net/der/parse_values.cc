@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,7 @@
 #include "base/third_party/icu/icu_utf.h"
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
 
-namespace net {
-
-namespace der {
+namespace net::der {
 
 namespace {
 
@@ -236,7 +234,7 @@ bool BitString::AssertsBit(size_t bit_index) const {
   return 0 != (byte & (1 << bit_index_in_byte));
 }
 
-bool ParseBitString(const Input& in, BitString* out) {
+absl::optional<BitString> ParseBitString(const Input& in) {
   ByteReader reader(in);
 
   // From ITU-T X.690, section 8.6.2.2 (applies to BER, CER, DER):
@@ -246,13 +244,13 @@ bool ParseBitString(const Input& in, BitString* out) {
   // subsequent octet. The number shall be in the range zero to seven.
   uint8_t unused_bits;
   if (!reader.ReadByte(&unused_bits))
-    return false;
+    return absl::nullopt;
   if (unused_bits > 7)
-    return false;
+    return absl::nullopt;
 
   Input bytes;
   if (!reader.ReadBytes(reader.BytesLeft(), &bytes))
-    return false;  // Not reachable.
+    return absl::nullopt;  // Not reachable.
 
   // Ensure that unused bits in the last byte are set to 0.
   if (unused_bits > 0) {
@@ -261,7 +259,7 @@ bool ParseBitString(const Input& in, BitString* out) {
     // If the bitstring is empty, there shall be no subsequent octets,
     // and the initial octet shall be zero.
     if (bytes.Length() == 0)
-      return false;
+      return absl::nullopt;
     uint8_t last_byte = bytes.UnsafeData()[bytes.Length() - 1];
 
     // From ITU-T X.690, section 11.2.1 (applies to CER and DER, but not BER):
@@ -270,11 +268,10 @@ bool ParseBitString(const Input& in, BitString* out) {
     // shall be set to zero.
     uint8_t mask = 0xFF >> (8 - unused_bits);
     if ((mask & last_byte) != 0)
-      return false;
+      return absl::nullopt;
   }
 
-  *out = BitString(bytes, unused_bits);
-  return true;
+  return BitString(bytes, unused_bits);
 }
 
 bool GeneralizedTime::InUTCTimeRange() const {
@@ -297,48 +294,6 @@ bool operator<=(const GeneralizedTime& lhs, const GeneralizedTime& rhs) {
 
 bool operator>=(const GeneralizedTime& lhs, const GeneralizedTime& rhs) {
   return !(lhs < rhs);
-}
-
-// A UTC Time in DER encoding should be YYMMDDHHMMSSZ, but some CAs encode
-// the time following BER rules, which allows for YYMMDDHHMMZ. If the length
-// is 11, assume it's YYMMDDHHMMZ, and in converting it to a GeneralizedTime,
-// add in the seconds (set to 0).
-bool ParseUTCTimeRelaxed(const Input& in, GeneralizedTime* value) {
-  ByteReader reader(in);
-  GeneralizedTime time;
-  if (!DecimalStringToUint(reader, 2, &time.year) ||
-      !DecimalStringToUint(reader, 2, &time.month) ||
-      !DecimalStringToUint(reader, 2, &time.day) ||
-      !DecimalStringToUint(reader, 2, &time.hours) ||
-      !DecimalStringToUint(reader, 2, &time.minutes)) {
-    return false;
-  }
-
-  // Try to read the 'Z' at the end. If we read something else, then for it to
-  // be valid the next bytes should be seconds (and then followed by 'Z').
-  uint8_t zulu;
-  ByteReader zulu_reader = reader;
-  if (!zulu_reader.ReadByte(&zulu))
-    return false;
-  if (zulu == 'Z' && !zulu_reader.HasMore()) {
-    time.seconds = 0;
-    *value = time;
-  } else {
-    if (!DecimalStringToUint(reader, 2, &time.seconds))
-      return false;
-    if (!reader.ReadByte(&zulu) || zulu != 'Z' || reader.HasMore())
-      return false;
-  }
-
-  if (time.year < 50) {
-    time.year += 2000;
-  } else {
-    time.year += 1900;
-  }
-  if (!ValidateGeneralizedTime(time))
-    return false;
-  *value = time;
-  return true;
 }
 
 bool ParseUTCTime(const Input& in, GeneralizedTime* value) {
@@ -453,7 +408,7 @@ bool ParseUniversalString(Input in, std::string* out) {
     memcpy(in_32bit.data(), in.UnsafeData(), in.Length());
   for (const uint32_t c : in_32bit) {
     // UniversalString is UCS-4 in big-endian order.
-    uint32_t codepoint = base::NetToHost32(c);
+    auto codepoint = static_cast<base_icu::UChar32>(base::NetToHost32(c));
     if (!CBU_IS_UNICODE_CHAR(codepoint))
       return false;
 
@@ -472,7 +427,7 @@ bool ParseBmpString(Input in, std::string* out) {
     memcpy(in_16bit.data(), in.UnsafeData(), in.Length());
   for (const uint16_t c : in_16bit) {
     // BMPString is UCS-2 in big-endian order.
-    uint32_t codepoint = base::NetToHost16(c);
+    base_icu::UChar32 codepoint = base::NetToHost16(c);
 
     // BMPString only supports codepoints in the Basic Multilingual Plane;
     // surrogates are not allowed. CBU_IS_UNICODE_CHAR excludes the surrogate
@@ -485,6 +440,4 @@ bool ParseBmpString(Input in, std::string* out) {
   return true;
 }
 
-}  // namespace der
-
-}  // namespace net
+}  // namespace net::der

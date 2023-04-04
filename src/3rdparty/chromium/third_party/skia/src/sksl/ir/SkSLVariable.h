@@ -8,27 +8,31 @@
 #ifndef SKSL_VARIABLE
 #define SKSL_VARIABLE
 
+#include "include/core/SkTypes.h"
 #include "include/private/SkSLModifiers.h"
+#include "include/private/SkSLStatement.h"
 #include "include/private/SkSLSymbol.h"
-#include "src/sksl/ir/SkSLExpression.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLType.h"
-#include "src/sksl/ir/SkSLVariableReference.h"
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace SkSL {
 
+class Context;
 class Expression;
+class Mangler;
+class SymbolTable;
 class VarDeclaration;
-
-namespace dsl {
-class DSLCore;
-class DSLFunction;
-} // namespace dsl
 
 enum class VariableStorage : int8_t {
     kGlobal,
     kInterfaceBlock,
     kLocal,
-    kParameter
+    kParameter,
 };
 
 /**
@@ -54,8 +58,8 @@ public:
 
     static std::unique_ptr<Variable> Convert(const Context& context, Position pos,
             Position modifiersPos, const Modifiers& modifiers, const Type* baseType,
-            std::string_view name, bool isArray, std::unique_ptr<Expression> arraySize,
-            Variable::Storage storage);
+            Position namePos, std::string_view name, bool isArray,
+            std::unique_ptr<Expression> arraySize, Variable::Storage storage);
 
     static std::unique_ptr<Variable> Make(const Context& context, Position pos,
             Position modifiersPos, const Modifiers& modifiers, const Type* baseType,
@@ -71,6 +75,7 @@ public:
         std::unique_ptr<Statement> fVarDecl;
     };
     static ScratchVariable MakeScratchVariable(const Context& context,
+                                               Mangler& mangler,
                                                std::string_view baseName,
                                                const Type* type,
                                                const Modifiers& modifiers,
@@ -93,7 +98,7 @@ public:
     }
 
     Storage storage() const {
-        return (Storage) fStorage;
+        return fStorage;
     }
 
     const Expression* initialValue() const;
@@ -114,6 +119,8 @@ public:
                std::string(this->name());
     }
 
+    std::string mangledName() const;
+
 private:
     VarDeclaration* fDeclaration = nullptr;
     // We don't store the position in the Modifiers object itself because they are pooled
@@ -123,10 +130,6 @@ private:
     bool fBuiltin;
 
     using INHERITED = Symbol;
-
-    friend class dsl::DSLCore;
-    friend class dsl::DSLFunction;
-    friend class VariableReference;
 };
 
 } // namespace SkSL

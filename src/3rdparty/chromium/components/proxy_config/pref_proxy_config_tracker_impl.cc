@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -263,10 +263,9 @@ ProxyPrefs::ConfigState PrefProxyConfigTrackerImpl::ReadPrefConfig(
       pref_service->FindPreference(proxy_config::prefs::kProxy);
   DCHECK(pref);
 
-  const base::Value* dict =
-      pref_service->GetDictionary(proxy_config::prefs::kProxy);
-  DCHECK(dict);
-  ProxyConfigDictionary proxy_dict(dict->Clone());
+  const base::Value::Dict& dict =
+      pref_service->GetDict(proxy_config::prefs::kProxy);
+  ProxyConfigDictionary proxy_dict(dict.Clone());
 
   if (PrefConfigToNetConfig(proxy_dict, config)) {
     if (!pref->IsUserModifiable() || pref->HasUserSetting()) {

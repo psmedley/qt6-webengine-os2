@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,14 @@ namespace test {
 // Reads a font from a specified path, for use in unit tests only.
 Font CreateTestFont(const AtomicString& family_name,
                     const String& font_path,
+                    float size,
+                    const FontDescription::VariantLigatures* = nullptr,
+                    void (*init_font_description)(FontDescription*) = nullptr);
+
+// Reads a font from raw font data, for use in fuzzing test only.
+Font CreateTestFont(const AtomicString& family_name,
+                    const uint8_t* data,
+                    size_t data_size,
                     float size,
                     const FontDescription::VariantLigatures* = nullptr);
 

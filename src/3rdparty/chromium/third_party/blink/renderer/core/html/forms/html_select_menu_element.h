@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,6 +36,8 @@ class CORE_EXPORT HTMLSelectMenuElement final
   HTMLOptionElement* selectedOption() const;
   String value() const;
   void setValue(const String&, bool send_events = false);
+  String valueForBinding() const { return value(); }
+  void setValueForBinding(const String&);
   bool open() const;
 
   // For ValidityState
@@ -61,6 +63,8 @@ class CORE_EXPORT HTMLSelectMenuElement final
   PartType AssignedPartType(Node* node) const;
 
   Element* ButtonPart() const { return button_part_; }
+
+  bool IsRichlyEditableForAccessibility() const override { return false; }
 
  private:
   class SelectMutationCallback;

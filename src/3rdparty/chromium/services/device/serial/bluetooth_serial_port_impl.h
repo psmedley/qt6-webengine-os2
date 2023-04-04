@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_socket.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "services/device/public/mojom/serial.mojom.h"
 #include "services/device/serial/serial_io_handler.h"
@@ -62,7 +63,7 @@ class BluetoothSerialPortImpl : public mojom::SerialPort {
   void ConfigurePort(mojom::SerialConnectionOptionsPtr options,
                      ConfigurePortCallback callback) override;
   void GetPortInfo(GetPortInfoCallback callback) override;
-  void Close(CloseCallback callback) override;
+  void Close(bool flush, CloseCallback callback) override;
 
   void OpenSocket(const BluetoothUUID& service_class_id, OpenCallback callback);
   void WriteToSocket(MojoResult result, const mojo::HandleSignalsState& state);

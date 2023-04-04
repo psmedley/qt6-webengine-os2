@@ -1,10 +1,19 @@
 # Open Screen Library
 
-The Open Screen Library implements the Open Screen Protocol and the Chromecast
-protocols (discovery, application control, and media streaming).
+The Open Screen Library implements the Open Screen Protocol, Multicast DNS and
+DNS-SD, and the Chromecast protocols (discovery, application control, and media
+streaming).
 
-Information about the Open Screen Protocol and its specification can be found
-[on GitHub](https://w3c.github.io/openscreenprotocol/).
+The library consists of feature modules that share a [common platform
+API](platform/README.md) that must be implemented and linked by the embedding
+application.
+
+The major feature modules in the library can be used independently and have
+their own documentation:
+
+  * [Cast protocols](cast/README.md) (aka `libcast`)
+  * [Open Screen Protocol](osp/README.md)
+  * [Multicast DNS and DNS-SD](discovery/README.md)
 
 # Getting the code
 
@@ -57,39 +66,48 @@ dependencies that have changed.
 
 # Build setup
 
-The following are the main tools are required for development/builds:
+The following are the main tools are required for development/builds.
 
- - Build file generator: `gn`
- - Code formatter: `clang-format`
- - Builder: `ninja` ([GitHub releases](https://github.com/ninja-build/ninja/releases))
- - Compiler/Linker: `clang` (installed by default) or `gcc` (installed by you)
+- Installed by gclient automatically
+  - Build file generator: `gn` (installed into `buildtools/`)
+  - Code formatter: `clang-format` (installed into `buildtools/`)
+  - Builder: `ninja`
+  - Compiler/Linker: `clang`
+- Installed by you
+  - JSON validator: `yajsv`
+  - `libstdc++`
+  - `gcc`
+  - XCode
 
-All of these--except `gcc` as noted above--are automatically downloaded/updated
-for the Linux and Mac environments via `gclient sync` as described above. The
-first two are installed into `buildtools/<platform>/`.
+## yajsv installation
 
-Mac only: XCode must be installed on the system, to link against its frameworks.
+1. Install `go` from [https://golang.org](https://golang.org) or your Linux package manager.
+2. `go install github.com/neilpa/yajsv@latest`
 
-`clang-format` is used for maintaining consistent coding style, but it is not a
-complete replacement for adhering to Chromium/Google C++ style (that's on you!).
-The presubmit script will sanity-check that it has been run on all new/changed
-code.
-
-## Linux clang
-
-On Linux, the build will automatically download the Clang compiler from the
-Google storage cache, the same way that Chromium does it.
+## libstdc++ (Linux only)
 
 Ensure that libstdc++ 8 is installed, as clang depends on the system
 instance of it. On Debian flavors, you can run:
 
 ```bash
-   sudo apt-get install libstdc++-8-dev
+   sudo apt-get install libstdc++-8-dev libstdc++6-8-dbg
 ```
 
-## Linux gcc
+## XCode (Mac only)
 
-Setting the `gn` argument "is_gcc=true" on Linux enables building using gcc
+On Mac OS X, the build will use the clang provided by
+[XCode](https://apps.apple.com/us/app/xcode/id497799835?mt=12). You can install
+the XCode command-line tools only or the full version of XCode.
+
+```bash
+xcode-select --install
+```
+
+TODO(https://issuetracker.google.com/202964797): Switch to use Chromium clang for Mac builds.
+
+##  gcc (optional, Linux only)
+
+Setting the `gn` argument `is_gcc=true` on Linux enables building using gcc
 instead.
 
 ```bash
@@ -104,30 +122,19 @@ run:
   sudo apt-get install gcc-7
 ```
 
-## Mac clang
-
-On Mac OS X, the build will use the clang provided by
-[XCode](https://apps.apple.com/us/app/xcode/id497799835?mt=12), which must be
-installed.
-
 ## Debug build
 
-Setting the `gn` argument "is_debug=true" enables debug build.
+Setting the `gn` argument `is_debug=true` enables debug build.
 
 ```bash
   gn gen out/debug --args="is_debug=true"
 ```
 
-To install debug information for libstdc++ 8 on Debian flavors, you can run:
-
-```bash
-   sudo apt-get install libstdc++6-8-dbg
-```
-
 ## gn configuration
 
 Running `gn args` opens an editor that allows to create a list of arguments
-passed to every invocation of `gn gen`.
+passed to every invocation of `gn gen`.  `gn args --list` will list all of the
+possible arguments you can set.
 
 ```bash
   gn args out/debug
@@ -135,15 +142,14 @@ passed to every invocation of `gn gen`.
 
 # Building targets
 
-## OSP demo
-
-The following commands will build the Open Screen Protocol demo and run it.
+We use the Open Screen Protocol demo application as an example, however, the
+instructions are essentially the same for all executable targets.
 
 ``` bash
   mkdir out/debug
   gn gen out/debug             # Creates the build directory and necessary ninja files
   ninja -C out/debug osp_demo  # Builds the executable with ninja
-  ./out/debug/osp_demo          # Runs the executable
+  ./out/debug/osp_demo         # Runs the executable
 ```
 
 The `-C` argument to `ninja` works just like it does for GNU Make: it specifies
@@ -165,7 +171,7 @@ depending on number of processor cores, amount of RAM, etc.
 
 Also, while specifying build targets is possible while using ninja, typically
 for development it is sufficient to just build everything, especially since the
-Open Screen repository is still quite small. That makes the invokation to the
+Open Screen repository is still quite small. That makes the invocation to the
 build system simplify to:
 
 ```bash
@@ -174,31 +180,7 @@ build system simplify to:
 
 For details on running `osp_demo`, see its [README.md](osp/demo/README.md).
 
-## Cast Streaming sender and receiver
-
-The process for running the Cast Streaming sender and receiver applications
-is detailed in the [cast/README.md](cast/README.md). The build process is the
-same as the osp_demo, excepting the choice of targets:
-
-```bash
-gn gen out/debug
-autoninja -C out/debug cast_sender cast_receiver
-```
-
-However invokation is more complicated due to certificate requirements, as well
-as requiring a valid network address and path to a video for the sender to play.
-An example is provided below but the cast readme should be consulted for
-more information.
-
-```bash
-/path/to/out/Default/cast_receiver -g
-
-./out/Default/cast_receiver -d generated_root_cast_receiver.crt -p generated_root_cast_receiver.key lo0
-
-./out/Default/cast_sender -d generated_root_cast_receiver.crt lo0 ~/video-1080-mp4.mp4
-```
-
-## Building other targets
+## Building all targets
 
 Running `ninja -C out/debug gn_all` will build all non-test targets in the
 repository.
@@ -241,9 +223,10 @@ committed changes locally, simply run:
   git cl upload
 ```
 
-The first command will will auto-format the code changes. Then, the second
-command runs the `PRESUBMIT.py` script to check style and, if it passes, a
-newcode review will be posted on `chromium-review.googlesource.com`.
+The first command will will auto-format the code changes using
+`clang-format`. Then, the second command runs the `PRESUBMIT.py` script to check
+style and, if it passes, a newcode review will be posted on
+`chromium-review.googlesource.com`.
 
 If you make additional commits to your local branch, then running `git cl
 upload` again in the same branch will merge those commits into the ongoing

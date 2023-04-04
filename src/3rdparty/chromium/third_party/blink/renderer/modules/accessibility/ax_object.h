@@ -63,6 +63,7 @@ class Transform;
 namespace ui {
 struct AXActionData;
 struct AXNodeData;
+struct AXRelativeBounds;
 }
 
 namespace blink {
@@ -122,7 +123,7 @@ class NameSource {
   String text;
   bool superseded = false;
   bool invalid = false;
-  ax::mojom::blink::NameFrom type = ax::mojom::blink::NameFrom::kUninitialized;
+  ax::mojom::blink::NameFrom type = ax::mojom::blink::NameFrom::kNone;
   const QualifiedName& attribute;
   AtomicString attribute_value;
   AXTextSource native_source = kAXTextFromNativeSourceUninitialized;
@@ -466,6 +467,8 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
 
   // Is the element focusable?
   bool CanSetFocusAttribute() const;
+  // Is the element in the tab order?
+  bool IsKeyboardFocusable() const;
 
   // Whether objects are ignored, i.e. hidden from the AT.
   bool AccessibilityIsIgnored() const;
@@ -588,10 +591,10 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   //
 
   virtual const AtomicString& AccessKey() const { return g_null_atom; }
-  virtual RGBA32 BackgroundColor() const { return Color::kTransparent; }
-  virtual RGBA32 GetColor() const { return Color::kBlack; }
+  virtual RGBA32 BackgroundColor() const { return Color::kTransparent.Rgb(); }
+  virtual RGBA32 GetColor() const { return Color::kBlack.Rgb(); }
   // Used by objects of role ColorWellRole.
-  virtual RGBA32 ColorValue() const { return Color::kTransparent; }
+  virtual RGBA32 ColorValue() const { return Color::kTransparent.Rgb(); }
   virtual bool CanvasHasFallbackContent() const { return false; }
   // Returns the font family that was cascaded onto ComputedStyle. This may
   // contain non-user-friendly internal names.
@@ -1134,7 +1137,7 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   virtual bool CanHaveChildren() const { return true; }
   void UpdateChildrenIfNecessary();
   bool NeedsToUpdateChildren() const;
-  void SetNeedsToUpdateChildren() const;
+  virtual void SetNeedsToUpdateChildren() const;
   virtual void ClearChildren() const;
   void DetachFromParent() { parent_ = nullptr; }
   virtual void SelectedOptions(AXObjectVector&) const {}
@@ -1178,6 +1181,7 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   gfx::Point GetScrollOffset() const;
   gfx::Point MinimumScrollOffset() const;
   gfx::Point MaximumScrollOffset() const;
+  void Scroll(ax::mojom::blink::Action scroll_action) const;
   void SetScrollOffset(const gfx::Point&) const;
 
   // Tables and grids.
@@ -1273,13 +1277,15 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   virtual void HandleActiveDescendantChanged() {}
   virtual void HandleAutofillStateChanged(WebAXAutofillState) {}
   virtual void HandleAriaExpandedChanged() {}
-  virtual void SelectionChanged();
 
   // Static helper functions.
   // TODO(accessibility) Move these to a static helper util class.
   static bool IsARIAControl(ax::mojom::blink::Role);
   static bool IsARIAInput(ax::mojom::blink::Role);
+  static bool IsFrame(const Node*);
   static bool HasARIAOwns(Element* element);
+  // Should this own a child tree (e.g. an iframe).
+  virtual bool IsChildTreeOwner() const { return false; }
   // Is this a widget that requires container widget.
   bool IsSubWidget() const;
   static ax::mojom::blink::Role AriaRoleStringToRoleEnum(const String&);
@@ -1321,10 +1327,18 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   // xml-roles object attribute.
   const AtomicString& GetRoleAttributeStringForObjectAttribute();
 
+  // Extra checks that occur right before a node is evaluated for serialization.
+  void PreSerializationConsistencyCheck();
+
   // Returns a string representation of this object.
   // |cached_values_only| avoids recomputing cached values, and thus can be
   // used during UpdateCachedValuesIfNecessary() without causing recursion.
   String ToString(bool verbose = false, bool cached_values_only = false) const;
+
+  void PopulateAXRelativeBounds(ui::AXRelativeBounds& bounds,
+                                bool* clips_children) const;
+
+  void MarkAllImageAXObjectsDirty();
 
  protected:
   AXID id_;
@@ -1342,8 +1356,8 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
 
   virtual void AddChildren() = 0;
 
-  // Used only inside textAlternative():
-  static String CollapseWhitespace(const String&);
+  // Collapses multiple whitespace characters into one. Used by GetName().
+  String SimplifyName(const String&) const;
   static String RecursiveTextAlternative(
       const AXObject&,
       const AXObject* aria_label_or_description_root,
@@ -1375,11 +1389,6 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   static bool IsNameFromAriaAttribute(Element* element);
   // Return true if the name is from @aria-label / @aria-labelledby / @title.
   bool IsNameFromAuthorAttribute() const;
-  String TextFromAriaLabelledby(AXObjectSet& visited,
-                                AXRelatedObjectVector* related_objects,
-                                Vector<String>& ids) const;
-  String TextFromAriaDescribedby(AXRelatedObjectVector* related_objects,
-                                 Vector<String>& ids) const;
 
   ax::mojom::blink::Role ButtonRoleType() const;
 
@@ -1397,7 +1406,9 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   const AXObject* TableParent() const;
 
   // Helpers for serialization.
+  void SerializeBoundingBoxAttributes(ui::AXNodeData& dst) const;
   void SerializeActionAttributes(ui::AXNodeData* node_data);
+  void SerializeChildTreeID(ui::AXNodeData* node_data);
   void SerializeChooserPopupAttributes(ui::AXNodeData* node_data);
   void SerializeColorAttributes(ui::AXNodeData* node_data);
   void SerializeElementAttributes(ui::AXNodeData* node_data);
@@ -1411,6 +1422,7 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   void SerializeNameAndDescriptionAttributes(ui::AXMode accessibility_mode,
                                              ui::AXNodeData* node_data) const;
   void SerializeOtherScreenReaderAttributes(ui::AXNodeData* node_data) const;
+  void SerializeScreenReaderAttributes(ui::AXNodeData* node_data);
   void SerializeScrollAttributes(ui::AXNodeData* node_data);
   void SerializeSparseAttributes(ui::AXNodeData* node_data);
   void SerializeStyleAttributes(ui::AXNodeData* node_data);
@@ -1423,6 +1435,7 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
 
  private:
   bool ComputeCanSetFocusAttribute() const;
+  String KeyboardShortcut() const;
 
   mutable int last_modification_count_;
 

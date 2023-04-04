@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,7 +47,7 @@ namespace gfx {
 class ColorSpace;
 class GpuFence;
 struct PresentationFeedback;
-}
+}  // namespace gfx
 
 namespace viz {
 class CompositorFrame;
@@ -55,6 +55,7 @@ class CompositorFrame;
 
 namespace exo {
 class Buffer;
+class SecurityDelegate;
 class FrameSinkResourceManager;
 class SurfaceObserver;
 
@@ -180,6 +181,13 @@ class Surface final : public ui::PropertyHandler {
   void SetRoundedCorners(const gfx::RRectF& rounded_corners_bounds);
   void SetOverlayPriorityHint(OverlayPriority hint);
 
+  // Sets the surface's clip rectangle.
+  void SetClipRect(const absl::optional<gfx::RectF>& clip_rect);
+
+  // Sets the background color that shall be associated with the next buffer
+  // commit.
+  void SetBackgroundColor(absl::optional<SkColor4f> background_color);
+
   // This sets the surface viewport for scaling.
   void SetViewport(const gfx::SizeF& viewport);
 
@@ -241,6 +249,12 @@ class Surface final : public ui::PropertyHandler {
   // Request that surface should have a specific ID assigned by client.
   void SetClientSurfaceId(const char* client_surface_id);
   std::string GetClientSurfaceId() const;
+
+  // Sets whether the surface contains video.
+  void SetContainsVideo(bool contains_video);
+
+  // Returns whether this surface or any of its subsurfaces contains a video.
+  bool ContainsVideo();
 
   // Enable embedding of an arbitrary viz surface in this exo surface.
   // If the callback is valid, a SurfaceDrawQuad will be emitted targeting
@@ -407,6 +421,20 @@ class Surface final : public ui::PropertyHandler {
   // Starts or ends throttling on the surface.
   void ThrottleFrameRate(bool on);
 
+  // If true is set, if this window has a focus, key events should be sent to
+  // the app, even if it is an ash shortcut (with some exceptions).
+  // See exo::Keyboard for more details.
+  void SetKeyboardShortcutsInhibited(bool inhibited);
+
+  // Returns whether keyboard shortcuts are inhibited.
+  bool is_keyboard_shortcuts_inhibited() const {
+    return keyboard_shortcuts_inhibited_;
+  }
+
+  // Returns the SecurityDelegate associated with this surface, or nullptr
+  // if one can not be determined. See go/secure-exo-ids for more details.
+  SecurityDelegate* GetSecurityDelegate();
+
  private:
   struct State {
     State();
@@ -426,8 +454,12 @@ class Surface final : public ui::PropertyHandler {
     SkBlendMode blend_mode = SkBlendMode::kSrcOver;
     float alpha = 1.0f;
     gfx::Vector2d offset;
-    gfx::ColorSpace color_space;
+    gfx::ColorSpace color_space = gfx::ColorSpace::CreateSRGB();
     bool is_tracking_occlusion = false;
+    // Represents optional background color that must be associated with the
+    // next buffer commit.
+    absl::optional<SkColor4f> background_color;
+    bool contains_video = false;
   };
   class BufferAttachment {
    public:
@@ -503,6 +535,10 @@ class Surface final : public ui::PropertyHandler {
     // The hint for overlay prioritization
     // Persisted between commits.
     OverlayPriority overlay_priority_hint = OverlayPriority::REGULAR;
+    // The clip rect for this surface, in the parent's coordinate space. This
+    // should only be set for subsurfaces.
+    // Persisted between commits.
+    absl::optional<gfx::RectF> clip_rect;
   };
 
   friend class subtle::PropertyHelper;
@@ -609,6 +645,8 @@ class Surface final : public ui::PropertyHandler {
   gfx::Size embedded_surface_size_;
 
   LeaveEnterCallback leave_enter_callback_;
+
+  bool keyboard_shortcuts_inhibited_ = false;
 };
 
 class ScopedSurface {

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/base_export.h"
 #include "base/containers/flat_map.h"
+#include "base/memory/raw_ptr.h"
 
 namespace base {
 
@@ -167,7 +168,7 @@ class BASE_EXPORT dict_iterator_proxy {
   const_reverse_iterator crend() const;
 
  private:
-  DictStorage* storage_;
+  raw_ptr<DictStorage> storage_;
 };
 
 // This class wraps the various const |begin| and |end| methods of the
@@ -204,7 +205,7 @@ class BASE_EXPORT const_dict_iterator_proxy {
   const_reverse_iterator crend() const;
 
  private:
-  const DictStorage* storage_;
+  raw_ptr<const DictStorage> storage_;
 };
 }  // namespace detail
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Creates a GN include file for building dav1d from source."""
@@ -60,6 +60,8 @@ def _WriteGn(fd):
         fd, "arm64_asm_sources", _Glob("libdav1d/src/arm/64/*.S"),
         _Glob("libdav1d/src/arm/64/*_tmpl.S") + ["libdav1d/src/arm/64/util.S"])
     _WriteArray(fd, "arm_template_sources", _Glob("libdav1d/src/arm/*_tmpl.c"))
+
+    _WriteArray(fd, "ppc64_template_sources", _Glob("libdav1d/src/ppc/*_tmpl.c"))
 
     template_sources = _Glob("libdav1d/src/*_tmpl.c")
     _WriteArray(fd, "template_sources", template_sources)

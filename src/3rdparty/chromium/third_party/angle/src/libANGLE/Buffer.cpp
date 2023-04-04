@@ -62,9 +62,14 @@ void Buffer::onDestroy(const Context *context)
         mImpl->destroy(context);
 }
 
-void Buffer::setLabel(const Context *context, const std::string &label)
+angle::Result Buffer::setLabel(const Context *context, const std::string &label)
 {
     mState.mLabel = label;
+    if (mImpl)
+    {
+        return mImpl->onLabelUpdate(context);
+    }
+    return angle::Result::Continue;
 }
 
 const std::string &Buffer::getLabel() const
@@ -391,11 +396,6 @@ angle::Result Buffer::getSubData(const gl::Context *context,
 
 void Buffer::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message)
 {
-    if (message == angle::SubjectMessage::BufferVkStorageChanged)
-    {
-        return;
-    }
-
     // Pass it along!
     ASSERT(index == kImplementationSubjectIndex);
     ASSERT(message == angle::SubjectMessage::SubjectChanged ||

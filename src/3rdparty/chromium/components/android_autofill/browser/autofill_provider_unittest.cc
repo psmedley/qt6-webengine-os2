@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,19 +15,19 @@ namespace autofill {
 class AndroidAutofillManagerTestHelper : public AndroidAutofillManager {
  public:
   explicit AndroidAutofillManagerTestHelper(AutofillProvider* autofill_provider)
-      : AndroidAutofillManager(nullptr,
-                               nullptr,
-                               DISABLE_AUTOFILL_DOWNLOAD_MANAGER) {
+      : AndroidAutofillManager(nullptr, nullptr, EnableDownloadManager(false)) {
     set_autofill_provider_for_testing(autofill_provider);
   }
 
   void SimulatePropagateAutofillPredictions() {
-    PropagateAutofillPredictions(nullptr, std::vector<FormStructure*>());
+    PropagateAutofillPredictions({});
   }
 
   void SimulateOnAskForValuesToFillImpl() {
-    OnAskForValuesToFillImpl(0, FormData(), FormFieldData(), gfx::RectF(),
-                             /*autoselect_first_suggestion=*/false);
+    OnAskForValuesToFillImpl(FormData(), FormFieldData(), gfx::RectF(),
+                             /*query_id=*/0,
+                             /*autoselect_first_suggestion=*/false,
+                             FormElementWasClicked(false));
   }
 };
 
@@ -40,12 +40,14 @@ class AutofillProviderTestHelper : public TestAutofillProvider {
 
  private:
   // AutofillProvider
-  void OnAskForValuesToFill(AndroidAutofillManager* manager,
-                            int32_t id,
-                            const FormData& form,
-                            const FormFieldData& field,
-                            const gfx::RectF& bounding_box,
-                            bool autoselect_first_suggestion) override {
+  void OnAskForValuesToFill(
+      AndroidAutofillManager* manager,
+      const FormData& form,
+      const FormFieldData& field,
+      const gfx::RectF& bounding_box,
+      int32_t query_id,
+      bool autoselect_first_suggestion,
+      FormElementWasClicked form_element_was_clicked) override {
     manager_ = manager;
   }
   void OnServerQueryRequestError(AndroidAutofillManager* manager,

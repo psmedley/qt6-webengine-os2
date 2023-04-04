@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,10 +141,10 @@ class NavigationController {
     // because they are unique to LoadURLParams or OpenURLParams).
     explicit LoadURLParams(const OpenURLParams& open_url_params);
     LoadURLParams(const LoadURLParams&) = delete;
+    LoadURLParams(LoadURLParams&&);
     LoadURLParams& operator=(const LoadURLParams&) = delete;
+    LoadURLParams& operator=(LoadURLParams&&);
     ~LoadURLParams();
-    LoadURLParams(LoadURLParams &&) = default;
-    LoadURLParams& operator=(LoadURLParams &&) = default;
 
     // The url to load. This field is required.
     GURL url;
@@ -233,6 +233,9 @@ class NavigationController {
     // LoadURLWithParams call.
     scoped_refptr<network::ResourceRequestBody> post_data;
 
+    // Content type for a form submission for LOAD_TYPE_HTTP_POST.
+    std::string post_content_type;
+
     // True if this URL should be able to access local resources.
     bool can_load_local_resources = false;
 
@@ -287,6 +290,9 @@ class NavigationController {
 
     // Indicates the reload type of this navigation.
     ReloadType reload_type = ReloadType::NONE;
+
+    // Indicates a form submission created this navigation.
+    bool is_form_submission = false;
 
     // Impression info associated with this navigation. Should only be populated
     // for navigations originating from a link click.

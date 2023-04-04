@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,9 +65,19 @@ scoped_refptr<Image> ImageElementBase::GetSourceImageForCanvas(
   }
 
   scoped_refptr<Image> source_image = image_content->GetImage();
+
+  if (!source_image->width() || !source_image->height()) {
+    *status = kZeroSizeImageSourceStatus;
+    return nullptr;
+  }
+
   if (auto* svg_image = DynamicTo<SVGImage>(source_image.get())) {
     UseCounter::Count(GetElement().GetDocument(), WebFeature::kSVGInCanvas2D);
     gfx::SizeF image_size = svg_image->ConcreteObjectSize(default_object_size);
+    if (!image_size.width() || !image_size.height()) {
+      *status = kZeroSizeImageSourceStatus;
+      return nullptr;
+    }
     source_image = SVGImageForContainer::Create(
         svg_image, image_size, 1,
         GetElement().GetDocument().CompleteURL(GetElement().ImageSourceURL()),
@@ -174,7 +184,9 @@ ScriptPromise ImageElementBase::CreateImageBitmap(
     // The following function only works on SVGImages (as checked above).
     return ImageBitmap::CreateAsync(
         this, crop_rect, script_state,
-        GetElement().GetDocument().GetPreferredColorScheme(), options);
+        GetElement().GetDocument().GetTaskRunner(TaskType::kInternalDefault),
+        GetElement().GetDocument().GetPreferredColorScheme(), exception_state,
+        options);
   }
   return ImageBitmapSource::FulfillImageBitmap(
       script_state, MakeGarbageCollected<ImageBitmap>(this, crop_rect, options),

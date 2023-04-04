@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,10 +36,12 @@ class FakeMojoPasswordManagerDriver
               (const autofill::FormData&),
               (override));
 
+#if BUILDFLAG(IS_ANDROID)
   MOCK_METHOD(void,
               ShowTouchToFill,
               (autofill::mojom::SubmissionReadinessState),
               (override));
+#endif
 
   MOCK_METHOD(void,
               ShowPasswordSuggestions,
@@ -140,8 +142,7 @@ class FakeMojoPasswordManagerDriver
       const std::vector<autofill::FormData>& forms_data) override;
 
   void PasswordFormsRendered(
-      const std::vector<autofill::FormData>& visible_forms_data,
-      bool did_stop_loading) override;
+      const std::vector<autofill::FormData>& visible_forms_data) override;
 
   void PasswordFormSubmitted(const autofill::FormData& form_data) override;
 

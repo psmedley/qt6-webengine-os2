@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -223,7 +223,7 @@ void HeadsUpDisplayLayerImpl::AppendQuads(
   // layers.
   gfx::Rect quad_rect(internal_content_bounds_);
   auto* quad = render_pass->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
-  quad->SetNew(shared_quad_state, quad_rect, quad_rect, SK_ColorTRANSPARENT,
+  quad->SetNew(shared_quad_state, quad_rect, quad_rect, SkColors::kTransparent,
                false);
   ValidateQuadResources(quad);
   current_quad_ = quad;
@@ -296,7 +296,7 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
               ->settings()
               .resource_settings.use_gpu_memory_buffer_resources);
 
-      uint32_t flags = gpu::SHARED_IMAGE_USAGE_DISPLAY;
+      uint32_t flags = gpu::SHARED_IMAGE_USAGE_DISPLAY_READ;
       if (gpu_raster) {
         flags |= gpu::SHARED_IMAGE_USAGE_RASTER |
                  gpu::SHARED_IMAGE_USAGE_OOP_RASTERIZATION;
@@ -370,7 +370,7 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
     display_item_list->Finalize();
 
     auto* ri = raster_context_provider->RasterInterface();
-    constexpr GLuint background_color = SkColorSetARGB(0, 0, 0, 0);
+    constexpr SkColor4f background_color = SkColors::kTransparent;
     constexpr GLuint msaa_sample_count = -1;
     constexpr bool can_use_lcd_text = true;
     ri->BeginRasterCHROMIUM(background_color, needs_clear, msaa_sample_count,
@@ -491,7 +491,7 @@ void HeadsUpDisplayLayerImpl::UpdateHudTexture(
                    resource_id, /*premultiplied_alpha=*/true,
                    /*uv_top_left=*/gfx::PointF(),
                    /*uv_bottom_right=*/uv_bottom_right,
-                   /*background_color=*/SK_ColorTRANSPARENT, vertex_opacity,
+                   /*background_color=*/SkColors::kTransparent, vertex_opacity,
                    /*flipped=*/false,
                    /*nearest_neighbor=*/false, /*secure_output_only=*/false,
                    gfx::ProtectedVideoType::kClear);
@@ -588,7 +588,7 @@ void HeadsUpDisplayLayerImpl::DrawHudContents(PaintCanvas* canvas) {
   const LayerTreeDebugState& debug_state = layer_tree_impl()->debug_state();
 
   TRACE_EVENT0("cc", "DrawHudContents");
-  canvas->clear(SkColorSetARGB(0, 0, 0, 0));
+  canvas->clear(SkColors::kTransparent);
   canvas->save();
   canvas->scale(internal_contents_scale_);
 
@@ -704,8 +704,7 @@ void HeadsUpDisplayLayerImpl::DrawSeparatorLine(PaintCanvas* canvas,
                                                 PaintFlags* flags,
                                                 const SkRect& bounds) const {
   // Draw separator line as transparent white.
-  constexpr auto kSeparatorLineColor = SkColorSetARGB(64, 255, 255, 255);
-  flags->setColor(kSeparatorLineColor);
+  flags->setColor({1.0f, 1.0f, 1.0f, 0.25f});
   canvas->drawLine(bounds.left(), bounds.top(), bounds.right(), bounds.top(),
                    *flags);
 }
@@ -856,8 +855,11 @@ SkRect HeadsUpDisplayLayerImpl::DrawMemoryDisplay(PaintCanvas* canvas,
                   memory_entry_.total_budget_in_bytes) *
                  180;
 
-  SkColor colors[] = {SK_ColorRED, SK_ColorGREEN, SK_ColorGREEN,
-                      SkColorSetARGB(255, 255, 140, 0), SK_ColorRED};
+  SkColor4f colors[] = {SkColors::kRed,
+                        SkColors::kGreen,
+                        SkColors::kGreen,
+                        {1.0f, 0.55f, 0.0f, 1.0f},
+                        SkColors::kRed};
   const SkScalar pos[] = {SkFloatToScalar(0.2f), SkFloatToScalar(0.4f),
                           SkFloatToScalar(0.6f), SkFloatToScalar(0.8f),
                           SkFloatToScalar(1.0f)};
@@ -916,7 +918,8 @@ SkRect HeadsUpDisplayLayerImpl::DrawGpuRasterizationStatus(PaintCanvas* canvas,
 
   SkPoint gpu_status_pos = SkPoint::Make(left + width - kPadding,
                                          top + 2 * kFontHeight + 2 * kPadding);
-  flags.setColor(DebugColors::HUDTitleColor());
+  // TODO(crbug/1308932): Remove toSkColor and make all SkColor4f.
+  flags.setColor(DebugColors::HUDTitleColor().toSkColor());
   DrawText(canvas, flags, "GPU raster", TextAlign::kLeft, kTitleFontHeight,
            left + kPadding, top + kFontHeight + kPadding);
   flags.setColor(color);
@@ -930,8 +933,8 @@ void HeadsUpDisplayLayerImpl::DrawDebugRect(
     PaintCanvas* canvas,
     PaintFlags* flags,
     const DebugRect& rect,
-    SkColor stroke_color,
-    SkColor fill_color,
+    SkColor4f stroke_color,
+    SkColor4f fill_color,
     float stroke_width,
     const std::string& label_text) const {
   DCHECK(typeface_.get());
@@ -989,8 +992,8 @@ void HeadsUpDisplayLayerImpl::DrawDebugRects(
   std::vector<DebugRect> new_layout_shift_rects;
 
   for (size_t i = 0; i < debug_rects.size(); ++i) {
-    SkColor stroke_color = 0;
-    SkColor fill_color = 0;
+    SkColor4f stroke_color = SkColors::kTransparent;
+    SkColor4f fill_color = SkColors::kTransparent;
     float stroke_width = 0.f;
     std::string label_text;
 
@@ -1067,8 +1070,8 @@ void HeadsUpDisplayLayerImpl::DrawDebugRects(
   }
   if (paint_rects_fade_step_ > 0) {
     paint_rects_fade_step_--;
-    for (size_t i = 0; i < paint_rects_.size(); ++i) {
-      DrawDebugRect(canvas, &flags, paint_rects_[i],
+    for (auto& paint_rect : paint_rects_) {
+      DrawDebugRect(canvas, &flags, paint_rect,
                     DebugColors::PaintRectBorderColor(paint_rects_fade_step_),
                     DebugColors::PaintRectFillColor(paint_rects_fade_step_),
                     DebugColors::PaintRectBorderWidth(), "");
@@ -1080,9 +1083,11 @@ void HeadsUpDisplayLayerImpl::DrawDebugRects(
   }
   if (layout_shift_rects_fade_step_ > 0) {
     layout_shift_rects_fade_step_--;
-    for (size_t i = 0; i < layout_shift_debug_rects_.size(); ++i) {
+    for (auto& layout_shift_debug_rect : layout_shift_debug_rects_) {
+      // TODO(crbug/1308932): Remove all instances of toSkColor below and make
+      // all SkColor4f.
       DrawDebugRect(
-          canvas, &flags, layout_shift_debug_rects_[i],
+          canvas, &flags, layout_shift_debug_rect,
           DebugColors::LayoutShiftRectBorderColor(),
           DebugColors::LayoutShiftRectFillColor(layout_shift_rects_fade_step_),
           DebugColors::LayoutShiftRectBorderWidth(), "");
@@ -1100,18 +1105,18 @@ int HeadsUpDisplayLayerImpl::DrawSingleMetric(
     bool has_value,
     double value) const {
   std::string value_str = "-";
-  SkColor metrics_color = DebugColors::HUDTitleColor();
-  SkColor badge_color = SK_ColorGREEN;
+  SkColor4f metrics_color = DebugColors::HUDTitleColor();
+  SkColor4f badge_color = SkColors::kGreen;
   if (has_value) {
     value_str = ToStringTwoDecimalPrecision(value) + info.UnitToString();
     if (value < info.green_threshold) {
-      metrics_color = SK_ColorGREEN;
+      metrics_color = SkColors::kGreen;
     } else if (value < info.yellow_threshold) {
-      metrics_color = SK_ColorYELLOW;
-      badge_color = SK_ColorYELLOW;
+      metrics_color = SkColors::kYellow;
+      badge_color = SkColors::kYellow;
     } else {
-      metrics_color = SK_ColorRED;
-      badge_color = SK_ColorRED;
+      metrics_color = SkColors::kRed;
+      badge_color = SkColors::kRed;
     }
   }
 
@@ -1120,13 +1125,13 @@ int HeadsUpDisplayLayerImpl::DrawSingleMetric(
   badge_flags.setColor(badge_color);
   badge_flags.setStyle(PaintFlags::kFill_Style);
   badge_flags.setAntiAlias(true);
-  if (badge_color == SK_ColorGREEN) {
+  if (badge_color == SkColors::kGreen) {
     constexpr int kRadius = 6;
     int x = left + metrics_sizes.kSidePadding + kRadius;
     int y = top - kRadius - 2;
     SkPath circle = SkPath::Circle(x, y, kRadius);
     canvas->drawPath(circle, badge_flags);
-  } else if (badge_color == SK_ColorYELLOW) {
+  } else if (badge_color == SkColors::kYellow) {
     constexpr int kSquareSize = 12;
     int x = left + metrics_sizes.kSidePadding;
     int y = top - kSquareSize - 2;
@@ -1201,11 +1206,13 @@ int HeadsUpDisplayLayerImpl::DrawSinglePercentageMetric(PaintCanvas* canvas,
                                                         std::string name,
                                                         double value) const {
   std::string value_str = "-";
-  SkColor metrics_color = DebugColors::HUDTitleColor();
+  // TODO(crbug/1308932): Remove toSkColor and make all SkColor4f.
+  SkColor metrics_color = DebugColors::HUDTitleColor().toSkColor();
   value_str = ToStringTwoDecimalPrecision(value) + "%";
 
   PaintFlags flags;
-  flags.setColor(DebugColors::HUDTitleColor());
+  // TODO(crbug/1308932): Remove toSkColor and make all SkColor4f.
+  flags.setColor(DebugColors::HUDTitleColor().toSkColor());
   DrawText(canvas, flags, name, TextAlign::kLeft, metrics_sizes.kFontHeight,
            left + metrics_sizes.kSidePadding + metrics_sizes.kBadgeWidth, top);
   flags.setColor(metrics_color);

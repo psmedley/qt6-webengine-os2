@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,7 +47,7 @@ void TestCreditCardSaveManager::set_upload_request_card(
   upload_request_.card = std::move(card);
 }
 
-raw_ptr<payments::PaymentsClient::UploadRequestDetails>
+payments::PaymentsClient::UploadRequestDetails*
 TestCreditCardSaveManager::upload_request() {
   return &upload_request_;
 }

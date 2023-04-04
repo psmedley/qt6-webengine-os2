@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,6 +61,9 @@ class CONTENT_EXPORT StoragePartitionImplMap
                       base::OnceClosure done);
 
   void ForEach(BrowserContext::StoragePartitionCallback callback);
+
+  // Disposes the given in-memory storage partition.
+  void DisposeInMemory(StoragePartition* partition);
 
   size_t size() const { return partitions_.size(); }
 

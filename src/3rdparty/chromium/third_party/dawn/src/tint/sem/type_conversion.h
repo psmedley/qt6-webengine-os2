@@ -21,20 +21,21 @@ namespace tint::sem {
 
 /// TypeConversion is the CallTarget for a type conversion (cast).
 class TypeConversion final : public Castable<TypeConversion, CallTarget> {
- public:
-  /// Constructor
-  /// @param type the target type of the cast
-  /// @param parameter the type cast parameter
-  TypeConversion(const sem::Type* type, const sem::Parameter* parameter);
+  public:
+    /// Constructor
+    /// @param type the target type of the cast
+    /// @param parameter the type cast parameter
+    /// @param stage the earliest evaluation stage for the expression
+    TypeConversion(const sem::Type* type, const sem::Parameter* parameter, EvaluationStage stage);
 
-  /// Destructor
-  ~TypeConversion() override;
+    /// Destructor
+    ~TypeConversion() override;
 
-  /// @returns the cast source type
-  const sem::Type* Source() const { return Parameters()[0]->Type(); }
+    /// @returns the cast source type
+    const sem::Type* Source() const { return Parameters()[0]->Type(); }
 
-  /// @returns the cast target type
-  const sem::Type* Target() const { return ReturnType(); }
+    /// @returns the cast target type
+    const sem::Type* Target() const { return ReturnType(); }
 };
 
 }  // namespace tint::sem

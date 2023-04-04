@@ -18,7 +18,7 @@
 #include "libANGLE/renderer/ProgramImpl.h"
 #include "libANGLE/renderer/d3d/DynamicHLSL.h"
 #include "libANGLE/renderer/d3d/RendererD3D.h"
-#include "platform/FeaturesD3D.h"
+#include "platform/FeaturesD3D_autogen.h"
 
 namespace rx
 {
@@ -133,7 +133,7 @@ struct D3DVarying final
                unsigned int componentCountIn,
                unsigned int outputSlotIn);
 
-    D3DVarying(const D3DVarying &) = default;
+    D3DVarying(const D3DVarying &)            = default;
     D3DVarying &operator=(const D3DVarying &) = default;
 
     std::string semanticName;
@@ -235,7 +235,8 @@ class ProgramD3D : public ProgramImpl
     angle::Result getPixelExecutableForCachedOutputLayout(d3d::Context *context,
                                                           ShaderExecutableD3D **outExectuable,
                                                           gl::InfoLog *infoLog);
-    angle::Result getComputeExecutableForImage2DBindLayout(d3d::Context *context,
+    angle::Result getComputeExecutableForImage2DBindLayout(const gl::Context *glContext,
+                                                           d3d::Context *context,
                                                            ShaderExecutableD3D **outExecutable,
                                                            gl::InfoLog *infoLog);
     std::unique_ptr<LinkEvent> link(const gl::Context *context,
@@ -357,7 +358,6 @@ class ProgramD3D : public ProgramImpl
     bool hasNamedUniform(const std::string &name);
 
     bool usesVertexID() const { return mUsesVertexID; }
-    size_t getNumPixelShaderOutputs() const { return mPixelShaderOutputLayoutCache.size(); }
 
   private:
     // These forward-declared tasks are used for multi-thread shader compiles.
@@ -464,7 +464,7 @@ class ProgramD3D : public ProgramImpl
 
     void initializeUniformStorage(const gl::ShaderBitSet &availableShaderStages);
 
-    void defineUniformsAndAssignRegisters();
+    void defineUniformsAndAssignRegisters(const gl::Context *context);
     void defineUniformBase(const gl::Shader *shader,
                            const sh::ShaderVariable &uniform,
                            D3DUniformMap *uniformMap);
@@ -520,20 +520,20 @@ class ProgramD3D : public ProgramImpl
     D3DUniform *getD3DUniformFromLocation(GLint location);
     const D3DUniform *getD3DUniformFromLocation(GLint location) const;
 
-    void initAttribLocationsToD3DSemantic();
+    void initAttribLocationsToD3DSemantic(const gl::Context *context);
 
     void reset();
     void initializeUniformBlocks();
-    void initializeShaderStorageBlocks();
+    void initializeShaderStorageBlocks(const gl::Context *context);
 
-    void updateCachedInputLayoutFromShader();
+    void updateCachedInputLayoutFromShader(const gl::Context *context);
     void updateCachedOutputLayoutFromShader();
     void updateCachedImage2DBindLayoutFromShader(gl::ShaderType shaderType);
     void updateCachedVertexExecutableIndex();
     void updateCachedPixelExecutableIndex();
     void updateCachedComputeExecutableIndex();
 
-    void linkResources(const gl::ProgramLinkedResources &resources);
+    void linkResources(const gl::Context *context, const gl::ProgramLinkedResources &resources);
 
     RendererD3D *mRenderer;
     DynamicHLSL *mDynamicHLSL;

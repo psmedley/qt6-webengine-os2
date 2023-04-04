@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,8 @@
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_file_handle.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/forms/html_button_element.h"
@@ -127,7 +129,7 @@ TEST_F(GlobalFileSystemAccessTest, UserActivationRequiredOtherwiseDenied) {
   EXPECT_FALSE(frame->HasStickyUserActivation());
 
   MockFileSystemAccessManager manager(frame->GetBrowserInterfaceBroker());
-  manager.SetChooseEntriesResponse(WTF::Bind(
+  manager.SetChooseEntriesResponse(WTF::BindOnce(
       [](MockFileSystemAccessManager::ChooseEntriesCallback callback) {
         FAIL();
       }));
@@ -148,7 +150,7 @@ TEST_F(GlobalFileSystemAccessTest, UserActivationChooseEntriesSuccessful) {
   base::RunLoop manager_run_loop;
   MockFileSystemAccessManager manager(frame->GetBrowserInterfaceBroker(),
                                       manager_run_loop.QuitClosure());
-  manager.SetChooseEntriesResponse(WTF::Bind(
+  manager.SetChooseEntriesResponse(WTF::BindOnce(
       [](MockFileSystemAccessManager::ChooseEntriesCallback callback) {
         auto error = mojom::blink::FileSystemAccessError::New();
         error->status = mojom::blink::FileSystemAccessStatus::kOk;
@@ -204,7 +206,7 @@ TEST_F(GlobalFileSystemAccessTest, UserActivationChooseEntriesErrors) {
 
     base::RunLoop manager_run_loop;
     manager.SetQuitClosure(manager_run_loop.QuitClosure());
-    manager.SetChooseEntriesResponse(WTF::Bind(
+    manager.SetChooseEntriesResponse(WTF::BindOnce(
         [](mojom::blink::FileSystemAccessStatus status,
            MockFileSystemAccessManager::ChooseEntriesCallback callback) {
           auto error = mojom::blink::FileSystemAccessError::New();

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/cancelable_callback.h"
 #include "base/check.h"
 #include "base/files/file_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/sys_byteorder.h"
@@ -22,6 +23,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_waitable_event.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -310,8 +312,8 @@ class DnsConfigServiceLinuxTest : public ::testing::Test,
 
  protected:
   internal::DnsConfigServiceLinux service_;
-  TestResolvReader* resolv_reader_;
-  TestNsswitchReader* nsswitch_reader_;
+  raw_ptr<TestResolvReader> resolv_reader_;
+  raw_ptr<TestNsswitchReader> nsswitch_reader_;
 };
 
 // Regression test to verify crash does not occur if DnsConfigServiceLinux
@@ -878,7 +880,7 @@ TEST_F(DnsConfigServiceLinuxTest, RejectsNsswitchResolve) {
   EXPECT_TRUE(config->unhandled_options);
 }
 
-TEST_F(DnsConfigServiceLinuxTest, AcceptsNsswitchNis) {
+TEST_F(DnsConfigServiceLinuxTest, RejectsNsswitchNis) {
   auto res = std::make_unique<struct __res_state>();
   InitializeResState(res.get());
   resolv_reader_->set_value(std::move(res));
@@ -895,7 +897,7 @@ TEST_F(DnsConfigServiceLinuxTest, AcceptsNsswitchNis) {
 
   ASSERT_TRUE(config.has_value());
   EXPECT_TRUE(config->IsValid());
-  EXPECT_FALSE(config->unhandled_options);
+  EXPECT_TRUE(config->unhandled_options);
 }
 
 TEST_F(DnsConfigServiceLinuxTest, RejectsWithBadNisNotFoundAction) {

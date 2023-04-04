@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,13 @@
 #include "base/strings/string_piece.h"
 #include "components/autofill_assistant/browser/features.h"
 #include "components/autofill_assistant/browser/js_flow_util.h"
+#include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/parse_jspb.h"
 #include "components/autofill_assistant/browser/web/web_controller_util.h"
+#include "components/version_info/version_info.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
 
 namespace autofill_assistant {
 namespace {
@@ -52,10 +57,6 @@ constexpr char kLeadingWrapper[] = R"(
   }
 
   (async () => {
-
-  // Keep the next empty line. The JS flow script should be concatenated
-  // without leading spaces.
-
 )";
 
 // The code inserted after the JS flow. This closes and executes the arrow
@@ -64,20 +65,17 @@ constexpr char kLeadingWrapper[] = R"(
 // wrapper not on the same line as the JS flow source.
 constexpr char kTrailingWrapper[] = "\n})()";
 
-// The number of lines to subtract from all call stack entries sent to the
-// backend.
-constexpr int kJsLineOffset = []() {
+constexpr int CountLines(base::StringPiece str) {
   int num_lines = 0;
-  for (const char c : kLeadingWrapper) {
+  for (const char c : str) {
     num_lines += c == '\n';
   }
   return num_lines;
-}();
+}
 
-// The number of stack entries to drop before returning to the client. We drop
-// one entry as the source sent from the backend is wrapped in an anonymous
-// function.
-constexpr int kNumStackEntriesToDrop = 1;
+// The number of lines to subtract from all call stack entries sent to the
+// backend. We add one line to the wrapper in CreateWrappedJsFlow.
+constexpr int kJsLineOffset = CountLines(kLeadingWrapper) + 1;
 
 constexpr char kArrayGetNthElement[] =
     "function(index) { return this[index]; }";
@@ -87,8 +85,6 @@ constexpr char kFulfillActionPromise[] = R"(
     this([status, result]);
   }
 )";
-
-constexpr char kMainFrame[] = "";
 
 absl::optional<std::string> ConvertActionToBytes(const base::Value* action,
                                                  std::string* error_message) {
@@ -115,14 +111,11 @@ absl::optional<std::string> ConvertActionToBytes(const base::Value* action,
 
 }  // namespace
 
-JsFlowExecutorImpl::JsFlowExecutorImpl(content::WebContents* web_contents,
-                                       Delegate* delegate)
+JsFlowExecutorImpl::JsFlowExecutorImpl(
+    Delegate* delegate,
+    JsFlowDevtoolsWrapper* js_flow_devtools_wrapper)
     : delegate_(delegate),
-      devtools_client_(std::make_unique<DevtoolsClient>(
-          content::DevToolsAgentHost::GetOrCreateFor(web_contents),
-          base::FeatureList::IsEnabled(
-              autofill_assistant::features::
-                  kAutofillAssistantFullJsFlowStackTraces))) {}
+      js_flow_devtools_wrapper_(js_flow_devtools_wrapper) {}
 
 JsFlowExecutorImpl::~JsFlowExecutorImpl() = default;
 
@@ -130,82 +123,87 @@ void JsFlowExecutorImpl::Start(
     const std::string& js_flow,
     base::OnceCallback<void(const ClientStatus&, std::unique_ptr<base::Value>)>
         callback) {
+  Metrics::RecordJsFlowStartedEvent(
+      Metrics::JsFlowStartedEvent::EXECUTOR_STARTED);
+
   if (callback_) {
     LOG(ERROR) << "Invoked " << __func__ << " while already running";
+    Metrics::RecordJsFlowStartedEvent(
+        Metrics::JsFlowStartedEvent::FAILED_ALREADY_RUNNING);
     std::move(callback).Run(ClientStatus(INVALID_ACTION), nullptr);
     return;
   }
 
   js_flow_ = std::make_unique<std::string>(js_flow);
   callback_ = std::move(callback);
-  if (isolated_world_context_id_ == -1) {
-    devtools_client_->GetPage()->GetFrameTree(
-        kMainFrame, base::BindOnce(&JsFlowExecutorImpl::OnGetFrameTree,
-                                   weak_ptr_factory_.GetWeakPtr()));
-  } else {
-    InternalStart();
-  }
+
+  js_flow_devtools_wrapper_->GetDevtoolsAndMaybeInit(base::BindOnce(
+      &JsFlowExecutorImpl::InternalStart, weak_ptr_factory_.GetWeakPtr()));
 }
 
-void JsFlowExecutorImpl::OnGetFrameTree(
-    const DevtoolsClient::ReplyStatus& reply_status,
-    std::unique_ptr<page::GetFrameTreeResult> result) {
-  if (!result) {
-    LOG(ERROR) << "Failed to retrieve frame tree";
-    std::move(callback_).Run(
-        JavaScriptErrorStatus(reply_status, __FILE__, __LINE__, nullptr),
-        nullptr);
-    return;
-  }
-
-  devtools_client_->GetPage()->CreateIsolatedWorld(
-      page::CreateIsolatedWorldParams::Builder()
-          .SetFrameId(result->GetFrameTree()->GetFrame()->GetId())
-          .Build(),
-      kMainFrame,
-      base::BindOnce(&JsFlowExecutorImpl::IsolatedWorldCreated,
-                     weak_ptr_factory_.GetWeakPtr()));
+// Wraps the main js_flow in an async function as well as making
+// runNativeAction, client constants (e.g. LINE_OFFSET) available to the flow.
+std::string CreateWrappedJsFlow(const std::string& js_flow) {
+  return base::StrCat(
+      {// The leading wrapper contains the runNativeAction
+       // function as well as the first part of the anonymous
+       // function call that will wrap the js flow.
+       kLeadingWrapper,
+       // The line offset constant. Since compile time string
+       // concatenation is not straightforward we add it here.
+       "const LINE_OFFSET = ", base::NumberToString(kJsLineOffset), ";",
+       // The Chrome version number, e.g. "104.0.490.1".
+       "const CHROME_VERSION_NUMBER = '", version_info::GetVersionNumber(),
+       "';",
+       // The DebugMode command line switch, if true more info will be logged.
+       "const DEBUG_MODE = ", js_flow_util::IsDebugMode() ? "true" : "false",
+       ";",
+       // New line so the js flow starts from the first column.
+       // Added to kJsLineOffset.
+       "\n",
+       // The js flow to execute.
+       js_flow,
+       // The trailing wrapper closes and executes the anonymous
+       // function from the leading wrapper.
+       kTrailingWrapper,
+       // Devtools source url comment so we can identity this
+       // snippet.
+       js_flow_util::GetDevtoolsSourceUrlCommentToAppend(
+           UnexpectedErrorInfoProto::JS_FLOW)});
 }
 
-void JsFlowExecutorImpl::IsolatedWorldCreated(
-    const DevtoolsClient::ReplyStatus& reply_status,
-    std::unique_ptr<page::CreateIsolatedWorldResult> result) {
-  if (!result) {
-    LOG(ERROR) << "Failed to create isolated world";
-    std::move(callback_).Run(
-        JavaScriptErrorStatus(reply_status, __FILE__, __LINE__, nullptr),
-        nullptr);
-    return;
-  }
-
-  isolated_world_context_id_ = result->GetExecutionContextId();
-  InternalStart();
-}
-
-void JsFlowExecutorImpl::InternalStart() {
-  DCHECK(isolated_world_context_id_ != -1);
+void JsFlowExecutorImpl::InternalStart(const ClientStatus& status,
+                                       DevtoolsClient* devtools_client,
+                                       const int isolated_world_context_id) {
   DCHECK(callback_);
+
+  if (!status.ok()) {
+    RunCallback(status, nullptr);
+    return;
+  }
+
+  devtools_client_ = devtools_client;
+  isolated_world_context_id_ = isolated_world_context_id;
 
   // Before running the flow in the sandbox, we define a promise that
   // the flow may fulfill to request execution of a native action.
   RefreshNativeActionPromise();
 
-  // Wrap the main js_flow in an async function containing a method to
-  // request native actions. This is essentially providing |js_flow| with a
-  // JS API to call native functionality.
-  js_flow_ = std::make_unique<std::string>(
-      base::StrCat({kLeadingWrapper, *js_flow_, kTrailingWrapper}));
+  const auto wrapped_js_flow = CreateWrappedJsFlow(*js_flow_);
+
+  Metrics::RecordJsFlowStartedEvent(
+      Metrics::JsFlowStartedEvent::SCRIPT_STARTED);
 
   // Run the wrapped js_flow in the sandbox and serve potential native action
   // requests as they arrive.
   devtools_client_->GetRuntime()->Evaluate(
       runtime::EvaluateParams::Builder()
-          .SetExpression(*js_flow_)
+          .SetExpression(wrapped_js_flow)
           .SetAwaitPromise(true)
           .SetReturnByValue(true)
           .SetContextId(isolated_world_context_id_)
           .Build(),
-      kMainFrame,
+      js_flow_util::kMainFrame,
       base::BindOnce(&JsFlowExecutorImpl::OnFlowFinished,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -217,7 +215,7 @@ void JsFlowExecutorImpl::RefreshNativeActionPromise() {
           .SetAwaitPromise(true)
           .SetContextId(isolated_world_context_id_)
           .Build(),
-      kMainFrame,
+      js_flow_util::kMainFrame,
       base::BindOnce(&JsFlowExecutorImpl::OnNativeActionRequested,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -241,7 +239,7 @@ void JsFlowExecutorImpl::OnNativeActionRequested(
           .SetFunctionDeclaration(kArrayGetNthElement)
           .SetReturnByValue(true)
           .Build(),
-      kMainFrame,
+      js_flow_util::kMainFrame,
       base::BindOnce(&JsFlowExecutorImpl::OnNativeActionRequestActionRetrieved,
                      weak_ptr_factory_.GetWeakPtr(), js_array_object_id));
 }
@@ -270,7 +268,7 @@ void JsFlowExecutorImpl::OnNativeActionRequestActionRetrieved(
           .SetArguments(std::move(arguments))
           .SetFunctionDeclaration(kArrayGetNthElement)
           .Build(),
-      kMainFrame,
+      js_flow_util::kMainFrame,
       base::BindOnce(
           &JsFlowExecutorImpl::OnNativeActionRequestFulfillPromiseRetrieved,
           weak_ptr_factory_.GetWeakPtr(),
@@ -352,7 +350,7 @@ void JsFlowExecutorImpl::OnNativeActionFinished(
           .SetArguments(std::move(arguments))
           .SetFunctionDeclaration(kFulfillActionPromise)
           .Build(),
-      kMainFrame,
+      js_flow_util::kMainFrame,
       base::BindOnce(&JsFlowExecutorImpl::OnFlowResumed,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -370,13 +368,15 @@ void JsFlowExecutorImpl::OnFlowResumed(
 void JsFlowExecutorImpl::OnFlowFinished(
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<runtime::EvaluateResult> result) {
+  const JsLineOffsets js_line_offsets = {
+      {js_flow_util::GetDevtoolsSourceUrl(UnexpectedErrorInfoProto::JS_FLOW),
+       {kJsLineOffset, kJsLineOffset + CountLines(*js_flow_)}}};
   // Check and extract the return value. In case of exceptions, the sanitized
   // stack trace will be part of the returned ClientStatus. Only primitive
   // values are allowed (see js_flow_util::ExtractFlowReturnValue for details).
   std::unique_ptr<base::Value> out_result_value;
   ClientStatus status = js_flow_util::ExtractFlowReturnValue(
-      reply_status, result.get(), out_result_value, kJsLineOffset,
-      kNumStackEntriesToDrop);
+      reply_status, result.get(), out_result_value, js_line_offsets);
 
   RunCallback(status, std::move(out_result_value));
 }
@@ -387,7 +387,10 @@ void JsFlowExecutorImpl::RunCallback(
   if (!status.ok() && result_value) {
     VLOG(1) << "Flow failed with " << status
             << " and result: " << *result_value;
+  } else if (!status.ok()) {
+    VLOG(1) << "Flow failed with " << status;
   }
+
   std::move(callback_).Run(status, std::move(result_value));
 }
 

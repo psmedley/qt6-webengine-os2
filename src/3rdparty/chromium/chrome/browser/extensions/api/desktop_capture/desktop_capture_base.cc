@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,6 +81,9 @@ void DesktopCaptureChooseDesktopMediaFunctionBase::Cancel() {
 ExtensionFunction::ResponseAction
 DesktopCaptureChooseDesktopMediaFunctionBase::Execute(
     const std::vector<api::desktop_capture::DesktopCaptureSourceType>& sources,
+    bool exclude_system_audio,
+    bool exclude_self_browser_surface,
+    bool suppress_local_audio_playback_intended,
     content::RenderFrameHost* render_frame_host,
     const GURL& origin,
     const std::u16string target_name) {
@@ -136,15 +139,12 @@ DesktopCaptureChooseDesktopMediaFunctionBase::Execute(
       capture_policy::GetAllowedCaptureLevel(origin, web_contents);
 
   capture_policy::FilterMediaList(media_types, capture_level);
+
   DesktopMediaList::WebContentsFilter includable_web_contents_filter =
       capture_policy::GetIncludableWebContentsFilter(origin, capture_level);
-
-  // Avoid offering window-capture as a separate source, since PipeWire's
-  // content-picker will offer both screen and window sources.
-  // See crbug.com/1157006.
-  if (content::desktop_capture::CanUsePipeWire() &&
-      base::Contains(media_types, DesktopMediaList::Type::kScreen)) {
-    base::Erase(media_types, DesktopMediaList::Type::kWindow);
+  if (exclude_self_browser_surface) {
+    includable_web_contents_filter = DesktopMediaList::ExcludeWebContents(
+        std::move(includable_web_contents_filter), web_contents);
   }
 
   DesktopMediaPickerController::DoneCallback callback = base::BindOnce(
@@ -157,6 +157,9 @@ DesktopCaptureChooseDesktopMediaFunctionBase::Execute(
   picker_params.app_name = base::UTF8ToUTF16(GetCallerDisplayName());
   picker_params.target_name = target_name;
   picker_params.request_audio = request_audio;
+  picker_params.exclude_system_audio = exclude_system_audio;
+  picker_params.suppress_local_audio_playback =
+      suppress_local_audio_playback_intended;
   picker_controller_ =
       std::make_unique<DesktopMediaPickerController>(g_picker_factory);
   picker_params.restricted_by_policy =

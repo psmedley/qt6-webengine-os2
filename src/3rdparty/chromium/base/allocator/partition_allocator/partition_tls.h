@@ -1,13 +1,14 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_ALLOCATOR_PARTITION_ALLOCATOR_PARTITION_TLS_H_
 #define BASE_ALLOCATOR_PARTITION_ALLOCATOR_PARTITION_TLS_H_
 
+#include "base/allocator/partition_allocator/partition_alloc_base/compiler_specific.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/component_export.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/immediate_crash.h"
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
-#include "base/base_export.h"
-#include "base/compiler_specific.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(IS_POSIX)
@@ -15,7 +16,7 @@
 #endif
 
 #if BUILDFLAG(IS_WIN)
-#include "base/win/windows_types.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/win/windows_types.h"
 #endif
 
 // Barebones TLS implementation for use in PartitionAlloc. This doesn't use the
@@ -33,7 +34,7 @@ using PartitionTlsKey = pthread_key_t;
 #if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_X86_64)
 namespace {
 
-ALWAYS_INLINE void* FastTlsGet(intptr_t index) {
+PA_ALWAYS_INLINE void* FastTlsGet(PartitionTlsKey index) {
   // On macOS, pthread_getspecific() is in libSystem, so a call to it has to go
   // through PLT. However, and contrary to some other platforms, *all* TLS keys
   // are in a static array in the thread structure. So they are *always* at a
@@ -52,7 +53,10 @@ ALWAYS_INLINE void* FastTlsGet(intptr_t index) {
   // This function is essentially inlining the content of pthread_getspecific()
   // here.
   intptr_t result;
-  asm("movq %%gs:(,%1,8), %0;" : "=r"(result) : "r"(index));
+  static_assert(sizeof index <= sizeof(intptr_t));
+  asm("movq %%gs:(,%1,8), %0;"
+      : "=r"(result)
+      : "r"(static_cast<intptr_t>(index)));
 
   return reinterpret_cast<void*>(result);
 }
@@ -60,12 +64,12 @@ ALWAYS_INLINE void* FastTlsGet(intptr_t index) {
 }  // namespace
 #endif  // BUILDFLAG(IS_MAC) && defined(ARCH_CPU_X86_64)
 
-ALWAYS_INLINE bool PartitionTlsCreate(PartitionTlsKey* key,
-                                      void (*destructor)(void*)) {
+PA_ALWAYS_INLINE bool PartitionTlsCreate(PartitionTlsKey* key,
+                                         void (*destructor)(void*)) {
   return !pthread_key_create(key, destructor);
 }
 
-ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
+PA_ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
 #if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_X86_64)
   PA_DCHECK(pthread_getspecific(key) == FastTlsGet(key));
   return FastTlsGet(key);
@@ -74,7 +78,7 @@ ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
 #endif
 }
 
-ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
+PA_ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
   int ret = pthread_setspecific(key, value);
   PA_DCHECK(!ret);
 }
@@ -84,10 +88,10 @@ ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
 // be lifted.
 using PartitionTlsKey = unsigned long;
 
-BASE_EXPORT bool PartitionTlsCreate(PartitionTlsKey* key,
-                                    void (*destructor)(void*));
+PA_COMPONENT_EXPORT(PARTITION_ALLOC)
+bool PartitionTlsCreate(PartitionTlsKey* key, void (*destructor)(void*));
 
-ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
+PA_ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
   // Accessing TLS resets the last error, which then makes |GetLastError()|
   // return something misleading. While this means that properly using
   // |GetLastError()| is difficult, there is currently code in Chromium which
@@ -104,12 +108,12 @@ ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
   DWORD saved_error = GetLastError();
   void* ret = TlsGetValue(key);
   // Only non-zero errors need to be restored.
-  if (UNLIKELY(saved_error))
+  if (PA_UNLIKELY(saved_error))
     SetLastError(saved_error);
   return ret;
 }
 
-ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
+PA_ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
   BOOL ret = TlsSetValue(key, value);
   PA_DCHECK(ret);
 }
@@ -121,38 +125,24 @@ void PartitionTlsSetOnDllProcessDetach(void (*callback)());
 // Not supported.
 using PartitionTlsKey = int;
 
-ALWAYS_INLINE bool PartitionTlsCreate(PartitionTlsKey* key,
-                                      void (*destructor)(void*)) {
+PA_ALWAYS_INLINE bool PartitionTlsCreate(PartitionTlsKey* key,
+                                         void (*destructor)(void*)) {
   // NOTIMPLEMENTED() may allocate, crash instead.
-  IMMEDIATE_CRASH();
+  PA_IMMEDIATE_CRASH();
   return false;
 }
 
-ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
-  IMMEDIATE_CRASH();
+PA_ALWAYS_INLINE void* PartitionTlsGet(PartitionTlsKey key) {
+  PA_IMMEDIATE_CRASH();
   return nullptr;
 }
 
-ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
-  IMMEDIATE_CRASH();
+PA_ALWAYS_INLINE void PartitionTlsSet(PartitionTlsKey key, void* value) {
+  PA_IMMEDIATE_CRASH();
 }
 
 #endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace partition_alloc::internal
-
-namespace base::internal {
-
-// TODO(https://crbug.com/1288247): Remove these 'using' declarations once
-// the migration to the new namespaces gets done.
-using ::partition_alloc::internal::PartitionTlsCreate;
-using ::partition_alloc::internal::PartitionTlsGet;
-using ::partition_alloc::internal::PartitionTlsKey;
-using ::partition_alloc::internal::PartitionTlsSet;
-#if BUILDFLAG(IS_WIN)
-using ::partition_alloc::internal::PartitionTlsSetOnDllProcessDetach;
-#endif  // BUILDFLAG(IS_WIN)
-
-}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_PARTITION_TLS_H_

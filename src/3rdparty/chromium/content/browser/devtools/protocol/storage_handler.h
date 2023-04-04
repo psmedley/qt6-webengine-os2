@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/storage.h"
 #include "content/browser/interest_group/interest_group_manager_impl.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 
 namespace storage {
 class QuotaOverrideHandle;
@@ -41,10 +43,16 @@ class StorageHandler : public DevToolsDomainHandler,
   Response Disable() override;
 
   // content::protocol::storage::Backend
+  Response GetStorageKeyForFrame(const std::string& frame_id,
+                                 std::string* serialized_storage_key) override;
   void ClearDataForOrigin(
       const std::string& origin,
       const std::string& storage_types,
       std::unique_ptr<ClearDataForOriginCallback> callback) override;
+  void ClearDataForStorageKey(
+      const std::string& storage_key,
+      const std::string& storage_types,
+      std::unique_ptr<ClearDataForStorageKeyCallback> callback) override;
   void GetUsageAndQuota(
       const String& origin,
       std::unique_ptr<GetUsageAndQuotaCallback> callback) override;
@@ -74,7 +82,10 @@ class StorageHandler : public DevToolsDomainHandler,
   Response TrackCacheStorageForOrigin(const std::string& origin) override;
   Response UntrackCacheStorageForOrigin(const std::string& origin) override;
   Response TrackIndexedDBForOrigin(const std::string& origin) override;
+  Response TrackIndexedDBForStorageKey(const std::string& storage_key) override;
   Response UntrackIndexedDBForOrigin(const std::string& origin) override;
+  Response UntrackIndexedDBForStorageKey(
+      const std::string& storage_key) override;
 
   void GetTrustTokens(
       std::unique_ptr<GetTrustTokensCallback> callback) override;
@@ -109,8 +120,10 @@ class StorageHandler : public DevToolsDomainHandler,
   void NotifyCacheStorageListChanged(const std::string& origin);
   void NotifyCacheStorageContentChanged(const std::string& origin,
                                         const std::string& name);
-  void NotifyIndexedDBListChanged(const std::string& origin);
+  void NotifyIndexedDBListChanged(const std::string& origin,
+                                  const std::string& storage_key);
   void NotifyIndexedDBContentChanged(const std::string& origin,
+                                     const std::string& storage_key,
                                      const std::u16string& database_name,
                                      const std::u16string& object_store_name);
 
@@ -118,7 +131,8 @@ class StorageHandler : public DevToolsDomainHandler,
                                 StoragePartition** storage_partition);
 
   std::unique_ptr<Storage::Frontend> frontend_;
-  StoragePartition* storage_partition_;
+  StoragePartition* storage_partition_{nullptr};
+  RenderFrameHostImpl* frame_host_ = nullptr;
   std::unique_ptr<CacheStorageObserver> cache_storage_observer_;
   std::unique_ptr<IndexedDBObserver> indexed_db_observer_;
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,16 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
   bool InShadowTree() const override;
   void Detached(FrameDetachType) override;
 
+  // RemoteFrameClient overrides:
+  void CreateRemoteChild(
+      const RemoteFrameToken& token,
+      const absl::optional<FrameToken>& opener_frame_token,
+      mojom::blink::TreeScopeType tree_scope_type,
+      mojom::blink::FrameReplicationStatePtr replication_state,
+      const base::UnguessableToken& devtools_frame_token,
+      mojom::blink::RemoteFrameInterfacesFromBrowserPtr remote_frame_interfaces)
+      override;
   unsigned BackForwardLength() override;
-  AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() override;
 
   WebRemoteFrameImpl* GetWebFrame() const { return web_frame_; }
 

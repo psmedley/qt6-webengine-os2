@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@ class ScriptState;
 class SharedStorageWorklet;
 class SharedStorageSetMethodOptions;
 class SharedStorageRunOperationMethodOptions;
+class SharedStorageUrlWithMetadata;
 
 class MODULES_EXPORT SharedStorage final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
@@ -51,23 +52,21 @@ class MODULES_EXPORT SharedStorage final : public ScriptWrappable {
 
   ScriptPromise clear(ScriptState*, ExceptionState&);
 
-  ScriptPromise runURLSelectionOperation(ScriptState*,
-                                         const String& name,
-                                         const Vector<String>& urls,
-                                         ExceptionState&);
-  ScriptPromise runURLSelectionOperation(
-      ScriptState*,
-      const String& name,
-      const Vector<String>& urls,
-      const SharedStorageRunOperationMethodOptions* options,
-      ExceptionState&);
+  ScriptPromise selectURL(ScriptState*,
+                          const String& name,
+                          HeapVector<Member<SharedStorageUrlWithMetadata>> urls,
+                          ExceptionState&);
+  ScriptPromise selectURL(ScriptState*,
+                          const String& name,
+                          HeapVector<Member<SharedStorageUrlWithMetadata>> urls,
+                          const SharedStorageRunOperationMethodOptions* options,
+                          ExceptionState&);
 
-  ScriptPromise runOperation(ScriptState*, const String& name, ExceptionState&);
-  ScriptPromise runOperation(
-      ScriptState*,
-      const String& name,
-      const SharedStorageRunOperationMethodOptions* options,
-      ExceptionState&);
+  ScriptPromise run(ScriptState*, const String& name, ExceptionState&);
+  ScriptPromise run(ScriptState*,
+                    const String& name,
+                    const SharedStorageRunOperationMethodOptions* options,
+                    ExceptionState&);
 
   SharedStorageWorklet* worklet(ScriptState*, ExceptionState&);
 

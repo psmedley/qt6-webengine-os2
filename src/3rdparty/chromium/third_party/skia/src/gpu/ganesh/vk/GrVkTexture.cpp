@@ -106,7 +106,8 @@ sk_sp<GrVkTexture> GrVkTexture::MakeNewTexture(GrVkGpu* gpu, SkBudgeted budgeted
                                                SkISize dimensions,
                                                VkFormat format, uint32_t mipLevels,
                                                GrProtected isProtected,
-                                               GrMipmapStatus mipmapStatus) {
+                                               GrMipmapStatus mipmapStatus,
+                                               std::string_view label) {
     sk_sp<GrVkImage> texture = GrVkImage::MakeTexture(
             gpu, dimensions, format, mipLevels, GrRenderable::kNo, /*numSamples=*/1, budgeted,
             isProtected);
@@ -115,13 +116,13 @@ sk_sp<GrVkTexture> GrVkTexture::MakeNewTexture(GrVkGpu* gpu, SkBudgeted budgeted
         return nullptr;
     }
     return sk_sp<GrVkTexture>(new GrVkTexture(
-            gpu, budgeted, dimensions, std::move(texture), mipmapStatus, /*label=*/{}));
+            gpu, budgeted, dimensions, std::move(texture), mipmapStatus, label));
 }
 
 sk_sp<GrVkTexture> GrVkTexture::MakeWrappedTexture(
         GrVkGpu* gpu, SkISize dimensions, GrWrapOwnership wrapOwnership, GrWrapCacheable cacheable,
         GrIOType ioType, const GrVkImageInfo& info,
-        sk_sp<GrBackendSurfaceMutableStateImpl> mutableState) {
+        sk_sp<skgpu::MutableTextureStateRef> mutableState) {
     // Adopted textures require both image and allocation because we're responsible for freeing
     SkASSERT(VK_NULL_HANDLE != info.fImage &&
              (kBorrow_GrWrapOwnership == wrapOwnership || VK_NULL_HANDLE != info.fAlloc.fMemory));
@@ -132,7 +133,8 @@ sk_sp<GrVkTexture> GrVkTexture::MakeWrappedTexture(
                                                       std::move(mutableState),
                                                       GrAttachment::UsageFlags::kTexture,
                                                       wrapOwnership,
-                                                      cacheable);
+                                                      cacheable,
+                                                      "VkImage_MakeWrappedTexture");
     if (!texture) {
         return nullptr;
     }
@@ -150,7 +152,7 @@ sk_sp<GrVkTexture> GrVkTexture::MakeWrappedTexture(
                                               cacheable,
                                               ioType,
                                               isExternal,
-                                              /*label=*/{}));
+                                              /*label=*/"Vk_MakeWrappedTexture"));
 }
 
 GrVkTexture::~GrVkTexture() {

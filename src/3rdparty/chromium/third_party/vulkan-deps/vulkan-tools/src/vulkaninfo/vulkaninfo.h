@@ -67,7 +67,7 @@
 #endif
 #endif  // _WIN32
 
-#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <dlfcn.h>
 #endif
 
@@ -77,6 +77,10 @@
 
 #if defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT)
 #include "metal_view.h"
+#endif
+
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+#include <wayland-client.h>
 #endif
 
 #include <vulkan/vulkan.h>
@@ -226,14 +230,17 @@ auto GetVectorInit(const char *func_name, F &&f, T init, Ts &&...ts) -> std::vec
     uint32_t count = 0;
     std::vector<T> results;
     VkResult err;
+    uint32_t iteration_count = 0;
+    uint32_t max_iterations = 3;
     do {
         err = f(ts..., &count, nullptr);
         if (err) THROW_VK_ERR(func_name, err);
         results.resize(count, init);
         err = f(ts..., &count, results.data());
         results.resize(count);
-    } while (err == VK_INCOMPLETE);
-    if (err) THROW_VK_ERR(func_name, err);
+        iteration_count++;
+    } while (err == VK_INCOMPLETE || iteration_count < max_iterations);
+    if (err && iteration_count <= max_iterations) THROW_VK_ERR(func_name, err);
     return results;
 }
 
@@ -245,7 +252,7 @@ auto GetVector(const char *func_name, F &&f, Ts &&...ts) -> std::vector<T> {
 // ----------- Instance Setup ------- //
 struct VkDll {
     VkResult Initialize() {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
         library = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
         if (!library) library = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
 #elif defined(_WIN32)
@@ -257,7 +264,7 @@ struct VkDll {
         return VK_SUCCESS;
     }
     void Close() {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
         dlclose(library);
 #elif defined(_WIN32)
         FreeLibrary(library);
@@ -418,13 +425,13 @@ struct VkDll {
   private:
     template <typename T>
     void Load(T &func_dest, const char *func_name) {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
         func_dest = reinterpret_cast<T>(dlsym(library, func_name));
 #elif defined(_WIN32)
         func_dest = reinterpret_cast<T>(GetProcAddress(library, func_name));
 #endif
     }
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
     void *library;
 #elif defined(_WIN32)
     HMODULE library;
@@ -1307,8 +1314,10 @@ class AppSurface {
 
 std::vector<VkPhysicalDeviceGroupProperties> GetGroups(AppInstance &inst) {
     if (inst.CheckExtensionEnabled(VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME)) {
-        return GetVector<VkPhysicalDeviceGroupProperties>("vkEnumeratePhysicalDeviceGroupsKHR",
-                                                          inst.ext_funcs.vkEnumeratePhysicalDeviceGroupsKHR, inst.instance);
+        VkPhysicalDeviceGroupProperties group_props{};
+        group_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES;
+        return GetVectorInit<VkPhysicalDeviceGroupProperties>(
+            "vkEnumeratePhysicalDeviceGroupsKHR", inst.ext_funcs.vkEnumeratePhysicalDeviceGroupsKHR, group_props, inst.instance);
     }
     return {};
 }
@@ -1616,8 +1625,8 @@ struct AppGpu {
                 }
 
                 VkImageCreateInfo image_ci_regular = GetImageCreateInfo(0, format, tiling, 0);
-                VkImageCreateInfo image_ci_transient = GetImageCreateInfo(
-                    0, format, tiling, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+                VkImageCreateInfo image_ci_transient =
+                    GetImageCreateInfo(0, format, tiling, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
                 VkImageCreateInfo image_ci_sparse =
                     GetImageCreateInfo(VK_IMAGE_CREATE_SPARSE_BINDING_BIT, format, tiling, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 

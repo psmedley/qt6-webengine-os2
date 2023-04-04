@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,12 +75,14 @@ class MockUpdateClient : public UpdateClient {
  public:
   MockUpdateClient() = default;
 
-  void Install(const std::string& id,
-               CrxDataCallback crx_data_callback,
-               CrxStateChangeCallback crx_state_change_callback,
-               Callback callback) override {
+  base::RepeatingClosure Install(
+      const std::string& id,
+      CrxDataCallback crx_data_callback,
+      CrxStateChangeCallback crx_state_change_callback,
+      Callback callback) override {
     DoInstall(id, std::move(crx_data_callback));
     std::move(callback).Run(update_client::Error::NONE);
+    return base::DoNothing();
   }
 
   void Update(const std::vector<std::string>& ids,
@@ -370,8 +372,8 @@ TEST_F(ComponentInstallerTest, InstallerRegister_CheckSequence) {
     MOCK_METHOD(void, RegisterComplete, (), (override));
 
    private:
-    void CheckSequence() { DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker); }
-    SEQUENCE_CHECKER(sequence_checker);
+    void CheckSequence() { DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_); }
+    SEQUENCE_CHECKER(sequence_checker_);
   };
 
   base::ScopedPathOverride scoped_path_override(DIR_COMPONENT_USER);

@@ -1,9 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import {Point} from './constants.js';
 import {GestureDetector, PinchEventDetail} from './gesture_detector.js';
+import {SwipeDetector, SwipeDirection} from './swipe_detector.js';
 import {ViewportInterface, ViewportScroller} from './viewport_scroller.js';
 
 interface InProcessPdfPluginElement extends HTMLEmbedElement {
@@ -73,12 +74,11 @@ channel.port1.onmessage = e => {
       plugin.setAttribute('has-edits', '');
       return;
 
-    case 'setReadOnly':
-      // TODO(crbug.com/702993): Rename the incoming message to reflect that
-      // this is only used by Presentation mode.
-      isPresentationMode = e.data.enableReadOnly;
+    case 'setPresentationMode':
+      isPresentationMode = e.data.enablePresentationMode;
 
       gestureDetector.setPresentationMode(isPresentationMode);
+      swipeDetector.setPresentationMode(isPresentationMode);
       if (isPresentationMode) {
         document.documentElement.className = 'fullscreen';
       } else {
@@ -162,6 +162,21 @@ const gestureDetector = new GestureDetector(plugin);
 for (const type of ['pinchstart', 'pinchupdate', 'pinchend', 'wheel']) {
   gestureDetector.getEventTarget().addEventListener(type, relayGesture);
 }
+
+/**
+ * Relays swipe events to the parent frame.
+ * @param e The swipe event.
+ */
+function relaySwipe(e: Event): void {
+  const swipeEvent = e as CustomEvent<SwipeDirection>;
+  channel.port1.postMessage({
+    type: 'swipe',
+    direction: swipeEvent.detail,
+  });
+}
+
+const swipeDetector = new SwipeDetector(plugin);
+swipeDetector.getEventTarget().addEventListener('swipe', relaySwipe);
 
 document.addEventListener('keydown', e => {
   // Only forward potential shortcut keys.
@@ -256,7 +271,7 @@ function hasCtrlModifier(e: KeyboardEvent): boolean {
   return hasModifier;
 }
 
-// TODO(crbug.com/1252096): Load from chrome://resources/js/util.m.js instead.
+// TODO(crbug.com/1252096): Load from chrome://resources/js/util.js instead.
 function hasKeyModifiers(e: KeyboardEvent): boolean {
   return !!(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey);
 }

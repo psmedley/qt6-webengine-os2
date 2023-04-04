@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,18 +22,24 @@
 #include "base/types/id_type.h"
 #include "components/services/storage/public/cpp/buckets/bucket_id.h"
 #include "components/services/storage/public/cpp/buckets/bucket_info.h"
+#include "components/services/storage/public/cpp/buckets/bucket_init_params.h"
 #include "components/services/storage/public/cpp/buckets/bucket_locator.h"
 #include "components/services/storage/public/cpp/buckets/constants.h"
 #include "components/services/storage/public/cpp/quota_error_or.h"
+#include "storage/browser/quota/quota_internals.mojom-forward.h"
 #include "storage/browser/quota/storage_directory.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom-shared.h"
 
+namespace base {
+class Clock;
+}
+
 namespace sql {
 class Database;
 class MetaTable;
-}
+}  // namespace sql
 
 namespace storage {
 
@@ -60,29 +66,6 @@ enum class DatabaseResetReason {
 // constructor, must called on the DB thread.
 class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
  public:
-  struct COMPONENT_EXPORT(STORAGE_BROWSER) BucketTableEntry {
-    BucketTableEntry();
-    BucketTableEntry(BucketId bucket_id,
-                     blink::StorageKey storage_key,
-                     blink::mojom::StorageType type,
-                     std::string name,
-                     int use_count,
-                     const base::Time& last_accessed,
-                     const base::Time& last_modified);
-    ~BucketTableEntry();
-
-    BucketTableEntry(const BucketTableEntry&);
-    BucketTableEntry& operator=(const BucketTableEntry&);
-
-    BucketId bucket_id;
-    blink::StorageKey storage_key;
-    blink::mojom::StorageType type = blink::mojom::StorageType::kUnknown;
-    std::string name;
-    int use_count = 0;
-    base::Time last_accessed;
-    base::Time last_modified;
-  };
-
   static constexpr char kDatabaseName[] = "QuotaManager";
 
   // If `profile_path` is empty, an in-memory database will be used.
@@ -105,22 +88,21 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   QuotaError DeleteHostQuota(const std::string& host,
                              blink::mojom::StorageType type);
 
-  // Gets the bucket with `bucket_name` for the `storage_key` for StorageType
-  // kTemporary and returns the BucketInfo. If one doesn't exist, it creates
-  // a new bucket with the specified policies. Returns a QuotaError if the
-  // operation has failed.
-  // TODO(crbug/1203467): Include more policies when supported.
-  QuotaErrorOr<BucketInfo> GetOrCreateBucket(
-      const blink::StorageKey& storage_key,
-      const std::string& bucket_name);
+  // Gets the bucket described by `params.storage_key` and `params.name`
+  // for StorageType kTemporary and returns the BucketInfo. If a bucket fitting
+  // the params doesn't exist, it creates a new bucket with the policies in
+  // `params`. If the bucket exists but policies don't match what's provided in
+  // `params`, the existing bucket will be updated and returned (for those
+  // policies that are possible to modify --- expiration and persistence).
+  // Returns a QuotaError if the operation has failed.
+  QuotaErrorOr<BucketInfo> UpdateOrCreateBucket(const BucketInitParams& params);
 
-  // Same as GetOrCreateBucket but takes in StorageType. This should only be
-  // used by FileSystem, and is expected to be removed when
+  // Same as UpdateOrCreateBucket but takes in StorageType. This should only
+  // be used by FileSystem, and is expected to be removed when
   // StorageType::kSyncable and StorageType::kPersistent are deprecated.
   // (crbug.com/1233525, crbug.com/1286964).
   QuotaErrorOr<BucketInfo> GetOrCreateBucketDeprecated(
-      const blink::StorageKey& storage_key,
-      const std::string& bucket_name,
+      const BucketInitParams& params,
       blink::mojom::StorageType type);
 
   // TODO(crbug.com/1208141): Remove `storage_type` when the only supported
@@ -144,20 +126,27 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
 
   // Returns all buckets for `type` in the buckets table. Returns a QuotaError
   // if the operation has failed.
-  QuotaErrorOr<std::set<BucketLocator>> GetBucketsForType(
+  QuotaErrorOr<std::set<BucketInfo>> GetBucketsForType(
       blink::mojom::StorageType type);
 
   // Retrieves all buckets for `host` and `type`. Returns a QuotaError if the
   // operation has failed.
-  QuotaErrorOr<std::set<BucketLocator>> GetBucketsForHost(
+  QuotaErrorOr<std::set<BucketInfo>> GetBucketsForHost(
       const std::string& host,
       blink::mojom::StorageType type);
 
   // Returns all buckets for `storage_key` in the buckets table. Returns a
   // QuotaError if the operation has failed.
-  QuotaErrorOr<std::set<BucketLocator>> GetBucketsForStorageKey(
+  QuotaErrorOr<std::set<BucketInfo>> GetBucketsForStorageKey(
       const blink::StorageKey& storage_key,
       blink::mojom::StorageType type);
+
+  // Updates the expiration for the designated bucket.
+  QuotaErrorOr<BucketInfo> UpdateBucketExpiration(BucketId bucket,
+                                                  const base::Time& expiration);
+  // Updates the persistence bit for the designated bucket.
+  QuotaErrorOr<BucketInfo> UpdateBucketPersistence(BucketId bucket,
+                                                   bool persistent);
 
   // TODO(crbug.com/1202167): Remove once all usages have updated to use
   // SetBucketLastAccessTime.
@@ -187,15 +176,17 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
 
   // Returns the BucketTableEntry for `bucket` if one exists. Returns a
   // QuotaError if not found or the operation has failed.
-  QuotaErrorOr<BucketTableEntry> GetBucketInfo(BucketId bucket_id);
+  QuotaErrorOr<mojom::BucketTableEntryPtr> GetBucketInfo(BucketId bucket_id);
 
-  // Deletes the specified bucket.
-  QuotaError DeleteBucketInfo(BucketId bucket_id);
+  // Deletes the bucket from the database as well as the bucket directory in the
+  // storage directory.
+  QuotaError DeleteBucketData(const BucketLocator& bucket);
 
   // Returns the BucketLocator for the least recently used bucket. Will exclude
-  // buckets with ids in `bucket_exceptions` and origins that have the special
-  // unlimited storage policy. Returns a QuotaError if the operation has failed.
-  QuotaErrorOr<BucketLocator> GetLRUBucket(
+  // buckets with ids in `bucket_exceptions`, buckets marked persistent, and
+  // origins that have the special unlimited storage policy. Returns a
+  // QuotaError if the operation has failed.
+  QuotaErrorOr<BucketLocator> GetLruEvictableBucket(
       blink::mojom::StorageType type,
       const std::set<BucketId>& bucket_exceptions,
       SpecialStoragePolicy* special_storage_policy);
@@ -224,6 +215,9 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   // one doesn't exist.
   QuotaError RazeAndReopen();
 
+  // Flushes previously scheduled commits.
+  void CommitNow();
+
   // Testing support for database corruption handling.
   //
   // Runs `corrupter` on the same sequence used to do database I/O,
@@ -240,6 +234,9 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   // Manually disable database to test database error scenarios for testing.
   void SetDisabledForTesting(bool disable);
 
+  static base::Time GetNow();
+  static void SetClockForTesting(base::Clock* clock);
+
  private:
   struct COMPONENT_EXPORT(STORAGE_BROWSER) QuotaTableEntry {
     std::string host;
@@ -252,9 +249,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   friend COMPONENT_EXPORT(STORAGE_BROWSER) bool operator<(
       const QuotaTableEntry& lhs,
       const QuotaTableEntry& rhs);
-  friend COMPONENT_EXPORT(STORAGE_BROWSER) bool operator<(
-      const BucketTableEntry& lhs,
-      const BucketTableEntry& rhs);
 
   // Structures used for CreateSchema.
   struct TableSchema {
@@ -271,7 +265,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   using QuotaTableCallback =
       base::RepeatingCallback<bool(const QuotaTableEntry&)>;
   using BucketTableCallback =
-      base::RepeatingCallback<bool(const BucketTableEntry&)>;
+      base::RepeatingCallback<bool(mojom::BucketTableEntryPtr)>;
 
   // For long-running transactions support.  We always keep a transaction open
   // so that multiple transactions can be batched.  They are flushed
@@ -297,13 +291,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
 
   // Adds a new bucket entry in the buckets table. Will return a
   // QuotaError::kDatabaseError if the query fails.
-  QuotaErrorOr<BucketInfo> CreateBucketInternal(
-      const blink::StorageKey& storage_key,
-      blink::mojom::StorageType type,
-      const std::string& bucket_name,
-      int use_count,
-      base::Time last_accessed,
-      base::Time last_modified);
+  QuotaErrorOr<BucketInfo> CreateBucketInternal(const BucketInitParams& params,
+                                                blink::mojom::StorageType type);
 
   SEQUENCE_CHECKER(sequence_checker_);
 

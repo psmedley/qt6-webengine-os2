@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,13 @@ GAIAServiceType GetGAIAServiceTypeFromHeader(const std::string& header_value) {
     return GAIA_SERVICE_TYPE_NONE;
 }
 
+bool NewRequestHeaderCheckOrder() {
+  // The result is computed once and cached because the code is on the hot path.
+  static bool new_order =
+      base::FeatureList::IsEnabled(switches::kNewSigninRequestHeaderCheckOrder);
+  return new_order;
+}
+
 }  // namespace
 
 const char kChromeConnectedCookieName[] = "CHROME_CONNECTED";
@@ -125,12 +132,22 @@ ManageAccountsParams ChromeConnectedHeaderHelper::BuildManageAccountsParams(
 bool ChromeConnectedHeaderHelper::ShouldBuildRequestHeader(
     const GURL& url,
     const content_settings::CookieSettings* cookie_settings) {
+  // The 'new order' refers to the order of the two checks performed in this
+  // function. In the new order the less expensive URL-based check is performed
+  // first in the most common case (non-Google URLs), and the cookie-based
+  // check is performed second.
+  bool new_order = NewRequestHeaderCheckOrder();
+
+  // Check if url is eligible for the header. New order.
+  if (new_order && !IsUrlEligibleForRequestHeader(url))
+    return false;
+
   // If signin cookies are not allowed, don't add the header.
   if (!SettingsAllowSigninCookies(cookie_settings))
     return false;
 
-  // Check if url is eligible for the header.
-  if (!IsUrlEligibleForRequestHeader(url))
+  // Check if url is eligible for the header. Old order.
+  if (!new_order && !IsUrlEligibleForRequestHeader(url))
     return false;
 
   return true;
@@ -182,7 +199,7 @@ bool ChromeConnectedHeaderHelper::IsUrlEligibleForRequestHeader(
              google_util::IsYoutubeDomainUrl(
                  url, google_util::ALLOW_SUBDOMAIN,
                  google_util::DISALLOW_NON_STANDARD_PORTS) ||
-             gaia::IsGaiaSignonRealm(url.DeprecatedGetOriginAsURL());
+             gaia::HasGaiaSchemeHostPort(url);
     }
   }
 }
@@ -207,13 +224,13 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
 // Sessions and Active Directory logins. Guest Sessions have already been
 // filtered upstream and we want to enforce account consistency in Public
 // Sessions and Active Directory logins.
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   force_account_consistency = true;
 #endif
 
   if (!force_account_consistency && gaia_id.empty()) {
 #if BUILDFLAG(IS_ANDROID)
-    if (gaia::IsGaiaSignonRealm(url.DeprecatedGetOriginAsURL())) {
+    if (gaia::HasGaiaSchemeHostPort(url)) {
       parts.push_back(
           base::StringPrintf("%s=%s", kEligibleForConsistency, "true"));
       return base::JoinString(parts, is_header_request ? "," : ":");
@@ -248,18 +265,13 @@ std::string ChromeConnectedHeaderHelper::BuildRequestHeader(
       break;
   }
 
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  std::string consistency_enabled_by_default =
-      base::FeatureList::IsEnabled(switches::kLacrosNonSyncingProfiles)
-          ? "true"
-          : "false";
-#else
-  std::string consistency_enabled_by_default = "false";
-#endif
-
   parts.push_back(base::StringPrintf("%s=%s",
                                      kConsistencyEnabledByDefaultAttrName,
-                                     consistency_enabled_by_default.c_str()));
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+                                     "true"));
+#else
+                                     "false"));
+#endif
 
   return base::JoinString(parts, is_header_request ? "," : ":");
 }

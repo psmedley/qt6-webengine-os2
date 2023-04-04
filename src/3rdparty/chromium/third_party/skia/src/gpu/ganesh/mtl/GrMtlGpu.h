@@ -84,8 +84,9 @@ public:
                            GrMtlAttachment* dstAttachment, GrMtlAttachment* srcAttachment,
                            const SkIRect& srcRect, const SkIPoint& dstPoint);
 
-    bool onCopySurface(GrSurface* dst, GrSurface* src, const SkIRect& srcRect,
-                       const SkIPoint& dstPoint) override;
+    bool onCopySurface(GrSurface* dst, const SkIRect& dstRect,
+                       GrSurface* src, const SkIRect& srcRect,
+                       GrSamplerState::Filter) override;
 
 #if GR_METAL_SDK_VERSION >= 230
     id<MTLBinaryArchive> binaryArchive() const SK_API_AVAILABLE(macos(11.0), ios(14.0)) {
@@ -97,7 +98,7 @@ public:
 
     GrFence SK_WARN_UNUSED_RESULT insertFence() override;
     bool waitFence(GrFence) override;
-    void deleteFence(GrFence) const override;
+    void deleteFence(GrFence) override;
 
     std::unique_ptr<GrSemaphore> SK_WARN_UNUSED_RESULT makeSemaphore(bool isOwned) override;
     std::unique_ptr<GrSemaphore> wrapBackendSemaphore(const GrBackendSemaphore&,
@@ -139,7 +140,8 @@ private:
                                             const GrBackendFormat&,
                                             GrRenderable,
                                             GrMipmapped,
-                                            GrProtected) override;
+                                            GrProtected,
+                                            std::string_view label) override;
 
     bool onClearBackendTexture(const GrBackendTexture&,
                                sk_sp<skgpu::RefCntedCallback> finishedCallback,
@@ -162,7 +164,8 @@ private:
                                      SkBudgeted,
                                      GrProtected,
                                      int mipLevelCount,
-                                     uint32_t levelClearMask) override;
+                                     uint32_t levelClearMask,
+                                     std::string_view label) override;
     sk_sp<GrTexture> onCreateCompressedTexture(SkISize dimensions,
                                                const GrBackendFormat&,
                                                SkBudgeted,
@@ -186,8 +189,7 @@ private:
 
     sk_sp<GrRenderTarget> onWrapBackendRenderTarget(const GrBackendRenderTarget&) override;
 
-    sk_sp<GrGpuBuffer> onCreateBuffer(size_t, GrGpuBufferType, GrAccessPattern,
-                                      const void*) override;
+    sk_sp<GrGpuBuffer> onCreateBuffer(size_t, GrGpuBufferType, GrAccessPattern) override;
 
     bool onReadPixels(GrSurface* surface,
                       SkIRect,
@@ -195,6 +197,12 @@ private:
                       GrColorType bufferColorType,
                       void*,
                       size_t rowBytes) override;
+
+    bool onTransferFromBufferToBuffer(sk_sp<GrGpuBuffer> src,
+                                      size_t srcOffset,
+                                      sk_sp<GrGpuBuffer> dst,
+                                      size_t dstOffset,
+                                      size_t size) override;
 
     bool onWritePixels(GrSurface*,
                        SkIRect,
@@ -289,7 +297,7 @@ private:
 
 #if GR_TEST_UTILS
     void testingOnly_startCapture() override;
-    void testingOnly_endCapture() override;
+    void testingOnly_stopCapture() override;
 #endif
 
 #ifdef SK_ENABLE_DUMP_GPU

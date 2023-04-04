@@ -6,6 +6,7 @@
 
 #include "core/fxcodec/flate/flatemodule.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "core/fxcodec/scanlinedecoder.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_safe_types.h"
@@ -62,7 +64,7 @@ uint32_t FlateGetPossiblyTruncatedTotalIn(z_stream* context) {
 bool FlateCompress(unsigned char* dest_buf,
                    unsigned long* dest_size,
                    const unsigned char* src_buf,
-                   uint32_t src_size) {
+                   unsigned long src_size) {
   return compress(dest_buf, dest_size, src_buf, src_size) == Z_OK;
 }
 
@@ -616,7 +618,7 @@ class FlateScanlineDecoder : public ScanlineDecoder {
  protected:
   std::unique_ptr<z_stream, FlateDeleter> m_pFlate;
   const pdfium::span<const uint8_t> m_SrcBuf;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_Scanline;
+  DataVector<uint8_t> m_Scanline;
 };
 
 FlateScanlineDecoder::FlateScanlineDecoder(pdfium::span<const uint8_t> src_span,
@@ -684,9 +686,9 @@ class FlatePredictorScanlineDecoder final : public FlateScanlineDecoder {
   int m_Columns = 0;
   uint32_t m_PredictPitch = 0;
   size_t m_LeftOver = 0;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_LastLine;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_PredictBuffer;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_PredictRaw;
+  DataVector<uint8_t> m_LastLine;
+  DataVector<uint8_t> m_PredictBuffer;
+  DataVector<uint8_t> m_PredictRaw;
 };
 
 FlatePredictorScanlineDecoder::FlatePredictorScanlineDecoder(
@@ -863,20 +865,19 @@ uint32_t FlateModule::FlateOrLZWDecode(
 }
 
 // static
-bool FlateModule::Encode(pdfium::span<const uint8_t> src_span,
-                         std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,
-                         uint32_t* dest_size) {
-  const uint8_t* src_buf = src_span.data();
-  FX_SAFE_UINT32 src_size = src_span.size();
-  *dest_size = (src_size + src_size / 1000 + 12).ValueOrDie();
-  dest_buf->reset(FX_Alloc(uint8_t, *dest_size));
-  unsigned long temp_size = *dest_size;
-  if (!FlateCompress(dest_buf->get(), &temp_size, src_buf,
-                     src_size.ValueOrDie())) {
-    return false;
-  }
-  *dest_size = pdfium::base::checked_cast<uint32_t>(temp_size);
-  return true;
+DataVector<uint8_t> FlateModule::Encode(pdfium::span<const uint8_t> src_span) {
+  const unsigned long src_size =
+      pdfium::base::checked_cast<unsigned long>(src_span.size());
+  pdfium::base::CheckedNumeric<unsigned long> safe_dest_size = src_size;
+  safe_dest_size += src_size / 1000;
+  safe_dest_size += 12;
+  unsigned long dest_size = safe_dest_size.ValueOrDie();
+  DataVector<uint8_t> dest_buf(dest_size);
+  if (!FlateCompress(dest_buf.data(), &dest_size, src_span.data(), src_size))
+    return {};
+
+  dest_buf.resize(pdfium::base::checked_cast<size_t>(dest_size));
+  return dest_buf;
 }
 
 }  // namespace fxcodec

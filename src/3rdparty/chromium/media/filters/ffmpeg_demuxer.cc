@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,8 +47,10 @@
 #include "media/formats/mpeg/mpeg1_audio_stream_parser.h"
 #include "media/formats/webm/webm_crypto_helpers.h"
 #include "media/media_buildflags.h"
+#if !BUILDFLAG(USE_SYSTEM_FFMPEG)
 #include "third_party/ffmpeg/ffmpeg_features.h"
 #include "third_party/ffmpeg/libavcodec/packet.h"
+#endif  // !BUILDFLAG(USE_SYSTEM_FFMPEG)
 
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC)
 #include "media/filters/ffmpeg_h265_to_annex_b_bitstream_converter.h"
@@ -72,11 +74,6 @@ auto av_stream_get_first_dts(AVStream* stream) {
 }
 #endif
 }  // namespace
-
-ScopedAVPacket MakeScopedAVPacket() {
-  ScopedAVPacket packet(av_packet_alloc());
-  return packet;
-}
 
 static base::Time ExtractTimelineOffset(
     container_names::MediaContainerName container,
@@ -1796,7 +1793,7 @@ void FFmpegDemuxer::ReadFrameIfNeeded() {
   // Allocate and read an AVPacket from the media. Save |packet_ptr| since
   // evaluation order of packet.get() and std::move(&packet) is
   // undefined.
-  ScopedAVPacket packet = MakeScopedAVPacket();
+  auto packet = ScopedAVPacket::Allocate();
   AVPacket* packet_ptr = packet.get();
 
   pending_read_ = true;

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ void SessionSyncTestHelper::AddWindowSpecifics(
   sync_pb::SessionWindow* window = header->add_window();
   window->set_window_id(window_id.id());
   window->set_selected_tab_index(0);
-  window->set_browser_type(sync_pb::SessionWindow_BrowserType_TYPE_TABBED);
+  window->set_browser_type(sync_pb::SyncEnums_BrowserType_TYPE_TABBED);
   for (const SessionID& tab_id : tab_list) {
     window->add_tab(tab_id.id());
   }
@@ -60,10 +60,11 @@ void SessionSyncTestHelper::VerifySyncedSession(
   for (const std::vector<SessionID>& window : windows) {
     sessions::SessionWindow* win_ptr;
     auto map_iter = session.windows.find(SessionID::FromSerializedValue(i));
-    if (map_iter != session.windows.end())
+    if (map_iter != session.windows.end()) {
       win_ptr = &map_iter->second->wrapped_window;
-    else
+    } else {
       FAIL();
+    }
     ASSERT_EQ(window.size(), win_ptr->tabs.size());
     ASSERT_EQ(0, win_ptr->selected_tab_index);
     ASSERT_EQ(sessions::SessionWindow::TYPE_NORMAL, win_ptr->type);
@@ -104,6 +105,7 @@ sync_pb::SessionSpecifics SessionSyncTestHelper::BuildTabSpecifics(
   specifics.set_session_tag(tag);
   specifics.set_tab_node_id(tab_node_id);
   sync_pb::SessionTab* tab = specifics.mutable_tab();
+  tab->set_window_id(window_id.id());
   tab->set_tab_id(tab_id.id());
   tab->set_tab_visual_index(1);
   tab->set_current_navigation_index(0);

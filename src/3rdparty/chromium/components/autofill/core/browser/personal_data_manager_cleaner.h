@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,6 +84,12 @@ class PersonalDataManagerCleaner {
   // purposes.
   void ClearCreditCardNonSettingsOriginsForTesting() {
     ClearCreditCardNonSettingsOrigins();
+  }
+
+  // Getter for |alternative_state_name_map_updater_| used for testing purposes.
+  AlternativeStateNameMapUpdater*
+  alternative_state_name_map_updater_for_testing() {
+    return alternative_state_name_map_updater_;
   }
 #endif  // defined(UNIT_TEST)
 

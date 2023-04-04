@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,8 +63,7 @@ class SOCKSClientSocketTest : public PlatformTest, public WithTaskEnvironment {
 };
 
 SOCKSClientSocketTest::SOCKSClientSocketTest()
-  : host_resolver_(new MockHostResolver) {
-}
+    : host_resolver_(std::make_unique<MockHostResolver>()) {}
 
 // Set up platform before every test case
 void SOCKSClientSocketTest::SetUp() {
@@ -94,9 +93,9 @@ std::unique_ptr<SOCKSClientSocket> SOCKSClientSocketTest::BuildMockSocket(
   // non-owning pointer to it.
   tcp_sock_ = socket.get();
   return std::make_unique<SOCKSClientSocket>(
-      std::move(socket), HostPortPair(hostname, port), NetworkIsolationKey(),
-      DEFAULT_PRIORITY, host_resolver, SecureDnsPolicy::kAllow,
-      TRAFFIC_ANNOTATION_FOR_TESTS);
+      std::move(socket), HostPortPair(hostname, port),
+      NetworkAnonymizationKey(), DEFAULT_PRIORITY, host_resolver,
+      SecureDnsPolicy::kAllow, TRAFFIC_ANNOTATION_FOR_TESTS);
 }
 
 // Tests a complete handshake and the disconnection.
@@ -427,24 +426,25 @@ TEST_F(SOCKSClientSocketTest, NoIPv6RealResolver) {
 
 TEST_F(SOCKSClientSocketTest, Tag) {
   StaticSocketDataProvider data;
-  MockTaggingStreamSocket* tagging_sock =
-      new MockTaggingStreamSocket(std::unique_ptr<StreamSocket>(
-          new MockTCPClientSocket(address_list_, NetLog::Get(), &data)));
+  auto tagging_sock = std::make_unique<MockTaggingStreamSocket>(
+      std::make_unique<MockTCPClientSocket>(address_list_, NetLog::Get(),
+                                            &data));
+  auto* tagging_sock_ptr = tagging_sock.get();
 
-  std::unique_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
+  auto connection = std::make_unique<ClientSocketHandle>();
   // |connection| takes ownership of |tagging_sock|, but keep a
   // non-owning pointer to it.
   MockHostResolver host_resolver;
   SOCKSClientSocket socket(
-      std::unique_ptr<StreamSocket>(tagging_sock),
-      HostPortPair("localhost", 80), NetworkIsolationKey(), DEFAULT_PRIORITY,
-      &host_resolver, SecureDnsPolicy::kAllow, TRAFFIC_ANNOTATION_FOR_TESTS);
+      std::move(tagging_sock), HostPortPair("localhost", 80),
+      NetworkAnonymizationKey(), DEFAULT_PRIORITY, &host_resolver,
+      SecureDnsPolicy::kAllow, TRAFFIC_ANNOTATION_FOR_TESTS);
 
-  EXPECT_EQ(tagging_sock->tag(), SocketTag());
+  EXPECT_EQ(tagging_sock_ptr->tag(), SocketTag());
 #if BUILDFLAG(IS_ANDROID)
   SocketTag tag(0x12345678, 0x87654321);
   socket.ApplySocketTag(tag);
-  EXPECT_EQ(tagging_sock->tag(), tag);
+  EXPECT_EQ(tagging_sock_ptr->tag(), tag);
 #endif  // BUILDFLAG(IS_ANDROID)
 }
 
@@ -454,11 +454,12 @@ TEST_F(SOCKSClientSocketTest, SetSecureDnsPolicy) {
     StaticSocketDataProvider data;
     MockHostResolver host_resolver;
     host_resolver.rules()->AddRule("doh.test", "127.0.0.1");
-    SOCKSClientSocket socket(
-        std::make_unique<MockTCPClientSocket>(address_list_, NetLog::Get(),
-                                              &data),
-        HostPortPair("doh.test", 80), NetworkIsolationKey(), DEFAULT_PRIORITY,
-        &host_resolver, secure_dns_policy, TRAFFIC_ANNOTATION_FOR_TESTS);
+    SOCKSClientSocket socket(std::make_unique<MockTCPClientSocket>(
+                                 address_list_, NetLog::Get(), &data),
+                             HostPortPair("doh.test", 80),
+                             NetworkAnonymizationKey(), DEFAULT_PRIORITY,
+                             &host_resolver, secure_dns_policy,
+                             TRAFFIC_ANNOTATION_FOR_TESTS);
 
     EXPECT_EQ(ERR_IO_PENDING, socket.Connect(callback_.callback()));
     EXPECT_EQ(secure_dns_policy, host_resolver.last_secure_dns_policy());

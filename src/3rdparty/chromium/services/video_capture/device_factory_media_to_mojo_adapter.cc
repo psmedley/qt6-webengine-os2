@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/containers/contains.h"
 #include "base/notreached.h"
+#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "media/capture/video/fake_video_capture_device.h"
 #include "media/capture/video/video_capture_device_info.h"
@@ -145,7 +146,6 @@ void DeviceFactoryMediaToMojoAdapter::CreateDevice(
 void DeviceFactoryMediaToMojoAdapter::AddSharedMemoryVirtualDevice(
     const media::VideoCaptureDeviceInfo& device_info,
     mojo::PendingRemote<mojom::Producer> producer,
-    bool send_buffer_handles_to_producer_as_raw_file_descriptors,
     mojo::PendingReceiver<mojom::SharedMemoryVirtualDevice>
         virtual_device_receiver) {
   NOTIMPLEMENTED();
@@ -191,6 +191,9 @@ void DeviceFactoryMediaToMojoAdapter::CreateAndAddNewDevice(
   device_entry.device = std::make_unique<DeviceMediaToMojoAdapter>(
       std::move(media_device), jpeg_decoder_factory_callback_,
       jpeg_decoder_task_runner_);
+#elif BUILDFLAG(IS_WIN)
+  device_entry.device = std::make_unique<DeviceMediaToMojoAdapter>(
+      std::move(media_device), capture_system_->GetFactory());
 #else
   device_entry.device =
       std::make_unique<DeviceMediaToMojoAdapter>(std::move(media_device));
@@ -213,5 +216,11 @@ void DeviceFactoryMediaToMojoAdapter::OnClientConnectionErrorOrClose(
   active_devices_by_id_[device_id].device->Stop();
   active_devices_by_id_.erase(device_id);
 }
+
+#if BUILDFLAG(IS_WIN)
+void DeviceFactoryMediaToMojoAdapter::OnGpuInfoUpdate(const CHROME_LUID& luid) {
+  capture_system_->GetFactory()->OnGpuInfoUpdate(luid);
+}
+#endif
 
 }  // namespace video_capture

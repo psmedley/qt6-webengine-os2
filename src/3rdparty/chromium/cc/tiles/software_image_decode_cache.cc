@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,10 +16,12 @@
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/ostream_operators.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "cc/base/devtools_instrumentation.h"
+#include "cc/base/features.h"
 #include "cc/base/histograms.h"
 #include "cc/raster/tile_task.h"
 #include "cc/tiles/mipmap_util.h"
@@ -65,7 +67,10 @@ class SoftwareImageDecodeTaskImpl : public TileTask {
       SoftwareImageDecodeCache::DecodeTaskType task_type,
       const ImageDecodeCache::TracingInfo& tracing_info)
       : TileTask(TileTask::SupportsConcurrentExecution::kYes,
-                 TileTask::SupportsBackgroundThreadPriority::kYes),
+                 (base::FeatureList::IsEnabled(
+                      features::kNormalPriorityImageDecoding)
+                      ? TileTask::SupportsBackgroundThreadPriority::kNo
+                      : TileTask::SupportsBackgroundThreadPriority::kYes)),
         cache_(cache),
         image_key_(image_key),
         paint_image_(paint_image),
@@ -101,6 +106,13 @@ class SoftwareImageDecodeTaskImpl : public TileTask {
   // Overridden from TileTask:
   void OnTaskCompleted() override {
     cache_->OnImageDecodeTaskCompleted(image_key_, task_type_);
+  }
+
+  // Overridden from TileTask:
+  bool TaskContainsLCPCandidateImages() const override {
+    if (!HasCompleted() && paint_image_.may_be_lcp_candidate())
+      return true;
+    return TileTask::TaskContainsLCPCandidateImages();
   }
 
  protected:
@@ -142,13 +154,13 @@ PaintFlags::FilterQuality GetDecodedFilterQuality(
 
 SoftwareImageDecodeCache::SoftwareImageDecodeCache(
     SkColorType color_type,
-    size_t locked_memory_limit_bytes,
-    PaintImage::GeneratorClientId generator_client_id)
+    size_t locked_memory_limit_bytes)
     : decoded_images_(ImageLRUCache::NO_AUTO_EVICT),
       locked_images_budget_(locked_memory_limit_bytes),
       color_type_(color_type),
-      generator_client_id_(generator_client_id),
+      generator_client_id_(PaintImage::GetNextGeneratorClientId()),
       max_items_in_cache_(kNormalMaxItemsInCacheForSoftware) {
+  DCHECK_NE(generator_client_id_, PaintImage::kDefaultGeneratorClientId);
   // In certain cases, ThreadTaskRunnerHandle isn't set (Android Webview).
   // Don't register a dump provider in these cases.
   if (base::ThreadTaskRunnerHandle::IsSet()) {
@@ -600,8 +612,7 @@ void SoftwareImageDecodeCache::ReduceCacheUsageUntilWithinLimit(size_t limit) {
 
     const CacheKey& key = it->first;
     auto vector_it = frame_key_to_image_keys_.find(key.frame_key());
-    auto item_it =
-        std::find(vector_it->second.begin(), vector_it->second.end(), key);
+    auto item_it = base::ranges::find(vector_it->second, key);
     DCHECK(item_it != vector_it->second.end());
     vector_it->second.erase(item_it);
     if (vector_it->second.empty())
@@ -633,6 +644,8 @@ void SoftwareImageDecodeCache::OnImageDecodeTaskCompleted(
   auto image_it = decoded_images_.Peek(key);
   DCHECK(image_it != decoded_images_.end());
   CacheEntry* cache_entry = image_it->second.get();
+  UMA_HISTOGRAM_BOOLEAN("Compositing.DecodeLCPCandidateImage.Software",
+                        key.may_be_lcp_candidate());
   auto& task = task_type == DecodeTaskType::USE_IN_RASTER_TASKS
                    ? cache_entry->in_raster_task
                    : cache_entry->out_of_raster_task;

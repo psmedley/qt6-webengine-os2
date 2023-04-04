@@ -377,7 +377,8 @@ angle::Result ConvertSpirvToMsl(Context *context,
 
 }  // namespace
 
-void GlslangGetShaderSpirvCode(const gl::ProgramState &programState,
+void GlslangGetShaderSpirvCode(const gl::Context *context,
+                               const gl::ProgramState &programState,
                                const gl::ProgramLinkedResources &resources,
                                gl::ShaderMap<const angle::spirv::Blob *> *spirvBlobsOut,
                                ShaderInterfaceVariableInfoMap *variableInfoMapOut,
@@ -390,18 +391,20 @@ void GlslangGetShaderSpirvCode(const gl::ProgramState &programState,
     options.supportsTransformFeedbackEmulation = true;
 
     // Get shader sources and fill variable info map with transform feedback disabled.
-    rx::GlslangGetShaderSpirvCode(options, programState, resources, &programInterfaceInfo,
+    rx::GlslangGetShaderSpirvCode(context, options, programState, resources, &programInterfaceInfo,
                                   spirvBlobsOut, variableInfoMapOut);
 
+    const gl::ProgramExecutable &programExecutable = programState.getExecutable();
+
     // Fill variable info map with transform feedback enabled.
-    if (!programState.getLinkedTransformFeedbackVaryings().empty())
+    if (!programExecutable.getLinkedTransformFeedbackVaryings().empty())
     {
         GlslangProgramInterfaceInfo xfbOnlyInterfaceInfo;
         ResetGlslangProgramInterfaceInfo(&xfbOnlyInterfaceInfo);
 
         options.enableTransformFeedbackEmulation = true;
         UniformBindingIndexMap uniformBindingIndexMap;
-        GlslangAssignLocations(options, programState, resources.varyingPacking,
+        GlslangAssignLocations(options, programExecutable, resources.varyingPacking,
                                gl::ShaderType::Vertex, gl::ShaderType::InvalidEnum, true,
                                &xfbOnlyInterfaceInfo, &uniformBindingIndexMap,
                                xfbOnlyVSVariableInfoMapOut);
@@ -417,8 +420,7 @@ angle::Result GlslangTransformSpirvCode(const gl::ShaderBitSet &linkedShaderStag
     for (const gl::ShaderType shaderType : linkedShaderStages)
     {
         GlslangSpirvOptions options;
-        options.shaderType                         = shaderType;
-        options.transformPositionToVulkanClipSpace = true;
+        options.shaderType = shaderType;
         options.isTransformFeedbackStage =
             shaderType == gl::ShaderType::Vertex && isTransformFeedbackEnabled;
         options.isTransformFeedbackEmulated = true;
@@ -457,11 +459,10 @@ angle::Result SpirvCodeToMsl(Context *context,
     angle::HashMap<uint32_t, uint32_t> xfbOriginalBindings;
     for (uint32_t bufferIdx = 0; bufferIdx < kMaxShaderXFBs; ++bufferIdx)
     {
-        std::string bufferName = rx::GetXfbBufferName(bufferIdx);
-        if (xfbVSVariableInfoMap.contains(gl::ShaderType::Vertex, bufferName))
+        if (xfbVSVariableInfoMap.hasTransformFeedbackInfo(gl::ShaderType::Vertex, bufferIdx))
         {
             const ShaderInterfaceVariableInfo &info =
-                xfbVSVariableInfoMap.get(gl::ShaderType::Vertex, bufferName);
+                xfbVSVariableInfoMap.getTransformFeedbackInfo(gl::ShaderType::Vertex, bufferIdx);
             xfbOriginalBindings[info.binding] = bufferIdx;
         }
     }

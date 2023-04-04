@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "base/memory/ptr_util.h"
 #include "cc/input/layer_selection_bound.h"
@@ -47,7 +48,10 @@ enum class PaintBenchmarkMode {
 // corresponding frame. They are never reset to false. First-paint is defined in
 // https://github.com/WICG/paint-timing. It excludes default background paint.
 struct FrameFirstPaint {
-  FrameFirstPaint(const void* frame)
+  DISALLOW_NEW();
+
+ public:
+  explicit FrameFirstPaint(const void* frame)
       : frame(frame),
         first_painted(false),
         text_painted(false),
@@ -131,6 +135,9 @@ class PLATFORM_EXPORT PaintController {
 
   void RecordSelection(absl::optional<PaintedSelectionBound> start,
                        absl::optional<PaintedSelectionBound> end);
+  void RecordAnySelectionWasPainted() {
+    paint_chunker_.RecordAnySelectionWasPainted();
+  }
 
   wtf_size_t NumNewChunks() const {
     return new_paint_artifact_->PaintChunks().size();
@@ -346,6 +353,7 @@ class PLATFORM_EXPORT PaintController {
     wtf_size_t start_chunk_index = 0;
     wtf_size_t end_chunk_index = 0;
     bool is_moved_from_cached_subsequence = false;
+    DISALLOW_NEW();
   };
 
   wtf_size_t GetSubsequenceIndex(DisplayItemClientId) const;
@@ -434,6 +442,7 @@ class PLATFORM_EXPORT PaintController {
     HashMap<DisplayItemClientId, wtf_size_t> map;
     // A pre-order list of the subsequence tree.
     Vector<SubsequenceMarkers> tree;
+    DISALLOW_NEW();
   };
   SubsequencesData current_subsequences_;
   SubsequencesData new_subsequences_;
@@ -451,13 +460,13 @@ class PLATFORM_EXPORT PaintControllerCycleScope {
   STACK_ALLOCATED();
 
  public:
-  explicit PaintControllerCycleScope(bool record_debug_info = false)
+  explicit PaintControllerCycleScope(bool record_debug_info)
       : record_debug_info_(record_debug_info) {
     clients_to_validate_ =
         MakeGarbageCollected<HeapVector<Member<const DisplayItemClient>>>();
   }
   explicit PaintControllerCycleScope(PaintController& controller,
-                                     bool record_debug_info = false)
+                                     bool record_debug_info)
       : PaintControllerCycleScope(record_debug_info) {
     AddController(controller);
   }

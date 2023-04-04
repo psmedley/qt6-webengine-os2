@@ -1,49 +1,55 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/document_transition/document_transition_style_tracker.h"
 
+#include <limits>
+
+#include "base/containers/contains.h"
 #include "components/viz/common/shared_element_resource_id.h"
 #include "third_party/blink/public/resources/grit/blink_resources.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
 #include "third_party/blink/renderer/core/css/properties/computed_style_utils.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 #include "third_party/blink/renderer/core/document_transition/document_transition_content_element.h"
 #include "third_party/blink/renderer/core/document_transition/document_transition_pseudo_element_base.h"
+#include "third_party/blink/renderer/core/document_transition/document_transition_style_builder.h"
 #include "third_party/blink/renderer/core/document_transition/document_transition_utils.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
+#include "third_party/blink/renderer/core/frame/browser_controls.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
+#include "third_party/blink/renderer/core/paint/clip_path_clipper.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_paint_order_iterator.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer_entry.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
+#include "third_party/blink/renderer/core/style/shape_clip_path_operation.h"
 #include "third_party/blink/renderer/platform/data_resource_helper.h"
 #include "third_party/blink/renderer/platform/geometry/layout_size.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 
 namespace blink {
 namespace {
 
 const char* kElementSetModificationError =
     "The element set cannot be modified at this transition state.";
-const char* kPaintContainmentNotSatisfied =
-    "Dropping element from transition. Shared element must contain paint";
+const char* kContainmentNotSatisfied =
+    "Dropping element from transition. Shared element must contain paint or "
+    "layout";
 const char* kDuplicateTagBaseError =
     "Unexpected duplicate page transition tag: ";
-const char* kReservedTagBaseError = "Unexpected reserved page transition tag: ";
-
-const AtomicString& RootTag() {
-  DEFINE_STATIC_LOCAL(AtomicString, kRootTag, ("root"));
-  return kRootTag;
-}
-
-constexpr int root_index = 0;
 
 const String& StaticUAStyles() {
   DEFINE_STATIC_LOCAL(
@@ -59,6 +65,82 @@ const String& AnimationUAStyles() {
   return kAnimationUAStyles;
 }
 
+absl::optional<String> GetSnapshotViewportOffsetTransform(
+    const gfx::Vector2d& offset,
+    float device_pixel_ratio) {
+  if (!offset.x() && !offset.y())
+    return absl::nullopt;
+
+  // Since we're using the offset in style, convert from physical pixels to CSS
+  // pixels.
+  gfx::Vector2dF css_offset =
+      gfx::ScaleVector2d(offset, 1.f / device_pixel_ratio);
+
+  // The root is translated up and left so that the coordinate space for all
+  // children has its origin at the point that is the top-left when all UI is
+  // hidden. This requires non-root shared elements to be shifted back down and
+  // right.
+  DCHECK_LE(css_offset.x(), 0.f);
+  DCHECK_LE(css_offset.y(), 0.f);
+  return String::Format("transform: translate(%.3fpx, %.3fpx);", css_offset.x(),
+                        css_offset.y());
+}
+
+absl::optional<String> ComputeInsetDifference(PhysicalRect reference_rect,
+                                              const LayoutRect& target_rect,
+                                              float device_pixel_ratio) {
+  if (reference_rect.IsEmpty()) {
+    DCHECK(target_rect.IsEmpty());
+    return absl::nullopt;
+  }
+
+  // Reference rect is given to us in layout space, but target_rect is in css
+  // space. Note that this currently relies on the fact that object-view-box
+  // scales its parameters from CSS to layout space. However, that's a bug.
+  // TODO(crbug.com/1324618): Fix this when the object-view-box bug is fixed.
+  reference_rect.Scale(1.f / device_pixel_ratio);
+  LayoutRect reference_layout_rect = reference_rect.ToLayoutRect();
+
+  if (reference_layout_rect == target_rect)
+    return absl::nullopt;
+
+  float top_offset = (target_rect.Y() - reference_layout_rect.Y()).ToFloat();
+  float right_offset =
+      (reference_layout_rect.MaxX() - target_rect.MaxX()).ToFloat();
+  float bottom_offset =
+      (reference_layout_rect.MaxY() - target_rect.MaxY()).ToFloat();
+  float left_offset = (target_rect.X() - reference_layout_rect.X()).ToFloat();
+
+  return String::Format("inset(%.3fpx %.3fpx %.3fpx %.3fpx);", top_offset,
+                        right_offset, bottom_offset, left_offset);
+}
+
+// TODO(vmpstr): This could be optimized by caching values for individual layout
+// boxes. However, it's unclear when the cache should be cleared.
+PhysicalRect ComputeVisualOverflowRect(LayoutBox* box) {
+  if (auto clip_path_bounds = ClipPathClipper::LocalClipPathBoundingBox(*box)) {
+    // TODO(crbug.com/1326514): This is just the bounds of the clip-path, as
+    // opposed to the intersection between the clip-path and the border box
+    // bounds. This seems suboptimal, but that's the rect that we use further
+    // down the pipeline to generate the texture.
+    return PhysicalRect::EnclosingRect(*clip_path_bounds);
+  }
+
+  PhysicalRect result;
+  for (auto* child = box->Layer()->FirstChild(); child;
+       child = child->NextSibling()) {
+    auto* child_box = child->GetLayoutBox();
+    PhysicalRect overflow_rect = ComputeVisualOverflowRect(child_box);
+    child_box->MapToVisualRectInAncestorSpace(box, overflow_rect);
+    result.Unite(overflow_rect);
+  }
+  // Clip self painting descendant overflow by the overflow clip rect, then add
+  // in the visual overflow from the own painting layer.
+  result.Intersect(box->OverflowClipRect(PhysicalOffset()));
+  result.Unite(box->PhysicalVisualOverflowRectIncludingFilters());
+  return result;
+}
+
 }  // namespace
 
 class DocumentTransitionStyleTracker::ImageWrapperPseudoElement
@@ -70,15 +152,10 @@ class DocumentTransitionStyleTracker::ImageWrapperPseudoElement
                             const DocumentTransitionStyleTracker* style_tracker)
       : DocumentTransitionPseudoElementBase(parent,
                                             pseudo_id,
-                                            document_transition_tag),
-        style_tracker_(style_tracker) {}
+                                            document_transition_tag,
+                                            style_tracker) {}
 
   ~ImageWrapperPseudoElement() override = default;
-
-  void Trace(Visitor* visitor) const override {
-    PseudoElement::Trace(visitor);
-    visitor->Trace(style_tracker_);
-  }
 
  private:
   bool CanGeneratePseudoElement(PseudoId pseudo_id) const override {
@@ -86,24 +163,46 @@ class DocumentTransitionStyleTracker::ImageWrapperPseudoElement
             pseudo_id)) {
       return false;
     }
-
     viz::SharedElementResourceId snapshot_id;
-    if (document_transition_tag() == RootTag()) {
-      snapshot_id = pseudo_id == kPseudoIdPageTransitionOutgoingImage
-                        ? style_tracker_->old_root_snapshot_id_
-                        : style_tracker_->new_root_snapshot_id_;
+    if (pseudo_id == kPseudoIdPageTransitionOutgoingImage) {
+      if (style_tracker_->old_root_data_ &&
+          style_tracker_->old_root_data_->tags.Contains(
+              document_transition_tag())) {
+        snapshot_id = style_tracker_->old_root_data_->snapshot_id;
+        DCHECK(snapshot_id.IsValid());
+      } else if (auto it = style_tracker_->element_data_map_.find(
+                     document_transition_tag());
+                 it != style_tracker_->element_data_map_.end()) {
+        snapshot_id = it->value->old_snapshot_id;
+      } else {
+        // If we're being called with a tag that isn't an old_root tag and it's
+        // not an element shared element, it must mean we have it as a new root
+        // tag.
+        DCHECK(style_tracker_->new_root_data_);
+        DCHECK(style_tracker_->new_root_data_->tags.Contains(
+            document_transition_tag()));
+      }
     } else {
-      auto& element_data =
-          style_tracker_->element_data_map_.find(document_transition_tag())
-              ->value;
-      snapshot_id = pseudo_id == kPseudoIdPageTransitionOutgoingImage
-                        ? element_data->old_snapshot_id
-                        : element_data->new_snapshot_id;
+      if (style_tracker_->new_root_data_ &&
+          style_tracker_->new_root_data_->tags.Contains(
+              document_transition_tag())) {
+        snapshot_id = style_tracker_->new_root_data_->snapshot_id;
+        DCHECK(snapshot_id.IsValid());
+      } else if (auto it = style_tracker_->element_data_map_.find(
+                     document_transition_tag());
+                 it != style_tracker_->element_data_map_.end()) {
+        snapshot_id = it->value->new_snapshot_id;
+      } else {
+        // If we're being called with a tag that isn't a new_root tag and it's
+        // not an element shared element, it must mean we have it as an old root
+        // tag.
+        DCHECK(style_tracker_->old_root_data_);
+        DCHECK(style_tracker_->old_root_data_->tags.Contains(
+            document_transition_tag()));
+      }
     }
     return snapshot_id.IsValid();
   }
-
-  Member<const DocumentTransitionStyleTracker> style_tracker_;
 };
 
 DocumentTransitionStyleTracker::DocumentTransitionStyleTracker(
@@ -136,12 +235,8 @@ void DocumentTransitionStyleTracker::AddSharedElement(Element* element,
   auto& value = pending_shared_element_tags_
                     .insert(element, HashSet<std::pair<AtomicString, int>>())
                     .stored_value->value;
-  // Find the existing tag if one is there.
-  auto it = std::find_if(
-      value.begin(), value.end(),
-      [&tag](const std::pair<AtomicString, int>& p) { return p.first == tag; });
-  // If it is there, do nothing.
-  if (it != value.end())
+  // Find the existing tag if one is there. If it is there, do nothing.
+  if (base::Contains(value, tag, &std::pair<AtomicString, int>::first))
     return;
   // Otherwise, insert a new sequence id with this tag. We'll use the sequence
   // to sort later.
@@ -161,6 +256,19 @@ void DocumentTransitionStyleTracker::RemoveSharedElement(Element* element) {
 
 void DocumentTransitionStyleTracker::AddSharedElementsFromCSS() {
   DCHECK(document_ && document_->View());
+
+  // TODO(vmpstr): This needs some thought :(
+  // From khushalsagar:
+  // We have to change this such that discovering of tags happens at the end of
+  // reaching the paint phase of the lifecycle update at the next frame. So the
+  // way this would be setup is:
+  // - At the next frame, acquire the scope before dispatching raf callbacks.
+  // - When we hit paint, discover all the tags and then release the scope.
+  // We can have recursive lifecycle updates after this to invalidate the pseudo
+  // DOM but the decision for which elements will be shared is not changeable
+  // after that point.
+  auto scope =
+      document_->GetDisplayLockDocumentState().GetScopedForceActivatableLocks();
 
   // We need our paint layers, and z-order lists which is done during
   // compositing inputs update.
@@ -185,12 +293,10 @@ void DocumentTransitionStyleTracker::AddSharedElementsFromCSSRecursive(
   // of pseudo-elements constructed to represent the shared elements, which by
   // default will also represent the paint order of the pseudo-elements (unless
   // changed by something like z-index on the pseudo-elements).
-  //
-  // TODO(vmpstr): If root object is the layout view, we shouldn't append it as
-  // a shared element. It's unlikely to work correctly here.
   auto& root_object = root->GetLayoutObject();
   auto& root_style = root_object.StyleRef();
   if (root_style.PageTransitionTag()) {
+    DCHECK(root_object.GetNode());
     DCHECK(root_object.GetNode()->IsElementNode());
     AddSharedElement(DynamicTo<Element>(root_object.GetNode()),
                      root_style.PageTransitionTag());
@@ -204,7 +310,8 @@ void DocumentTransitionStyleTracker::AddSharedElementsFromCSSRecursive(
 
 bool DocumentTransitionStyleTracker::FlattenAndVerifyElements(
     VectorOf<Element>& elements,
-    VectorOf<AtomicString>& transition_tags) {
+    VectorOf<AtomicString>& transition_tags,
+    absl::optional<RootData>& root_data) {
   // We need to flatten the data first, and sort it by ordering which reflects
   // the setElement ordering.
   struct FlatData : public GarbageCollected<FlatData> {
@@ -220,9 +327,19 @@ bool DocumentTransitionStyleTracker::FlattenAndVerifyElements(
 
   // Flatten it.
   for (auto& [element, tags] : pending_shared_element_tags_) {
+    bool is_root = element->IsDocumentElement();
+    if (is_root && !root_data)
+      root_data.emplace();
+
     for (auto& tag_pair : tags) {
-      flat_list.push_back(MakeGarbageCollected<FlatData>(
-          element, tag_pair.first, tag_pair.second));
+      if (is_root) {
+        // The order of the root tags doesn't matter, so we don't keep the
+        // ordering.
+        root_data->tags.push_back(tag_pair.first);
+      } else {
+        flat_list.push_back(MakeGarbageCollected<FlatData>(
+            element, tag_pair.first, tag_pair.second));
+      }
     }
   }
 
@@ -231,22 +348,20 @@ bool DocumentTransitionStyleTracker::FlattenAndVerifyElements(
             [](const FlatData* a, const FlatData* b) {
               return a->ordering < b->ordering;
             });
+  DCHECK(!root_data || !root_data->tags.empty());
+
+  auto have_root_tag = [&root_data](const AtomicString& tag) {
+    return root_data && root_data->tags.Contains(tag);
+  };
 
   // Verify it.
   for (auto& flat_data : flat_list) {
     auto& tag = flat_data->tag;
     auto& element = flat_data->element;
 
-    if (UNLIKELY(transition_tags.Contains(tag))) {
+    if (UNLIKELY(transition_tags.Contains(tag) || have_root_tag(tag))) {
       StringBuilder message;
       message.Append(kDuplicateTagBaseError);
-      message.Append(tag);
-      AddConsoleError(message.ReleaseString());
-      return false;
-    }
-    if (UNLIKELY(tag == RootTag())) {
-      StringBuilder message;
-      message.Append(kReservedTagBaseError);
       message.Append(tag);
       AddConsoleError(message.ReleaseString());
       return false;
@@ -264,21 +379,23 @@ bool DocumentTransitionStyleTracker::Capture() {
   // This process also verifies that the tag-element combinations are valid.
   VectorOf<AtomicString> transition_tags;
   VectorOf<Element> elements;
-  bool success = FlattenAndVerifyElements(elements, transition_tags);
+  bool success =
+      FlattenAndVerifyElements(elements, transition_tags, old_root_data_);
   if (!success)
     return false;
 
   // Now we know that we can start a transition. Update the state and populate
   // `element_data_map_`.
   state_ = State::kCapturing;
-  captured_tag_count_ = transition_tags.size();
+  InvalidateHitTestingCache();
 
-  old_root_snapshot_id_ = viz::SharedElementResourceId::Generate();
+  captured_tag_count_ = transition_tags.size() + OldRootDataTagSize();
+
   element_data_map_.ReserveCapacityForSize(captured_tag_count_);
   HeapHashMap<Member<Element>, viz::SharedElementResourceId>
       element_snapshot_ids;
-  int next_index = root_index + 1;
-  for (int i = 0; i < captured_tag_count_; ++i) {
+  int next_index = OldRootDataTagSize();
+  for (wtf_size_t i = 0; i < transition_tags.size(); ++i) {
     const auto& tag = transition_tags[i];
     const auto& element = elements[i];
 
@@ -299,13 +416,11 @@ bool DocumentTransitionStyleTracker::Capture() {
     element_data_map_.insert(tag, std::move(element_data));
   }
 
-  // Don't forget to add the root tag!
-  transition_tags.push_front(RootTag());
-
-  // Add one to the captured tag count to account for root. We don't add it
-  // earlier, since we're doing an iteration over captured tag counts from the
-  // shared non-root elements.
-  ++captured_tag_count_;
+  if (old_root_data_) {
+    old_root_data_->snapshot_id = viz::SharedElementResourceId::Generate();
+  }
+  for (const auto& root_tag : AllRootTags())
+    transition_tags.push_front(root_tag);
 
   // This informs the style engine the set of tags we have, which will be used
   // to create the pseudo element tree.
@@ -324,6 +439,10 @@ void DocumentTransitionStyleTracker::CaptureResolved() {
   DCHECK_EQ(state_, State::kCapturing);
 
   state_ = State::kCaptured;
+  // TODO(crbug.com/1347473): We should also suppress hit testing at this point,
+  // since we're about to start painting the element as a captured snapshot, but
+  // we still haven't given script chance to modify the DOM to the new state.
+  InvalidateHitTestingCache();
 
   // Since the elements will be unset, we need to invalidate their style first.
   // TODO(vmpstr): We don't have to invalidate the pseudo styles at this point,
@@ -334,12 +453,32 @@ void DocumentTransitionStyleTracker::CaptureResolved() {
   for (auto& entry : element_data_map_) {
     auto& element_data = entry.value;
     element_data->target_element = nullptr;
-    element_data->cached_border_box_size = element_data->border_box_size;
-    element_data->cached_viewport_matrix = element_data->viewport_matrix;
-    element_data->cached_device_pixel_ratio = element_data->device_pixel_ratio;
+
+    // This could be empty if the element was uncontained and was ignored for a
+    // transition.
+    if (!element_data->container_properties.empty()) {
+      element_data->cached_container_properties =
+          element_data->container_properties.back();
+    }
+    element_data->cached_visual_overflow_rect_in_layout_space =
+        element_data->visual_overflow_rect_in_layout_space;
     element_data->effect_node = nullptr;
   }
   root_effect_node_ = nullptr;
+}
+
+VectorOf<Element> DocumentTransitionStyleTracker::GetTransitioningElements()
+    const {
+  // In stable states, we don't have shared elements.
+  if (state_ == State::kIdle || state_ == State::kCaptured)
+    return {};
+
+  VectorOf<Element> result;
+  for (auto& entry : element_data_map_) {
+    if (entry.value->target_element)
+      result.push_back(entry.value->target_element);
+  }
+  return result;
 }
 
 bool DocumentTransitionStyleTracker::Start() {
@@ -349,22 +488,25 @@ bool DocumentTransitionStyleTracker::Start() {
   // This process also verifies that the tag-element combinations are valid.
   VectorOf<AtomicString> transition_tags;
   VectorOf<Element> elements;
-  bool success = FlattenAndVerifyElements(elements, transition_tags);
+  bool success =
+      FlattenAndVerifyElements(elements, transition_tags, new_root_data_);
   if (!success)
     return false;
 
   state_ = State::kStarted;
-  new_root_snapshot_id_ = viz::SharedElementResourceId::Generate();
+  InvalidateHitTestingCache();
+
   HeapHashMap<Member<Element>, viz::SharedElementResourceId>
       element_snapshot_ids;
   bool found_new_tags = false;
-  int next_index = root_index + element_data_map_.size() + 1;
+  int next_index =
+      element_data_map_.size() + OldRootDataTagSize() + NewRootDataTagSize();
   for (wtf_size_t i = 0; i < elements.size(); ++i) {
     const auto& tag = transition_tags[i];
     const auto& element = elements[i];
 
     // Insert a new tag data if there is no data for this tag yet.
-    if (element_data_map_.find(tag) == element_data_map_.end()) {
+    if (!element_data_map_.Contains(tag)) {
       found_new_tags = true;
       auto* data = MakeGarbageCollected<ElementData>();
       data->element_index = next_index++;
@@ -385,9 +527,30 @@ bool DocumentTransitionStyleTracker::Start() {
     DCHECK_LT(element_data->element_index, next_index);
   }
 
+  // If the old and new root tags have different size that means we likely have
+  // at least one new tag.
+  found_new_tags |= OldRootDataTagSize() != NewRootDataTagSize();
+  if (!found_new_tags && new_root_data_) {
+    DCHECK(old_root_data_);
+    for (const auto& new_tag : new_root_data_->tags) {
+      // If the new root tag is not also an old root tag and it isn't a shared
+      // element tag, then we have a new tag.
+      if (!old_root_data_->tags.Contains(new_tag) &&
+          !element_data_map_.Contains(new_tag)) {
+        found_new_tags = true;
+        break;
+      }
+    }
+  }
+
+  if (new_root_data_)
+    new_root_data_->snapshot_id = viz::SharedElementResourceId::Generate();
+
   if (found_new_tags) {
     VectorOf<std::pair<AtomicString, int>> new_tag_pairs;
-    new_tag_pairs.push_back(std::make_pair(RootTag(), root_index));
+    int next_tag_index = 0;
+    for (const auto& root_tag : AllRootTags())
+      new_tag_pairs.push_back(std::make_pair(root_tag, ++next_tag_index));
     for (auto& [tag, data] : element_data_map_)
       new_tag_pairs.push_back(std::make_pair(tag, data->element_index));
 
@@ -408,6 +571,8 @@ bool DocumentTransitionStyleTracker::Start() {
   // new elements in the DOM.
   InvalidateStyle();
 
+  if (auto* page = document_->GetPage())
+    page->Animator().SetHasSharedElementTransition(true);
   return true;
 }
 
@@ -422,6 +587,7 @@ void DocumentTransitionStyleTracker::Abort() {
 
 void DocumentTransitionStyleTracker::EndTransition() {
   state_ = State::kFinished;
+  InvalidateHitTestingCache();
 
   // We need a style invalidation to remove the pseudo element tree. This needs
   // to be done before we clear the data, since we need to invalidate the shared
@@ -431,7 +597,11 @@ void DocumentTransitionStyleTracker::EndTransition() {
   element_data_map_.clear();
   pending_shared_element_tags_.clear();
   set_element_sequence_id_ = 0;
+  old_root_data_.reset();
+  new_root_data_.reset();
   document_->GetStyleEngine().SetDocumentTransitionTags({});
+  if (auto* page = document_->GetPage())
+    page->Animator().SetHasSharedElementTransition(false);
 }
 
 void DocumentTransitionStyleTracker::UpdateElementIndicesAndSnapshotId(
@@ -454,12 +624,21 @@ void DocumentTransitionStyleTracker::UpdateElementIndicesAndSnapshotId(
   DCHECK(resource_id.IsValid());
 }
 
+auto DocumentTransitionStyleTracker::GetCurrentRootData() const
+    -> absl::optional<RootData> {
+  return HasLiveNewContent() ? new_root_data_ : old_root_data_;
+}
+
 void DocumentTransitionStyleTracker::UpdateRootIndexAndSnapshotId(
     DocumentTransitionSharedElementId& index,
     viz::SharedElementResourceId& resource_id) const {
-  index.AddIndex(root_index);
-  resource_id =
-      HasLiveNewContent() ? new_root_snapshot_id_ : old_root_snapshot_id_;
+  if (!IsRootTransitioning())
+    return;
+
+  index.AddIndex(0);
+  const auto& root_data = GetCurrentRootData();
+  DCHECK(root_data);
+  resource_id = root_data->snapshot_id;
   DCHECK(resource_id.IsValid());
 }
 
@@ -470,30 +649,23 @@ PseudoElement* DocumentTransitionStyleTracker::CreatePseudoElement(
   DCHECK(IsTransitionPseudoElement(pseudo_id));
   DCHECK(pseudo_id == kPseudoIdPageTransition || document_transition_tag);
 
-  const auto& element_data =
-      (document_transition_tag && document_transition_tag != RootTag())
-          ? element_data_map_.find(document_transition_tag)->value
-          : nullptr;
-
   switch (pseudo_id) {
     case kPseudoIdPageTransition:
     case kPseudoIdPageTransitionContainer:
       return MakeGarbageCollected<DocumentTransitionPseudoElementBase>(
-          parent, pseudo_id, document_transition_tag);
+          parent, pseudo_id, document_transition_tag, this);
     case kPseudoIdPageTransitionImageWrapper:
       return MakeGarbageCollected<ImageWrapperPseudoElement>(
           parent, pseudo_id, document_transition_tag, this);
     case kPseudoIdPageTransitionOutgoingImage: {
       LayoutSize size;
       viz::SharedElementResourceId snapshot_id;
-      if (document_transition_tag == RootTag()) {
-        // Always use the the current layout view's size.
-        // TODO(vmpstr): We might want to consider caching the size when we
-        // capture it, in case the layout view sizes change.
-        size = LayoutSize(
-            document_->GetLayoutView()->GetLayoutSize(kIncludeScrollbars));
-        snapshot_id = old_root_snapshot_id_;
+      if (old_root_data_ && old_root_data_->tags.Contains(document_transition_tag)) {
+        size = LayoutSize(GetSnapshotViewportRect().size());
+        snapshot_id = old_root_data_->snapshot_id;
       } else {
+        DCHECK(document_transition_tag);
+        const auto& element_data = element_data_map_.find(document_transition_tag)->value;
         // If live data is tracking new elements then use the cached data for
         // the pseudo element displaying snapshot of old element.
         bool use_cached_data = HasLiveNewContent();
@@ -512,18 +684,19 @@ PseudoElement* DocumentTransitionStyleTracker::CreatePseudoElement(
       auto* pseudo_element =
           MakeGarbageCollected<DocumentTransitionContentElement>(
               parent, pseudo_id, document_transition_tag, snapshot_id,
-              /*is_live_content_element=*/false);
+              /*is_live_content_element=*/false, this);
       pseudo_element->SetIntrinsicSize(size);
       return pseudo_element;
     }
     case kPseudoIdPageTransitionIncomingImage: {
       LayoutSize size;
       viz::SharedElementResourceId snapshot_id;
-      if (document_transition_tag == RootTag()) {
-        size = LayoutSize(
-            document_->GetLayoutView()->GetLayoutSize(kIncludeScrollbars));
-        snapshot_id = new_root_snapshot_id_;
+      if (new_root_data_ && new_root_data_->tags.Contains(document_transition_tag)) {
+        size = LayoutSize(GetSnapshotViewportRect().size());
+        snapshot_id = new_root_data_->snapshot_id;
       } else {
+        DCHECK(document_transition_tag);
+        const auto& element_data = element_data_map_.find(document_transition_tag)->value;
         bool use_cached_data = false;
         size = element_data->GetIntrinsicSize(use_cached_data);
         snapshot_id = element_data->new_snapshot_id;
@@ -531,7 +704,7 @@ PseudoElement* DocumentTransitionStyleTracker::CreatePseudoElement(
       auto* pseudo_element =
           MakeGarbageCollected<DocumentTransitionContentElement>(
               parent, pseudo_id, document_transition_tag, snapshot_id,
-              /*is_live_content_element=*/true);
+              /*is_live_content_element=*/true, this);
       pseudo_element->SetIntrinsicSize(size);
       return pseudo_element;
     }
@@ -553,7 +726,8 @@ void DocumentTransitionStyleTracker::RunPostPrePaintSteps() {
     // TODO(khushalsagar) : Switch paint containment and disallow fragmentation
     // to implicit constraints. See crbug.com/1277121.
     auto* layout_object = element_data->target_element->GetLayoutObject();
-    if (!layout_object || !layout_object->ShouldApplyPaintContainment()) {
+    if (!layout_object || (!layout_object->ShouldApplyPaintContainment() &&
+                           !layout_object->ShouldApplyLayoutContainment())) {
       element_data->target_element = nullptr;
 
       // If we had a valid |target_element| there must be an associated snapshot
@@ -567,32 +741,70 @@ void DocumentTransitionStyleTracker::RunPostPrePaintSteps() {
       continue;
     }
 
-    float device_pixel_ratio = document_->DevicePixelRatio();
-    TransformationMatrix viewport_matrix =
+    // Use the document element's effective zoom, since that's what the parent
+    // effective zoom would be.
+    const float device_pixel_ratio = document_->documentElement()
+                                         ->GetLayoutObject()
+                                         ->StyleRef()
+                                         .EffectiveZoom();
+    TransformationMatrix snapshot_matrix =
         layout_object->LocalToAbsoluteTransform();
-    viewport_matrix.Zoom(1.0 / device_pixel_ratio);
+
+    gfx::Vector2d snapshot_to_fixed_offset =
+        -GetSnapshotViewportRect().OffsetFromOrigin();
+    snapshot_matrix.PostTranslate(snapshot_to_fixed_offset.x(),
+                                  snapshot_to_fixed_offset.y());
+
+    snapshot_matrix.Zoom(1.0 / device_pixel_ratio);
 
     // ResizeObserverEntry is created to reuse the logic for parsing object size
     // for different types of LayoutObjects.
     auto* resize_observer_entry =
         MakeGarbageCollected<ResizeObserverEntry>(element_data->target_element);
     auto entry_size = resize_observer_entry->borderBoxSize()[0];
-    LayoutSize border_box_size =
+    LayoutSize border_box_size_in_css_space =
         layout_object->IsHorizontalWritingMode()
             ? LayoutSize(LayoutUnit(entry_size->inlineSize()),
                          LayoutUnit(entry_size->blockSize()))
             : LayoutSize(LayoutUnit(entry_size->blockSize()),
                          LayoutUnit(entry_size->inlineSize()));
+    if (float effective_zoom = layout_object->StyleRef().EffectiveZoom();
+        std::abs(effective_zoom - device_pixel_ratio) >=
+        std::numeric_limits<float>::epsilon()) {
+      border_box_size_in_css_space.Scale(effective_zoom / device_pixel_ratio);
+    }
 
-    if (viewport_matrix == element_data->viewport_matrix &&
-        border_box_size == element_data->border_box_size &&
-        device_pixel_ratio == element_data->device_pixel_ratio) {
+    PhysicalRect visual_overflow_rect_in_layout_space;
+    if (auto* box = DynamicTo<LayoutBox>(layout_object))
+      visual_overflow_rect_in_layout_space = ComputeVisualOverflowRect(box);
+
+    WritingMode writing_mode = layout_object->StyleRef().GetWritingMode();
+
+    ContainerProperties container_properties(border_box_size_in_css_space,
+                                             snapshot_matrix);
+    if (!element_data->container_properties.empty() &&
+        element_data->container_properties.back() == container_properties &&
+        visual_overflow_rect_in_layout_space ==
+            element_data->visual_overflow_rect_in_layout_space &&
+        writing_mode == element_data->container_writing_mode) {
       continue;
     }
 
-    element_data->viewport_matrix = viewport_matrix;
-    element_data->border_box_size = border_box_size;
-    element_data->device_pixel_ratio = device_pixel_ratio;
+    // Only add a new container properties entry if it differs from the last
+    // one.
+    if (element_data->container_properties.empty()) {
+      element_data->container_properties.push_back(container_properties);
+    } else if (element_data->container_properties.back() !=
+               container_properties) {
+      if (state_ == State::kStarted)
+        element_data->container_properties.push_back(container_properties);
+      else
+        element_data->container_properties.back() = container_properties;
+    }
+
+    element_data->visual_overflow_rect_in_layout_space =
+        visual_overflow_rect_in_layout_space;
+    element_data->container_writing_mode = writing_mode;
 
     PseudoId live_content_element = HasLiveNewContent()
                                         ? kPseudoIdPageTransitionIncomingImage
@@ -702,10 +914,12 @@ void DocumentTransitionStyleTracker::VerifySharedElements() {
 
     // TODO(vmpstr): Should this work for replaced elements as well?
     if (object) {
-      if (object->ShouldApplyPaintContainment())
+      if (object->ShouldApplyPaintContainment() ||
+          object->ShouldApplyLayoutContainment()) {
         continue;
+      }
 
-      AddConsoleError(kPaintContainmentNotSatisfied,
+      AddConsoleError(kContainmentNotSatisfied,
                       {DOMNodeIds::IdForNode(active_element)});
     }
 
@@ -714,11 +928,10 @@ void DocumentTransitionStyleTracker::VerifySharedElements() {
     // support nulls as a valid active element.
 
     // Invalidate the element since we should no longer be compositing it.
+    // TODO(vmpstr): Should we abort the transition instead?0
     auto* box = active_element->GetLayoutBox();
-    if (box && box->HasSelfPaintingLayer()) {
+    if (box && box->HasSelfPaintingLayer())
       box->SetNeedsPaintPropertyUpdate();
-      box->Layer()->SetNeedsCompositingInputsUpdate();
-    }
     active_element = nullptr;
   }
 }
@@ -735,10 +948,99 @@ bool DocumentTransitionStyleTracker::IsSharedElement(Element* element) const {
   return false;
 }
 
-// static
-bool DocumentTransitionStyleTracker::IsReservedTransitionTag(
-    const StringView& value) {
-  return value == RootTag();
+bool DocumentTransitionStyleTracker::IsRootTransitioning() const {
+  switch (state_) {
+    case State::kIdle:
+      return false;
+    case State::kCapturing:
+    case State::kCaptured:
+      return !!old_root_data_;
+    case State::kStarted:
+    case State::kFinished:
+      return !!new_root_data_;
+  }
+  NOTREACHED();
+  return false;
+}
+
+StyleRequest::RulesToInclude
+DocumentTransitionStyleTracker::StyleRulesToInclude() const {
+  switch (state_) {
+    case State::kIdle:
+    case State::kCapturing:
+    case State::kCaptured:
+      return StyleRequest::kUAOnly;
+    case State::kStarted:
+    case State::kFinished:
+      return StyleRequest::kAll;
+  }
+
+  NOTREACHED();
+  return StyleRequest::kAll;
+}
+
+namespace {
+
+// Returns the outsets applied by browser UI on the fixed viewport that will
+// transform it into the snapshot viewport.
+gfx::Outsets GetFixedToSnapshotViewportOutsets(Document& document) {
+  DCHECK(document.View());
+  DCHECK(document.GetPage());
+  DCHECK(document.GetFrame());
+
+  if (!document.GetFrame()->IsOutermostMainFrame())
+    return gfx::Outsets();
+
+  Page& page = *document.GetPage();
+
+  int top = 0;
+  int right = 0;
+  int bottom = 0;
+  int left = 0;
+
+  // TODO(bokan): This assumes any shown ratio implies controls are shown. We
+  // many need to do some synchronization to make this work seamlessly with URL
+  // bar animations.
+  BrowserControls& controls = page.GetBrowserControls();
+  if (page.GetBrowserControls().TopShownRatio()) {
+    top += controls.TopHeight() - controls.TopMinHeight();
+    bottom += controls.BottomHeight() - controls.BottomMinHeight();
+  }
+
+  // TODO(bokan): Account for virtual-keyboard
+
+  // TODO(bokan): Account for scrollbars.
+
+  gfx::Outsets outsets;
+  outsets.set_top(top);
+  outsets.set_right(right);
+  outsets.set_bottom(bottom);
+  outsets.set_left(left);
+  return outsets;
+}
+}  // namespace
+
+gfx::Rect DocumentTransitionStyleTracker::GetSnapshotViewportRect() const {
+  DCHECK(document_->GetLayoutView());
+  DCHECK(document_->View());
+  DCHECK(document_->GetFrame());
+
+  LocalFrameView& view = *document_->View();
+
+  // Start with the full FrameView size, i.e. the position: fixed viewport and
+  // expand the viewport by any insetting UI such as the mobile URL bar,
+  // virtual-keyboard, etc. Note: the FrameView size already includes
+  // scrollbars.
+  gfx::Rect snapshot_viewport_rect(view.Size());
+  snapshot_viewport_rect.Outset(GetFixedToSnapshotViewportOutsets(*document_));
+
+  return snapshot_viewport_rect;
+}
+
+gfx::Vector2d DocumentTransitionStyleTracker::GetRootSnapshotPaintOffset()
+    const {
+  gfx::Outsets outsets = GetFixedToSnapshotViewportOutsets(*document_);
+  return gfx::Vector2d(outsets.left(), outsets.top());
 }
 
 void DocumentTransitionStyleTracker::InvalidateStyle() {
@@ -759,11 +1061,8 @@ void DocumentTransitionStyleTracker::InvalidateStyle() {
                                                    invalidate_style);
 
   // Invalidate layout view compositing properties.
-  if (auto* layout_view = document_->GetLayoutView()) {
+  if (auto* layout_view = document_->GetLayoutView())
     layout_view->SetNeedsPaintPropertyUpdate();
-    if (layout_view->HasSelfPaintingLayer())
-      layout_view->Layer()->SetNeedsCompositingInputsUpdate();
-  }
 
   for (auto& entry : element_data_map_) {
     if (!entry.value->target_element)
@@ -776,14 +1075,23 @@ void DocumentTransitionStyleTracker::InvalidateStyle() {
     // means that we should update the paint properties to update the shared
     // element id.
     object->SetNeedsPaintPropertyUpdate();
-
-    auto* box = entry.value->target_element->GetLayoutBox();
-    if (!box || !box->HasSelfPaintingLayer())
-      continue;
-
-    // We might need to composite or decomposite this layer.
-    box->Layer()->SetNeedsCompositingInputsUpdate();
   }
+
+  document_->GetDisplayLockDocumentState()
+      .NotifySharedElementPseudoTreeChanged();
+}
+
+HashSet<AtomicString> DocumentTransitionStyleTracker::AllRootTags() const {
+  HashSet<AtomicString> all_root_tags;
+  if (old_root_data_) {
+    for (auto& tag : old_root_data_->tags)
+      all_root_tags.insert(tag);
+  }
+  if (new_root_data_) {
+    for (auto& tag : new_root_data_->tags)
+      all_root_tags.insert(tag);
+  }
+  return all_root_tags;
 }
 
 const String& DocumentTransitionStyleTracker::UAStyleSheet() {
@@ -796,70 +1104,161 @@ const String& DocumentTransitionStyleTracker::UAStyleSheet() {
   // animations.
   const bool add_animations = state_ == State::kStarted;
 
-  StringBuilder builder;
-  builder.Append(StaticUAStyles());
+  DocumentTransitionStyleBuilder builder;
+  builder.AddUAStyle(StaticUAStyles());
   if (add_animations)
-    builder.Append(AnimationUAStyles());
+    builder.AddUAStyle(AnimationUAStyles());
+
+  // SUBTLETY AHEAD!
+  // There are several situations to consider when creating the styles and
+  // animation styles below:
+  //
+  // 1. A tag is both an old and new root. We will only visit the AllRootTags
+  // loop and correctly append styles (modulo TODO in that loop). Note that this
+  // tag will not be in the `element_data_map_` (DCHECKed in that loop).
+  //
+  // 2. A tag is an old root only (exit animation for root). The style is set up
+  // in the AllrootTags loop and fades out through AnimationUAStyles.
+  //
+  // 3. A tag is an old root and a new shared element. The AllRootTags loop
+  // skips this tag. The element map loop updates the container for the new
+  // shared element size and transform. The animation code of that loop adds an
+  // animation from old root size and identity matrix.
+  //
+  // 4. A tag is a new root only (entry animation for root). Its only visited in
+  // AllRootTags and its a default fade-in.
+  //
+  // 5. A tag is a new root and old shared element. We visit it in AllRootTags
+  // to set up the destination state. We skip setting its styles in the
+  // `element_data_map_` loop since latest value comes from AllRootTags. We do
+  // set the animation in that loop since we need the "from" state.
+  //
+  // 6. A tag is a new and old shared element (or maybe exit/enter for shared
+  // element only -- no roots involved. Everything is done in the
+  // `element_data_map_` loop.
+
+  // Use the document element's effective zoom, since that's what the parent
+  // effective zoom would be.
+  float device_pixel_ratio = document_->documentElement()
+                                 ->GetLayoutObject()
+                                 ->StyleRef()
+                                 .EffectiveZoom();
+
+  // Position the root container behind any viewport insetting widgets (such
+  // as the URL bar) so that it's stable across a transition.
+  absl::optional<String> snapshot_viewport_offset =
+      GetSnapshotViewportOffsetTransform(
+          GetSnapshotViewportRect().OffsetFromOrigin(), device_pixel_ratio);
+  if (snapshot_viewport_offset) {
+    builder.AddRootStyles(*snapshot_viewport_offset);
+  }
+
+  for (auto& root_tag : AllRootTags()) {
+    // This is case 3 above.
+    bool tag_is_old_root =
+        old_root_data_ && old_root_data_->tags.Contains(root_tag);
+    if (tag_is_old_root && element_data_map_.Contains(root_tag)) {
+      DCHECK(
+          element_data_map_.find(root_tag)->value->new_snapshot_id.IsValid());
+      continue;
+    }
+
+    // TODO(vmpstr): For animations, we need to re-target the layout size if it
+    // changes, but right now we only use the latest layout view size.
+    // Note that we don't set the writing-mode since it would inherit from the
+    // :root anyway, so there is no reason to put it on the pseudo elements.
+    builder.AddContainerStyles(root_tag, "right: 0; bottom: 0;");
+
+    bool tag_is_new_root =
+        new_root_data_ && new_root_data_->tags.Contains(root_tag);
+    if (tag_is_old_root && tag_is_new_root)
+      builder.AddPlusLighter(root_tag);
+  }
 
   for (auto& entry : element_data_map_) {
-    auto document_transition_tag = entry.key.GetString().Utf8();
+    const auto& document_transition_tag = entry.key.GetString();
     auto& element_data = entry.value;
 
-    // ::page-transition-container styles using computed properties for each
-    // element.
-    builder.AppendFormat(
-        R"CSS(
-        html::page-transition-container(%s) {
-          width: %dpx;
-          height: %dpx;
-          transform: %s;
-        }
-        )CSS",
-        document_transition_tag.c_str(),
-        element_data->border_box_size.Width().ToInt(),
-        element_data->border_box_size.Height().ToInt(),
-        ComputedStyleUtils::ValueForTransformationMatrix(
-            element_data->viewport_matrix, 1, false)
-            ->CssText()
-            .Utf8()
-            .c_str());
+    // TODO(vmpstr): We will run a style resolution before the first time we get
+    // a chance to update our rendering in RunPostPrePaintSteps. There is no
+    // point in adding any styles here, because those will be wrong. The TODO
+    // here is to skip this step earlier, instead of per each element.
+    if (element_data->container_properties.empty())
+      continue;
+
+    const bool tag_is_old_root =
+        old_root_data_ &&
+        old_root_data_->tags.Contains(document_transition_tag);
+    const bool tag_is_new_root =
+        new_root_data_ &&
+        new_root_data_->tags.Contains(document_transition_tag);
+    // The tag can't be both old and new root, since it shouldn't be in the
+    // `element_data_map_`. This is case 1 above.
+    DCHECK(!tag_is_old_root || !tag_is_new_root);
+
+    // Skipping this if a tag is a new root. This is case 5 above.
+    if (!tag_is_new_root) {
+      // ::page-transition-container styles using computed properties for each
+      // element.
+      builder.AddContainerStyles(document_transition_tag,
+                                 element_data->container_properties.back(),
+                                 element_data->container_writing_mode);
+
+      // Incoming inset also only makes sense if the tag is a new shared element
+      // (not a new root).
+      absl::optional<String> incoming_inset = ComputeInsetDifference(
+          element_data->visual_overflow_rect_in_layout_space,
+          LayoutRect(LayoutPoint(), element_data->container_properties.back()
+                                        .border_box_size_in_css_space),
+          device_pixel_ratio);
+      if (incoming_inset) {
+        builder.AddIncomingObjectViewBox(document_transition_tag,
+                                         *incoming_inset);
+      }
+    }
+
+    // Outgoing inset only makes sense if the tag is an old shared element (not
+    // an old root).
+    if (!tag_is_old_root) {
+      absl::optional<String> outgoing_inset = ComputeInsetDifference(
+          element_data->cached_visual_overflow_rect_in_layout_space,
+          LayoutRect(LayoutPoint(), element_data->cached_container_properties
+                                        .border_box_size_in_css_space),
+          device_pixel_ratio);
+      if (outgoing_inset) {
+        builder.AddOutgoingObjectViewBox(document_transition_tag,
+                                         *outgoing_inset);
+      }
+    }
 
     // TODO(khushalsagar) : We'll need to retarget the animation if the final
     // value changes during the start phase.
-    if (add_animations && element_data->old_snapshot_id.IsValid() &&
-        element_data->new_snapshot_id.IsValid()) {
-      builder.AppendFormat(
-          R"CSS(
-          @keyframes page-transition-container-anim-%s {
-            from {
-             transform: %s;
-             width: %dpx;
-             height: %dpx;
-            }
-           }
-           )CSS",
-          document_transition_tag.c_str(),
-          ComputedStyleUtils::ValueForTransformationMatrix(
-              element_data->cached_viewport_matrix, 1, false)
-              ->CssText()
-              .Utf8()
-              .c_str(),
-          element_data->cached_border_box_size.Width().ToInt(),
-          element_data->cached_border_box_size.Height().ToInt());
-
-      // TODO(khushalsagar) : The duration/delay in the UA stylesheet will need
-      // to be the duration from TransitionConfig. See crbug.com/1275727.
-      builder.AppendFormat(
-          R"CSS(
-          html::page-transition-container(%s) {
-            animation: page-transition-container-anim-%s 0.25s both
-          }
-          )CSS",
-          document_transition_tag.c_str(), document_transition_tag.c_str());
+    if (add_animations) {
+      // If the old snapshot is valid, then we add a transition if we have
+      // either the new snapshot (case 6 above) or the tag is a new root (case 5
+      // above).
+      //
+      // The else-if case is case 3 above: if we have the new snapshot and the
+      // tag is an old root, in which case we also add an animation but sourced
+      // from the old root, rather than from the cached element data.
+      if (element_data->old_snapshot_id.IsValid() &&
+          (element_data->new_snapshot_id.IsValid() || tag_is_new_root)) {
+        builder.AddAnimationAndBlending(
+            document_transition_tag, element_data->cached_container_properties);
+      } else if (element_data->new_snapshot_id.IsValid() && tag_is_old_root) {
+        auto layout_view_size = LayoutSize(GetSnapshotViewportRect().size());
+        // Note that we want the size in css space, which means we need to undo
+        // the effective zoom.
+        layout_view_size.Scale(
+            1 / document_->GetLayoutView()->StyleRef().EffectiveZoom());
+        builder.AddAnimationAndBlending(
+            document_transition_tag,
+            ContainerProperties(layout_view_size, TransformationMatrix()));
+      }
     }
   }
 
-  ua_style_sheet_ = builder.ReleaseString();
+  ua_style_sheet_ = builder.Build();
   return *ua_style_sheet_;
 }
 
@@ -873,19 +1272,31 @@ void DocumentTransitionStyleTracker::Trace(Visitor* visitor) const {
   visitor->Trace(pending_shared_element_tags_);
 }
 
+void DocumentTransitionStyleTracker::InvalidateHitTestingCache() {
+  // Hit-testing data is cached based on the current DOM version. Normally, this
+  // version is incremented any time there is a DOM modification or an attribute
+  // change to some element (which can result in a new style). However, with
+  // shared element transitions, we dynamically create and destroy hit-testable
+  // pseudo elements based on the current state. This means that we have to
+  // manually modify the DOM tree version since there is no other mechanism that
+  // will do it.
+  document_->IncDOMTreeVersion();
+}
+
 void DocumentTransitionStyleTracker::ElementData::Trace(
     Visitor* visitor) const {
   visitor->Trace(target_element);
 }
 
+// TODO(vmpstr): We need to write tests for the following:
+// * A local transform on the shared element.
+// * A transform on an ancestor which changes its screen space transform.
 LayoutSize DocumentTransitionStyleTracker::ElementData::GetIntrinsicSize(
     bool use_cached_data) {
   LayoutSize box_size =
-      use_cached_data ? cached_border_box_size : border_box_size;
-  float ratio =
-      use_cached_data ? cached_device_pixel_ratio : device_pixel_ratio;
-
-  box_size.Scale(ratio);
+      use_cached_data
+          ? cached_visual_overflow_rect_in_layout_space.size.ToLayoutSize()
+          : visual_overflow_rect_in_layout_space.size.ToLayoutSize();
   return box_size;
 }
 

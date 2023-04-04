@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "build/build_config.h"
 #include "content/public/browser/document_service.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "media/mojo/mojom/speech_recognition_service.mojom.h"
+#include "media/mojo/mojom/speech_recognition.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace content {
@@ -34,15 +34,10 @@ class LiveCaptionSpeechRecognitionHost
           media::mojom::SpeechRecognitionRecognizerClient>,
       public content::WebContentsObserver {
  public:
-  explicit LiveCaptionSpeechRecognitionHost(
-      content::RenderFrameHost* frame_host,
-      mojo::PendingReceiver<media::mojom::SpeechRecognitionRecognizerClient>
-          pending_receiver);
   LiveCaptionSpeechRecognitionHost(const LiveCaptionSpeechRecognitionHost&) =
       delete;
   LiveCaptionSpeechRecognitionHost& operator=(
       const LiveCaptionSpeechRecognitionHost&) = delete;
-  ~LiveCaptionSpeechRecognitionHost() override;
 
   // static
   static void Create(
@@ -68,6 +63,12 @@ class LiveCaptionSpeechRecognitionHost
 #endif
 
  private:
+  explicit LiveCaptionSpeechRecognitionHost(
+      content::RenderFrameHost& frame_host,
+      mojo::PendingReceiver<media::mojom::SpeechRecognitionRecognizerClient>
+          pending_receiver);
+  ~LiveCaptionSpeechRecognitionHost() override;
+
   // Returns the WebContents if it exists. If it does not exist, sets the
   // RenderFrameHost reference to nullptr and returns nullptr.
   content::WebContents* GetWebContents();

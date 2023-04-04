@@ -131,6 +131,27 @@ static inline unsigned SkDiv255Round(unsigned prod) {
     static inline uint32_t SkBSwap32(uint32_t v) { return __builtin_bswap32(v); }
 #endif
 
+/*
+ * Return the number of set bits (i.e., the population count) in the provided uint32_t.
+ */
+int SkPopCount_portable(uint32_t n);
+
+#if defined(__GNUC__) || defined(__clang__)
+    static inline int SkPopCount(uint32_t n) {
+        return __builtin_popcount(n);
+    }
+#else
+    static inline int SkPopCount(uint32_t n) {
+        return SkPopCount_portable(n);
+    }
+#endif
+
+/*
+ * Return the 0-based index of the nth bit set in target
+ * Returns 32 if there is no nth bit set.
+ */
+int SkNthSet(uint32_t target, int n);
+
 //! Returns the number of leading zero bits (0...32)
 // From Hacker's Delight 2nd Edition
 constexpr int SkCLZ_portable(uint32_t x) {
@@ -140,7 +161,7 @@ constexpr int SkCLZ_portable(uint32_t x) {
              y = x >>  4; if (y != 0) {n -=  4; x = y;}
              y = x >>  2; if (y != 0) {n -=  2; x = y;}
              y = x >>  1; if (y != 0) {return n - 2;}
-    return n - x;
+    return n - static_cast<int>(x);
 }
 
 static_assert(32 == SkCLZ_portable(0));
@@ -258,12 +279,12 @@ constexpr int SkPrevLog2_portable(uint32_t value) {
  */
 static inline int SkNextPow2(int value) {
     SkASSERT(value > 0);
-    return 1 << SkNextLog2(value);
+    return 1 << SkNextLog2(static_cast<uint32_t>(value));
 }
 
 constexpr int SkNextPow2_portable(int value) {
     SkASSERT(value > 0);
-    return 1 << SkNextLog2_portable(value);
+    return 1 << SkNextLog2_portable(static_cast<uint32_t>(value));
 }
 
 /**
@@ -273,12 +294,12 @@ constexpr int SkNextPow2_portable(int value) {
 */
 static inline int SkPrevPow2(int value) {
     SkASSERT(value > 0);
-    return 1 << SkPrevLog2(value);
+    return 1 << SkPrevLog2(static_cast<uint32_t>(value));
 }
 
 constexpr int SkPrevPow2_portable(int value) {
     SkASSERT(value > 0);
-    return 1 << SkPrevLog2_portable(value);
+    return 1 << SkPrevLog2_portable(static_cast<uint32_t>(value));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -73,7 +73,8 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
   private readonly files: Map<string, Workspace.UISourceCode.UISourceCode>;
   private readonly previouslyViewedFilesSetting: Common.Settings.Setting<SerializedHistoryItem[]>;
   private readonly history: History;
-  private readonly uriToUISourceCode: Map<string, Workspace.UISourceCode.UISourceCode>;
+  private readonly uriToUISourceCode: Map<Platform.DevToolsPath.UrlString, Workspace.UISourceCode.UISourceCode>;
+  private readonly idToUISourceCode: Map<string, Workspace.UISourceCode.UISourceCode>;
   private currentFileInternal!: Workspace.UISourceCode.UISourceCode|null;
   private currentView!: UI.Widget.Widget|null;
   private scrollTimer?: number;
@@ -104,6 +105,7 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
     this.previouslyViewedFilesSetting = setting;
     this.history = History.fromObject(this.previouslyViewedFilesSetting.get());
     this.uriToUISourceCode = new Map();
+    this.idToUISourceCode = new Map();
   }
 
   private onBindingCreated(event: Common.EventTarget.EventTargetEvent<Persistence.Persistence.PersistenceBinding>):
@@ -238,7 +240,7 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
       this.scrollTimer = window.setTimeout(() => this.history.save(this.previouslyViewedFilesSetting), 100);
       if (this.currentFileInternal) {
         const {editor} = this.currentView.textEditor;
-        const topBlock = editor.blockAtHeight(editor.scrollDOM.getBoundingClientRect().top);
+        const topBlock = editor.lineBlockAtHeight(editor.scrollDOM.getBoundingClientRect().top - editor.documentTop);
         const topLine = editor.state.doc.lineAt(topBlock.from).number - 1;
         this.history.updateScrollLineNumber(this.currentFileInternal.url(), topLine);
       }
@@ -356,11 +358,12 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
   private canonicalUISourceCode(uiSourceCode: Workspace.UISourceCode.UISourceCode):
       Workspace.UISourceCode.UISourceCode {
     // Check if we have already a UISourceCode for this url
-    const existingSourceCode = this.uriToUISourceCode.get(uiSourceCode.url());
+    const existingSourceCode = this.idToUISourceCode.get(uiSourceCode.canononicalScriptId());
     if (existingSourceCode) {
       // Ignore incoming uiSourceCode, we already have this file.
       return existingSourceCode;
     }
+    this.idToUISourceCode.set(uiSourceCode.canononicalScriptId(), uiSourceCode);
     this.uriToUISourceCode.set(uiSourceCode.url(), uiSourceCode);
     return uiSourceCode;
   }
@@ -420,6 +423,9 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
       if (this.uriToUISourceCode.get(uiSourceCode.url()) === uiSourceCode) {
         this.uriToUISourceCode.delete(uiSourceCode.url());
       }
+      if (this.idToUISourceCode.get(uiSourceCode.canononicalScriptId()) === uiSourceCode) {
+        this.idToUISourceCode.delete(uiSourceCode.canononicalScriptId());
+      }
     }
     this.tabbedPane.closeTabs(tabIds);
   }
@@ -436,10 +442,10 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
   private updateHistory(): void {
     const tabIds = this.tabbedPane.lastOpenedTabIds(maximalPreviouslyViewedFilesCount);
 
-    function tabIdToURI(this: TabbedEditorContainer, tabId: string): string {
+    function tabIdToURI(this: TabbedEditorContainer, tabId: string): Platform.DevToolsPath.UrlString {
       const tab = this.files.get(tabId);
       if (!tab) {
-        return '';
+        return Platform.DevToolsPath.EmptyUrlString;
       }
       return tab.url();
     }
@@ -591,7 +597,13 @@ export class TabbedEditorContainer extends Common.ObjectWrapper.ObjectWrapper<Ev
         this.uriToUISourceCode.delete(k);
       }
     }
-    // Ensure it is mapped under current url.
+    // Remove from map under old id if it has changed.
+    for (const [k, v] of this.idToUISourceCode) {
+      if (v === uiSourceCode && k !== v.canononicalScriptId()) {
+        this.idToUISourceCode.delete(k);
+      }
+    }
+    // Ensure it is mapped under current url and id.
     this.canonicalUISourceCode(uiSourceCode);
   }
 
@@ -639,18 +651,19 @@ export let tabId = 0;
 export const maximalPreviouslyViewedFilesCount = 30;
 
 interface SerializedHistoryItem {
-  url: string;
+  url: Platform.DevToolsPath.UrlString;
   selectionRange?: TextUtils.TextRange.SerializedTextRange;
   scrollLineNumber?: number;
 }
 
 export class HistoryItem {
-  url: string;
+  url: Platform.DevToolsPath.UrlString;
   private isSerializable: boolean;
   selectionRange: TextUtils.TextRange.TextRange|undefined;
   scrollLineNumber: number|undefined;
 
-  constructor(url: string, selectionRange?: TextUtils.TextRange.TextRange, scrollLineNumber?: number) {
+  constructor(
+      url: Platform.DevToolsPath.UrlString, selectionRange?: TextUtils.TextRange.TextRange, scrollLineNumber?: number) {
     this.url = url;
     this.isSerializable = url.length < HistoryItem.serializableUrlLengthLimit;
     this.selectionRange = selectionRange;
@@ -700,7 +713,7 @@ export class History {
     return new History(items);
   }
 
-  index(url: string): number {
+  index(url: Platform.DevToolsPath.UrlString): number {
     const index = this.itemsIndex.get(url);
     if (index !== undefined) {
       return index;
@@ -716,12 +729,12 @@ export class History {
     }
   }
 
-  selectionRange(url: string): TextUtils.TextRange.TextRange|undefined {
+  selectionRange(url: Platform.DevToolsPath.UrlString): TextUtils.TextRange.TextRange|undefined {
     const index = this.index(url);
     return index !== -1 ? this.items[index].selectionRange : undefined;
   }
 
-  updateSelectionRange(url: string, selectionRange?: TextUtils.TextRange.TextRange): void {
+  updateSelectionRange(url: Platform.DevToolsPath.UrlString, selectionRange?: TextUtils.TextRange.TextRange): void {
     if (!selectionRange) {
       return;
     }
@@ -732,12 +745,12 @@ export class History {
     this.items[index].selectionRange = selectionRange;
   }
 
-  scrollLineNumber(url: string): number|undefined {
+  scrollLineNumber(url: Platform.DevToolsPath.UrlString): number|undefined {
     const index = this.index(url);
     return index !== -1 ? this.items[index].scrollLineNumber : undefined;
   }
 
-  updateScrollLineNumber(url: string, scrollLineNumber: number): void {
+  updateScrollLineNumber(url: Platform.DevToolsPath.UrlString, scrollLineNumber: number): void {
     const index = this.index(url);
     if (index === -1) {
       return;
@@ -745,7 +758,7 @@ export class History {
     this.items[index].scrollLineNumber = scrollLineNumber;
   }
 
-  update(urls: string[]): void {
+  update(urls: Platform.DevToolsPath.UrlString[]): void {
     for (let i = urls.length - 1; i >= 0; --i) {
       const index = this.index(urls[i]);
       let item;
@@ -760,7 +773,7 @@ export class History {
     }
   }
 
-  remove(url: string): void {
+  remove(url: Platform.DevToolsPath.UrlString): void {
     const index = this.index(url);
     if (index !== -1) {
       this.items.splice(index, 1);
@@ -786,7 +799,7 @@ export class History {
     return serializedHistory;
   }
 
-  urls(): string[] {
+  urls(): Platform.DevToolsPath.UrlString[] {
     const result = [];
     for (let i = 0; i < this.items.length; ++i) {
       result.push(this.items[i].url);

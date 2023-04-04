@@ -1,17 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-import './shared_style.js';
+import './app_management_shared_style.css.js';
 import './toggle_row.js';
 
-import {assert, assertNotReached} from '//resources/js/assert.m.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {assert, assertNotReached} from '//resources/js/assert_ts.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {App} from './app_management.mojom-webui.js';
-import {Permission} from './app_management.mojom-webui.js';
+import {App, Permission, PermissionType, TriState} from './app_management.mojom-webui.js';
 import {BrowserProxy} from './browser_proxy.js';
 import {AppManagementUserAction} from './constants.js';
-import {PermissionType, PermissionTypeIndex, TriState} from './permission_constants.js';
+import {PermissionTypeIndex} from './permission_constants.js';
+import {getTemplate} from './permission_item.html.js';
 import {createBoolPermission, createTriStatePermission, getBoolPermissionValue, getTriStatePermissionValue, isBoolValue, isTriStateValue} from './permission_util.js';
 import {AppManagementToggleRowElement} from './toggle_row.js';
 import {getPermission, getPermissionValueBool, recordAppManagementUserAction} from './util.js';
@@ -22,7 +22,7 @@ export class AppManagementPermissionItemElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -81,35 +81,33 @@ export class AppManagementPermissionItemElement extends PolymerElement {
     this.addEventListener('change', this.togglePermission_);
   }
 
-  private isAvailable_(app: App, permissionType: PermissionTypeIndex): boolean {
+  private isAvailable_(
+      app: App|undefined,
+      permissionType: PermissionTypeIndex|undefined): boolean {
     if (app === undefined || permissionType === undefined) {
       return false;
     }
 
-    assert(app);
-
     return getPermission(app, permissionType) !== undefined;
   }
 
-  private isManaged_(app: App, permissionType: PermissionTypeIndex): boolean {
+  private isManaged_(app: App|undefined, permissionType: PermissionTypeIndex):
+      boolean {
     if (app === undefined || permissionType === undefined ||
         !this.isAvailable_(app, permissionType)) {
       return false;
     }
 
-    assert(app);
     const permission = getPermission(app, permissionType);
-
-    assert(permission);
     return permission.isManaged;
   }
 
-  private getValue_(app: App, permissionType: PermissionTypeIndex): boolean {
+  private getValue_(
+      app: App|undefined,
+      permissionType: PermissionTypeIndex|undefined): boolean {
     if (app === undefined || permissionType === undefined) {
       return false;
     }
-    assert(app);
-
     return getPermissionValueBool(app, permissionType);
   }
 
@@ -136,8 +134,6 @@ export class AppManagementPermissionItemElement extends PolymerElement {
    * called when `syncPermissionManually` is set.
    */
   syncPermission() {
-    assert(this.app);
-
     let newPermission: Permission|undefined = undefined;
 
     let newBoolState = false;  // to keep the closure compiler happy.
@@ -207,10 +203,8 @@ export class AppManagementPermissionItemElement extends PolymerElement {
         break;
       default:
         assertNotReached();
-        newPermissionValue = TriState.kBlock;
     }
 
-    assert(newPermissionValue !== undefined);
     return createTriStatePermission(
         PermissionType[permissionType], newPermissionValue,
         currentPermission.isManaged);
@@ -251,7 +245,6 @@ export class AppManagementPermissionItemElement extends PolymerElement {
 
       default:
         assertNotReached();
-        return AppManagementUserAction.NOTIFICATIONS_TURNED_ON;
     }
   }
 }

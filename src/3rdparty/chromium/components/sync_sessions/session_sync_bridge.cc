@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,8 +35,6 @@ namespace {
 
 using sync_pb::SessionSpecifics;
 using syncer::MetadataChangeList;
-using syncer::ModelTypeStore;
-using syncer::ModelTypeSyncBridge;
 
 // Default time without activity after which a session is considered stale and
 // becomes a candidate for garbage collection.

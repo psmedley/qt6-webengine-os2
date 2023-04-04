@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include "base/feature_list.h"
 #include "base/memory/ref_counted.h"
-#include "content/browser/browsing_instance.h"
-#include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "base/memory/safe_ref.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
 #include "content/browser/site_instance_group.h"
+#include "content/public/browser/browsing_instance_id.h"
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-forward.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 
@@ -32,6 +32,8 @@ CONTENT_EXPORT BrowsingContextStateImplementationType GetBrowsingContextMode();
 }  // namespace features
 
 namespace content {
+
+class RenderFrameHostImpl;
 
 // BrowsingContextState is intended to store all state associated with a given
 // browsing context (BrowsingInstance in the code, as defined in the HTML spec
@@ -175,9 +177,8 @@ class CONTENT_EXPORT BrowsingContextState
   // update.
   void OnSetHadStickyUserActivationBeforeNavigation(bool value);
 
-  // Sets whether this is an ad subframe and notifies the proxies about the
-  // update.
-  void SetIsAdSubframe(bool is_ad_subframe);
+  // Sets whether this is an ad frame and notifies the proxies about the update.
+  void SetIsAdFrame(bool is_ad_frame);
 
   // Delete a RenderFrameProxyHost owned by this object.
   void DeleteRenderFrameProxyHost(
@@ -225,14 +226,16 @@ class CONTENT_EXPORT BrowsingContextState
       SiteInstance* site_instance,
       const scoped_refptr<RenderViewHostImpl>& rvh,
       FrameTreeNode* frame_tree_node,
-      ProxyAccessMode proxy_access_mode = ProxyAccessMode::kRegular);
+      ProxyAccessMode proxy_access_mode = ProxyAccessMode::kRegular,
+      const blink::RemoteFrameToken& frame_token = blink::RemoteFrameToken());
 
   // Called on the RFHM of the inner WebContents to create a
   // RenderFrameProxyHost in its outer WebContents's SiteInstance,
   // |outer_contents_site_instance|.
   RenderFrameProxyHost* CreateOuterDelegateProxy(
       SiteInstance* outer_contents_site_instance,
-      FrameTreeNode* frame_tree_node);
+      FrameTreeNode* frame_tree_node,
+      const blink::RemoteFrameToken& frame_token);
 
   // Called on an inner WebContents that's being detached from its outer
   // WebContents. This will delete the proxy in the
@@ -264,6 +267,8 @@ class CONTENT_EXPORT BrowsingContextState
   // Write a representation of this object into a trace.
   void WriteIntoTrace(perfetto::TracedProto<TraceProto> proto) const;
 
+  base::SafeRef<BrowsingContextState> GetSafeRef();
+
  protected:
   friend class base::RefCounted<BrowsingContextState>;
 
@@ -294,6 +299,8 @@ class CONTENT_EXPORT BrowsingContextState
   // TODO(crbug.com/1270671): Make |browsing_instance_id| non-optional when the
   // legacy path is removed.
   const absl::optional<BrowsingInstanceId> browsing_instance_id_;
+
+  base::WeakPtrFactory<BrowsingContextState> weak_factory_{this};
 };
 
 }  // namespace content

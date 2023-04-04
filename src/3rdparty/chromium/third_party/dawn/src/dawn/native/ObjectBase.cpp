@@ -12,79 +12,104 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "dawn/native/ObjectBase.h"
-#include "dawn/native/Device.h"
-
 #include <mutex>
+
+#include "dawn/native/Device.h"
+#include "dawn/native/ObjectBase.h"
 
 namespace dawn::native {
 
-    static constexpr uint64_t kErrorPayload = 0;
-    static constexpr uint64_t kNotErrorPayload = 1;
+static constexpr uint64_t kErrorPayload = 0;
+static constexpr uint64_t kNotErrorPayload = 1;
 
-    ObjectBase::ObjectBase(DeviceBase* device) : RefCounted(kNotErrorPayload), mDevice(device) {
+ErrorMonad::ErrorMonad() : RefCounted(kNotErrorPayload) {}
+ErrorMonad::ErrorMonad(ErrorTag) : RefCounted(kErrorPayload) {}
+
+bool ErrorMonad::IsError() const {
+    return GetRefCountPayload() == kErrorPayload;
+}
+
+ObjectBase::ObjectBase(DeviceBase* device) : ErrorMonad(), mDevice(device) {}
+
+ObjectBase::ObjectBase(DeviceBase* device, ErrorTag) : ErrorMonad(kError), mDevice(device) {}
+
+DeviceBase* ObjectBase::GetDevice() const {
+    return mDevice.Get();
+}
+
+void ApiObjectList::Track(ApiObjectBase* object) {
+    if (mMarkedDestroyed) {
+        object->DestroyImpl();
+        return;
     }
+    std::lock_guard<std::mutex> lock(mMutex);
+    mObjects.Prepend(object);
+}
 
-    ObjectBase::ObjectBase(DeviceBase* device, ErrorTag)
-        : RefCounted(kErrorPayload), mDevice(device) {
+bool ApiObjectList::Untrack(ApiObjectBase* object) {
+    std::lock_guard<std::mutex> lock(mMutex);
+    return object->RemoveFromList();
+}
+
+void ApiObjectList::Destroy() {
+    std::lock_guard<std::mutex> lock(mMutex);
+    mMarkedDestroyed = true;
+    while (!mObjects.empty()) {
+        auto* head = mObjects.head();
+        bool removed = head->RemoveFromList();
+        ASSERT(removed);
+        head->value()->DestroyImpl();
     }
+}
 
-    DeviceBase* ObjectBase::GetDevice() const {
-        return mDevice;
-    }
-
-    bool ObjectBase::IsError() const {
-        return GetRefCountPayload() == kErrorPayload;
-    }
-
-    ApiObjectBase::ApiObjectBase(DeviceBase* device, const char* label) : ObjectBase(device) {
-        if (label) {
-            mLabel = label;
-        }
-    }
-
-    ApiObjectBase::ApiObjectBase(DeviceBase* device, ErrorTag tag) : ObjectBase(device, tag) {
-    }
-
-    ApiObjectBase::ApiObjectBase(DeviceBase* device, LabelNotImplementedTag tag)
-        : ObjectBase(device) {
-    }
-
-    ApiObjectBase::~ApiObjectBase() {
-        ASSERT(!IsAlive());
-    }
-
-    void ApiObjectBase::APISetLabel(const char* label) {
+ApiObjectBase::ApiObjectBase(DeviceBase* device, const char* label) : ObjectBase(device) {
+    if (label) {
         mLabel = label;
-        SetLabelImpl();
     }
+}
 
-    const std::string& ApiObjectBase::GetLabel() const {
-        return mLabel;
-    }
+ApiObjectBase::ApiObjectBase(DeviceBase* device, ErrorTag tag) : ObjectBase(device, tag) {}
 
-    void ApiObjectBase::SetLabelImpl() {
-    }
+ApiObjectBase::ApiObjectBase(DeviceBase* device, LabelNotImplementedTag tag) : ObjectBase(device) {}
 
-    bool ApiObjectBase::IsAlive() const {
-        return IsInList();
-    }
+ApiObjectBase::~ApiObjectBase() {
+    ASSERT(!IsAlive());
+}
 
-    void ApiObjectBase::DeleteThis() {
-        Destroy();
-        RefCounted::DeleteThis();
-    }
+void ApiObjectBase::APISetLabel(const char* label) {
+    mLabel = label;
+    SetLabelImpl();
+}
 
-    void ApiObjectBase::TrackInDevice() {
-        ASSERT(GetDevice() != nullptr);
-        GetDevice()->TrackObject(this);
-    }
+const std::string& ApiObjectBase::GetLabel() const {
+    return mLabel;
+}
 
-    void ApiObjectBase::Destroy() {
-        const std::lock_guard<std::mutex> lock(*GetDevice()->GetObjectListMutex(GetType()));
-        if (RemoveFromList()) {
-            DestroyImpl();
-        }
+void ApiObjectBase::SetLabelImpl() {}
+
+bool ApiObjectBase::IsAlive() const {
+    return IsInList();
+}
+
+void ApiObjectBase::DeleteThis() {
+    Destroy();
+    RefCounted::DeleteThis();
+}
+
+ApiObjectList* ApiObjectBase::GetObjectTrackingList() {
+    ASSERT(GetDevice() != nullptr);
+    return GetDevice()->GetObjectTrackingList(GetType());
+}
+
+void ApiObjectBase::Destroy() {
+    if (!IsAlive()) {
+        return;
     }
+    ApiObjectList* list = GetObjectTrackingList();
+    ASSERT(list != nullptr);
+    if (list->Untrack(this)) {
+        DestroyImpl();
+    }
+}
 
 }  // namespace dawn::native

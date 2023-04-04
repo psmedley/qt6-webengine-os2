@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,6 +141,13 @@ struct MEDIA_EXPORT BitstreamBufferMetadata final {
 // Video encoder interface.
 class MEDIA_EXPORT VideoEncodeAccelerator {
  public:
+  // Bitmask values for supported rate control modes.
+  enum SupportedRateControlMode : uint8_t {
+    kNoMode = 0,  // for uninitialized profiles only
+    kConstantMode = 0b0001,
+    kVariableMode = 0b0010,
+  };
+
   // Specification of an encoding profile supported by an encoder.
   struct MEDIA_EXPORT SupportedProfile {
     SupportedProfile();
@@ -149,6 +156,7 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
         const gfx::Size& max_resolution,
         uint32_t max_framerate_numerator = 0u,
         uint32_t max_framerate_denominator = 1u,
+        SupportedRateControlMode rc_modes = kConstantMode,
         const std::vector<SVCScalabilityMode>& scalability_modes = {});
     SupportedProfile(const SupportedProfile& other);
     SupportedProfile& operator=(const SupportedProfile& other) = default;
@@ -158,6 +166,7 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     gfx::Size max_resolution;
     uint32_t max_framerate_numerator{0};
     uint32_t max_framerate_denominator{0};
+    SupportedRateControlMode rate_control_modes = kNoMode;
     std::vector<SVCScalabilityMode> scalability_modes;
   };
   using SupportedProfiles = std::vector<SupportedProfile>;
@@ -346,14 +355,6 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
   // can be called before Initialize().
   virtual SupportedProfiles GetSupportedProfiles() = 0;
 
-  // Returns a list of the supported codec profiles of the video encoder,
-  // similar to GetSupportedProfiles(), but this function only populates:
-  // codec, framerate range and resolution range.
-  //
-  // Populating things like SVC modes can take a lot of time and they are
-  // not always used. See https://crbug.com/1263196
-  virtual SupportedProfiles GetSupportedProfilesLight();
-
   // Initializes the video encoder with specific configuration.  Called once per
   // encoder construction.  This call is synchronous and returns true iff
   // initialization is successful.
@@ -445,6 +446,35 @@ MEDIA_EXPORT bool operator==(
     const VideoEncodeAccelerator::Config::SpatialLayer& r);
 MEDIA_EXPORT bool operator==(const VideoEncodeAccelerator::Config& l,
                              const VideoEncodeAccelerator::Config& r);
+
+MEDIA_EXPORT inline VideoEncodeAccelerator::SupportedRateControlMode operator|(
+    VideoEncodeAccelerator::SupportedRateControlMode lhs,
+    VideoEncodeAccelerator::SupportedRateControlMode rhs) {
+  return static_cast<VideoEncodeAccelerator::SupportedRateControlMode>(
+      static_cast<uint8_t>(lhs) | static_cast<uint8_t>(rhs));
+}
+
+MEDIA_EXPORT inline VideoEncodeAccelerator::SupportedRateControlMode&
+operator|=(VideoEncodeAccelerator::SupportedRateControlMode& lhs,
+           VideoEncodeAccelerator::SupportedRateControlMode rhs) {
+  lhs = lhs | rhs;
+  return lhs;
+}
+
+MEDIA_EXPORT inline VideoEncodeAccelerator::SupportedRateControlMode operator&(
+    VideoEncodeAccelerator::SupportedRateControlMode lhs,
+    VideoEncodeAccelerator::SupportedRateControlMode rhs) {
+  return static_cast<VideoEncodeAccelerator::SupportedRateControlMode>(
+      static_cast<uint8_t>(lhs) & static_cast<uint8_t>(rhs));
+}
+
+MEDIA_EXPORT inline VideoEncodeAccelerator::SupportedRateControlMode&
+operator&=(VideoEncodeAccelerator::SupportedRateControlMode& lhs,
+           VideoEncodeAccelerator::SupportedRateControlMode rhs) {
+  lhs = lhs & rhs;
+  return lhs;
+}
+
 }  // namespace media
 
 namespace std {

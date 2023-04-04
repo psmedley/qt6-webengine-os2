@@ -1,12 +1,12 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/cert/internal/trust_store_chrome.h"
 
 #include "base/containers/span.h"
-#include "net/cert/internal/cert_errors.h"
-#include "net/cert/internal/parsed_certificate.h"
+#include "net/cert/pki/cert_errors.h"
+#include "net/cert/pki/parsed_certificate.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "net/test/cert_test_util.h"
@@ -31,7 +31,8 @@ scoped_refptr<ParsedCertificate> ToParsedCertificate(
 TEST(TrustStoreChromeTestNoFixture, ContainsCert) {
   std::unique_ptr<TrustStoreChrome> trust_store_chrome =
       TrustStoreChrome::CreateTrustStoreForTesting(
-          base::span<const ChromeRootCertInfo>(kChromeRootCertList));
+          base::span<const ChromeRootCertInfo>(kChromeRootCertList),
+          /*version=*/1);
 
   // Check every certificate in test_store.certs is included.
   CertificateList certs = CreateCertificateListFromFile(
@@ -47,9 +48,11 @@ TEST(TrustStoreChromeTestNoFixture, ContainsCert) {
     EXPECT_EQ(CertificateTrustType::TRUSTED_ANCHOR, trust.type);
   }
 
-  // Other certificates should not be included.
+  // Other certificates should not be included. Which test cert used here isn't
+  // important as long as it isn't one of the certificates in the
+  // chrome_root_store/test_store.certs.
   scoped_refptr<X509Certificate> other_cert =
-      ImportCertFromFile(GetTestCertsDirectory(), "ocsp-test-root.pem");
+      ImportCertFromFile(GetTestCertsDirectory(), "root_ca_cert.pem");
   ASSERT_TRUE(other_cert);
   scoped_refptr<ParsedCertificate> other_parsed =
       ToParsedCertificate(*other_cert);

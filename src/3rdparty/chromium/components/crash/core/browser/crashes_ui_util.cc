@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,26 +69,26 @@ std::string UploadInfoStateAsString(UploadList::UploadInfo::State state) {
   return "";
 }
 
-void UploadListToValue(UploadList* upload_list, base::ListValue* out_value) {
+void UploadListToValue(UploadList* upload_list, base::Value::List* out_value) {
   std::vector<UploadList::UploadInfo> crashes;
   upload_list->GetUploads(50, &crashes);
 
   for (const auto& info : crashes) {
-    std::unique_ptr<base::DictionaryValue> crash(new base::DictionaryValue());
-    crash->SetStringKey("id", info.upload_id);
+    base::Value::Dict crash;
+    crash.Set("id", info.upload_id);
     if (info.state == UploadList::UploadInfo::State::Uploaded) {
-      crash->SetStringKey("upload_time",
-                          base::UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
-                              info.upload_time)));
+      crash.Set("upload_time",
+                base::UTF16ToUTF8(
+                    base::TimeFormatFriendlyDateAndTime(info.upload_time)));
     }
     if (!info.capture_time.is_null()) {
-      crash->SetStringKey("capture_time",
-                          base::UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
-                              info.capture_time)));
+      crash.Set("capture_time",
+                base::UTF16ToUTF8(
+                    base::TimeFormatFriendlyDateAndTime(info.capture_time)));
     }
-    crash->SetStringKey("local_id", info.local_id);
-    crash->SetStringKey("state", UploadInfoStateAsString(info.state));
-    crash->SetStringKey("file_size", base::UTF16ToUTF8(info.file_size));
+    crash.Set("local_id", info.local_id);
+    crash.Set("state", UploadInfoStateAsString(info.state));
+    crash.Set("file_size", base::UTF16ToUTF8(info.file_size));
     out_value->Append(std::move(crash));
   }
 }

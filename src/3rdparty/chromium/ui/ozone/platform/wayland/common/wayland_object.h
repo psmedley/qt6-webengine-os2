@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,12 @@
 
 #include "base/check.h"
 #include "ui/ozone/platform/wayland/common/wayland.h"
+
+#define CHROME_WAYLAND_CHECK_VERSION(x, y, z)                   \
+  (WAYLAND_VERSION_MAJOR > x ||                                 \
+   (WAYLAND_VERSION_MAJOR == x && WAYLAND_VERSION_MINOR > y) || \
+   (WAYLAND_VERSION_MAJOR == x && WAYLAND_VERSION_MINOR == y && \
+    WAYLAND_VERSION_MICRO >= z))
 
 struct wl_proxy;
 
@@ -143,16 +149,26 @@ DECLARE_WAYLAND_OBJECT_TRAITS(wp_presentation)
 DECLARE_WAYLAND_OBJECT_TRAITS(wp_presentation_feedback)
 DECLARE_WAYLAND_OBJECT_TRAITS(wp_viewport)
 DECLARE_WAYLAND_OBJECT_TRAITS(wp_viewporter)
+DECLARE_WAYLAND_OBJECT_TRAITS(wp_content_type_manager_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(wp_content_type_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(xdg_activation_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(xdg_activation_token_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(xdg_popup)
 DECLARE_WAYLAND_OBJECT_TRAITS(xdg_positioner)
 DECLARE_WAYLAND_OBJECT_TRAITS(xdg_surface)
 DECLARE_WAYLAND_OBJECT_TRAITS(xdg_toplevel)
 DECLARE_WAYLAND_OBJECT_TRAITS(xdg_wm_base)
+DECLARE_WAYLAND_OBJECT_TRAITS(zaura_output)
 DECLARE_WAYLAND_OBJECT_TRAITS(zaura_shell)
 DECLARE_WAYLAND_OBJECT_TRAITS(zaura_surface)
 DECLARE_WAYLAND_OBJECT_TRAITS(zaura_toplevel)
 DECLARE_WAYLAND_OBJECT_TRAITS(zaura_popup)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_cursor_shapes_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_color_manager_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_color_management_output_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_color_management_surface_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_color_space_creator_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_color_space_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_blending_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_alpha_compositing_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_keyboard_extension_v1)
@@ -161,9 +177,15 @@ DECLARE_WAYLAND_OBJECT_TRAITS(zcr_extended_drag_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_extended_drag_source_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_extended_drag_offer_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_extended_text_input_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_pointer_stylus_v2)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_touch_stylus_v2)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_stylus_v2)
 DECLARE_WAYLAND_OBJECT_TRAITS(zcr_text_input_extension_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zcr_touchpad_haptics_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zwp_idle_inhibit_manager_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zwp_idle_inhibitor_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zwp_keyboard_shortcuts_inhibit_manager_v1)
+DECLARE_WAYLAND_OBJECT_TRAITS(zwp_keyboard_shortcuts_inhibitor_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zwp_linux_buffer_release_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zwp_linux_buffer_params_v1)
 DECLARE_WAYLAND_OBJECT_TRAITS(zwp_linux_dmabuf_v1)

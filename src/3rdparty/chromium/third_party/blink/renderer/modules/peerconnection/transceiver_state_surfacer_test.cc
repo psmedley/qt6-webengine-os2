@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,8 @@
 #include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_dependency_factory.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
-#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/peerconnection/webrtc_util.h"
 
@@ -219,7 +220,6 @@ class TransceiverStateSurfacerTest : public ::testing::Test {
     // Inspect transceiver states.
     EXPECT_TRUE(blink::OptionalEquals(transceiver_state.mid(),
                                       webrtc_transceiver->mid()));
-    EXPECT_EQ(transceiver_state.stopped(), webrtc_transceiver->stopped());
     EXPECT_TRUE(transceiver_state.direction() ==
                 webrtc_transceiver->direction());
     EXPECT_TRUE(blink::OptionalEquals(transceiver_state.current_direction(),
@@ -235,9 +235,10 @@ class TransceiverStateSurfacerTest : public ::testing::Test {
         String::FromUTF8(id), MediaStreamSource::kTypeAudio,
         String::FromUTF8("local_audio_track"), false, std::move(audio_source));
 
-    auto* component =
-        MakeGarbageCollected<MediaStreamComponent>(source->Id(), source);
-    audio_source_ptr->ConnectToTrack(component);
+    auto* component = MakeGarbageCollected<MediaStreamComponentImpl>(
+        source->Id(), source,
+        std::make_unique<MediaStreamAudioTrack>(/*is_local=*/true));
+    audio_source_ptr->ConnectToInitializedTrack(component);
     return component;
   }
 
@@ -321,51 +322,6 @@ TEST_F(TransceiverStateSurfacerTest, SurfaceTransceiverWithTransport) {
           &TransceiverStateSurfacerTest::ObtainStatesAndExpectInitialized,
           base::Unretained(this), webrtc_transceiver));
   run_loop->Run();
-}
-
-TEST_F(TransceiverStateSurfacerTest, SurfaceSenderStateOnly) {
-  auto local_track_adapter = CreateLocalTrackAndAdapter("local_track");
-  auto webrtc_sender =
-      CreateWebRtcSender(local_track_adapter->webrtc_track(), "local_stream");
-  auto waitable_event = AsyncInitializeSurfacerWithWaitableEvent(
-      {rtc::scoped_refptr<webrtc::RtpTransceiverInterface>(
-          new SurfaceSenderStateOnly(webrtc_sender))});
-  waitable_event->Wait();
-  auto transceiver_states = surfacer_->ObtainStates();
-  EXPECT_EQ(1u, transceiver_states.size());
-  auto& transceiver_state = transceiver_states[0];
-  EXPECT_TRUE(transceiver_state.sender_state());
-  EXPECT_TRUE(transceiver_state.sender_state()->is_initialized());
-  EXPECT_FALSE(transceiver_state.receiver_state());
-  // Expect transceiver members be be missing for optional members and have
-  // sensible values for non-optional members.
-  EXPECT_FALSE(transceiver_state.mid());
-  EXPECT_FALSE(transceiver_state.stopped());
-  EXPECT_EQ(transceiver_state.direction(),
-            webrtc::RtpTransceiverDirection::kSendOnly);
-  EXPECT_FALSE(transceiver_state.current_direction());
-}
-
-TEST_F(TransceiverStateSurfacerTest, SurfaceReceiverStateOnly) {
-  auto local_track_adapter = CreateLocalTrackAndAdapter("local_track");
-  auto webrtc_receiver = CreateWebRtcReceiver("remote_track", "remote_stream");
-  auto waitable_event = AsyncInitializeSurfacerWithWaitableEvent(
-      {rtc::scoped_refptr<webrtc::RtpTransceiverInterface>(
-          new SurfaceReceiverStateOnly(webrtc_receiver))});
-  waitable_event->Wait();
-  auto transceiver_states = surfacer_->ObtainStates();
-  EXPECT_EQ(1u, transceiver_states.size());
-  auto& transceiver_state = transceiver_states[0];
-  EXPECT_FALSE(transceiver_state.sender_state());
-  EXPECT_TRUE(transceiver_state.receiver_state());
-  EXPECT_TRUE(transceiver_state.receiver_state()->is_initialized());
-  // Expect transceiver members be be missing for optional members and have
-  // sensible values for non-optional members.
-  EXPECT_FALSE(transceiver_state.mid());
-  EXPECT_FALSE(transceiver_state.stopped());
-  EXPECT_EQ(transceiver_state.direction(),
-            webrtc::RtpTransceiverDirection::kRecvOnly);
-  EXPECT_FALSE(transceiver_state.current_direction());
 }
 
 TEST_F(TransceiverStateSurfacerTest, SurfaceTransceiverWithSctpTransport) {

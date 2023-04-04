@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@ class ComputedStyle;
 class CounterContentData;
 class Document;
 class HTMLElement;
+class HTMLFrameSetElement;
 class LayoutBlock;
 class LayoutBlockFlow;
 class LayoutObject;
@@ -83,6 +84,9 @@ class LayoutObjectFactory {
   static LayoutBlockFlow* CreateFileUploadControl(Node& node,
                                                   const ComputedStyle& style,
                                                   LegacyLayout legacy);
+  static LayoutBox* CreateFrameSet(HTMLFrameSetElement& element,
+                                   const ComputedStyle& style,
+                                   LegacyLayout legacy);
   static LayoutObject* CreateSliderTrack(Node& node,
                                          const ComputedStyle& style,
                                          LegacyLayout legacy);
@@ -115,6 +119,9 @@ class LayoutObjectFactory {
                                       const ComputedStyle& style,
                                       LegacyLayout legacy);
 
+  static LayoutObject* CreateSVGForeignObject(Node& node,
+                                              const ComputedStyle& style,
+                                              LegacyLayout legacy);
   static LayoutObject* CreateSVGText(Node& node,
                                      const ComputedStyle& style,
                                      LegacyLayout legacy);

@@ -15,6 +15,7 @@ import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import type * as Protocol from '../../generated/protocol.js';
 import * as IconButton from '../../ui/components/icon_button/icon_button.js';
+import * as ApplicationComponents from './components/components.js';
 
 const UIStrings = {
   /**
@@ -41,6 +42,10 @@ const UIStrings = {
   *@description Text in App Manifest View of the Application panel
   */
   presentation: 'Presentation',
+  /**
+  *@description Text in App Manifest View of the Application panel
+  */
+  protocolHandlers: 'Protocol Handlers',
   /**
   *@description Text in App Manifest View of the Application panel
   */
@@ -85,6 +90,11 @@ const UIStrings = {
   *@description Tooltip text that appears when hovering over a button which copies the previous text to the clipboard.
   */
   copyToClipboard: 'Copy to clipboard',
+  /**
+  *@description Screen reader announcement string when the user clicks the copy to clipboard button.
+  *@example {/index.html} PH1
+  */
+  copiedToClipboard: 'Copied suggested ID {PH1} to clipboard',
   /**
   *@description Text for the description of something
   */
@@ -184,7 +194,7 @@ const UIStrings = {
   /**
   *@description Manifest installability error in the Application panel
   */
-  manifestStartUrlIsNotValid: 'Manifest start `URL` is not valid',
+  manifestStartUrlIsNotValid: 'Manifest \'`start_URL`\' is not valid',
   /**
   *@description Manifest installability error in the Application panel
   */
@@ -199,12 +209,12 @@ const UIStrings = {
   *@example {100} PH1
   */
   manifestDoesNotContainASuitable:
-      'Manifest does not contain a suitable icon - PNG, SVG or WebP format of at least {PH1}px is required, the `sizes` attribute must be set, and the `purpose` attribute, if set, must include `"any"`.',
+      'Manifest does not contain a suitable icon - PNG or SVG format of at least {PH1}px is required, the \'`sizes`\' attribute must be set, and the \'`purpose`\' attribute, if set, must include \'`any`\'.',
   /**
   *@description Manifest installability error in the Application panel
   */
   avoidPurposeAnyAndMaskable:
-      'Declaring an icon with `purpose: "any maskable"` is discouraged. It is likely to look incorrect on some platforms due to too much or too little padding.',
+      'Declaring an icon with \'`purpose: "any maskable"`\' is discouraged. It is likely to look incorrect on some platforms due to too much or too little padding.',
   /**
   *@description Manifest installability error in the Application panel
   */
@@ -215,7 +225,7 @@ const UIStrings = {
   *@example {100} PH1
   */
   noSuppliedIconIsAtLeastSpxSquare:
-      'No supplied icon is at least {PH1} pixels square in `PNG`, `SVG` or `WebP` format, with the purpose attribute unset or set to `"any"`.',
+      'No supplied icon is at least {PH1} pixels square in `PNG` or `SVG` format, with the purpose attribute unset or set to \'`any`\'.',
   /**
   *@description Manifest installability error in the Application panel
   */
@@ -259,12 +269,12 @@ const UIStrings = {
   /**
   *@description Manifest installability error in the Application panel
   */
-  manifestSpecifies: 'Manifest specifies `prefer_related_applications`: true',
+  manifestSpecifies: 'Manifest specifies \'`prefer_related_applications`: true\'',
   /**
   *@description Manifest installability error in the Application panel
   */
   preferrelatedapplicationsIsOnly:
-      '`prefer_related_applications` is only supported on `Chrome` Beta and Stable channels on `Android`.',
+      '\'`prefer_related_applications`\' is only supported on `Chrome` Beta and Stable channels on `Android`.',
   /**
   *@description Manifest installability error in the Application panel
   */
@@ -295,7 +305,7 @@ const UIStrings = {
   * be translated.
   * @example {ImageName} PH1
   */
-  sSrcIsNotSet: '{PH1} `src` is not set',
+  sSrcIsNotSet: '{PH1} \'`src`\' is not set',
   /**
   *@description Warning message for image resources from the manifest
   *@example {Screenshot} PH1
@@ -403,6 +413,7 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
   private readonly identitySection: UI.ReportView.Section;
   private readonly presentationSection: UI.ReportView.Section;
   private readonly iconsSection: UI.ReportView.Section;
+  private readonly protocolHandlersSection: UI.ReportView.Section;
   private readonly shortcutSections: UI.ReportView.Section[];
   private readonly screenshotsSections: UI.ReportView.Section[];
   private nameField: HTMLElement;
@@ -423,6 +434,7 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
   private target?: SDK.Target.Target;
   private resourceTreeModel?: SDK.ResourceTreeModel.ResourceTreeModel|null;
   private serviceWorkerManager?: SDK.ServiceWorkerManager.ServiceWorkerManager|null;
+  private protocolHandlersView: ApplicationComponents.ProtocolHandlersView.ProtocolHandlersView;
   constructor() {
     super(true);
 
@@ -433,7 +445,7 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
         .addChangeListener(this.updateManifest.bind(this, true));
 
     this.emptyView = new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.noManifestDetected));
-    this.emptyView.appendLink('https://web.dev/add-manifest/');
+    this.emptyView.appendLink('https://web.dev/add-manifest/' as Platform.DevToolsPath.UrlString);
 
     this.emptyView.show(this.contentElement);
     this.emptyView.hideWidget();
@@ -448,8 +460,10 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
     this.errorsSection = this.reportView.appendSection(i18nString(UIStrings.errorsAndWarnings));
     this.installabilitySection = this.reportView.appendSection(i18nString(UIStrings.installability));
     this.identitySection = this.reportView.appendSection(i18nString(UIStrings.identity));
-
     this.presentationSection = this.reportView.appendSection(i18nString(UIStrings.presentation));
+    this.protocolHandlersSection = this.reportView.appendSection(i18nString(UIStrings.protocolHandlers));
+    this.protocolHandlersView = new ApplicationComponents.ProtocolHandlersView.ProtocolHandlersView();
+    this.protocolHandlersSection.appendFieldWithCustomView(this.protocolHandlersView);
     this.iconsSection = this.reportView.appendSection(i18nString(UIStrings.icons), 'report-section-icons');
     this.shortcutSections = [];
     this.screenshotsSections = [];
@@ -459,6 +473,7 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
     this.descriptionField = this.identitySection.appendFlexedField(i18nString(UIStrings.description));
 
     this.startURLField = this.presentationSection.appendField(i18nString(UIStrings.startUrl));
+    UI.ARIAUtils.setAccessibleName(this.startURLField, i18nString(UIStrings.startUrl));
 
     const themeColorField = this.presentationSection.appendField(i18nString(UIStrings.themeColor));
     this.themeColorSwatch = new InlineEditor.ColorSwatch.ColorSwatch();
@@ -484,6 +499,14 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
     this.throttler = new Common.Throttler.Throttler(1000);
     SDK.TargetManager.TargetManager.instance().observeTargets(this);
     this.registeredListeners = [];
+  }
+
+  getStaticSections(): UI.ReportView.Section[] {
+    return [this.identitySection, this.presentationSection, this.protocolHandlersSection, this.iconsSection];
+  }
+
+  getManifestElement(): Element {
+    return this.reportView.getHeaderElement();
   }
 
   targetAdded(target: SDK.Target.Target): void {
@@ -551,10 +574,12 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
     if (!data && !errors.length) {
       this.emptyView.showWidget();
       this.reportView.hideWidget();
+      this.contentElement.dispatchEvent(new CustomEvent('manifestDetection', {detail: false}));
       return;
     }
     this.emptyView.hideWidget();
     this.reportView.showWidget();
+    this.contentElement.dispatchEvent(new CustomEvent('manifestDetection', {detail: true}));
 
     const link = Components.Linkifier.Linkifier.linkifyURL(url);
     link.tabIndex = 0;
@@ -625,6 +650,7 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
             iconColor: 'var(--color-text-primary)',
           }],
           clickHandler: (): void => {
+            UI.ARIAUtils.alert(i18nString(UIStrings.copiedToClipboard, {PH1: recommendedId}));
             Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(recommendedId);
           },
           compact: true,
@@ -663,7 +689,8 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
     }
 
     const userPreferences = parsedManifest['user_preferences'] || {};
-    const colorSchemeDark = userPreferences['color_scheme_dark'] || {};
+    const colorScheme = userPreferences['color_scheme'] || {};
+    const colorSchemeDark = colorScheme['dark'] || {};
     const darkThemeColorString = colorSchemeDark['theme_color'];
     const hasDarkThemeColor = typeof darkThemeColorString === 'string';
     this.darkThemeColorField.parentElement?.classList.toggle('hidden', !hasDarkThemeColor);
@@ -693,12 +720,15 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
     this.newNoteUrlField.parentElement?.classList.toggle('hidden', !hasNewNoteUrl);
     this.newNoteUrlField.removeChildren();
     if (hasNewNoteUrl) {
-      const completeURL = (Common.ParsedURL.ParsedURL.completeURL(url, newNoteUrl) as string);
+      const completeURL = (Common.ParsedURL.ParsedURL.completeURL(url, newNoteUrl) as Platform.DevToolsPath.UrlString);
       const link = Components.Linkifier.Linkifier.linkifyURL(
           completeURL, ({text: newNoteUrl} as Components.Linkifier.LinkifyURLOptions));
       link.tabIndex = 0;
       this.newNoteUrlField.appendChild(link);
     }
+
+    const protocolHandlers = parsedManifest['protocol_handlers'] || [];
+    this.protocolHandlersView.data = {protocolHandlers, manifestLink: url};
 
     const icons = parsedManifest['icons'] || [];
     this.iconsSection.clearContent();
@@ -763,7 +793,7 @@ export class AppManifestView extends UI.Widget.VBox implements SDK.TargetManager
         shortcutSection.appendFlexedField('Description', shortcut.description);
       }
       const urlField = shortcutSection.appendFlexedField('URL');
-      const shortcutUrl = (Common.ParsedURL.ParsedURL.completeURL(url, shortcut.url) as string);
+      const shortcutUrl = Common.ParsedURL.ParsedURL.completeURL(url, shortcut.url) as Platform.DevToolsPath.UrlString;
       const link = Components.Linkifier.Linkifier.linkifyURL(
           shortcutUrl, ({text: shortcut.url} as Components.Linkifier.LinkifyURLOptions));
       link.tabIndex = 0;

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -276,7 +276,6 @@ void ArcIntentHelperBridge::LaunchCameraApp(uint32_t intent_id,
                                             int32_t task_id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  base::DictionaryValue intent_info;
   std::string mode_str =
       mode == arc::mojom::CameraIntentMode::PHOTO ? "photo" : "video";
 
@@ -323,30 +322,21 @@ void ArcIntentHelperBridge::IsChromeAppEnabled(
 }
 
 void ArcIntentHelperBridge::OnSupportedLinksChanged(
-    std::vector<arc::mojom::SupportedLinksPtr> added_packages,
-    std::vector<arc::mojom::SupportedLinksPtr> removed_packages,
+    std::vector<arc::mojom::SupportedLinksPackagePtr> added_packages,
+    std::vector<arc::mojom::SupportedLinksPackagePtr> removed_packages,
     arc::mojom::SupportedLinkChangeSource source) {
   for (auto& observer : observer_list_)
     observer.OnArcSupportedLinksChanged(added_packages, removed_packages,
                                         source);
 }
 
-void ArcIntentHelperBridge::OnDownloadAdded(
+void ArcIntentHelperBridge::OnDownloadAddedDeprecated(
     const std::string& relative_path_as_string,
     const std::string& owner_package_name) {
-  const base::FilePath download_folder("Download/");
-  const base::FilePath relative_path(relative_path_as_string);
-
-  // Observers should *not* be called when a download is added outside of the
-  // Download/ folder. This would be an unexpected event coming from ARC but
-  // we protect against it because ARC is treated as an untrusted source.
-  if (!download_folder.IsParent(relative_path) ||
-      relative_path.ReferencesParent()) {
-    return;
-  }
-
-  for (auto& observer : observer_list_)
-    observer.OnArcDownloadAdded(relative_path, owner_package_name);
+  // The `OnDownloadAdded()` event has been broken since at least 01/2022
+  // (see crbug.com/1291882). It is being fixed and replaced with a new API,
+  // `mojom::FileSystemHost::OnMediaStoreUriAdded()`.
+  LOG(ERROR) << "`OnDownloadAdded()` is deprecated.";
 }
 
 void ArcIntentHelperBridge::OnOpenAppWithIntent(
@@ -433,8 +423,8 @@ void ArcIntentHelperBridge::SendNewCaptureBroadcast(bool is_video,
   std::string action =
       is_video ? "org.chromium.arc.intent_helper.ACTION_SEND_NEW_VIDEO"
                : "org.chromium.arc.intent_helper.ACTION_SEND_NEW_PICTURE";
-  base::DictionaryValue value;
-  value.SetString("file_path", file_path);
+  base::Value::Dict value;
+  value.Set("file_path", file_path);
   std::string extras;
   base::JSONWriter::Write(value, &extras);
 

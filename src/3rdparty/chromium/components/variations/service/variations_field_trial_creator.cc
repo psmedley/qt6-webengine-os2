@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -16,6 +17,8 @@
 #include "base/bind.h"
 #include "base/build_time.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -36,7 +39,6 @@
 #include "components/variations/proto/variations_seed.pb.h"
 #include "components/variations/service/buildflags.h"
 #include "components/variations/service/safe_seed_manager.h"
-#include "components/variations/service/variations_safe_mode_constants.h"
 #include "components/variations/service/variations_service.h"
 #include "components/variations/service/variations_service_client.h"
 #include "components/variations/variations_ids_provider.h"
@@ -171,10 +173,32 @@ bool ShouldUseFieldTrialTestingConfig(const base::CommandLine* command_line) {
 }
 #endif  // BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
 
+// Causes Chrome to start watching for browser crashes if the following
+// conditions are met:
+// 1. This is not a background session.
+// 2. Extended Variations Safe Mode is supported on this platform.
+void MaybeExtendVariationsSafeMode(
+    metrics::MetricsStateManager* metrics_state_manager) {
+  if (metrics_state_manager->is_background_session()) {
+    // If the session is expected to be a background session, then do not start
+    // watching for browser crashes here. This monitoring is not desired in
+    // background sessions, whose terminations should never be considered
+    // crashes.
+    return;
+  }
+  if (!metrics_state_manager->IsExtendedSafeModeSupported())
+    return;
+
+  metrics_state_manager->LogHasSessionShutdownCleanly(
+      /*has_session_shutdown_cleanly=*/false,
+      /*is_extended_safe_mode=*/true);
+}
+
 }  // namespace
 
-const base::Feature kForceFieldTrialSetupCrashForTesting{
-    "ForceFieldTrialSetupCrashForTesting", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kForceFieldTrialSetupCrashForTesting,
+             "ForceFieldTrialSetupCrashForTesting",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 VariationsFieldTrialCreator::VariationsFieldTrialCreator(
     VariationsServiceClient* client,
@@ -202,9 +226,8 @@ std::string VariationsFieldTrialCreator::GetLatestCountry() const {
 
 bool VariationsFieldTrialCreator::SetUpFieldTrials(
     const std::vector<std::string>& variation_ids,
+    const std::string& command_line_variation_ids,
     const std::vector<base::FeatureList::FeatureOverrideInfo>& extra_overrides,
-    std::unique_ptr<const base::FieldTrial::EntropyProvider>
-        low_entropy_provider,
     std::unique_ptr<base::FeatureList> feature_list,
     metrics::MetricsStateManager* metrics_state_manager,
     PlatformFieldTrials* platform_field_trials,
@@ -215,29 +238,22 @@ bool VariationsFieldTrialCreator::SetUpFieldTrials(
   DCHECK(platform_field_trials);
   DCHECK(safe_seed_manager);
 
-  if (base::FieldTrialList::IsTrialActive(kExtendedSafeModeTrial) &&
-      !metrics_state_manager->is_background_session()) {
-    // If the session is expected to be a background session, then do not extend
-    // Variations Safe Mode. Extending Safe Mode involves monitoring for crashes
-    // earlier on in startup; however, this monitoring is not desired in
-    // background sessions, whose terminations should never be considered
-    // crashes.
-    MaybeExtendVariationsSafeMode(metrics_state_manager);
-  }
+  MaybeExtendVariationsSafeMode(metrics_state_manager);
 
   // TODO(crbug/1257204): Some FieldTrial-setup-related code is here and some is
   // in MetricsStateManager::InstantiateFieldTrialList(). It's not ideal that
   // it's in two places.
   VariationsIdsProvider* http_header_provider =
       VariationsIdsProvider::GetInstance();
-  http_header_provider->SetLowEntropySourceValue(low_entropy_source_value);
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
+
+  if (low_entropy_source_value.has_value()) {
+    http_header_provider->SetLowEntropySourceValue(
+        low_entropy_source_value.value());
+  }
   // Force the variation ids selected in chrome://flags and/or specified using
   // the command-line flag.
   auto result = http_header_provider->ForceVariationIds(
-      variation_ids,
-      command_line->GetSwitchValueASCII(switches::kForceVariationIds));
+      variation_ids, command_line_variation_ids);
 
   switch (result) {
     case VariationsIdsProvider::ForceIdsResult::INVALID_SWITCH_ENTRY:
@@ -253,6 +269,8 @@ bool VariationsFieldTrialCreator::SetUpFieldTrials(
       break;
   }
 
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   bool success = http_header_provider->ForceDisableVariationIds(
       command_line->GetSwitchValueASCII(switches::kForceDisableVariationIds));
   if (!success) {
@@ -272,6 +290,7 @@ bool VariationsFieldTrialCreator::SetUpFieldTrials(
   feature_list->RegisterExtraFeatureOverrides(extra_overrides);
 
   bool used_testing_config = false;
+  // TODO(crbug/1342057): Remove this code path.
 #if BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
   if (ShouldUseFieldTrialTestingConfig(command_line)) {
     ApplyFieldTrialTestingConfig(feature_list.get());
@@ -285,14 +304,21 @@ bool VariationsFieldTrialCreator::SetUpFieldTrials(
                            switches::kEnableFieldTrialTestingConfig));
   }
 #endif  // BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
+  if (command_line->HasSwitch(switches::kVariationsTestSeedPath)) {
+    LoadSeedFromFile(
+        command_line->GetSwitchValuePath(switches::kVariationsTestSeedPath));
+  }
+
+  auto entropy_providers = metrics_state_manager->CreateEntropyProviders();
+
   bool used_seed = false;
   if (!used_testing_config) {
-    used_seed = CreateTrialsFromSeed(low_entropy_provider.get(),
-                                     feature_list.get(), safe_seed_manager);
+    used_seed = CreateTrialsFromSeed(*entropy_providers, feature_list.get(),
+                                     safe_seed_manager);
   }
 
   platform_field_trials->SetUpFeatureControllingFieldTrials(
-      used_seed, low_entropy_provider.get(), feature_list.get());
+      used_seed, *entropy_providers, feature_list.get());
 
   base::FeatureList::SetInstance(std::move(feature_list));
 
@@ -369,18 +395,17 @@ std::string VariationsFieldTrialCreator::LoadPermanentConsistencyCountry(
     return permanent_overridden_country;
   }
 
-  const base::Value* list_value =
+  const base::Value::List& list_value =
       local_state()->GetList(prefs::kVariationsPermanentConsistencyCountry);
   const std::string* stored_version_string = nullptr;
   const std::string* stored_country = nullptr;
 
   // Determine if the saved pref value is present and valid.
-  const bool is_pref_empty = list_value->GetListDeprecated().empty();
+  const bool is_pref_empty = list_value.empty();
   const bool is_pref_valid =
-      list_value->GetListDeprecated().size() == 2 &&
-      (stored_version_string =
-           list_value->GetListDeprecated()[0].GetIfString()) &&
-      (stored_country = list_value->GetListDeprecated()[1].GetIfString()) &&
+      list_value.size() == 2 &&
+      (stored_version_string = list_value[0].GetIfString()) &&
+      (stored_country = list_value[1].GetIfString()) &&
       base::Version(*stored_version_string).IsValid();
 
   // Determine if the version from the saved pref matches |version|.
@@ -472,29 +497,6 @@ bool VariationsFieldTrialCreator::IsOverrideResourceMapEmpty() {
   return overridden_strings_map_.empty();
 }
 
-void VariationsFieldTrialCreator::MaybeExtendVariationsSafeMode(
-    metrics::MetricsStateManager* metrics_state_manager) {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName(kExtendedSafeModeTrial);
-  DCHECK(!group_name.empty());
-
-  if (group_name == kDefaultGroup)
-    return;
-
-  if (group_name == kControlGroup) {
-    // Populate the histogram for the control group to more easily compare it
-    // with the groups that introduce new behavior.
-    SCOPED_UMA_HISTOGRAM_TIMER_MICROS(
-        "Variations.ExtendedSafeMode.WritePrefsTime");
-    return;
-  }
-
-  DCHECK_EQ(group_name, kEnabledGroup);
-  metrics_state_manager->LogHasSessionShutdownCleanly(
-      /*has_session_shutdown_cleanly=*/false,
-      /*is_extended_safe_mode=*/true);
-}
-
 Study::Platform VariationsFieldTrialCreator::GetPlatform() {
   if (has_platform_override_)
     return platform_override_;
@@ -582,7 +584,7 @@ bool VariationsFieldTrialCreator::IsSeedForFutureMilestone(bool is_safe_seed) {
 }
 
 bool VariationsFieldTrialCreator::CreateTrialsFromSeed(
-    const base::FieldTrial::EntropyProvider* low_entropy_provider,
+    const EntropyProviders& entropy_providers,
     base::FeatureList* feature_list,
     SafeSeedManager* safe_seed_manager) {
   TRACE_EVENT0("startup", "VariationsFieldTrialCreator::CreateTrialsFromSeed");
@@ -659,7 +661,7 @@ bool VariationsFieldTrialCreator::CreateTrialsFromSeed(
       seed, *client_filterable_state,
       base::BindRepeating(&VariationsFieldTrialCreator::OverrideUIString,
                           base::Unretained(this)),
-      low_entropy_provider, feature_list);
+      entropy_providers, feature_list);
 
   // Store into the |safe_seed_manager| the combined server and client data used
   // to create the field trials. But, as an optimization, skip this step when
@@ -676,6 +678,51 @@ bool VariationsFieldTrialCreator::CreateTrialsFromSeed(
   base::UmaHistogramTimes("Variations.SeedProcessingTime",
                           base::TimeTicks::Now() - start_time);
   return true;
+}
+
+void VariationsFieldTrialCreator::LoadSeedFromFile(
+    const base::FilePath& seed_path) {
+  JSONFileValueDeserializer file_deserializer(seed_path);
+  int error_code;
+  std::string error_message;
+  std::unique_ptr<base::Value> json_contents =
+      file_deserializer.Deserialize(&error_code, &error_message);
+
+  if (!json_contents) {
+    ExitWithMessage(base::StringPrintf("Failed to load \"%s\" %s (%i)",
+                                       seed_path.AsUTF8Unsafe().c_str(),
+                                       error_message.c_str(), error_code));
+  }
+
+  const base::Value* seed_data =
+      json_contents->GetDict().Find(prefs::kVariationsCompressedSeed);
+  const base::Value* seed_signature =
+      json_contents->GetDict().Find(prefs::kVariationsSeedSignature);
+
+  if (!seed_data || !seed_data->is_string()) {
+    ExitWithMessage(
+        base::StringPrintf("Missing or invalid seed data in contents of \"%s\"",
+                           seed_path.AsUTF8Unsafe().c_str()));
+  }
+
+  if (!seed_signature || !seed_signature->is_string()) {
+    ExitWithMessage(base::StringPrintf(
+        "Missing or invalid seed signature in contents of \"%s\"",
+        seed_path.AsUTF8Unsafe().c_str()));
+  }
+
+  // Set fail counters to 0 to make sure Chrome doesn't run in variations safe
+  // mode. This ensures that Chrome won't use the safe seed.
+  local_state()->SetInteger(prefs::kVariationsCrashStreak, 0);
+  local_state()->SetInteger(prefs::kVariationsFailedToFetchSeedStreak, 0);
+
+  // Override Local State seed prefs.
+  local_state()->SetString(prefs::kVariationsCompressedSeed,
+                           seed_data->GetString());
+  local_state()->SetString(prefs::kVariationsSeedSignature,
+                           seed_signature->GetString());
+
+  local_state()->CommitPendingWrite();  // Schedule a write to Local State.
 }
 
 VariationsSeedStore* VariationsFieldTrialCreator::GetSeedStore() {

@@ -167,14 +167,12 @@ static inline void idct_put(MDECContext *a, AVFrame *frame, int mb_x, int mb_y)
     }
 }
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame, AVPacket *avpkt)
 {
     MDECContext * const a = avctx->priv_data;
     const uint8_t *buf    = avpkt->data;
     int buf_size          = avpkt->size;
-    AVFrame *const frame  = data;
     int ret;
 
     if ((ret = ff_thread_get_buffer(avctx, frame, 0)) < 0)
@@ -221,7 +219,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
 
     a->avctx           = avctx;
 
-    ff_blockdsp_init(&a->bdsp, avctx);
+    ff_blockdsp_init(&a->bdsp);
     ff_bswapdsp_init(&a->bbdsp);
     ff_idctdsp_init(&a->idsp, avctx);
     ff_mpeg12_init_vlcs();
@@ -253,13 +251,12 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
 const FFCodec ff_mdec_decoder = {
     .p.name           = "mdec",
-    .p.long_name      = NULL_IF_CONFIG_SMALL("Sony PlayStation MDEC (Motion DECoder)"),
+    CODEC_LONG_NAME("Sony PlayStation MDEC (Motion DECoder)"),
     .p.type           = AVMEDIA_TYPE_VIDEO,
     .p.id             = AV_CODEC_ID_MDEC,
     .priv_data_size   = sizeof(MDECContext),
     .init             = decode_init,
     .close            = decode_end,
-    .decode           = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
-    .caps_internal    = FF_CODEC_CAP_INIT_THREADSAFE,
 };

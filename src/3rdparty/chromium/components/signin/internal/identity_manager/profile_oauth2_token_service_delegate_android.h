@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,17 +44,15 @@ class ProfileOAuth2TokenServiceDelegateAndroid
 
   // ProfileOAuth2TokenServiceDelegate overrides:
   bool RefreshTokenIsAvailable(const CoreAccountId& account_id) const override;
-  GoogleServiceAuthError GetAuthError(
-      const CoreAccountId& account_id) const override;
-  void UpdateAuthError(const CoreAccountId& account_id,
-                       const GoogleServiceAuthError& error) override;
+
   std::vector<CoreAccountId> GetAccounts() const override;
 
   // Overridden from ProfileOAuth2TokenService to complete signout of all
   // POA2TService aware accounts.
   void RevokeAllCredentials() override;
 
-  void LoadCredentials(const CoreAccountId& primary_account_id) override;
+  void LoadCredentials(const CoreAccountId& primary_account_id,
+                       bool is_syncing) override;
 
   void ReloadAllAccountsFromSystemWithPrimaryAccount(
       const absl::optional<CoreAccountId>& primary_account_id) override;

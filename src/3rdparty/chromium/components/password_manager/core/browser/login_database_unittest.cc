@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/sync/base/features.h"
 #include "components/sync/model/metadata_batch.h"
 #include "components/sync/protocol/entity_metadata.pb.h"
 #include "sql/database.h"
@@ -2092,7 +2093,7 @@ TEST_F(LoginDatabaseUndecryptableLoginsTest, DeleteUndecryptableLoginsTest) {
   base::HistogramTester histogram_tester;
   ASSERT_TRUE(db.Init());
 
-#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST))
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS))
   // Make sure that we can't get any logins when database is corrupted.
   // Disabling the checks in chromecast because encryption is unavailable.
   std::vector<std::unique_ptr<PasswordForm>> result;
@@ -2110,7 +2111,7 @@ TEST_F(LoginDatabaseUndecryptableLoginsTest, DeleteUndecryptableLoginsTest) {
   EXPECT_THAT(result, IsEmpty());
 
   RunUntilIdle();
-#elif (BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_CHROMECAST))
+#elif BUILDFLAG(IS_CASTOS)
   EXPECT_EQ(DatabaseCleanupResult::kEncryptionUnavailable,
             db.DeleteUndecryptableLogins());
 #else
@@ -2118,7 +2119,7 @@ TEST_F(LoginDatabaseUndecryptableLoginsTest, DeleteUndecryptableLoginsTest) {
 #endif
 
 // Check histograms.
-#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST))
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS))
   histogram_tester.ExpectUniqueSample("PasswordManager.CleanedUpPasswords", 2,
                                       1);
   histogram_tester.ExpectUniqueSample(
@@ -2348,7 +2349,7 @@ TEST_F(LoginDatabaseTest, RetrievesInsecureDataWithLogins) {
 
 TEST_F(LoginDatabaseTest, RetrievesNoteWithLogin) {
   base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kPasswordNotes);
+  feature_list.InitAndEnableFeature(syncer::kPasswordNotesWithBackup);
 
   PasswordForm form = GenerateExamplePasswordForm();
   std::ignore = db().AddLogin(form);
@@ -2360,72 +2361,40 @@ TEST_F(LoginDatabaseTest, RetrievesNoteWithLogin) {
                              /* should_PSL_matching_apply */ true, &results));
 
   PasswordForm expected_form = form;
-  expected_form.note = note;
+  expected_form.notes = {note};
   EXPECT_THAT(results, UnorderedElementsAre(Pointee(expected_form)));
 }
 
 TEST_F(LoginDatabaseTest, AddLoginWithNotePersistsThem) {
   base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kPasswordNotes);
+  feature_list.InitAndEnableFeature(syncer::kPasswordNotesWithBackup);
 
   PasswordForm form = GenerateExamplePasswordForm();
   PasswordNote note(u"example note", base::Time::Now());
-  form.note = note;
+  form.notes = {note};
 
   std::ignore = db().AddLogin(form);
 
-  EXPECT_EQ(db().password_notes_table().GetPasswordNote(FormPrimaryKey(1)),
+  EXPECT_EQ(db().password_notes_table().GetPasswordNotes(FormPrimaryKey(1))[0],
             note);
-}
-
-TEST_F(LoginDatabaseTest, AddLoginWithEmptyNoteDeletesTheNote) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kPasswordNotes);
-
-  PasswordForm form = GenerateExamplePasswordForm();
-  form.note = PasswordNote(std::u16string(), base::Time::Now());
-
-  std::ignore = db().AddLogin(form);
-
-  EXPECT_THAT(db().password_notes_table().GetPasswordNote(FormPrimaryKey(1)),
-              absl::nullopt);
-}
-
-TEST_F(LoginDatabaseTest, UpdateLoginWithEmptyNoteDeletesExistingNote) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kPasswordNotes);
-
-  PasswordForm form = GenerateExamplePasswordForm();
-  PasswordNote note = PasswordNote(u"example note", base::Time::Now());
-  form.note = note;
-
-  std::ignore = db().AddLogin(form);
-  EXPECT_EQ(db().password_notes_table().GetPasswordNote(FormPrimaryKey(1)),
-            note);
-
-  form.note = PasswordNote(u"", base::Time::Now());
-  std::ignore = db().UpdateLogin(form);
-
-  EXPECT_EQ(db().password_notes_table().GetPasswordNote(FormPrimaryKey(1)),
-            absl::nullopt);
 }
 
 TEST_F(LoginDatabaseTest, RemoveLoginRemovesNoteAttachedToTheLogin) {
   base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kPasswordNotes);
+  feature_list.InitAndEnableFeature(syncer::kPasswordNotesWithBackup);
 
   PasswordForm form = GenerateExamplePasswordForm();
   PasswordNote note = PasswordNote(u"example note", base::Time::Now());
-  form.note = note;
+  form.notes = {note};
   std::ignore = db().AddLogin(form);
 
-  EXPECT_EQ(db().password_notes_table().GetPasswordNote(FormPrimaryKey(1)),
+  EXPECT_EQ(db().password_notes_table().GetPasswordNotes(FormPrimaryKey(1))[0],
             note);
 
   PasswordStoreChangeList list;
   EXPECT_TRUE(db().RemoveLogin(form, &list));
-  EXPECT_EQ(db().password_notes_table().GetPasswordNote(FormPrimaryKey(1)),
-            absl::nullopt);
+  EXPECT_TRUE(
+      db().password_notes_table().GetPasswordNotes(FormPrimaryKey(1)).empty());
 }
 
 TEST_F(LoginDatabaseTest, RemovingLoginRemovesInsecureCredentials) {

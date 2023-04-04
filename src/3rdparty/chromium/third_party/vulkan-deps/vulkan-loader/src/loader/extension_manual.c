@@ -26,14 +26,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <vulkan/vk_icd.h>
-
 #include "allocation.h"
 #include "debug_utils.h"
 #include "loader.h"
 #include "log.h"
-#include "vk_loader_extensions.h"
-#include "vk_loader_platform.h"
 #include "wsi.h"
 
 // ---- Manually added trampoline/terminator functions
@@ -388,9 +384,7 @@ out:
         *pToolCount = 0;
     }
 
-    if (ext_props) {
-        loader_instance_heap_free(icd_term->this_instance, ext_props);
-    }
+    loader_instance_heap_free(icd_term->this_instance, ext_props);
 
     return res;
 }

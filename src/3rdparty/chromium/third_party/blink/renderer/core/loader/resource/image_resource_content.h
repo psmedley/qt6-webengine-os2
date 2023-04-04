@@ -1,36 +1,43 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_RESOURCE_IMAGE_RESOURCE_CONTENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_RESOURCE_IMAGE_RESOURCE_CONTENT_H_
 
+#include <cstddef>
+
 #include "base/auto_reset.h"
 #include "base/dcheck_is_on.h"
+#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_observer.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
-#include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_counted_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 #include "third_party/blink/renderer/platform/loader/fetch/media_timing.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_status.h"
-#include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
+
+namespace base {
+class TimeTicks;
+}
 
 namespace blink {
 
 class ExecutionContext;
 class FetchParameters;
 class ImageResourceInfo;
-class ImageResourceObserver;
+class KURL;
 class ResourceError;
 class ResourceFetcher;
 class ResourceResponse;
 class UseCounter;
+enum RespectImageOrientationEnum;
+struct ResourcePriority;
 
 // ImageResourceContent is a container that holds fetch result of
 // an ImageResource in a decoded form.
@@ -107,6 +114,7 @@ class CORE_EXPORT ImageResourceContent final
   // ImageResourceContent::GetContentStatus() can be different from
   // ImageResource::GetStatus(). Use ImageResourceContent::GetContentStatus().
   ResourceStatus GetContentStatus() const;
+  void SetIsSufficientContentLoadedForPaint() override;
   bool IsSufficientContentLoadedForPaint() const override;
   bool IsLoaded() const;
   bool IsLoading() const;
@@ -115,6 +123,15 @@ class CORE_EXPORT ImageResourceContent final
   bool IsAnimatedImage() const override;
   bool IsPaintedFirstFrame() const override;
   bool TimingAllowPassed() const override;
+  base::TimeTicks GetFirstVideoFrameTime() const override {
+    // This returns a null time, which is currently used to signal that this is
+    // an animated image, rather than a video, and we should use the
+    // ImagePaintTimingDetector to set the first frame time in the ImageRecord
+    // instead.
+    // TODO(iclelland): Find a better way to set this from IPTD and use it, to
+    // use this for images as well as videos.
+    return base::TimeTicks();
+  }
 
   // Redirecting methods to Resource.
   const KURL& Url() const override;
@@ -179,7 +196,7 @@ class CORE_EXPORT ImageResourceContent final
   scoped_refptr<const SharedBuffer> ResourceBuffer() const;
   bool ShouldUpdateImageImmediately() const;
   bool HasObservers() const {
-    return !observers_.IsEmpty() || !finished_observers_.IsEmpty();
+    return !observers_.empty() || !finished_observers_.empty();
   }
   bool IsRefetchableDataFromDiskCache() const {
     return is_refetchable_data_from_disk_cache_;

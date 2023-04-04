@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ TEST(DecoderBufferTest, CopyFrom) {
 TEST(DecoderBufferTest, FromArray) {
   const uint8_t kData[] = "hello";
   const size_t kDataSize = std::size(kData);
-  std::unique_ptr<uint8_t[]> ptr(new uint8_t[kDataSize]);
+  auto ptr = std::make_unique<uint8_t[]>(kDataSize);
   memcpy(ptr.get(), kData, kDataSize);
 
   scoped_refptr<DecoderBuffer> buffer(
@@ -86,10 +86,8 @@ TEST(DecoderBufferTest, FromPlatformSharedMemoryRegion) {
   ASSERT_TRUE(mapping.IsValid());
   memcpy(mapping.GetMemoryAs<uint8_t>(), kData, kDataSize);
 
-  scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::FromSharedMemoryRegion(
-      base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
-          std::move(region)),
-      0, kDataSize));
+  scoped_refptr<DecoderBuffer> buffer(
+      DecoderBuffer::FromSharedMemoryRegion(std::move(region), 0, kDataSize));
   ASSERT_TRUE(buffer.get());
   EXPECT_EQ(buffer->data_size(), kDataSize);
   EXPECT_EQ(0, memcmp(buffer->data(), kData, kDataSize));
@@ -108,9 +106,7 @@ TEST(DecoderBufferTest, FromPlatformSharedMemoryRegion_Unaligned) {
   memcpy(mapping.GetMemoryAs<uint8_t>(), kData, kDataSize);
 
   scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::FromSharedMemoryRegion(
-      base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
-          std::move(region)),
-      kDataOffset, kDataSize - kDataOffset));
+      std::move(region), kDataOffset, kDataSize - kDataOffset));
   ASSERT_TRUE(buffer.get());
   EXPECT_EQ(buffer->data_size(), kDataSize - kDataOffset);
   EXPECT_EQ(
@@ -128,10 +124,8 @@ TEST(DecoderBufferTest, FromPlatformSharedMemoryRegion_ZeroSize) {
   ASSERT_TRUE(mapping.IsValid());
   memcpy(mapping.memory(), kData, kDataSize);
 
-  scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::FromSharedMemoryRegion(
-      base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
-          std::move(region)),
-      0, 0));
+  scoped_refptr<DecoderBuffer> buffer(
+      DecoderBuffer::FromSharedMemoryRegion(std::move(region), 0, 0));
   ASSERT_FALSE(buffer.get());
 }
 

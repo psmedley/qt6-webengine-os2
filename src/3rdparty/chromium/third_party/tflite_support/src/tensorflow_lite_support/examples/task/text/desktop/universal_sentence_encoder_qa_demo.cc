@@ -19,10 +19,10 @@ limitations under the License.
 #include "absl/status/status.h"      // from @com_google_absl
 #include "absl/strings/str_split.h"  // from @com_google_absl
 #include "tensorflow_lite_support/cc/task/text/universal_sentence_encoder_qa.h"
-#include "tensorflow_lite_support/examples/task/text/desktop/universal_sentence_encoder_qa_op_resolver.h"
+#include "tensorflow_lite_support/cc/task/text/utils/text_op_resolver.h"
 
 namespace {
-using tflite::task::text::CreateQACustomOpResolver;
+using tflite::task::text::CreateTextOpResolver;
 using tflite::task::text::RetrievalInput;
 using tflite::task::text::RetrievalOptions;
 using tflite::task::text::RetrievalOutput;
@@ -63,8 +63,12 @@ int main(int argc, char** argv) {
   options.mutable_base_options()->mutable_model_file()->set_file_name(
       absl::GetFlag(FLAGS_model_path));
   auto status = UniversalSentenceEncoderQA::CreateFromOption(
-      options, CreateQACustomOpResolver());
-  CHECK_OK(status);
+      options, CreateTextOpResolver());
+  if (!status.ok()) {
+    std::cerr << "Retrieve failed: " << status.status().message() << std::endl;
+    return 1;
+  }
+
   std::unique_ptr<UniversalSentenceEncoderQA> client =
       std::move(status.value());
 
@@ -75,23 +79,27 @@ int main(int argc, char** argv) {
   // Add candidate responses, and each one contains a sentence of text. (May
   // set context too).
   for (const auto& ans : absl::StrSplit(absl::GetFlag(FLAGS_answers), ':')) {
-    input.add_responses()->mutable_raw_text()->set_text(ans);
+    input.add_responses()->mutable_raw_text()->set_text(std::string(ans));
   }
 
   // Run inference with the Retrieve function.
   const absl::StatusOr<RetrievalOutput>& output_status =
       client->Retrieve(input);
-  CHECK_OK(output_status);  // Check ok
+  if (!output_status.ok()) {
+    std::cerr << "Retrieve failed: " << output_status.status().message()
+              << std::endl;
+    return 1;
+  }
   const RetrievalOutput& output = output_status.value();
 
   // Get top results (may set optional parameter k=? to limit top-K results).
   const std::vector<size_t>& top = client->Top(output);
 
   // Consume the results according to the ranking. Here we just print them out.
-  std::cout << input.query_text() << std::endl;
+  std::cout << "Input questions: " << input.query_text() << std::endl;
   for (size_t k : top) {
-    std::cout << input.responses(k).raw_text().text() << ", "
-              << input.responses(k).raw_text().context() << ", "
-              << output.response_results(k).score() << std::endl;
+    std::cout << "Output answers " << k << ": "
+              << input.responses(k).raw_text().text()
+              << " Score: " << output.response_results(k).score() << std::endl;
   }
 }

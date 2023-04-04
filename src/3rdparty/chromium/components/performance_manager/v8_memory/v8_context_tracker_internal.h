@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,7 +166,7 @@ class RemoteFrameData : public base::LinkNode<RemoteFrameData> {
  private:
   const raw_ptr<ProcessData> process_data_;
   const blink::RemoteFrameToken token_;
-  const raw_ptr<ExecutionContextData> execution_context_data_;
+  raw_ptr<ExecutionContextData> execution_context_data_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

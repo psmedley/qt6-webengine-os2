@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
-#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 
 using ::testing::_;
@@ -132,9 +132,11 @@ class ProcessedLocalAudioSourceTest
     std::unique_ptr<blink::ProcessedLocalAudioSource> source =
         std::make_unique<blink::ProcessedLocalAudioSource>(
             *MainFrame().GetFrame(),
-            MediaStreamDevice(mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
-                              "mock_audio_device_id", "Mock audio device",
-                              kSampleRate, kChannelLayout, kDeviceBufferSize),
+            MediaStreamDevice(
+                mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
+                "mock_audio_device_id", "Mock audio device", kSampleRate,
+                media::ChannelLayoutConfig::FromLayout<kChannelLayout>(),
+                kDeviceBufferSize),
             false /* disable_local_echo */, properties, num_requested_channels,
             base::DoNothing(),
             scheduler::GetSingleThreadTaskRunnerForTesting());
@@ -142,8 +144,9 @@ class ProcessedLocalAudioSourceTest
     audio_source_ = MakeGarbageCollected<MediaStreamSource>(
         String::FromUTF8("audio_label"), MediaStreamSource::kTypeAudio,
         String::FromUTF8("audio_track"), false /* remote */, std::move(source));
-    audio_component_ = MakeGarbageCollected<MediaStreamComponent>(
-        audio_source_->Id(), audio_source_);
+    audio_component_ = MakeGarbageCollected<MediaStreamComponentImpl>(
+        audio_source_->Id(), audio_source_,
+        std::make_unique<MediaStreamAudioTrack>(/*is_local=*/true));
   }
 
   void CheckSourceFormatMatches(const media::AudioParameters& params) {
@@ -217,7 +220,7 @@ TEST_P(ProcessedLocalAudioSourceTest, VerifyAudioFlowWithoutAudioProcessing) {
       .WillOnce(Invoke(
           capture_source_callback(),
           &media::AudioCapturerSource::CaptureCallback::OnCaptureStarted));
-  ASSERT_TRUE(audio_source()->ConnectToTrack(audio_track()));
+  ASSERT_TRUE(audio_source()->ConnectToInitializedTrack(audio_track()));
   CheckOutputFormatMatches(audio_source()->GetAudioParameters());
 
   // Connect a sink to the track.

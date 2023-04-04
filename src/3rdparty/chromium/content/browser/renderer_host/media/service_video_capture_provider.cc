@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,10 @@
 #include "content/common/child_process_host_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/video_capture_service.h"
 #include "content/public/common/content_features.h"
+#include "gpu/config/gpu_info.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -33,7 +35,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/trace_event/common/trace_event_common.h"
-#include "content/public/common/content_features.h"
 #endif
 
 namespace {
@@ -129,11 +130,19 @@ ServiceVideoCaptureProvider::ServiceVideoCaptureProvider(
         base::BindOnce(&ServiceVideoCaptureProvider::OnServiceStarted,
                        weak_ptr_factory_.GetWeakPtr()));
   }
+
+  // Must register at the IO thread so that callbacks would be also
+  // triggered on the IO thread.
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ServiceVideoCaptureProvider::RegisterWithGpuDataManager,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 ServiceVideoCaptureProvider::~ServiceVideoCaptureProvider() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   OnServiceConnectionClosed(ReasonForDisconnect::kShutdown);
+  content::GpuDataManager::GetInstance()->RemoveObserver(this);
 }
 
 void ServiceVideoCaptureProvider::GetDeviceInfosAsync(
@@ -191,6 +200,11 @@ void ServiceVideoCaptureProvider::OnLauncherConnectingToSourceProvider(
   *out_provider = LazyConnectToService();
 }
 
+void ServiceVideoCaptureProvider::RegisterWithGpuDataManager() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  content::GpuDataManager::GetInstance()->AddObserver(this);
+}
+
 scoped_refptr<RefCountedVideoSourceProvider>
 ServiceVideoCaptureProvider::LazyConnectToService() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
@@ -228,6 +242,12 @@ ServiceVideoCaptureProvider::LazyConnectToService() {
   GetVideoCaptureService().InjectGpuDependencies(
       std::move(accelerator_factory));
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+#if BUILDFLAG(IS_WIN)
+  // Pass active gpu info.
+  GetVideoCaptureService().OnGpuInfoUpdate(
+      content::GpuDataManager::GetInstance()->GetGPUInfo().active_gpu().luid);
+#endif
 
   mojo::Remote<video_capture::mojom::VideoSourceProvider> source_provider;
   GetVideoCaptureService().ConnectToVideoSourceProvider(
@@ -370,6 +390,18 @@ void ServiceVideoCaptureProvider::OnServiceConnectionClosed(
       break;
   }
   time_of_last_uninitialize_ = base::TimeTicks::Now();
+}
+
+void ServiceVideoCaptureProvider::OnGpuInfoUpdate() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  if (!weak_service_connection_) {
+    // Only need to notify the service if it's already running.
+    return;
+  }
+#if BUILDFLAG(IS_WIN)
+  GetVideoCaptureService().OnGpuInfoUpdate(
+      content::GpuDataManager::GetInstance()->GetGPUInfo().active_gpu().luid);
+#endif
 }
 
 }  // namespace content

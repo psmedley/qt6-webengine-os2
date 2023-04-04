@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/strings/string_piece.h"
 #include "base/test/scoped_feature_list.h"
 #include "net/base/features.h"
+#include "net/base/network_change_notifier.h"
 #include "net/base/privacy_mode.h"
 #include "net/base/proxy_server.h"
 #include "net/dns/context_host_resolver.h"
@@ -33,6 +34,8 @@
 #include "net/http/http_stream_factory_test_util.h"
 #include "net/log/net_log.h"
 #include "net/socket/transport_client_socket_pool.h"
+#include "net/ssl/ssl_config_service.h"
+#include "net/ssl/test_ssl_config_service.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -63,8 +66,7 @@ const char kTestBody[] = "<html><body>TEST RESPONSE</body></html>";
 
 class TestHostResolverProc : public HostResolverProc {
  public:
-  TestHostResolverProc()
-      : HostResolverProc(nullptr), insecure_queries_served_(0) {}
+  TestHostResolverProc() : HostResolverProc(nullptr) {}
 
   int Resolve(const std::string& hostname,
               AddressFamily address_family,
@@ -72,15 +74,51 @@ class TestHostResolverProc : public HostResolverProc {
               AddressList* addrlist,
               int* os_error) override {
     insecure_queries_served_++;
-    *addrlist = AddressList::CreateFromIPAddress(IPAddress(127, 0, 0, 1), 443);
+    *addrlist = AddressList::CreateFromIPAddress(IPAddress(127, 0, 0, 1), 0);
     return OK;
   }
 
   uint32_t insecure_queries_served() { return insecure_queries_served_; }
 
  private:
-  ~TestHostResolverProc() override {}
-  uint32_t insecure_queries_served_;
+  ~TestHostResolverProc() override = default;
+  uint32_t insecure_queries_served_ = 0;
+};
+
+// Runs and waits for the DoH probe to complete in automatic mode. The resolver
+// must have a single DoH server, and the DoH server must serve addresses for
+// `kDohProbeHostname`.
+class DohProber : public NetworkChangeNotifier::DNSObserver {
+ public:
+  explicit DohProber(ContextHostResolver* resolver) : resolver_(resolver) {}
+
+  void ProbeAndWaitForCompletion() {
+    std::unique_ptr<HostResolver::ProbeRequest> probe_request =
+        resolver_->CreateDohProbeRequest();
+    EXPECT_THAT(probe_request->Start(), IsError(ERR_IO_PENDING));
+    if (NumAvailableDohServers() == 0) {
+      NetworkChangeNotifier::AddDNSObserver(this);
+      loop_.Run();
+      NetworkChangeNotifier::RemoveDNSObserver(this);
+    }
+    EXPECT_GT(NumAvailableDohServers(), 0u);
+  }
+
+  void OnDNSChanged() override {
+    if (NumAvailableDohServers() > 0) {
+      loop_.Quit();
+    }
+  }
+
+ private:
+  size_t NumAvailableDohServers() {
+    ResolveContext* context = resolver_->resolve_context_for_testing();
+    return context->NumAvailableDohServers(
+        context->current_session_for_testing());
+  }
+
+  raw_ptr<ContextHostResolver> resolver_;
+  base::RunLoop loop_;
 };
 
 // A test fixture that creates a DoH server with a `URLRequestContext`
@@ -91,12 +129,17 @@ class DnsOverHttpsIntegrationTest : public TestWithTaskEnvironment {
       : host_resolver_proc_(base::MakeRefCounted<TestHostResolverProc>()) {
     doh_server_.SetHostname(kDohHostname);
     EXPECT_TRUE(doh_server_.Start());
+
+    // In `kAutomatic` mode, DoH support depends on a probe for
+    // `kDohProbeHostname`.
+    doh_server_.AddAddressRecord(kDohProbeHostname, IPAddress::IPv4Localhost());
+
     ResetContext();
   }
 
   URLRequestContext* context() { return request_context_.get(); }
 
-  void ResetContext() {
+  void ResetContext(SecureDnsMode mode = SecureDnsMode::kSecure) {
     // TODO(crbug.com/1252155): Simplify this.
     HostResolver::ManagerOptions manager_options;
     // Without a DnsConfig, HostResolverManager will not use DoH, even in
@@ -106,8 +149,7 @@ class DnsOverHttpsIntegrationTest : public TestWithTaskEnvironment {
     // system DnsConfig via the usual pathway.
     manager_options.dns_config_overrides =
         DnsConfigOverrides::CreateOverridingEverythingWithDefaults();
-    manager_options.dns_config_overrides.secure_dns_mode =
-        SecureDnsMode::kSecure;
+    manager_options.dns_config_overrides.secure_dns_mode = mode;
     manager_options.dns_config_overrides.dns_over_https_config =
         *DnsOverHttpsConfig::FromString(doh_server_.GetPostOnlyTemplate());
     manager_options.dns_config_overrides.use_local_ipv6 = true;
@@ -118,15 +160,25 @@ class DnsOverHttpsIntegrationTest : public TestWithTaskEnvironment {
     // `doh_server_` itself. Additionally, without an explicit HostResolverProc,
     // HostResolverManager::HaveTestProcOverride disables the built-in DNS
     // client.
-    resolver->SetProcParamsForTesting(
-        ProcTaskParams(host_resolver_proc_.get(), 1));
+    auto* resolver_raw = resolver.get();
+    resolver->SetHostResolverSystemParamsForTest(
+        HostResolverSystemTask::Params(host_resolver_proc_, 1));
 
     auto context_builder = CreateTestURLRequestContextBuilder();
     context_builder->set_host_resolver(std::move(resolver));
+    auto ssl_config_service =
+        std::make_unique<TestSSLConfigService>(SSLContextConfig());
+    ssl_config_service_ = ssl_config_service.get();
+    context_builder->set_ssl_config_service(std::move(ssl_config_service));
     request_context_ = context_builder->Build();
+
+    if (mode == SecureDnsMode::kAutomatic) {
+      DohProber prober(resolver_raw);
+      prober.ProbeAndWaitForCompletion();
+    }
   }
 
-  void AddHostWithEch(const url::SchemeHostPort host,
+  void AddHostWithEch(const url::SchemeHostPort& host,
                       const IPAddress& address,
                       base::span<const uint8_t> ech_config_list) {
     doh_server_.AddAddressRecord(host.host(), address);
@@ -140,6 +192,7 @@ class DnsOverHttpsIntegrationTest : public TestWithTaskEnvironment {
   TestDohServer doh_server_;
   scoped_refptr<net::TestHostResolverProc> host_resolver_proc_;
   std::unique_ptr<URLRequestContext> request_context_;
+  raw_ptr<TestSSLConfigService> ssl_config_service_;
 };
 
 // A convenience wrapper over `DnsOverHttpsIntegrationTest` that also starts an
@@ -160,8 +213,7 @@ class HttpsWithDnsOverHttpsTest : public DnsOverHttpsIntegrationTest {
 
   std::unique_ptr<test_server::HttpResponse> HandleDefaultRequest(
       const test_server::HttpRequest& request) {
-    std::unique_ptr<test_server::BasicHttpResponse> http_response(
-        new test_server::BasicHttpResponse);
+    auto http_response = std::make_unique<test_server::BasicHttpResponse>();
     test_https_requests_served_++;
     http_response->set_content(kTestBody);
     http_response->set_content_type("text/html");
@@ -176,7 +228,7 @@ class HttpsWithDnsOverHttpsTest : public DnsOverHttpsIntegrationTest {
 class TestHttpDelegate : public HttpStreamRequest::Delegate {
  public:
   explicit TestHttpDelegate(base::RunLoop* loop) : loop_(loop) {}
-  ~TestHttpDelegate() override {}
+  ~TestHttpDelegate() override = default;
   void OnStreamReady(const SSLConfig& used_ssl_config,
                      const ProxyInfo& used_proxy_info,
                      std::unique_ptr<HttpStream> stream) override {
@@ -249,7 +301,7 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEnd) {
 
   ClientSocketPool::GroupId group_id(
       url::SchemeHostPort(request_info.url), PrivacyMode::PRIVACY_MODE_DISABLED,
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   EXPECT_EQ(network_session
                 ->GetSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL,
                                 ProxyServer::Direct())
@@ -274,9 +326,8 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEnd) {
   EXPECT_TRUE(http_server.ShutdownAndWaitUntilComplete());
   EXPECT_TRUE(doh_server_.ShutdownAndWaitUntilComplete());
 
-  // There should be two DoH lookups for kHostname (both A and AAAA records are
-  // queried).
-  EXPECT_EQ(doh_server_.QueriesServed(), 2);
+  // There should be three DoH lookups for kHostname (A, AAAA, and HTTPS).
+  EXPECT_EQ(doh_server_.QueriesServed(), 3);
   // The requests to the DoH server are pooled, so there should only be one
   // insecure lookup for the DoH server hostname.
   EXPECT_EQ(host_resolver_proc_->insecure_queries_served(), 1u);
@@ -318,7 +369,12 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEndFail) {
 TEST_F(HttpsWithDnsOverHttpsTest, HttpsUpgrade) {
   base::test::ScopedFeatureList features;
   features.InitAndEnableFeatureWithParameters(
-      features::kUseDnsHttpsSvcb, {{"UseDnsHttpsSvcbHttpUpgrade", "true"}});
+      features::kUseDnsHttpsSvcb,
+      {// Disable timeouts.
+       {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+       {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
+       {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}});
+  ResetContext();
 
   GURL https_url = https_server_.GetURL(kHostname, "/test");
   EXPECT_TRUE(https_url.SchemeIs(url::kHttpsScheme));
@@ -333,21 +389,26 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsUpgrade) {
       dns_util::GetNameForHttpsQuery(url::SchemeHostPort(https_url)),
       /*priority=*/1, /*service_name=*/kHostname, /*params=*/{}));
 
-  // Fetch the http URL.
-  TestDelegate d;
-  std::unique_ptr<URLRequest> req(context()->CreateRequest(
-      http_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
-  req->Start();
-  base::RunLoop().Run();
-  ASSERT_THAT(d.request_status(), IsOk());
+  for (auto mode : {SecureDnsMode::kSecure, SecureDnsMode::kAutomatic}) {
+    SCOPED_TRACE(kSecureDnsModes.at(mode));
+    ResetContext(mode);
 
-  // The request should have been redirected to https.
-  EXPECT_EQ(d.received_redirect_count(), 1);
-  EXPECT_EQ(req->url(), https_url);
+    // Fetch the http URL.
+    TestDelegate d;
+    std::unique_ptr<URLRequest> req(context()->CreateRequest(
+        http_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
+    req->Start();
+    base::RunLoop().Run();
+    ASSERT_THAT(d.request_status(), IsOk());
 
-  EXPECT_TRUE(d.response_completed());
-  EXPECT_EQ(d.request_status(), 0);
-  EXPECT_EQ(d.data_received(), kTestBody);
+    // The request should have been redirected to https.
+    EXPECT_EQ(d.received_redirect_count(), 1);
+    EXPECT_EQ(req->url(), https_url);
+
+    EXPECT_TRUE(d.response_completed());
+    EXPECT_EQ(d.request_status(), 0);
+    EXPECT_EQ(d.data_received(), kTestBody);
+  }
 }
 
 // An end-to-end test for requesting a domain with a basic HTTPS record. Expect
@@ -356,7 +417,12 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsUpgrade) {
 TEST_F(HttpsWithDnsOverHttpsTest, HttpsMetadata) {
   base::test::ScopedFeatureList features;
   features.InitAndEnableFeatureWithParameters(
-      features::kUseDnsHttpsSvcb, {{"UseDnsHttpsSvcbHttpUpgrade", "true"}});
+      features::kUseDnsHttpsSvcb,
+      {// Disable timeouts.
+       {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+       {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
+       {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}});
+  ResetContext();
 
   GURL main_url = https_server_.GetURL(kHostname, "/test");
   EXPECT_TRUE(main_url.SchemeIs(url::kHttpsScheme));
@@ -406,36 +472,56 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHello) {
   AddHostWithEch(url::SchemeHostPort(url), addr.front().address(),
                  ech_config_list);
 
-  for (bool ech_enabled : {true, false}) {
-    SCOPED_TRACE(ech_enabled);
+  for (bool feature_enabled : {true, false}) {
+    SCOPED_TRACE(feature_enabled);
     base::test::ScopedFeatureList features;
-    if (ech_enabled) {
-      features.InitWithFeatures(
-          /*enabled_features=*/{features::kUseDnsHttpsSvcb,
-                                features::kEncryptedClientHello},
+    if (feature_enabled) {
+      features.InitWithFeaturesAndParameters(
+          /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
+                                 {// Disable timeouts.
+                                  {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+                                  {"UseDnsHttpsSvcbSecureExtraTimePercent",
+                                   "0"},
+                                  {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}},
+                                {features::kEncryptedClientHello, {}}},
           /*disabled_features=*/{});
     } else {
-      features.InitWithFeatures(
-          /*enabled_features=*/{features::kUseDnsHttpsSvcb},
+      features.InitWithFeaturesAndParameters(
+          /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
+                                 {// Disable timeouts.
+                                  {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+                                  {"UseDnsHttpsSvcbSecureExtraTimePercent",
+                                   "0"},
+                                  {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
           /*disabled_features=*/{features::kEncryptedClientHello});
     }
 
-    // Create a new `URLRequestContext`, to ensure there are no cached sockets,
-    // etc., from the previous loop iteration.
-    ResetContext();
-    TestDelegate d;
-    std::unique_ptr<URLRequest> r = context()->CreateRequest(
-        url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS);
-    r->Start();
-    EXPECT_TRUE(r->is_pending());
+    for (bool config_enabled : {true, false}) {
+      SCOPED_TRACE(config_enabled);
+      bool ech_enabled = feature_enabled && config_enabled;
 
-    d.RunUntilComplete();
+      // Create a new `URLRequestContext`, to ensure there are no cached
+      // sockets, etc., from the previous loop iteration.
+      ResetContext();
 
-    EXPECT_THAT(d.request_status(), IsOk());
-    EXPECT_EQ(1, d.response_started_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_NE(0, d.bytes_received());
-    EXPECT_EQ(ech_enabled, r->ssl_info().encrypted_client_hello);
+      SSLContextConfig config;
+      config.ech_enabled = config_enabled;
+      ssl_config_service_->UpdateSSLConfigAndNotify(config);
+
+      TestDelegate d;
+      std::unique_ptr<URLRequest> r = context()->CreateRequest(
+          url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS);
+      r->Start();
+      EXPECT_TRUE(r->is_pending());
+
+      d.RunUntilComplete();
+
+      EXPECT_THAT(d.request_status(), IsOk());
+      EXPECT_EQ(1, d.response_started_count());
+      EXPECT_FALSE(d.received_data_before_response());
+      EXPECT_NE(0, d.bytes_received());
+      EXPECT_EQ(ech_enabled, r->ssl_info().encrypted_client_hello);
+    }
   }
 }
 
@@ -444,10 +530,15 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHello) {
 // handshake as the public name.
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloStaleKey) {
   base::test::ScopedFeatureList features;
-  features.InitWithFeatures(
-      /*enabled_features=*/{features::kEncryptedClientHello,
-                            features::kUseDnsHttpsSvcb},
+  features.InitWithFeaturesAndParameters(
+      /*enabled_features=*/{{features::kEncryptedClientHello, {}},
+                            {features::kUseDnsHttpsSvcb,
+                             {// Disable timeouts.
+                              {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
       /*disabled_features=*/{});
+  ResetContext();
 
   static constexpr char kRealNameStale[] = "secret1.example";
   static constexpr char kRealNameWrongPublicName[] = "secret2.example";
@@ -524,10 +615,15 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloStaleKey) {
 
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloFallback) {
   base::test::ScopedFeatureList features;
-  features.InitWithFeatures(
-      /*enabled_features=*/{features::kEncryptedClientHello,
-                            features::kUseDnsHttpsSvcb},
+  features.InitWithFeaturesAndParameters(
+      /*enabled_features=*/{{features::kEncryptedClientHello, {}},
+                            {features::kUseDnsHttpsSvcb,
+                             {// Disable timeouts.
+                              {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
       /*disabled_features=*/{});
+  ResetContext();
 
   static constexpr char kRealNameStale[] = "secret1.example";
   static constexpr char kRealNameWrongPublicName[] = "secret2.example";
@@ -594,10 +690,15 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloFallback) {
 
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloFallbackTLS12) {
   base::test::ScopedFeatureList features;
-  features.InitWithFeatures(
-      /*enabled_features=*/{features::kEncryptedClientHello,
-                            features::kUseDnsHttpsSvcb},
+  features.InitWithFeaturesAndParameters(
+      /*enabled_features=*/{{features::kEncryptedClientHello, {}},
+                            {features::kUseDnsHttpsSvcb,
+                             {// Disable timeouts.
+                              {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
       /*disabled_features=*/{});
+  ResetContext();
 
   static constexpr char kRealNameStale[] = "secret1.example";
   static constexpr char kRealNameWrongPublicName[] = "secret2.example";

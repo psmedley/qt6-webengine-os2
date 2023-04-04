@@ -163,7 +163,7 @@ bool SkDeferredDisplayListRecorder::init() {
                                                 fCharacterization.refColorSpace(),
                                                 fCharacterization.origin(),
                                                 fCharacterization.surfaceProps(),
-                                                skgpu::BaseDevice::InitContents::kUninit);
+                                                skgpu::v1::Device::InitContents::kUninit);
     if (!device) {
         return false;
     }
@@ -212,7 +212,7 @@ sk_sp<SkImage> SkDeferredDisplayListRecorder::makePromiseTexture(
         const GrBackendFormat& backendFormat,
         int width,
         int height,
-        GrMipmapped mipMapped,
+        GrMipmapped mipmapped,
         GrSurfaceOrigin origin,
         SkColorType colorType,
         SkAlphaType alphaType,
@@ -226,7 +226,7 @@ sk_sp<SkImage> SkDeferredDisplayListRecorder::makePromiseTexture(
     return SkImage::MakePromiseTexture(fContext->threadSafeProxy(),
                                        backendFormat,
                                        {width, height},
-                                       mipMapped,
+                                       mipmapped,
                                        origin,
                                        colorType,
                                        alphaType,

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,6 @@
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/webui/content_web_ui_controller_factory.h"
-#include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/content_navigation_policy.h"
 #include "content/common/frame.mojom.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -76,6 +74,7 @@
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
 #include "third_party/blink/public/mojom/image_downloader/image_downloader.mojom.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -148,9 +147,6 @@ class WebContentsImplTest : public RenderViewHostImplTestHarness {
   // Instantiate LacrosService for WakeLock support.
   chromeos::ScopedLacrosServiceTestHelper scoped_lacros_service_test_helper_;
 #endif
-
-  ScopedWebUIControllerFactoryRegistration factory_registration_{
-      ContentWebUIControllerFactory::GetInstance()};
 };
 
 class TestWebContentsObserver : public WebContentsObserver {
@@ -791,6 +787,9 @@ TEST_F(WebContentsImplTest, NavigateFromSitelessUrl) {
   SiteInstanceImpl* orig_instance = contents()->GetSiteInstance();
 
   // Navigate to an URL that will not assign a new SiteInstance.
+  // The url also needs to be defined with an empty scheme.
+  url::ScopedSchemeRegistryForTests scheme_registry;
+  url::AddEmptyDocumentScheme("non-site-url");
   const GURL native_url("non-site-url://stuffandthings");
   browser_client.set_assign_site_for_url(false, native_url);
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), native_url);
@@ -1021,7 +1020,7 @@ TEST_F(WebContentsImplTest, FindOpenerRVHWhenPending) {
   // Ensure that committing the navigation removes the proxy.
   navigation->Commit();
   EXPECT_FALSE(contents()
-                   ->GetMainFrame()
+                   ->GetPrimaryMainFrame()
                    ->browsing_context_state()
                    ->GetRenderFrameProxyHost(instance->group()));
 }
@@ -1419,7 +1418,8 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackOldNavigationIgnored) {
   EXPECT_EQ(entry1, controller().GetLastCommittedEntry());
 
   // The newly created process for url1 should be locked to chrome://gpu.
-  RenderProcessHost* new_process = contents()->GetMainFrame()->GetProcess();
+  RenderProcessHost* new_process =
+      contents()->GetPrimaryMainFrame()->GetProcess();
   auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
   EXPECT_TRUE(policy->CanAccessDataForOrigin(new_process->GetID(),
                                              url::Origin::Create(url1)));
@@ -1768,7 +1768,7 @@ TEST_F(WebContentsImplTest, FilterURLs) {
   other_contents->NavigateAndCommit(url_normalized);
 
   // Check that an IPC with about:whatever is correctly normalized.
-  other_contents->GetMainFrame()->DidFailLoadWithError(url_from_ipc, 1);
+  other_contents->GetPrimaryMainFrame()->DidFailLoadWithError(url_from_ipc, 1);
   EXPECT_EQ(url_blocked, other_observer.last_url());
 }
 
@@ -1780,7 +1780,7 @@ TEST_F(WebContentsImplTest, PendingContentsDestroyed) {
   content::TestWebContents* test_web_contents = other_contents.get();
   contents()->AddPendingContents(std::move(other_contents), GURL());
   RenderWidgetHost* widget =
-      test_web_contents->GetMainFrame()->GetRenderWidgetHost();
+      test_web_contents->GetPrimaryMainFrame()->GetRenderWidgetHost();
   int process_id = widget->GetProcess()->GetID();
   int widget_id = widget->GetRoutingID();
 
@@ -1798,7 +1798,7 @@ TEST_F(WebContentsImplTest, PendingContentsShown) {
   contents()->AddPendingContents(std::move(other_contents), url);
 
   RenderWidgetHost* widget =
-      test_web_contents->GetMainFrame()->GetRenderWidgetHost();
+      test_web_contents->GetPrimaryMainFrame()->GetRenderWidgetHost();
   int process_id = widget->GetProcess()->GetID();
   int widget_id = widget->GetRoutingID();
 
@@ -1964,8 +1964,8 @@ TEST_F(WebContentsImplTest, UpdateWebContentsVisibility) {
   EXPECT_EQ(Visibility::HIDDEN, contents()->GetVisibility());
 }
 
-TEST_F(WebContentsImplTest, PictureInPictureStaysVisibleIfHidden) {
-  // Entering Picture in Picture then hiding keeps the view visible.
+TEST_F(WebContentsImplTest, VideoPictureInPictureStaysVisibleIfHidden) {
+  // Entering video Picture in Picture then hiding keeps the view visible.
   TestRenderWidgetHostView* view = static_cast<TestRenderWidgetHostView*>(
       main_test_rfh()->GetRenderViewHost()->GetWidget()->GetView());
   // Must set the visibility to "visible" before anything interesting happens.
@@ -1976,9 +1976,42 @@ TEST_F(WebContentsImplTest, PictureInPictureStaysVisibleIfHidden) {
   EXPECT_TRUE(view->is_showing());
 }
 
-TEST_F(WebContentsImplTest, VisibilityIsUpdatedIfPictureInPictureChanges) {
-  // Hiding, then entering Picture in Picture shows the view.  If we then leave
-  // picture-in-picture, the view should become hidden.
+TEST_F(WebContentsImplTest, VisibilityIsUpdatedIfVideoPictureInPictureChanges) {
+  // Hiding, then entering video Picture in Picture shows the view.  If we then
+  // leave picture-in-picture, the view should become hidden.
+  TestRenderWidgetHostView* view = static_cast<TestRenderWidgetHostView*>(
+      main_test_rfh()->GetRenderViewHost()->GetWidget()->GetView());
+  contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
+
+  contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
+  EXPECT_FALSE(view->is_showing());
+
+  // If the WebContents enters video Picture in Picture while hidden, then it
+  // should notify the view that it's visible.
+  contents()->SetHasPictureInPictureVideo(true);
+  EXPECT_TRUE(view->is_showing());
+
+  // The view should be re-hidden if the WebContents leaves PiP.
+  contents()->SetHasPictureInPictureVideo(false);
+  EXPECT_FALSE(view->is_showing());
+}
+
+TEST_F(WebContentsImplTest, DocumentPictureInPictureStaysVisibleIfHidden) {
+  // Entering document Picture in Picture then hiding keeps the view visible.
+  TestRenderWidgetHostView* view = static_cast<TestRenderWidgetHostView*>(
+      main_test_rfh()->GetRenderViewHost()->GetWidget()->GetView());
+  // Must set the visibility to "visible" before anything interesting happens.
+  contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
+
+  contents()->SetHasPictureInPictureDocument(true);
+  contents()->UpdateWebContentsVisibility(Visibility::HIDDEN);
+  EXPECT_TRUE(view->is_showing());
+}
+
+TEST_F(WebContentsImplTest,
+       VisibilityIsUpdatedIfDocumentPictureInPictureChanges) {
+  // Hiding, then entering document Picture in Picture shows the view.  If we
+  // then leave picture-in-picture, the view should become hidden.
   TestRenderWidgetHostView* view = static_cast<TestRenderWidgetHostView*>(
       main_test_rfh()->GetRenderViewHost()->GetWidget()->GetView());
   contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
@@ -1988,11 +2021,11 @@ TEST_F(WebContentsImplTest, VisibilityIsUpdatedIfPictureInPictureChanges) {
 
   // If the WebContents enters Picture in Picture while hidden, it should notify
   // the view that it's visible.
-  contents()->SetHasPictureInPictureVideo(true);
+  contents()->SetHasPictureInPictureDocument(true);
   EXPECT_TRUE(view->is_showing());
 
   // The view should be re-hidden if the WebContents leaves PiP.
-  contents()->SetHasPictureInPictureVideo(false);
+  contents()->SetHasPictureInPictureDocument(false);
   EXPECT_FALSE(view->is_showing());
 }
 
@@ -2291,7 +2324,7 @@ TEST_F(WebContentsImplTest, ActiveContentsCountNavigate) {
   // Navigate to a URL in a different site in the same BrowsingInstance.
   const GURL kUrl2("http://b.com");
   auto navigation3 = NavigationSimulator::CreateRendererInitiated(
-      kUrl2, contents->GetMainFrame());
+      kUrl2, contents->GetPrimaryMainFrame());
   navigation3->ReadyToCommit();
   EXPECT_EQ(1u, instance->GetRelatedActiveContentsCount());
   if (AreAllSitesIsolatedForTesting() ||
@@ -2354,7 +2387,7 @@ TEST_F(WebContentsImplTest, ActiveContentsCountChangeBrowsingInstance) {
     EXPECT_EQ(0u, instance->GetRelatedActiveContentsCount());
     // The rest of the test expects |instance| to match the one in the main
     // frame.
-    instance = contents->GetMainFrame()->GetSiteInstance();
+    instance = contents->GetPrimaryMainFrame()->GetSiteInstance();
   }
   EXPECT_EQ(1u, instance->GetRelatedActiveContentsCount());
 
@@ -2890,12 +2923,44 @@ TEST_F(WebContentsImplTest, RegisterProtocolHandlerDataURL) {
   contents()->NavigateAndCommit(data);
 
   // Data URLs should fail.
-  EXPECT_CALL(delegate, RegisterProtocolHandler(contents()->GetMainFrame(),
-                                                "mailto", data_handler, true))
+  EXPECT_CALL(delegate,
+              RegisterProtocolHandler(contents()->GetPrimaryMainFrame(),
+                                      "mailto", data_handler, true))
       .Times(0);
 
   {
     contents()->RegisterProtocolHandler(main_test_rfh(), "mailto", data_handler,
+                                        /*user_gesture=*/true);
+  }
+
+  contents()->SetDelegate(nullptr);
+}
+
+TEST_F(WebContentsImplTest, RegisterProtocolHandlerInvalidURLSyntax) {
+  MockWebContentsDelegate delegate;
+  contents()->SetDelegate(&delegate);
+
+  GURL url("https://www.google.com");
+  GURL handler_url1("https://www.google.com/handler/%s");
+  GURL handler_url2("https://www.google.com/handler/");
+
+  contents()->NavigateAndCommit(url);
+
+  // Only the first call to RegisterProtocolHandler should register because the
+  // other call has a handler from a different origin.
+  EXPECT_CALL(delegate, RegisterProtocolHandler(main_test_rfh(), "mailto",
+                                                handler_url1, true))
+      .Times(1);
+
+  EXPECT_CALL(delegate, RegisterProtocolHandler(main_test_rfh(), "mailto",
+                                                handler_url2, true))
+      .Times(0);
+  {
+    contents()->RegisterProtocolHandler(main_test_rfh(), "mailto", handler_url1,
+                                        /*user_gesture=*/true);
+  }
+  {
+    contents()->RegisterProtocolHandler(main_test_rfh(), "mailto", handler_url2,
                                         /*user_gesture=*/true);
   }
 
@@ -2930,11 +2995,13 @@ TEST_F(WebContentsImplTest, BadDownloadImageResponseFromRenderer) {
       CreateParams::kInitializeAndWarmupRendererProcess;
   std::unique_ptr<WebContentsImpl> contents(
       WebContentsImpl::CreateWithOpener(create_params, /*opener_rfh=*/nullptr));
-  ASSERT_FALSE(contents->GetMainFrame()->GetProcess()->ShutdownRequested());
+  ASSERT_FALSE(
+      contents->GetPrimaryMainFrame()->GetProcess()->ShutdownRequested());
 
   // Set up the fake image downloader.
   FakeImageDownloader fake_image_downloader;
-  fake_image_downloader.Init(contents->GetMainFrame()->GetRemoteInterfaces());
+  fake_image_downloader.Init(
+      contents->GetPrimaryMainFrame()->GetRemoteInterfaces());
 
   // For the purpose of this test, set up a malformed response with different
   // vector sizes.
@@ -2963,7 +3030,8 @@ TEST_F(WebContentsImplTest, BadDownloadImageResponseFromRenderer) {
 
   // The renderer process should have been killed due to
   // WCI_INVALID_DOWNLOAD_IMAGE_RESULT.
-  EXPECT_TRUE(contents->GetMainFrame()->GetProcess()->ShutdownRequested());
+  EXPECT_TRUE(
+      contents->GetPrimaryMainFrame()->GetProcess()->ShutdownRequested());
 }
 
 TEST_F(WebContentsImplTest,
@@ -3174,7 +3242,7 @@ TEST_F(WebContentsImplTest, CanonicalUrlSchemeHttpsIsAllowed) {
     canonical_url = result;
     quit.Run();
   };
-  contents()->GetMainFrame()->GetCanonicalUrl(
+  contents()->GetPrimaryMainFrame()->GetCanonicalUrl(
       base::BindLambdaForTesting(on_done));
   run_loop.Run();
 
@@ -3194,11 +3262,38 @@ TEST_F(WebContentsImplTest, CanonicalUrlSchemeChromeIsNotAllowed) {
     canonical_url = result;
     quit.Run();
   };
-  contents()->GetMainFrame()->GetCanonicalUrl(
+  contents()->GetPrimaryMainFrame()->GetCanonicalUrl(
       base::BindLambdaForTesting(on_done));
   run_loop.Run();
 
   ASSERT_FALSE(canonical_url) << "canonical_url=" << *canonical_url;
+}
+
+TEST_F(WebContentsImplTest, RequestMediaAccessPermissionNoDelegate) {
+  MediaStreamRequest dummy_request(
+      /*render_process_id=*/0, /*render_frame_id=*/0, /*page_request_id=*/0,
+      /*security_origin=*/GURL(""), /*user_gesture=*/false,
+      blink::MediaStreamRequestType::MEDIA_GENERATE_STREAM,
+      /*requested_audio_device_id=*/"",
+      /*requested_video_device_id=*/"",
+      blink::mojom::MediaStreamType::DISPLAY_AUDIO_CAPTURE,
+      blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE,
+      /*disable_local_echo=*/false, /*request_pan_tilt_zoom_permission=*/false);
+  bool callback_run = false;
+  contents()->RequestMediaAccessPermission(
+      dummy_request,
+      base::BindLambdaForTesting(
+          [&callback_run](
+              const blink::mojom::StreamDevicesSet& stream_devices_set,
+              blink::mojom::MediaStreamRequestResult result,
+              std::unique_ptr<MediaStreamUI> ui) {
+            EXPECT_TRUE(stream_devices_set.stream_devices.empty());
+            EXPECT_EQ(
+                result,
+                blink::mojom::MediaStreamRequestResult::FAILED_DUE_TO_SHUTDOWN);
+            callback_run = true;
+          }));
+  ASSERT_TRUE(callback_run);
 }
 
 }  // namespace content

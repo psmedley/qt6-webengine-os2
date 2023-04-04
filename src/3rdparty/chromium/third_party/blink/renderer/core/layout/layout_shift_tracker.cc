@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -350,7 +350,7 @@ void LayoutShiftTracker::ObjectShifted(
 
   LocalFrame& frame = frame_view_->GetFrame();
   if (ShouldLog(frame)) {
-    VLOG(1) << "in " << (frame.IsMainFrame() ? "" : "subframe ")
+    VLOG(1) << "in " << (frame.IsOutermostMainFrame() ? "" : "subframe ")
             << frame.GetDocument()->Url() << ", " << object << " moved from "
             << old_rect_in_root.ToString() << " to "
             << new_rect_in_root.ToString() << " (visible from "
@@ -477,8 +477,18 @@ void LayoutShiftTracker::NotifyTextPrePaint(
 
 double LayoutShiftTracker::SubframeWeightingFactor() const {
   LocalFrame& frame = frame_view_->GetFrame();
-  if (frame.IsMainFrame())
+  if (frame.IsOutermostMainFrame())
     return 1;
+
+  // TODO(crbug.com/1346602): Enabling frames from a fenced frame tree to map
+  // to the outermost main frame enables fenced content to learn about its
+  // position in the embedder which can be used to communicate from embedder to
+  // embeddee. For now, assume any frame in a fenced frame is fully visible to
+  // avoid introducing a side channel but this will require design work to fix
+  // in the long term.
+  if (frame.IsInFencedFrameTree()) {
+    return 1;
+  }
 
   // Map the subframe view rect into the coordinate space of the local root.
   FloatClipRect subframe_cliprect(gfx::RectF(gfx::SizeF(frame_view_->Size())));
@@ -532,7 +542,7 @@ void LayoutShiftTracker::NotifyPrePaintFinishedInternal() {
 
   LocalFrame& frame = frame_view_->GetFrame();
   if (ShouldLog(frame)) {
-    VLOG(1) << "in " << (frame.IsMainFrame() ? "" : "subframe ")
+    VLOG(1) << "in " << (frame.IsOutermostMainFrame() ? "" : "subframe ")
             << frame.GetDocument()->Url() << ", viewport was "
             << (impact_fraction * 100) << "% impacted with distance fraction "
             << move_distance_factor << " and subframe weighting factor "
@@ -582,9 +592,12 @@ void LayoutShiftTracker::SubmitPerformanceEntry(double score_delta,
   DCHECK(performance);
 
   double input_timestamp = LastInputTimestamp();
-  LayoutShift* entry =
-      LayoutShift::Create(performance->now(), score_delta, had_recent_input,
-                          input_timestamp, CreateAttributionList());
+  LayoutShift* entry = LayoutShift::Create(
+      performance->now(), score_delta, had_recent_input, input_timestamp,
+      CreateAttributionList(),
+      PerformanceEntry::GetNavigationId(window));  // Add WPT for
+                                                   //  LayoutShift. See
+                                                   //  crbug.com/1320878.
 
   performance->AddLayoutShiftEntry(entry);
 }
@@ -611,7 +624,7 @@ void LayoutShiftTracker::ReportShift(double score_delta,
       "frame", ToTraceValue(&frame));
 
   if (ShouldLog(frame)) {
-    VLOG(1) << "in " << (frame.IsMainFrame() ? "" : "subframe ")
+    VLOG(1) << "in " << (frame.IsOutermostMainFrame() ? "" : "subframe ")
             << frame.GetDocument()->Url().GetString() << ", layout shift of "
             << score_delta
             << (had_recent_input ? " excluded by recent input" : " reported")
@@ -742,7 +755,8 @@ std::unique_ptr<TracedValue> LayoutShiftTracker::PerFrameTraceData(
   value->SetDouble("overall_max_distance", overall_max_distance_);
   value->SetDouble("frame_max_distance", frame_max_distance_);
   RegionToTracedValue(region_, *value);
-  value->SetBoolean("is_main_frame", frame_view_->GetFrame().IsMainFrame());
+  value->SetBoolean("is_main_frame",
+                    frame_view_->GetFrame().IsOutermostMainFrame());
   value->SetBoolean("had_recent_input", input_detected);
   value->SetDouble("last_input_timestamp", LastInputTimestamp());
   AttributionsToTracedValue(*value);

@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import("//extensions/buildflags/buildflags.gni")
@@ -7,6 +7,7 @@ static_library("common") {
   public_deps = [
     "//base",
     "//base:i18n",
+    "//media",
     "//net",
     "//third_party/icu",
     "//url",
@@ -32,7 +33,11 @@ static_library("common") {
     "route_request_result.h",
   ]
 
-  deps = [ "mojom:media_route_provider_id" ]
+  deps = [
+    "mojom:media_route_provider_id",
+    "mojom:route_request_result_code",
+    "//third_party/blink/public:blink_headers",
+  ]
 
   if (!is_android) {
     sources += [
@@ -47,7 +52,7 @@ static_library("common") {
     ]
 
     deps += [
-      "//components/cast_channel:cast_channel",
+      "//components/media_router/common/providers/cast/channel",
       "//third_party/openscreen/src/cast/common:public",
     ]
   }
@@ -101,8 +106,9 @@ source_set("unit_tests") {
     ]
 
     deps += [
-      "//components/cast_channel:cast_channel",
       "//components/media_router/common/mojom:media_router_test_interfaces",
+      "//components/media_router/common/providers/cast/certificate:unit_tests",
+      "//components/media_router/common/providers/cast/channel",
       "//third_party/openscreen/src/cast/common:public",
     ]
   }

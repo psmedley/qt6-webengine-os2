@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,7 +105,6 @@ blink::mojom::FileSystemType ToMojoFileSystemType(
     case storage::FileSystemType::kFileSystemTypeSyncableForInternalSync:
     case storage::FileSystemType::kFileSystemTypeLocalForPlatformApp:
     case storage::FileSystemType::kFileSystemTypeForTransientFile:
-    case storage::FileSystemType::kFileSystemTypePluginPrivate:
     case storage::FileSystemType::kFileSystemTypeProvided:
     case storage::FileSystemType::kFileSystemTypeDeviceMediaAsFileStorage:
     case storage::FileSystemType::kFileSystemTypeArcContent:
@@ -255,7 +254,8 @@ void FileSystemManagerImpl::ContinueOpen(
     RecordAction(base::UserMetricsAction("OpenFileSystemPersistent"));
   }
   context_->OpenFileSystem(
-      storage_key, ToStorageFileSystemType(file_system_type),
+      storage_key, /*bucket=*/absl::nullopt,
+      ToStorageFileSystemType(file_system_type),
       storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
       base::BindOnce(&FileSystemManagerImpl::DidOpenFileSystem, GetWeakPtr(),
                      std::move(callback)));
@@ -1136,12 +1136,12 @@ void FileSystemManagerImpl::DidWriteSync(WriteSyncCallbackEntry* entry,
 
 void FileSystemManagerImpl::DidOpenFileSystem(
     OpenCallback callback,
-    const GURL& root,
+    const FileSystemURL& root,
     const std::string& filesystem_name,
     base::File::Error result) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(root.is_valid() || result != base::File::FILE_OK);
-  std::move(callback).Run(filesystem_name, root, result);
+  std::move(callback).Run(filesystem_name, root.ToGURL(), result);
   // For OpenFileSystem we do not create a new operation, so no unregister here.
 }
 
@@ -1278,12 +1278,6 @@ absl::optional<base::File::Error> FileSystemManagerImpl::ValidateFileSystemURL(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!FileSystemURLIsValid(context_.get(), url))
     return base::File::FILE_ERROR_INVALID_URL;
-
-  // Deny access to files in PluginPrivate FileSystem from JavaScript.
-  // TODO(nhiroki): Move this filter somewhere else since this is not for
-  // validation.
-  if (url.type() == storage::kFileSystemTypePluginPrivate)
-    return base::File::FILE_ERROR_SECURITY;
 
   return absl::nullopt;
 }

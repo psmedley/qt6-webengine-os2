@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@ namespace blink {
 
 class LocalDOMWindow;
 
-// Interface exposing advanced per-screen information.
-// https://github.com/webscreens/window-placement
+// Interface exposing additional per-screen information.
+// https://w3c.github.io/window-placement/
 class MODULES_EXPORT ScreenDetailed final : public Screen {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -35,6 +35,18 @@ class MODULES_EXPORT ScreenDetailed final : public Screen {
   bool isInternal() const;
   float devicePixelRatio() const;
   String label() const;
+
+  // Attributes exposed for HDR canvas.
+  // https://github.com/w3c/ColorWeb-CG/blob/master/hdr_html_canvas_element.md
+  float highDynamicRangeHeadroom() const;
+  float redPrimaryX() const;
+  float redPrimaryY() const;
+  float greenPrimaryX() const;
+  float greenPrimaryY() const;
+  float bluePrimaryX() const;
+  float bluePrimaryY() const;
+  float whitePointX() const;
+  float whitePointY() const;
 
   uint32_t label_idx() const { return label_idx_; }
   bool label_is_internal() const { return label_is_internal_; }

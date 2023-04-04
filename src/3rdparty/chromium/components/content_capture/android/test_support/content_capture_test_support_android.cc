@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,11 +51,11 @@ static void JNI_ContentCaptureTestSupport_SimulateDidUpdateFaviconURL(
   CHECK(root);
   CHECK(root->is_list());
   std::vector<blink::mojom::FaviconURLPtr> favicon_urls;
-  for (const base::Value& icon : root->GetListDeprecated()) {
+  for (const base::Value& icon : root->GetList()) {
     std::vector<gfx::Size> sizes;
     // The sizes is optional.
     if (auto* icon_sizes = icon.FindKey("sizes")) {
-      for (const base::Value& size : icon_sizes->GetListDeprecated()) {
+      for (const base::Value& size : icon_sizes->GetList()) {
         CHECK(size.FindKey("width"));
         CHECK(size.FindKey("height"));
         sizes.emplace_back(size.FindKey("width")->GetInt(),
@@ -69,8 +69,8 @@ static void JNI_ContentCaptureTestSupport_SimulateDidUpdateFaviconURL(
         ToType(*icon.FindKey("type")->GetIfString()), sizes));
   }
   CHECK(!favicon_urls.empty());
-  provider->NotifyFaviconURLUpdatedForTesting(web_contents->GetMainFrame(),
-                                              favicon_urls);
+  provider->NotifyFaviconURLUpdatedForTesting(
+      web_contents->GetPrimaryMainFrame(), favicon_urls);
 }
 
 }  // namespace content_capture

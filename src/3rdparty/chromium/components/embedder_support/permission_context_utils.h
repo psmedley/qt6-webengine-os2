@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ struct PermissionContextDelegates {
   std::unique_ptr<permissions::GeolocationPermissionContext::Delegate>
       geolocation_permission_context_delegate;
 #if BUILDFLAG(IS_MAC)
-  device::GeolocationManager* geolocation_manager;
+  raw_ptr<device::GeolocationManager> geolocation_manager;
 #endif  // BUILDFLAG(IS_MAC)
   raw_ptr<webrtc::MediaStreamDeviceEnumerator> media_stream_device_enumerator;
   std::unique_ptr<permissions::NfcPermissionContext::Delegate>

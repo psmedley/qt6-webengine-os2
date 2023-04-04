@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,28 +42,6 @@ std::unique_ptr<IconLoader::Releaser> StubIconLoader::LoadIconFromIconKey(
     std::move(callback).Run(std::move(icon_value));
   } else {
     std::move(callback).Run(std::make_unique<IconValue>());
-  }
-  return nullptr;
-}
-
-std::unique_ptr<IconLoader::Releaser> StubIconLoader::LoadIconFromIconKey(
-    apps::mojom::AppType app_type,
-    const std::string& app_id,
-    apps::mojom::IconKeyPtr icon_key,
-    apps::mojom::IconType icon_type,
-    int32_t size_hint_in_dip,
-    bool allow_placeholder_icon,
-    apps::mojom::Publisher::LoadIconCallback callback) {
-  num_load_calls_++;
-  auto iter = timelines_by_app_id_.find(app_id);
-  if (iter != timelines_by_app_id_.end()) {
-    auto icon_value = apps::mojom::IconValue::New();
-    icon_value->icon_type = icon_type;
-    icon_value->uncompressed =
-        gfx::ImageSkia(gfx::ImageSkiaRep(gfx::Size(1, 1), 1.0f));
-    std::move(callback).Run(std::move(icon_value));
-  } else {
-    std::move(callback).Run(apps::mojom::IconValue::New());
   }
   return nullptr;
 }

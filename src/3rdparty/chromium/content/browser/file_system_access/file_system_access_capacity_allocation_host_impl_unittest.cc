@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_future.h"
 #include "base/types/pass_key.h"
 #include "content/browser/file_system_access/mock_file_system_access_permission_context.h"
 #include "content/public/test/browser_task_environment.h"
@@ -32,15 +33,9 @@ namespace {
 int64_t RequestCapacityChangeSync(
     FileSystemAccessCapacityAllocationHostImpl* allocation_host,
     int64_t capacity_delta) {
-  int64_t granted_capacity;
-  base::RunLoop run_loop;
-  allocation_host->RequestCapacityChange(
-      capacity_delta,
-      base::BindLambdaForTesting([&](int64_t returned_granted_capacity) {
-        granted_capacity = returned_granted_capacity;
-        run_loop.Quit();
-      }));
-  run_loop.Run();
+  base::test::TestFuture<int64_t> future;
+  allocation_host->RequestCapacityChange(capacity_delta, future.GetCallback());
+  int64_t granted_capacity = future.Get();
   return granted_capacity;
 }
 

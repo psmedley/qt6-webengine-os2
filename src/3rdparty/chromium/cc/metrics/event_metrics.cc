@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <ostream>
+#include <string>
 #include <utility>
 
 #include "base/check.h"
@@ -254,13 +255,25 @@ EventMetrics::EventMetrics(EventType type,
       timestamp;
 }
 
+EventMetrics::EventMetrics(EventType type,
+                           base::TimeTicks timestamp,
+                           base::TimeTicks arrived_in_browser_main_timestamp,
+                           const base::TickClock* tick_clock)
+    : EventMetrics(type, timestamp, tick_clock) {
+  dispatch_stage_timestamps_[static_cast<int>(
+      DispatchStage::kArrivedInBrowserMain)] =
+      arrived_in_browser_main_timestamp;
+}
+
 EventMetrics::EventMetrics(const EventMetrics& other)
-    : type_(other.type_), tick_clock_(other.tick_clock_) {
+    : type_(other.type_),
+      tick_clock_(other.tick_clock_),
+      should_record_tracing_(false) {
   CopyTimestampsFrom(other, DispatchStage::kMaxValue);
 }
 
 EventMetrics::~EventMetrics() {
-  if (!is_tracing_recorded()) {
+  if (should_record_tracing()) {
     EventLatencyTracingRecorder::RecordEventLatencyTraceEvent(
         this, base::TimeTicks::Now(), nullptr, nullptr);
   }
@@ -268,6 +281,10 @@ EventMetrics::~EventMetrics() {
 
 const char* EventMetrics::GetTypeName() const {
   return kInterestingEvents[static_cast<int>(type_)].name;
+}
+
+void EventMetrics::SetHighLatencyStage(const std::string& stage) {
+  high_latency_stages_.push_back(stage);
 }
 
 void EventMetrics::SetDispatchStageTimestamp(DispatchStage stage) {
@@ -338,7 +355,8 @@ std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::Create(
     ui::EventType type,
     ui::ScrollInputType input_type,
     bool is_inertial,
-    base::TimeTicks timestamp) {
+    base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp) {
   // TODO(crbug.com/1157090): We expect that `timestamp` is not null, but there
   // seems to be some tests that are emitting events with null timestamp.  We
   // should investigate and try to fix those cases and add a `DCHECK` here to
@@ -346,9 +364,9 @@ std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::Create(
 
   DCHECK(IsGestureScroll(type) && !IsGestureScrollUpdate(type));
 
-  std::unique_ptr<ScrollEventMetrics> metrics =
-      CreateInternal(type, input_type, is_inertial, timestamp,
-                     base::DefaultTickClock::GetInstance());
+  std::unique_ptr<ScrollEventMetrics> metrics = CreateInternal(
+      type, input_type, is_inertial, timestamp,
+      arrived_in_browser_main_timestamp, base::DefaultTickClock::GetInstance());
   if (!metrics)
     return nullptr;
 
@@ -358,16 +376,27 @@ std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::Create(
 }
 
 // static
+std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::CreateForBrowser(
+    ui::EventType type,
+    ui::ScrollInputType input_type,
+    bool is_inertial,
+    base::TimeTicks timestamp) {
+  return Create(type, input_type, is_inertial, timestamp, base::TimeTicks());
+}
+
+// static
 std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::CreateForTesting(
     ui::EventType type,
     ui::ScrollInputType input_type,
     bool is_inertial,
     base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp,
     const base::TickClock* tick_clock) {
   DCHECK(!timestamp.is_null());
 
   std::unique_ptr<ScrollEventMetrics> metrics =
-      CreateInternal(type, input_type, is_inertial, timestamp, tick_clock);
+      CreateInternal(type, input_type, is_inertial, timestamp,
+                     arrived_in_browser_main_timestamp, tick_clock);
   if (!metrics)
     return nullptr;
 
@@ -391,8 +420,9 @@ std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::CreateFromExisting(
   if (!existing)
     return nullptr;
 
-  std::unique_ptr<ScrollEventMetrics> metrics = CreateInternal(
-      type, input_type, is_inertial, base::TimeTicks(), existing->tick_clock_);
+  std::unique_ptr<ScrollEventMetrics> metrics =
+      CreateInternal(type, input_type, is_inertial, base::TimeTicks(),
+                     base::TimeTicks(), existing->tick_clock_);
   if (!metrics)
     return nullptr;
 
@@ -409,6 +439,7 @@ std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::CreateInternal(
     ui::ScrollInputType input_type,
     bool is_inertial,
     base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp,
     const base::TickClock* tick_clock) {
   absl::optional<EventType> interesting_type =
       ToInterestingEventType(type, is_inertial,
@@ -416,19 +447,26 @@ std::unique_ptr<ScrollEventMetrics> ScrollEventMetrics::CreateInternal(
   if (!interesting_type)
     return nullptr;
   return base::WrapUnique(new ScrollEventMetrics(
-      *interesting_type, ToScrollType(input_type), timestamp, tick_clock));
+      *interesting_type, ToScrollType(input_type), timestamp,
+      arrived_in_browser_main_timestamp, tick_clock));
 }
 
-ScrollEventMetrics::ScrollEventMetrics(EventType type,
-                                       ScrollType scroll_type,
-                                       base::TimeTicks timestamp,
-                                       const base::TickClock* tick_clock)
-    : EventMetrics(type, timestamp, tick_clock), scroll_type_(scroll_type) {}
+ScrollEventMetrics::ScrollEventMetrics(
+    EventType type,
+    ScrollType scroll_type,
+    base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp,
+    const base::TickClock* tick_clock)
+    : EventMetrics(type,
+                   timestamp,
+                   arrived_in_browser_main_timestamp,
+                   tick_clock),
+      scroll_type_(scroll_type) {}
 
 ScrollEventMetrics::ScrollEventMetrics(const ScrollEventMetrics&) = default;
 
 ScrollEventMetrics::~ScrollEventMetrics() {
-  if (!is_tracing_recorded()) {
+  if (should_record_tracing()) {
     EventLatencyTracingRecorder::RecordEventLatencyTraceEvent(
         this, base::TimeTicks::Now(), nullptr, nullptr);
   }
@@ -455,7 +493,8 @@ std::unique_ptr<ScrollUpdateEventMetrics> ScrollUpdateEventMetrics::Create(
     bool is_inertial,
     ScrollUpdateType scroll_update_type,
     float delta,
-    base::TimeTicks timestamp) {
+    base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp) {
   // TODO(crbug.com/1157090): We expect that `timestamp` is not null, but there
   // seems to be some tests that are emitting events with null timestamp. We
   // should investigate and try to fix those cases and add a `DCHECK` here to
@@ -463,9 +502,9 @@ std::unique_ptr<ScrollUpdateEventMetrics> ScrollUpdateEventMetrics::Create(
 
   DCHECK(IsGestureScrollUpdate(type));
 
-  std::unique_ptr<ScrollUpdateEventMetrics> metrics =
-      CreateInternal(type, input_type, is_inertial, scroll_update_type, delta,
-                     timestamp, base::DefaultTickClock::GetInstance());
+  std::unique_ptr<ScrollUpdateEventMetrics> metrics = CreateInternal(
+      type, input_type, is_inertial, scroll_update_type, delta, timestamp,
+      arrived_in_browser_main_timestamp, base::DefaultTickClock::GetInstance());
   if (!metrics)
     return nullptr;
 
@@ -476,18 +515,32 @@ std::unique_ptr<ScrollUpdateEventMetrics> ScrollUpdateEventMetrics::Create(
 
 // static
 std::unique_ptr<ScrollUpdateEventMetrics>
-ScrollUpdateEventMetrics::CreateForTesting(ui::EventType type,
+ScrollUpdateEventMetrics::CreateForBrowser(ui::EventType type,
                                            ui::ScrollInputType input_type,
                                            bool is_inertial,
                                            ScrollUpdateType scroll_update_type,
                                            float delta,
-                                           base::TimeTicks timestamp,
-                                           const base::TickClock* tick_clock) {
+                                           base::TimeTicks timestamp) {
+  return Create(type, input_type, is_inertial, scroll_update_type, delta,
+                timestamp, base::TimeTicks());
+}
+
+// static
+std::unique_ptr<ScrollUpdateEventMetrics>
+ScrollUpdateEventMetrics::CreateForTesting(
+    ui::EventType type,
+    ui::ScrollInputType input_type,
+    bool is_inertial,
+    ScrollUpdateType scroll_update_type,
+    float delta,
+    base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp,
+    const base::TickClock* tick_clock) {
   DCHECK(!timestamp.is_null());
 
   std::unique_ptr<ScrollUpdateEventMetrics> metrics =
       CreateInternal(type, input_type, is_inertial, scroll_update_type, delta,
-                     timestamp, tick_clock);
+                     timestamp, arrived_in_browser_main_timestamp, tick_clock);
   if (!metrics)
     return nullptr;
 
@@ -514,9 +567,9 @@ ScrollUpdateEventMetrics::CreateFromExisting(
   if (!existing)
     return nullptr;
 
-  std::unique_ptr<ScrollUpdateEventMetrics> metrics =
-      CreateInternal(type, input_type, is_inertial, scroll_update_type, delta,
-                     base::TimeTicks(), existing->tick_clock_);
+  std::unique_ptr<ScrollUpdateEventMetrics> metrics = CreateInternal(
+      type, input_type, is_inertial, scroll_update_type, delta,
+      base::TimeTicks(), base::TimeTicks(), existing->tick_clock_);
   if (!metrics)
     return nullptr;
 
@@ -529,20 +582,22 @@ ScrollUpdateEventMetrics::CreateFromExisting(
 
 // static
 std::unique_ptr<ScrollUpdateEventMetrics>
-ScrollUpdateEventMetrics::CreateInternal(ui::EventType type,
-                                         ui::ScrollInputType input_type,
-                                         bool is_inertial,
-                                         ScrollUpdateType scroll_update_type,
-                                         float delta,
-                                         base::TimeTicks timestamp,
-                                         const base::TickClock* tick_clock) {
+ScrollUpdateEventMetrics::CreateInternal(
+    ui::EventType type,
+    ui::ScrollInputType input_type,
+    bool is_inertial,
+    ScrollUpdateType scroll_update_type,
+    float delta,
+    base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp,
+    const base::TickClock* tick_clock) {
   absl::optional<EventType> interesting_type =
       ToInterestingEventType(type, is_inertial, scroll_update_type);
   if (!interesting_type)
     return nullptr;
   return base::WrapUnique(new ScrollUpdateEventMetrics(
       *interesting_type, ToScrollType(input_type), scroll_update_type, delta,
-      timestamp, tick_clock));
+      timestamp, arrived_in_browser_main_timestamp, tick_clock));
 }
 
 ScrollUpdateEventMetrics::ScrollUpdateEventMetrics(
@@ -551,8 +606,13 @@ ScrollUpdateEventMetrics::ScrollUpdateEventMetrics(
     ScrollUpdateType scroll_update_type,
     float delta,
     base::TimeTicks timestamp,
+    base::TimeTicks arrived_in_browser_main_timestamp,
     const base::TickClock* tick_clock)
-    : ScrollEventMetrics(type, scroll_type, timestamp, tick_clock),
+    : ScrollEventMetrics(type,
+                         scroll_type,
+                         timestamp,
+                         arrived_in_browser_main_timestamp,
+                         tick_clock),
       delta_(delta),
       predicted_delta_(delta),
       last_timestamp_(timestamp) {}
@@ -561,7 +621,7 @@ ScrollUpdateEventMetrics::ScrollUpdateEventMetrics(
     const ScrollUpdateEventMetrics&) = default;
 
 ScrollUpdateEventMetrics::~ScrollUpdateEventMetrics() {
-  if (!is_tracing_recorded()) {
+  if (should_record_tracing()) {
     EventLatencyTracingRecorder::RecordEventLatencyTraceEvent(
         this, base::TimeTicks::Now(), nullptr, nullptr);
   }
@@ -648,7 +708,7 @@ PinchEventMetrics::PinchEventMetrics(EventType type,
 PinchEventMetrics::PinchEventMetrics(const PinchEventMetrics&) = default;
 
 PinchEventMetrics::~PinchEventMetrics() {
-  if (!is_tracing_recorded()) {
+  if (should_record_tracing()) {
     EventLatencyTracingRecorder::RecordEventLatencyTraceEvent(
         this, base::TimeTicks::Now(), nullptr, nullptr);
   }

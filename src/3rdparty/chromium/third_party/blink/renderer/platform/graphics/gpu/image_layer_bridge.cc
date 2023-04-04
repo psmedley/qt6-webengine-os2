@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,7 @@ scoped_refptr<StaticBitmapImage> MakeAccelerated(
       image_info, cc::PaintFlags::FilterQuality::kLow,
       CanvasResourceProvider::ShouldInitialize::kNo, context_provider_wrapper,
       RasterMode::kGPU, source->IsOriginTopLeft(),
-      gpu::SHARED_IMAGE_USAGE_DISPLAY | gpu::SHARED_IMAGE_USAGE_SCANOUT);
+      gpu::SHARED_IMAGE_USAGE_DISPLAY_READ | gpu::SHARED_IMAGE_USAGE_SCANOUT);
   if (!provider || !provider->IsAccelerated())
     return nullptr;
 
@@ -96,7 +96,6 @@ void ImageLayerBridge::SetImage(scoped_refptr<StaticBitmapImage> image) {
 
   image_ = std::move(image);
   if (image_) {
-    LOG(ERROR) << "Image Is texture-backed:" << image_->IsTextureBacked();
     if (opacity_mode_ == kNonOpaque) {
       layer_->SetContentsOpaque(image_->CurrentFrameKnownToBeOpaque());
       layer_->SetBlendBackgroundColor(!image_->CurrentFrameKnownToBeOpaque());
@@ -183,12 +182,11 @@ bool ImageLayerBridge::PrepareTransferableResource(
     bool is_overlay_candidate = sii->UsageForMailbox(mailbox_holder.mailbox) &
                                 gpu::SHARED_IMAGE_USAGE_SCANOUT;
 
-    *out_resource = viz::TransferableResource::MakeGL(
-        mailbox_holder.mailbox, filter, mailbox_holder.texture_target,
-        mailbox_holder.sync_token, size, is_overlay_candidate);
-
     SkColorType color_type = image_for_compositor->GetSkColorInfo().colorType();
-    out_resource->format = viz::SkColorTypeToResourceFormat(color_type);
+    *out_resource = viz::TransferableResource::MakeGpu(
+        mailbox_holder.mailbox, filter, mailbox_holder.texture_target,
+        mailbox_holder.sync_token, size,
+        viz::SkColorTypeToResourceFormat(color_type), is_overlay_candidate);
 
     // If the transferred ImageBitmap contained in this ImageLayerBridge was
     // originated in a WebGPU context, we need to set the layer to be flipped.
@@ -201,9 +199,9 @@ bool ImageLayerBridge::PrepareTransferableResource(
       layer_->SetFlipped(false);
     }
 
-    auto func =
-        WTF::Bind(&ImageLayerBridge::ResourceReleasedGpu,
-                  WrapWeakPersistent(this), std::move(image_for_compositor));
+    auto func = WTF::BindOnce(&ImageLayerBridge::ResourceReleasedGpu,
+                              WrapWeakPersistent(this),
+                              std::move(image_for_compositor));
     *out_release_callback = std::move(func);
   } else {
     // Readback if needed and retain the readback in image_ to prevent future
@@ -241,8 +239,8 @@ bool ImageLayerBridge::PrepareTransferableResource(
     out_resource->color_space = sk_image->colorSpace()
                                     ? gfx::ColorSpace(*sk_image->colorSpace())
                                     : gfx::ColorSpace::CreateSRGB();
-    auto func = WTF::Bind(&ImageLayerBridge::ResourceReleasedSoftware,
-                          WrapWeakPersistent(this), std::move(registered));
+    auto func = WTF::BindOnce(&ImageLayerBridge::ResourceReleasedSoftware,
+                              WrapWeakPersistent(this), std::move(registered));
     *out_release_callback = std::move(func);
   }
 
@@ -265,7 +263,7 @@ ImageLayerBridge::RegisteredBitmap ImageLayerBridge::CreateOrRecycleBitmap(
   recycled_bitmaps_.Shrink(
       static_cast<wtf_size_t>(it - recycled_bitmaps_.begin()));
 
-  if (!recycled_bitmaps_.IsEmpty()) {
+  if (!recycled_bitmaps_.empty()) {
     RegisteredBitmap registered = std::move(recycled_bitmaps_.back());
     recycled_bitmaps_.pop_back();
     DCHECK(registered.bitmap->size() == size);

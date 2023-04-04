@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -149,6 +149,7 @@ class GL_EXPORT RealGLApi : public GLApiBase {
   // Compute |filtered_exts_| & |filtered_exts_str_| from |disabled_ext_|.
   void InitializeFilteredExtensionsIfNeeded();
 
+  const bool logging_enabled_;
   std::vector<std::string> disabled_exts_;
   // Filtered GL_EXTENSIONS we return to glGetString(i) calls.
   std::vector<std::string> filtered_exts_;

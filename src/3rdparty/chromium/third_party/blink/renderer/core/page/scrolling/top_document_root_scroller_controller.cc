@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,6 +90,11 @@ gfx::Size TopDocumentRootScrollerController::RootScrollerVisibleArea() const {
                               .size();
   return gfx::Size(layout_size.width(),
                    layout_size.height() + browser_controls_adjustment);
+}
+
+void TopDocumentRootScrollerController::Reset() {
+  global_root_scroller_.Clear();
+  viewport_apply_scroll_.Clear();
 }
 
 Node* TopDocumentRootScrollerController::FindGlobalRootScroller() {

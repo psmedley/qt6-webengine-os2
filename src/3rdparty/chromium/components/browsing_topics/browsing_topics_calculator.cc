@@ -1,8 +1,10 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/browsing_topics/browsing_topics_calculator.h"
+
+#include <algorithm>
 
 #include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
@@ -21,6 +23,49 @@
 namespace browsing_topics {
 
 namespace {
+
+// Return the max time among the three potential time boundaries:
+// - `calculation_time` - `kBrowsingTopicsTimePeriodPerEpoch`.
+// - Last epoch's calculation time.
+// - `data_accessible_since`.
+base::Time DeriveHistoryDataStartTime(
+    base::Time calculation_time,
+    const base::circular_deque<EpochTopics>& epochs,
+    base::Time data_accessible_since) {
+  base::Time start_time =
+      calculation_time -
+      blink::features::kBrowsingTopicsTimePeriodPerEpoch.Get();
+  if (!epochs.empty()) {
+    start_time = std::max(start_time, epochs.back().calculation_time());
+  }
+
+  return std::max(start_time, data_accessible_since);
+}
+
+// Return the max time among the three potential time boundaries:
+// - `calculation_time` - `epochs_window` * `kBrowsingTopicsTimePeriodPerEpoch`.
+// - The `epochs_window`-to-the-last epoch's calculation time.
+// - `data_accessible_since`.
+base::Time DeriveApiUsageContextDataStartTime(
+    base::Time calculation_time,
+    const base::circular_deque<EpochTopics>& epochs,
+    base::Time data_accessible_since) {
+  const size_t epochs_window =
+      blink::features::
+          kBrowsingTopicsNumberOfEpochsOfObservationDataToUseForFiltering.Get();
+  DCHECK_GT(epochs_window, 0u);
+
+  base::Time start_time =
+      calculation_time -
+      epochs_window * blink::features::kBrowsingTopicsTimePeriodPerEpoch.Get();
+
+  if (epochs.size() >= epochs_window) {
+    start_time = std::max(
+        start_time, epochs[epochs.size() - epochs_window].calculation_time());
+  }
+
+  return std::max(start_time, data_accessible_since);
+}
 
 void RecordCalculatorResultMetrics(
     const BrowsingTopicsCalculator::CalculatorResultStatus& status,
@@ -64,25 +109,22 @@ void RecordCalculatorResultMetrics(
 // Precondition: the annotation didn't fail in general (e.g. `ModelInfo` is
 // valid).
 void DeriveHostTopicsMapAndTopicHostsMap(
-    const std::vector<std::string>& raw_hosts,
     const std::vector<optimization_guide::BatchAnnotationResult>& results,
     std::map<HashedHost, std::set<Topic>>& host_topics_map,
     std::map<Topic, std::set<HashedHost>>& topic_hosts_map) {
   DCHECK(host_topics_map.empty());
   DCHECK(topic_hosts_map.empty());
 
-  DCHECK_EQ(raw_hosts.size(), results.size());
-
   for (size_t i = 0; i < results.size(); ++i) {
     const optimization_guide::BatchAnnotationResult& result = results[i];
-    const std::string raw_host = raw_hosts[i];
+    const std::string& original_host = result.input();
 
     const absl::optional<std::vector<optimization_guide::WeightedIdentifier>>&
         annotation_result_topics = result.topics();
     if (!annotation_result_topics)
       continue;
 
-    HashedHost host = HashMainFrameHostForStorage(raw_host);
+    HashedHost host = HashMainFrameHostForStorage(original_host);
 
     for (const optimization_guide::WeightedIdentifier& annotation_result_topic :
          *annotation_result_topics) {
@@ -109,22 +151,22 @@ std::set<HashedDomain> GetTopicObservationDomains(
 
   // If `topic` was padded, it may not exist in `topic_hosts_map`. In this
   // case, return an empty set.
-  auto it = topic_hosts_map.find(topic);
-  if (it == topic_hosts_map.end())
+  auto topic_it = topic_hosts_map.find(topic);
+  if (topic_it == topic_hosts_map.end())
     return std::set<HashedDomain>();
 
-  const std::set<HashedHost>& hosts = it->second;
+  const std::set<HashedHost>& hosts = topic_it->second;
 
   for (const HashedHost& host : hosts) {
     // `host` came from the history database, and it may not exist in the
     // `host_context_domains_map` which came from the usage contexts
     // database, due to e.g. per-context data deletion, database errors, etc.
     // In this case, continue checking other hosts.
-    auto it = host_context_domains_map.find(host);
-    if (it == host_context_domains_map.end())
+    auto host_it = host_context_domains_map.find(host);
+    if (host_it == host_context_domains_map.end())
       continue;
 
-    const std::vector<HashedDomain>& context_domains = it->second;
+    const std::vector<HashedDomain>& context_domains = host_it->second;
 
     for (const HashedDomain& context_domain : context_domains) {
       topic_observation_domains.insert(context_domain);
@@ -153,6 +195,7 @@ BrowsingTopicsCalculator::BrowsingTopicsCalculator(
     history::HistoryService* history_service,
     content::BrowsingTopicsSiteDataManager* site_data_manager,
     optimization_guide::PageContentAnnotationsService* annotations_service,
+    const base::circular_deque<EpochTopics>& epochs,
     CalculateCompletedCallback callback)
     : privacy_sandbox_settings_(privacy_sandbox_settings),
       history_service_(history_service),
@@ -160,6 +203,13 @@ BrowsingTopicsCalculator::BrowsingTopicsCalculator(
       annotations_service_(annotations_service),
       calculate_completed_callback_(std::move(callback)),
       calculation_time_(base::Time::Now()) {
+  history_data_start_time_ = DeriveHistoryDataStartTime(
+      calculation_time_, epochs,
+      privacy_sandbox_settings_->TopicsDataAccessibleSince());
+  api_usage_context_data_start_time_ = DeriveApiUsageContextDataStartTime(
+      calculation_time_, epochs,
+      privacy_sandbox_settings_->TopicsDataAccessibleSince());
+
   // Continue asynchronously so that `calculate_completed_callback_` isn't
   // called synchronously while `this` is being constructed.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -178,9 +228,11 @@ void BrowsingTopicsCalculator::DeriveTopTopics(
     const std::map<HashedHost, std::set<Topic>>& host_topics_map,
     size_t taxonomy_size,
     std::vector<Topic>& top_topics,
-    size_t& padded_top_topics_start_index) {
+    size_t& padded_top_topics_start_index,
+    size_t& history_topics_count) {
   DCHECK(top_topics.empty());
   DCHECK_EQ(padded_top_topics_start_index, 0u);
+  DCHECK_EQ(history_topics_count, 0u);
 
   // Derive the frequency of each topic, by summing up the frequencies of the
   // associated hosts. TODO(yaoxia): consider applying inverse frequency of
@@ -197,6 +249,8 @@ void BrowsingTopicsCalculator::DeriveTopTopics(
       topics_count[topic] += host_count;
     }
   }
+
+  history_topics_count = topics_count.size();
 
   DCHECK_LE(
       static_cast<size_t>(
@@ -240,7 +294,8 @@ void BrowsingTopicsCalculator::DeriveTopTopics(
 
 void BrowsingTopicsCalculator::CheckCanCalculate() {
   if (!privacy_sandbox_settings_->IsTopicsAllowed()) {
-    OnCalculateCompleted(CalculatorResultStatus::kFailurePermissionDenied);
+    OnCalculateCompleted(CalculatorResultStatus::kFailurePermissionDenied,
+                         EpochTopics(calculation_time_));
     return;
   }
 
@@ -248,9 +303,7 @@ void BrowsingTopicsCalculator::CheckCanCalculate() {
   // set of history hosts) so that we can figure out which topics the APIs were
   // called on.
   site_data_manager_->GetBrowsingTopicsApiUsage(
-      /*begin_time=*/DeriveApiUsageContextDataStartTime(
-          calculation_time_,
-          privacy_sandbox_settings_->TopicsDataAccessibleSince()),
+      /*begin_time=*/api_usage_context_data_start_time_,
       /*end_time=*/calculation_time_,
       base::BindOnce(&BrowsingTopicsCalculator::
                          OnGetRecentBrowsingTopicsApiUsagesCompleted,
@@ -263,7 +316,8 @@ void BrowsingTopicsCalculator::OnGetRecentBrowsingTopicsApiUsagesCompleted(
 
   if (!result.success) {
     OnCalculateCompleted(
-        CalculatorResultStatus::kFailureApiUsageContextQueryError);
+        CalculatorResultStatus::kFailureApiUsageContextQueryError,
+        EpochTopics(calculation_time_));
     return;
   }
 
@@ -275,12 +329,10 @@ void BrowsingTopicsCalculator::OnGetRecentBrowsingTopicsApiUsagesCompleted(
   // `ApiUsageContext::hashed_main_frame_host` is a hashed number. To get the
   // topic associated with it, we will need to match it against a set of raw
   // hosts with topics. Thus, here we query the history with the larger time
-  // range (from DeriveApiUsageContextDataStartTime() to `calculation_time_`) to
+  // range (from `api_usage_context_data_start_time_` to `calculation_time_`) to
   // get the raw hosts.
   history::QueryOptions options;
-  options.begin_time = DeriveApiUsageContextDataStartTime(
-      calculation_time_,
-      privacy_sandbox_settings_->TopicsDataAccessibleSince());
+  options.begin_time = api_usage_context_data_start_time_;
   options.end_time = calculation_time_;
   options.duplicate_policy = history::QueryOptions::KEEP_ALL_DUPLICATES;
 
@@ -307,10 +359,7 @@ void BrowsingTopicsCalculator::OnGetRecentlyVisitedURLsCompleted(
     std::string raw_host = url_result.url().host();
     raw_hosts.insert(raw_host);
 
-    if (url_result.visit_time() >=
-        DeriveHistoryDataStartTime(
-            calculation_time_,
-            privacy_sandbox_settings_->TopicsDataAccessibleSince())) {
+    if (url_result.visit_time() >= history_data_start_time_) {
       HashedHost host = HashMainFrameHostForStorage(raw_host);
       history_hosts_count_[host]++;
     }
@@ -339,18 +388,17 @@ void BrowsingTopicsCalculator::OnRequestModelCompleted(
   // Ignore `successful`. In `OnGetTopicsForHostsCompleted()`, it will need to
   // check the model again anyway in case there's a race.
   if (raw_hosts.empty()) {
-    OnGetTopicsForHostsCompleted(/*raw_hosts=*/{}, /*results=*/{});
+    OnGetTopicsForHostsCompleted(/*results=*/{});
     return;
   }
 
-  annotations_service_->BatchAnnotatePageTopics(
+  annotations_service_->BatchAnnotate(
       base::BindOnce(&BrowsingTopicsCalculator::OnGetTopicsForHostsCompleted,
-                     weak_ptr_factory_.GetWeakPtr(), raw_hosts),
-      raw_hosts);
+                     weak_ptr_factory_.GetWeakPtr()),
+      raw_hosts, optimization_guide::AnnotationType::kPageTopics);
 }
 
 void BrowsingTopicsCalculator::OnGetTopicsForHostsCompleted(
-    std::vector<std::string> raw_hosts,
     const std::vector<optimization_guide::BatchAnnotationResult>& results) {
   absl::optional<optimization_guide::ModelInfo> model_info =
       annotations_service_->GetModelInfoForType(
@@ -358,14 +406,16 @@ void BrowsingTopicsCalculator::OnGetTopicsForHostsCompleted(
 
   if (!model_info) {
     OnCalculateCompleted(
-        CalculatorResultStatus::kFailureAnnotationExecutionError);
+        CalculatorResultStatus::kFailureAnnotationExecutionError,
+        EpochTopics(calculation_time_));
     return;
   }
 
   absl::optional<size_t> taxonomy_size = GetTaxonomySize();
   if (!taxonomy_size) {
     OnCalculateCompleted(
-        CalculatorResultStatus::kFailureTaxonomyVersionNotSupportedInBinary);
+        CalculatorResultStatus::kFailureTaxonomyVersionNotSupportedInBinary,
+        EpochTopics(calculation_time_));
     return;
   }
 
@@ -374,13 +424,19 @@ void BrowsingTopicsCalculator::OnGetTopicsForHostsCompleted(
 
   std::map<HashedHost, std::set<Topic>> host_topics_map;
   std::map<Topic, std::set<HashedHost>> topic_hosts_map;
-  DeriveHostTopicsMapAndTopicHostsMap(raw_hosts, results, host_topics_map,
+  DeriveHostTopicsMapAndTopicHostsMap(results, host_topics_map,
                                       topic_hosts_map);
 
   std::vector<Topic> top_topics;
   size_t padded_top_topics_start_index = 0u;
+  size_t history_topics_count = 0u;
   DeriveTopTopics(history_hosts_count_, host_topics_map, *taxonomy_size,
-                  top_topics, padded_top_topics_start_index);
+                  top_topics, padded_top_topics_start_index,
+                  history_topics_count);
+
+  base::UmaHistogramCounts1000(
+      "BrowsingTopics.EpochTopicsCalculation.HistoryTopicsCount",
+      history_topics_count);
 
   base::UmaHistogramCounts100(
       "BrowsingTopics.EpochTopicsCalculation.TopTopicsCountBeforePadding",

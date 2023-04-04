@@ -25,12 +25,12 @@
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/GrStyle.h"
 #include "src/gpu/ganesh/GrUtil.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrBezierEffect.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 
 #define PREALLOC_PTARRAY(N) SkSTArray<(N),SkPoint, true>
 
@@ -72,7 +72,7 @@ static const uint16_t kQuadIdxBufPattern[] = {
     1, 4, 2
 };
 
-static const int kIdxsPerQuad = SK_ARRAY_COUNT(kQuadIdxBufPattern);
+static const int kIdxsPerQuad = std::size(kQuadIdxBufPattern);
 static const int kQuadNumVertices = 5;
 static const int kQuadsNumInIdxBuffer = 256;
 SKGPU_DECLARE_STATIC_UNIQUE_KEY(gQuadsIndexBufferKey);
@@ -105,7 +105,7 @@ static const uint16_t kLineSegIdxBufPattern[] = {
     1, 5, 3
 };
 
-static const int kIdxsPerLineSeg = SK_ARRAY_COUNT(kLineSegIdxBufPattern);
+static const int kIdxsPerLineSeg = std::size(kLineSegIdxBufPattern);
 static const int kLineSegNumVertices = 6;
 static const int kLineSegsNumInIdxBuffer = 256;
 
@@ -149,12 +149,11 @@ int get_float_exp(float x) {
 // and dst[1] are the two new conics.
 int split_conic(const SkPoint src[3], SkConic dst[2], const SkScalar weight) {
     SkScalar t = SkFindQuadMaxCurvature(src);
-    if (t == 0 || t == 1) {
-        if (dst) {
-            dst[0].set(src, weight);
-        }
-        return 1;
-    } else {
+    // SkFindQuadMaxCurvature() returns either a value in [0, 1) or NaN.
+    // However, passing NaN to conic.chopAt() will assert. Checking to see if
+    // t is in (0,1) will also cover the NaN case since NaN comparisons are always
+    // false, so we'll drop down into the else block in that case.
+    if (0 < t && t < 1) {
         if (dst) {
             SkConic conic;
             conic.set(src, weight);
@@ -164,6 +163,11 @@ int split_conic(const SkPoint src[3], SkConic dst[2], const SkScalar weight) {
             }
         }
         return 2;
+    } else {
+        if (dst) {
+            dst[0].set(src, weight);
+        }
+        return 1;
     }
 }
 
@@ -1046,7 +1050,7 @@ void AAHairlineOp::makeConicProgramInfo(const GrCaps& caps, SkArenaAlloc* arena,
 }
 
 AAHairlineOp::Program AAHairlineOp::predictPrograms(const GrCaps* caps) const {
-    bool convertConicsToQuads = !caps->shaderCaps()->floatIs32Bits();
+    bool convertConicsToQuads = !caps->shaderCaps()->fFloatIs32Bits;
 
     // When predicting the programs we always include the lineProgram bc it is used as a fallback
     // for quads and conics. In non-DDL mode there are cases where it sometimes isn't needed for a
@@ -1168,7 +1172,7 @@ void AAHairlineOp::onPrepareDraws(GrMeshDrawTarget* target) {
     int quadCount = 0;
 
     int instanceCount = fPaths.count();
-    bool convertConicsToQuads = !target->caps().shaderCaps()->floatIs32Bits();
+    bool convertConicsToQuads = !target->caps().shaderCaps()->fFloatIs32Bits;
     for (int i = 0; i < instanceCount; i++) {
         const PathData& args = fPaths[i];
         quadCount += gather_lines_and_quads(args.fPath, args.fViewMatrix, args.fDevClipBounds,
@@ -1319,7 +1323,7 @@ PathRenderer::CanDrawPath AAHairLinePathRenderer::onCanDrawPath(const CanDrawPat
     }
 
     if (SkPath::kLine_SegmentMask == args.fShape->segmentMask() ||
-        args.fCaps->shaderCaps()->shaderDerivativeSupport()) {
+        args.fCaps->shaderCaps()->fShaderDerivativeSupport) {
         return CanDrawPath::kYes;
     }
 
@@ -1343,4 +1347,3 @@ bool AAHairLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
 }
 
 } // namespace skgpu::v1
-

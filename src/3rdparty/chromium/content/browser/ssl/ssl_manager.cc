@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,6 +54,7 @@ enum class MixedContentType {
 };
 
 void OnAllowCertificate(SSLErrorHandler* handler,
+                        StoragePartition* storage_partition,
                         SSLHostStateDelegate* state_delegate,
                         bool record_decision,
                         CertificateRequestResultType decision) {
@@ -71,9 +72,9 @@ void OnAllowCertificate(SSLErrorHandler* handler,
       // ContinueRequest() gets posted to a different thread. Calling
       // AllowCert() first ensures deterministic ordering.
       if (record_decision && state_delegate) {
-        state_delegate->AllowCert(
-            handler->request_url().host(), *handler->ssl_info().cert.get(),
-            handler->cert_error(), handler->web_contents());
+        state_delegate->AllowCert(handler->request_url().host(),
+                                  *handler->ssl_info().cert.get(),
+                                  handler->cert_error(), storage_partition);
       }
       handler->ContinueRequest();
       return;
@@ -114,7 +115,7 @@ void LogMixedContentMetrics(MixedContentType type,
 // static
 void SSLManager::OnSSLCertificateError(
     const base::WeakPtr<SSLErrorHandler::Delegate>& delegate,
-    bool is_main_frame_request,
+    bool is_primary_main_frame_request,
     const GURL& url,
     NavigationOrDocumentHandle* navigation_or_document,
     int net_error,
@@ -135,8 +136,8 @@ void SSLManager::OnSSLCertificateError(
   }
 
   std::unique_ptr<SSLErrorHandler> handler(
-      new SSLErrorHandler(web_contents, delegate, is_main_frame_request, url,
-                          net_error, ssl_info, fatal));
+      new SSLErrorHandler(web_contents, delegate, is_primary_main_frame_request,
+                          url, net_error, ssl_info, fatal));
 
   if (!web_contents || !frame_tree_node) {
     // Requests can fail to dispatch because they don't have a WebContents. See
@@ -214,11 +215,15 @@ void SSLManager::DidCommitProvisionalLoad(const LoadCommittedDetails& details) {
     remove_content_status_flags = ~0;
   }
 
-  if (!UpdateEntry(entry, add_content_status_flags,
-                   remove_content_status_flags)) {
+  if (!UpdateEntry(entry, add_content_status_flags, remove_content_status_flags,
+                   /*notify_changes=*/details.is_in_active_page)) {
     // Ensure the WebContents is notified that the SSL state changed when a
     // load is committed, in case the active navigation entry has changed.
-    NotifyDidChangeVisibleSSLState();
+    // Notification will only be called during activation if this commit is
+    // triggered by prerendering.
+    if (details.is_in_active_page) {
+      NotifyDidChangeVisibleSSLState();
+    }
   }
 }
 
@@ -231,6 +236,10 @@ void SSLManager::DidDisplayMixedContent() {
     ukm::SourceId source_id = main_frame->GetPageUkmSourceId();
     LogMixedContentMetrics(MixedContentType::kOptionallyBlockableMixedContent,
                            source_id, ukm::UkmRecorder::Get());
+    WebContents* contents = WebContents::FromRenderFrameHost(main_frame);
+    if (contents) {
+      GetContentClient()->browser()->OnDisplayInsecureContent(contents);
+    }
   }
   UpdateLastCommittedEntry(SSLStatus::DISPLAYED_INSECURE_CONTENT, 0);
 }
@@ -289,7 +298,9 @@ void SSLManager::DidRunMixedContent(const GURL& security_origin) {
         security_origin.host(), site_instance->GetProcess()->GetID(),
         SSLHostStateDelegate::MIXED_CONTENT);
   }
-  UpdateEntry(entry, 0, 0);
+  // TODO(crbug.com/1320302): Ensure proper notify_changes is passed to
+  // UpdateEntry.
+  UpdateEntry(entry, 0, 0, /*notify_changes=*/true);
   NotifySSLInternalStateChanged(controller_->GetBrowserContext());
 }
 
@@ -317,7 +328,9 @@ void SSLManager::DidRunContentWithCertErrors(const GURL& security_origin) {
         security_origin.host(), site_instance->GetProcess()->GetID(),
         SSLHostStateDelegate::CERT_ERRORS_CONTENT);
   }
-  UpdateEntry(entry, 0, 0);
+  // TODO(crbug.com/1320302): Ensure proper notify_changes is passed to
+  // UpdateEntry.
+  UpdateEntry(entry, 0, 0, /*notify_changes=*/true);
   NotifySSLInternalStateChanged(controller_->GetBrowserContext());
 }
 
@@ -336,7 +349,8 @@ void SSLManager::OnCertError(std::unique_ptr<SSLErrorHandler> handler) {
   } else if (ssl_host_state_delegate_) {
     judgment = ssl_host_state_delegate_->QueryPolicy(
         handler->request_url().host(), *handler->ssl_info().cert.get(),
-        handler->cert_error(), handler->web_contents());
+        handler->cert_error(),
+        controller_->frame_tree().GetMainFrame()->GetStoragePartition());
   } else {
     judgment = SSLHostStateDelegate::DENIED;
   }
@@ -350,16 +364,21 @@ void SSLManager::OnCertError(std::unique_ptr<SSLErrorHandler> handler) {
   OnCertErrorInternal(std::move(handler));
 }
 
-void SSLManager::DidStartResourceResponse(const GURL& url,
-                                          bool has_certificate_errors) {
-  if (!url.SchemeIsCryptographic() || has_certificate_errors)
+void SSLManager::DidStartResourceResponse(
+    const url::SchemeHostPort& final_response_url,
+    bool has_certificate_errors) {
+  const std::string& scheme = final_response_url.scheme();
+  const std::string& host = final_response_url.host();
+
+  if (!GURL::SchemeIsCryptographic(scheme) || has_certificate_errors)
     return;
 
   // If the scheme is https: or wss and the cert did not have any errors, revoke
   // any previous decisions that have occurred.
   if (!ssl_host_state_delegate_ ||
       !ssl_host_state_delegate_->HasAllowException(
-          url.host(), controller_->DeprecatedGetWebContents())) {
+          host,
+          controller_->frame_tree().GetMainFrame()->GetStoragePartition())) {
     return;
   }
 
@@ -367,7 +386,7 @@ void SSLManager::DidStartResourceResponse(const GURL& url,
   // clear out any exceptions that were made by the user for bad
   // certificates. This intentionally does not apply to cached resources
   // (see https://crbug.com/634553 for an explanation).
-  ssl_host_state_delegate_->RevokeUserAllowExceptions(url.host());
+  ssl_host_state_delegate_->RevokeUserAllowExceptions(host);
 }
 
 void SSLManager::OnCertErrorInternal(std::unique_ptr<SSLErrorHandler> handler) {
@@ -375,13 +394,14 @@ void SSLManager::OnCertErrorInternal(std::unique_ptr<SSLErrorHandler> handler) {
   int cert_error = handler->cert_error();
   const net::SSLInfo& ssl_info = handler->ssl_info();
   const GURL& request_url = handler->request_url();
-  bool is_main_frame_request = handler->is_main_frame_request();
+  bool is_primary_main_frame_request = handler->is_primary_main_frame_request();
   bool fatal = handler->fatal();
 
   base::RepeatingCallback<void(bool, content::CertificateRequestResultType)>
-      callback = base::BindRepeating(&OnAllowCertificate,
-                                     base::Owned(handler.release()),
-                                     ssl_host_state_delegate_);
+      callback = base::BindRepeating(
+          &OnAllowCertificate, base::Owned(handler.release()),
+          controller_->frame_tree().GetMainFrame()->GetStoragePartition(),
+          ssl_host_state_delegate_);
 
   if (devtools_instrumentation::HandleCertificateError(
           web_contents, cert_error, request_url,
@@ -390,13 +410,15 @@ void SSLManager::OnCertErrorInternal(std::unique_ptr<SSLErrorHandler> handler) {
   }
 
   GetContentClient()->browser()->AllowCertificateError(
-      web_contents, cert_error, ssl_info, request_url, is_main_frame_request,
-      fatal, base::BindOnce(std::move(callback), true));
+      web_contents, cert_error, ssl_info, request_url,
+      is_primary_main_frame_request, fatal,
+      base::BindOnce(std::move(callback), true));
 }
 
 bool SSLManager::UpdateEntry(NavigationEntryImpl* entry,
                              int add_content_status_flags,
-                             int remove_content_status_flags) {
+                             int remove_content_status_flags,
+                             bool notify_changes) {
   // We don't always have a navigation entry to update, for example in the
   // case of the Web Inspector.
   if (!entry)
@@ -439,7 +461,9 @@ bool SSLManager::UpdateEntry(NavigationEntryImpl* entry,
 
   if (entry->GetSSL().initialized != original_ssl_status.initialized ||
       entry->GetSSL().content_status != original_ssl_status.content_status) {
-    NotifyDidChangeVisibleSSLState();
+    if (notify_changes) {
+      NotifyDidChangeVisibleSSLState();
+    }
     return true;
   }
 
@@ -468,7 +492,10 @@ void SSLManager::UpdateLastCommittedEntry(int add_content_status_flags,
 
   if (!entry)
     return;
-  UpdateEntry(entry, add_content_status_flags, remove_content_status_flags);
+  // TODO(crbug.com/1320302): Ensure proper notify_changes is passed to
+  // UpdateEntry.
+  UpdateEntry(entry, add_content_status_flags, remove_content_status_flags,
+              /*notify_changes=*/true);
 }
 
 void SSLManager::NotifyDidChangeVisibleSSLState() {
@@ -482,8 +509,11 @@ void SSLManager::NotifySSLInternalStateChanged(BrowserContext* context) {
   SSLManagerSet* managers =
       static_cast<SSLManagerSet*>(context->GetUserData(kSSLManagerKeyName));
 
-  for (auto i = managers->get().begin(); i != managers->get().end(); ++i) {
-    (*i)->UpdateEntry((*i)->controller()->GetLastCommittedEntry(), 0, 0);
+  for (auto* manager : managers->get()) {
+    // TODO(crbug.com/1320302): Ensure proper notify_changes is passed to
+    // UpdateEntry.
+    manager->UpdateEntry(manager->controller()->GetLastCommittedEntry(), 0, 0,
+                         /*notify_changes=*/true);
   }
 }
 

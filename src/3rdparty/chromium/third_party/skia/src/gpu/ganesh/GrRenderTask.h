@@ -77,8 +77,8 @@ public:
      */
     void addDependenciesFromOtherTask(GrRenderTask* otherTask);
 
-    SkSpan<GrRenderTask*> dependencies() { return SkMakeSpan(fDependencies); }
-    SkSpan<GrRenderTask*> dependents() { return SkMakeSpan(fDependents); }
+    SkSpan<GrRenderTask*> dependencies() { return SkSpan(fDependencies); }
+    SkSpan<GrRenderTask*> dependents() { return SkSpan(fDependents); }
 
     void replaceDependency(const GrRenderTask* toReplace, GrRenderTask* replaceWith);
     void replaceDependent(const GrRenderTask* toReplace, GrRenderTask* replaceWith);
@@ -89,9 +89,6 @@ public:
      */
     bool dependsOn(const GrRenderTask* dependedOn) const;
 
-    virtual void gatherIDs(SkSTArray<8, uint32_t, true>* idArray) const {
-        idArray->push_back(fUniqueID);
-    }
     uint32_t uniqueID() const { return fUniqueID; }
     int numTargets() const { return fTargets.count(); }
     GrSurfaceProxy* target(int i) const { return fTargets[i].get(); }
@@ -163,7 +160,7 @@ protected:
     };
 
     // Performs any work to finalize this renderTask prior to execution. If returning
-    // ExpectedOutcome::kTargetDiry, the caller is also responsible to fill out the area it will
+    // ExpectedOutcome::kTargetDirty, the caller is also responsible to fill out the area it will
     // modify in targetUpdateBounds.
     //
     // targetUpdateBounds must not extend beyond the proxy bounds.

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ struct TestTransaction {
             const std::string& response_headers) {
     std::string temp(response_headers);
     std::replace(temp.begin(), temp.end(), '\n', '\0');
-    response = new HttpResponseHeaders(temp);
+    response = base::MakeRefCounted<HttpResponseHeaders>(temp);
 
     request.extra_headers.Clear();
     for (const auto& [key, value] : request_headers)

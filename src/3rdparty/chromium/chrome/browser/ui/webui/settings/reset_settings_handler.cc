@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -186,9 +186,9 @@ void ResetSettingsHandler::HandleGetReportedSettings(
 }
 
 void ResetSettingsHandler::OnGetReportedSettingsDone(std::string callback_id) {
-  std::unique_ptr<base::ListValue> list =
+  base::Value::List list =
       GetReadableFeedbackForSnapshot(profile_, *setting_snapshot_);
-  ResolveJavascriptCallback(base::Value(callback_id), *list);
+  ResolveJavascriptCallback(base::Value(callback_id), list);
 }
 
 void ResetSettingsHandler::OnShowResetProfileDialog(

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "components/account_id/account_id.h"
 #include "components/services/app_service/public/cpp/app_types.h"
 #include "components/services/app_service/public/cpp/app_update.h"
-#include "components/services/app_service/public/cpp/features.h"
 
 namespace apps {
 
@@ -50,9 +49,12 @@ class COMPONENT_EXPORT(APP_UPDATE) AppRegistryCache {
 
     // The apps::AppUpdate argument shouldn't be accessed after OnAppUpdate
     // returns.
-    virtual void OnAppUpdate(const AppUpdate& update) = 0;
+    virtual void OnAppUpdate(const AppUpdate& update) {}
 
-    // Called when the publisher for |app_type| has finished initiating apps.
+    // Called when the AppRegistryCache first receives a set of apps for
+    // |app_type|. This is usually when a publisher first publishes its apps but
+    // may also happen if the AppRegistryCache gets instantiated after this
+    // event (e.g. after a Lacros restart).
     // Note that this will not be called for app types initialized prior to this
     // observer being registered. Observers should call
     // AppRegistryCache::InitializedAppTypes() at the time of starting
@@ -143,38 +145,6 @@ class COMPONENT_EXPORT(APP_UPDATE) AppRegistryCache {
   void ForEachApp(FunctionType f) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(my_sequence_checker_);
 
-    if (base::FeatureList::IsEnabled(kAppServiceOnAppUpdateWithoutMojom)) {
-      ForAllApps(std::move(f));
-      return;
-    }
-
-    for (const auto& s_iter : mojom_states_) {
-      const apps::mojom::App* state = s_iter.second.get();
-
-      auto d_iter = mojom_deltas_in_progress_.find(s_iter.first);
-      const apps::mojom::App* delta =
-          (d_iter != mojom_deltas_in_progress_.end()) ? d_iter->second
-                                                      : nullptr;
-
-      f(apps::AppUpdate(state, delta, account_id_));
-    }
-
-    for (const auto& d_iter : mojom_deltas_in_progress_) {
-      const apps::mojom::App* delta = d_iter.second;
-
-      auto s_iter = mojom_states_.find(d_iter.first);
-      if (s_iter != mojom_states_.end()) {
-        continue;
-      }
-
-      f(apps::AppUpdate(nullptr, delta, account_id_));
-    }
-  }
-
-  template <typename FunctionType>
-  void ForAllApps(FunctionType f) {
-    DCHECK_CALLED_ON_VALID_SEQUENCE(my_sequence_checker_);
-
     for (const auto& s_iter : states_) {
       const App* state = s_iter.second.get();
 
@@ -208,29 +178,6 @@ class COMPONENT_EXPORT(APP_UPDATE) AppRegistryCache {
   bool ForOneApp(const std::string& app_id, FunctionType f) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(my_sequence_checker_);
 
-    if (base::FeatureList::IsEnabled(kAppServiceOnAppUpdateWithoutMojom)) {
-      return ForApp(app_id, std::move(f));
-    }
-
-    auto s_iter = mojom_states_.find(app_id);
-    const apps::mojom::App* state =
-        (s_iter != mojom_states_.end()) ? s_iter->second.get() : nullptr;
-
-    auto d_iter = mojom_deltas_in_progress_.find(app_id);
-    const apps::mojom::App* delta =
-        (d_iter != mojom_deltas_in_progress_.end()) ? d_iter->second : nullptr;
-
-    if (state || delta) {
-      f(apps::AppUpdate(state, delta, account_id_));
-      return true;
-    }
-    return false;
-  }
-
-  template <typename FunctionType>
-  bool ForApp(const std::string& app_id, FunctionType f) const {
-    DCHECK_CALLED_ON_VALID_SEQUENCE(my_sequence_checker_);
-
     auto s_iter = states_.find(app_id);
     const App* state =
         (s_iter != states_.end()) ? s_iter->second.get() : nullptr;
@@ -251,14 +198,15 @@ class COMPONENT_EXPORT(APP_UPDATE) AppRegistryCache {
 
   bool IsAppTypeInitialized(AppType app_type) const;
 
+  // Clears all apps from the cache.
+  void ReinitializeForTesting();
+
  private:
   friend class AppRegistryCacheTest;
   friend class PublisherTest;
 
   void DoOnApps(std::vector<apps::mojom::AppPtr> deltas);
   void DoOnApps(std::vector<AppPtr> deltas);
-
-  void OnMojomAppTypeInitialized();
 
   void OnAppTypeInitialized();
 
@@ -291,7 +239,6 @@ class COMPONENT_EXPORT(APP_UPDATE) AppRegistryCache {
 
   // Saves app types which will finish initialization, and OnAppTypeInitialized
   // will be called to notify observers.
-  std::set<apps::mojom::AppType> in_progress_initialized_mojom_app_types_;
   std::set<AppType> in_progress_initialized_app_types_;
 
   // Saves app types which have finished initialization, and

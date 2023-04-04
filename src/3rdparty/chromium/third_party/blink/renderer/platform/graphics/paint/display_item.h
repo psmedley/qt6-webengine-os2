@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_DISPLAY_ITEM_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_DISPLAY_ITEM_H_
 
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
@@ -187,6 +188,9 @@ class PLATFORM_EXPORT DisplayItem {
     const wtf_size_t fragment;
 
     struct HashKey {
+      DISALLOW_NEW();
+
+     public:
       HashKey() = default;
       explicit HashKey(const DisplayItem::Id& id)
           : client_id(id.client_id), type(id.type), fragment(id.fragment) {}

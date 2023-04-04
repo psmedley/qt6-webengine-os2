@@ -1,10 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/skia_utils.h"
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -22,6 +23,11 @@ namespace {
 // require pre-scaling if the default filter would require an
 // allocation that exceeds this limit.
 const size_t kImageCacheSingleAllocationByteLimit = 64 * 1024 * 1024;
+
+// Decreases the size of the font cache to 1MiB.
+BASE_FEATURE(kSmallerFontCache,
+             "SmallerFontCache",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace
 
@@ -56,6 +62,12 @@ void InitializeSkia() {
     }
   }
 #endif
+
+  if (base::FeatureList::IsEnabled(kSmallerFontCache)) {
+    // Could also reduce the maximum number of cached strikes, but the intent
+    // being to reduce memory usage, only control cache memory usage.
+    SkGraphics::SetFontCacheLimit(kMB);
+  }
 
   InitSkiaEventTracer();
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(

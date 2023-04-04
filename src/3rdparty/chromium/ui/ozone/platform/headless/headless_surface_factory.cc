@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@
 #include "ui/ozone/platform/headless/headless_window_manager.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
-#if BUILDFLAG(ENABLE_VULKAN) && BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(ENABLE_VULKAN) && (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_FUCHSIA))
 #include "ui/ozone/platform/headless/vulkan_implementation_headless.h"
 #endif
 
@@ -49,15 +49,8 @@ base::FilePath GetPathForWidget(const base::FilePath& base_path,
   if (base_path.empty() || base_path == base::FilePath(kDevNull))
     return base_path;
 
-    // Disambiguate multiple window output files with the window id.
-#if BUILDFLAG(IS_WIN)
-  std::string path =
-      base::NumberToString(reinterpret_cast<int>(widget)) + ".png";
-  std::wstring wpath(path.begin(), path.end());
-  return base_path.Append(wpath);
-#else
+  // Disambiguate multiple window output files with the window id.
   return base_path.Append(base::NumberToString(widget) + ".png");
-#endif
 }
 
 void WriteDataToFile(const base::FilePath& location, const SkBitmap& bitmap) {
@@ -114,8 +107,8 @@ class FileSurface : public SurfaceOzoneCanvas {
 
 class FileGLSurface : public GLSurfaceEglReadback {
  public:
-  explicit FileGLSurface(const base::FilePath& location)
-      : location_(location) {}
+  FileGLSurface(gl::GLDisplayEGL* display, const base::FilePath& location)
+      : GLSurfaceEglReadback(display), location_(location) {}
 
   FileGLSurface(const FileGLSurface&) = delete;
   FileGLSurface& operator=(const FileGLSurface&) = delete;
@@ -195,15 +188,19 @@ class GLOzoneEGLHeadless : public GLOzoneEGL {
 
   // GLOzone:
   scoped_refptr<gl::GLSurface> CreateViewGLSurface(
+      gl::GLDisplay* display,
       gfx::AcceleratedWidget window) override {
     return gl::InitializeGLSurface(base::MakeRefCounted<FileGLSurface>(
+        display->GetAs<gl::GLDisplayEGL>(),
         GetPathForWidget(base_path_, window)));
   }
 
   scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
+      gl::GLDisplay* display,
       const gfx::Size& size) override {
     return gl::InitializeGLSurface(
-        base::MakeRefCounted<gl::PbufferGLSurfaceEGL>(size));
+        base::MakeRefCounted<gl::PbufferGLSurfaceEGL>(
+            display->GetAs<gl::GLDisplayEGL>(), size));
   }
 
  protected:
@@ -235,8 +232,8 @@ HeadlessSurfaceFactory::~HeadlessSurfaceFactory() = default;
 std::vector<gl::GLImplementationParts>
 HeadlessSurfaceFactory::GetAllowedGLImplementations() {
   return std::vector<gl::GLImplementationParts>{
-      gl::GLImplementationParts(gl::kGLImplementationEGLGLES2),
       gl::GLImplementationParts(gl::ANGLEImplementation::kSwiftShader),
+      gl::GLImplementationParts(gl::kGLImplementationEGLGLES2),
       gl::GLImplementationParts(gl::ANGLEImplementation::kDefault),
   };
 }
@@ -260,7 +257,7 @@ HeadlessSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
 
 scoped_refptr<gfx::NativePixmap> HeadlessSurfaceFactory::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
-    VkDevice vk_device,
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
@@ -280,13 +277,17 @@ void HeadlessSurfaceFactory::CheckBasePath() const {
     PLOG(FATAL) << "Unable to write to output location";
 }
 
-#if BUILDFLAG(ENABLE_VULKAN) && BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(ENABLE_VULKAN)
 std::unique_ptr<gpu::VulkanImplementation>
 HeadlessSurfaceFactory::CreateVulkanImplementation(
     bool use_swiftshader,
     bool allow_protected_memory) {
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_FUCHSIA)
   return std::make_unique<VulkanImplementationHeadless>(use_swiftshader);
-}
+#else
+  return nullptr;
 #endif
+}
+#endif  // BUILDFLAG(ENABLE_VULKAN)
 
 }  // namespace ui

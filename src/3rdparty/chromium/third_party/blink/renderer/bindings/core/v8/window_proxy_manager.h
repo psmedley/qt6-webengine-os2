@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,14 +21,15 @@ class DOMWrapperWorld;
 class LocalFrame;
 class SecurityOrigin;
 
-class WindowProxyManager : public GarbageCollected<WindowProxyManager> {
+class CORE_EXPORT WindowProxyManager
+    : public GarbageCollected<WindowProxyManager> {
  public:
   void Trace(Visitor*) const;
 
   v8::Isolate* GetIsolate() const { return isolate_; }
 
   void ClearForClose();
-  CORE_EXPORT void ClearForNavigation();
+  void ClearForNavigation();
   void ClearForSwap();
   void ClearForV8MemoryPurge();
 
@@ -38,8 +39,8 @@ class WindowProxyManager : public GarbageCollected<WindowProxyManager> {
   // like https://crbug.com/700077.
   using GlobalProxyVector =
       Vector<std::pair<DOMWrapperWorld*, v8::Local<v8::Object>>>;
-  void CORE_EXPORT ReleaseGlobalProxies(GlobalProxyVector&);
-  void CORE_EXPORT SetGlobalProxies(const GlobalProxyVector&);
+  void ReleaseGlobalProxies(GlobalProxyVector&);
+  void SetGlobalProxies(const GlobalProxyVector&);
 
   WindowProxy* GetWindowProxy(DOMWrapperWorld& world) {
     WindowProxy* window_proxy = WindowProxyMaybeUninitialized(world);
@@ -52,7 +53,7 @@ class WindowProxyManager : public GarbageCollected<WindowProxyManager> {
     return window_proxy;
   }
 
-  CORE_EXPORT void ResetIsolatedWorldsForTesting();
+  void ResetIsolatedWorldsForTesting();
 
  protected:
   using IsolatedWorldMap = HeapHashMap<int, Member<WindowProxy>>;

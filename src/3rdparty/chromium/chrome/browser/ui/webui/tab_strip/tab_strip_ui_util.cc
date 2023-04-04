@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ absl::optional<tab_groups::TabGroupId> GetTabGroupIdFromString(
 
 Browser* GetBrowserWithGroupId(Profile* profile, std::string group_id_string) {
   for (auto* browser : *BrowserList::GetInstance()) {
-    if (browser->profile() != profile) {
+    if (profile && browser->profile() != profile) {
       continue;
     }
 
@@ -69,12 +69,12 @@ void MoveTabAcrossWindows(Browser* source_browser,
       source_browser->tab_strip_model()->DetachWebContentsAtForInsertion(
           from_index);
 
-  int add_types = TabStripModel::ADD_NONE;
+  int add_types = AddTabTypes::ADD_NONE;
   if (was_active) {
-    add_types |= TabStripModel::ADD_ACTIVE;
+    add_types |= AddTabTypes::ADD_ACTIVE;
   }
   if (was_pinned) {
-    add_types |= TabStripModel::ADD_PINNED;
+    add_types |= AddTabTypes::ADD_PINNED;
   }
 
   target_browser->tab_strip_model()->InsertWebContentsAt(

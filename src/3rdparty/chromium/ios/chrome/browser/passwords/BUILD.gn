@@ -1,8 +1,6 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
-import("//ios/web/js_compile.gni")
 
 source_set("passwords") {
   configs += [ "//build/config/compiler:enable_arc" ]
@@ -15,8 +13,6 @@ source_set("passwords") {
     "ios_chrome_password_check_manager_factory.mm",
     "ios_chrome_password_manager_client.h",
     "ios_chrome_password_manager_client.mm",
-    "ios_chrome_password_manager_driver.h",
-    "ios_chrome_password_manager_driver.mm",
     "ios_password_requirements_service_factory.cc",
     "ios_password_requirements_service_factory.h",
     "notify_auto_signin_view_controller.h",
@@ -27,6 +23,8 @@ source_set("passwords") {
     "password_controller.mm",
     "password_manager_log_router_factory.cc",
     "password_manager_log_router_factory.h",
+    "password_manager_util_ios.cc",
+    "password_manager_util_ios.h",
     "password_store_observer_bridge.h",
     "password_store_observer_bridge.mm",
     "password_tab_helper.h",
@@ -69,6 +67,7 @@ source_set("passwords") {
     "//ios/chrome/browser",
     "//ios/chrome/browser/autofill:autofill_shared",
     "//ios/chrome/browser/browser_state",
+    "//ios/chrome/browser/flags:system_flags",
     "//ios/chrome/browser/infobars",
     "//ios/chrome/browser/infobars:public",
     "//ios/chrome/browser/main:public",
@@ -83,7 +82,6 @@ source_set("passwords") {
     "//ios/chrome/browser/ui/alert_coordinator",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/elements",
-    "//ios/chrome/browser/ui/elements:selector_coordinator",
     "//ios/chrome/browser/ui/infobars/coordinators",
     "//ios/chrome/browser/ui/ntp:logo",
     "//ios/chrome/browser/ui/util",
@@ -199,6 +197,7 @@ source_set("unit_tests") {
     "ios_chrome_password_manager_client_unittest.mm",
     "password_controller_js_unittest.mm",
     "password_controller_unittest.mm",
+    "password_tab_helper_unittest.mm",
     "well_known_change_password_tab_helper_unittest.mm",
   ]
   deps = [
@@ -255,7 +254,7 @@ source_set("eg2_tests") {
     "//base/test:test_support",
     "//components/password_manager/core/common",
     "//components/strings",
-    "//ios/chrome/app/strings:ios_strings_grit",
+    "//ios/chrome/app/strings",
     "//ios/chrome/browser/ui/authentication:eg_test_support+eg2",
     "//ios/chrome/browser/ui/infobars/banners:public",
     "//ios/chrome/test:eg_test_support+eg2",

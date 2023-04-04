@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,11 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
+#include "gpu/config/gpu_info.h"
 #include "media/mojo/mojom/video_encode_accelerator.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 #include "media/video/video_encode_accelerator.h"
@@ -43,18 +45,21 @@ class MEDIA_MOJO_EXPORT MojoVideoEncodeAcceleratorService
           Client* client,
           const gpu::GpuPreferences& gpu_preferences,
           const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
+          const gpu::GPUInfo::GPUDevice& gpu_device,
           std::unique_ptr<MediaLog> media_log)>;
 
   static void Create(
       mojo::PendingReceiver<mojom::VideoEncodeAccelerator> receiver,
       CreateAndInitializeVideoEncodeAcceleratorCallback create_vea_callback,
       const gpu::GpuPreferences& gpu_preferences,
-      const gpu::GpuDriverBugWorkarounds& gpu_workarounds);
+      const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
+      const gpu::GPUInfo::GPUDevice& gpu_device);
 
   MojoVideoEncodeAcceleratorService(
       CreateAndInitializeVideoEncodeAcceleratorCallback create_vea_callback,
       const gpu::GpuPreferences& gpu_preferences,
-      const gpu::GpuDriverBugWorkarounds& gpu_workarounds);
+      const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
+      const gpu::GPUInfo::GPUDevice& gpu_device);
 
   MojoVideoEncodeAcceleratorService(const MojoVideoEncodeAcceleratorService&) =
       delete;
@@ -73,7 +78,7 @@ class MEDIA_MOJO_EXPORT MojoVideoEncodeAcceleratorService
               bool force_keyframe,
               EncodeCallback callback) override;
   void UseOutputBitstreamBuffer(int32_t bitstream_buffer_id,
-                                mojo::ScopedSharedBufferHandle buffer) override;
+                                base::UnsafeSharedMemoryRegion region) override;
   void RequestEncodingParametersChangeWithBitrate(
       const media::Bitrate& bitrate_allocation,
       uint32_t framerate) override;
@@ -100,6 +105,7 @@ class MEDIA_MOJO_EXPORT MojoVideoEncodeAcceleratorService
   CreateAndInitializeVideoEncodeAcceleratorCallback create_vea_callback_;
   const gpu::GpuPreferences& gpu_preferences_;
   const gpu::GpuDriverBugWorkarounds gpu_workarounds_;
+  const gpu::GPUInfo::GPUDevice& gpu_device_;
 
   // Owned pointer to the underlying VideoEncodeAccelerator.
   std::unique_ptr<::media::VideoEncodeAccelerator> encoder_;

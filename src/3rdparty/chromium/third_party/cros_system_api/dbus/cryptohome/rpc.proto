@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -83,6 +83,9 @@ enum CryptohomeErrorCode {
   CRYPTOHOME_ADD_CREDENTIALS_FAILED = 50;
   CRYPTOHOME_ERROR_UNAUTHENTICATED_AUTH_SESSION = 51;
   CRYPTOHOME_ERROR_UNKNOWN_LEGACY = 52;
+  CRYPTOHOME_ERROR_UNUSABLE_VAULT = 53;
+  CRYPTOHOME_REMOVE_CREDENTIALS_FAILED = 54;
+  CRYPTOHOME_UPDATE_CREDENTIALS_FAILED = 55;
 }
 
 message AccountIdentifier {

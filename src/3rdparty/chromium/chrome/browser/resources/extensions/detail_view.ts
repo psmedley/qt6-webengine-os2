@@ -1,40 +1,41 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
-import 'chrome://resources/cr_elements/cr_icons_css.m.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import 'chrome://resources/cr_elements/cr_icons.css.js';
 import 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
-import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
-import 'chrome://resources/cr_elements/icons.m.js';
-import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.m.js';
-import 'chrome://resources/cr_elements/shared_style_css.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import 'chrome://resources/cr_elements/icons.html.js';
+import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.js';
+import 'chrome://resources/cr_elements/cr_shared_style.css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import 'chrome://resources/js/action_link.js';
-import 'chrome://resources/cr_elements/action_link_css.m.js';
+import 'chrome://resources/cr_elements/action_link.css.js';
 import 'chrome://resources/polymer/v3_0/iron-flex-layout/iron-flex-layout-classes.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import 'chrome://resources/polymer/v3_0/paper-spinner/paper-spinner-lite.js';
 import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 import './host_permissions_toggle_list.js';
 import './runtime_host_permissions.js';
-import './shared_style.js';
-import './shared_vars.js';
+import './shared_style.css.js';
+import './shared_vars.css.js';
 import './strings.m.js';
 import './toggle_row.js';
 
 import {CrLinkRowElement} from 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
-import {CrTooltipIconElement} from 'chrome://resources/cr_elements/policy/cr_tooltip_icon.m.js';
-import {focusWithoutInk} from 'chrome://resources/js/cr/ui/focus_without_ink.m.js';
+import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import {CrTooltipIconElement} from 'chrome://resources/cr_elements/policy/cr_tooltip_icon.js';
+import {assert} from 'chrome://resources/js/assert_ts.js';
+import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {afterNextRender, DomRepeatEvent, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {getTemplate} from './detail_view.html.js';
 
+import {getTemplate} from './detail_view.html.js';
 import {ItemDelegate} from './item.js';
 import {ItemMixin} from './item_mixin.js';
-import {computeInspectableViewLabel, EnableControl, getEnableControl, getItemSource, getItemSourceString, isEnabled, userCanChangeEnablement} from './item_util.js';
+import {computeInspectableViewLabel, EnableControl, getEnableControl, getItemSource, getItemSourceString, isEnabled, sortViews, userCanChangeEnablement} from './item_util.js';
 import {navigation, Page} from './navigation_helper.js';
 import {ExtensionsToggleRowElement} from './toggle_row.js';
 
@@ -91,6 +92,12 @@ export class ExtensionsDetailViewElement extends
 
       /** Whether the user navigated to this page from the activity log page. */
       fromActivityLog: Boolean,
+
+      /** Inspectable views sorted to put background/service workers first */
+      sortedViews_: {
+        type: Array,
+        computed: 'computeSortedViews_(data.views)',
+      },
     };
   }
 
@@ -106,10 +113,7 @@ export class ExtensionsDetailViewElement extends
   showActivityLog: boolean;
   fromActivityLog: boolean;
   private size_: string;
-
-  override connectedCallback() {
-    super.connectedCallback();
-  }
+  private sortedViews_: chrome.developerPrivate.ExtensionView[];
 
   override ready() {
     super.ready();
@@ -194,6 +198,10 @@ export class ExtensionsDetailViewElement extends
       offText: string): string {
     // TODO(devlin): Get the full spectrum of these strings from bettes.
     return isEnabled(state) ? onText : offText;
+  }
+
+  private computeSortedViews_(): chrome.developerPrivate.ExtensionView[] {
+    return sortViews(this.data.views);
   }
 
   private computeInspectLabel_(view: chrome.developerPrivate.ExtensionView):
@@ -327,6 +335,19 @@ export class ExtensionsDetailViewElement extends
   private showHostPermissionsToggleList_(): boolean {
     return this.hasRuntimeHostPermissions_() &&
         !this.data.permissions.runtimeHostPermissions!.hasAllHosts;
+  }
+
+  private showEnableAccessRequestsToggle_(): boolean {
+    return this.showSiteAccessContent_() && this.enableEnhancedSiteControls;
+  }
+
+  private onShowAccessRequestsChange_() {
+    const showAccessRequestsToggle =
+        this.shadowRoot!.querySelector<ExtensionsToggleRowElement>(
+            '#show-access-requests-toggle');
+    assert(showAccessRequestsToggle);
+    this.delegate.setShowAccessRequestsInToolbar(
+        this.data.id, showAccessRequestsToggle.checked);
   }
 
   private showReloadButton_(): boolean {

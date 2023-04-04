@@ -15,6 +15,7 @@
 #include "src/tint/ast/array.h"
 
 #include <cmath>
+#include <utility>
 
 #include "src/tint/program_builder.h"
 
@@ -24,53 +25,56 @@ namespace tint::ast {
 
 namespace {
 // Returns the string representation of an array size expression.
-std::string SizeExprToString(const Expression* size,
-                             const SymbolTable& symbols) {
-  if (auto* ident = size->As<IdentifierExpression>()) {
-    return symbols.NameFor(ident->symbol);
-  }
-  if (auto* literal = size->As<IntLiteralExpression>()) {
-    return std::to_string(literal->ValueAsU32());
-  }
-  // This will never be exposed to the user as the Resolver will reject this
-  // expression for array size.
-  return "<invalid>";
+std::string SizeExprToString(const Expression* size, const SymbolTable& symbols) {
+    if (auto* ident = size->As<IdentifierExpression>()) {
+        return symbols.NameFor(ident->symbol);
+    }
+    if (auto* literal = size->As<IntLiteralExpression>()) {
+        return std::to_string(literal->value);
+    }
+    // This will never be exposed to the user as the Resolver will reject this
+    // expression for array size.
+    return "<invalid>";
 }
 }  // namespace
 
 Array::Array(ProgramID pid,
+             NodeID nid,
              const Source& src,
              const Type* subtype,
              const Expression* cnt,
-             AttributeList attrs)
-    : Base(pid, src), type(subtype), count(cnt), attributes(attrs) {}
+             utils::VectorRef<const Attribute*> attrs)
+    : Base(pid, nid, src), type(subtype), count(cnt), attributes(std::move(attrs)) {}
 
 Array::Array(Array&&) = default;
 
 Array::~Array() = default;
 
 std::string Array::FriendlyName(const SymbolTable& symbols) const {
-  std::ostringstream out;
-  for (auto* attr : attributes) {
-    if (auto* stride = attr->As<ast::StrideAttribute>()) {
-      out << "@stride(" << stride->stride << ") ";
+    std::ostringstream out;
+    for (auto* attr : attributes) {
+        if (auto* stride = attr->As<ast::StrideAttribute>()) {
+            out << "@stride(" << stride->stride << ") ";
+        }
     }
-  }
-  out << "array<" << type->FriendlyName(symbols);
-  if (!IsRuntimeArray()) {
-    out << ", " << SizeExprToString(count, symbols);
-  }
-  out << ">";
-  return out.str();
+    out << "array";
+    if (type) {
+        out << "<" << type->FriendlyName(symbols);
+        if (count) {
+            out << ", " << SizeExprToString(count, symbols);
+        }
+        out << ">";
+    }
+    return out.str();
 }
 
 const Array* Array::Clone(CloneContext* ctx) const {
-  // Clone arguments outside of create() call to have deterministic ordering
-  auto src = ctx->Clone(source);
-  auto* ty = ctx->Clone(type);
-  auto* cnt = ctx->Clone(count);
-  auto attrs = ctx->Clone(attributes);
-  return ctx->dst->create<Array>(src, ty, cnt, attrs);
+    // Clone arguments outside of create() call to have deterministic ordering
+    auto src = ctx->Clone(source);
+    auto* ty = ctx->Clone(type);
+    auto* cnt = ctx->Clone(count);
+    auto attrs = ctx->Clone(attributes);
+    return ctx->dst->create<Array>(src, ty, cnt, std::move(attrs));
 }
 
 }  // namespace tint::ast

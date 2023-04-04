@@ -1,4 +1,4 @@
-// Copyright (c) 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(DateTimeChooserBrowserTest,
   EXPECT_TRUE(NavigateToURL(shell(), test_url));
 
   auto* date_time_chooser = DateTimeChooserAndroid::FromWebContents(
-      WebContents::FromRenderFrameHost(web_contents()->GetMainFrame()));
+      WebContents::FromRenderFrameHost(web_contents()->GetPrimaryMainFrame()));
   ASSERT_TRUE(date_time_chooser);
 
   mojo::Remote<blink::mojom::DateTimeChooser> date_time_chooser_remote;

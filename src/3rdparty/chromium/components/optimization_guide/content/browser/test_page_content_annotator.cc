@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@ TestPageContentAnnotator::TestPageContentAnnotator() = default;
 void TestPageContentAnnotator::Annotate(BatchAnnotationCallback callback,
                                         const std::vector<std::string>& inputs,
                                         AnnotationType annotation_type) {
+  annotation_requests_.emplace_back(std::make_pair(inputs, annotation_type));
+
   std::vector<BatchAnnotationResult> results;
 
   if (annotation_type == AnnotationType::kPageTopics) {
@@ -90,9 +92,15 @@ void TestPageContentAnnotator::UseVisibilityScores(
   visibility_scores_for_input_ = visibility_scores_for_input;
 }
 
+bool TestPageContentAnnotator::ModelRequestedForType(
+    AnnotationType type) const {
+  return model_requests_.contains(type);
+}
+
 void TestPageContentAnnotator::RequestAndNotifyWhenModelAvailable(
     AnnotationType type,
     base::OnceCallback<void(bool)> callback) {
+  model_requests_.insert(type);
   std::move(callback).Run(true);
 }
 

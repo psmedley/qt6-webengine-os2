@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,7 @@ class FieldTrialsProviderTest;
 class SyntheticTrialRegistryTest;
 
 namespace internal {
-COMPONENT_EXPORT(VARIATIONS)
-extern const base::Feature kExternalExperimentAllowlist;
+COMPONENT_EXPORT(VARIATIONS) BASE_DECLARE_FEATURE(kExternalExperimentAllowlist);
 }  // namespace internal
 
 class COMPONENT_EXPORT(VARIATIONS) SyntheticTrialRegistry {
@@ -85,6 +84,8 @@ class COMPONENT_EXPORT(VARIATIONS) SyntheticTrialRegistry {
   friend SyntheticTrialRegistryTest;
   FRIEND_TEST_ALL_PREFIXES(SyntheticTrialRegistryTest, RegisterSyntheticTrial);
   FRIEND_TEST_ALL_PREFIXES(SyntheticTrialRegistryTest,
+                           GetSyntheticFieldTrialsOlderThanSuffix);
+  FRIEND_TEST_ALL_PREFIXES(SyntheticTrialRegistryTest,
                            GetSyntheticFieldTrialActiveGroups);
   FRIEND_TEST_ALL_PREFIXES(VariationsCrashKeysTest, BasicFunctionality);
 
@@ -103,11 +104,10 @@ class COMPONENT_EXPORT(VARIATIONS) SyntheticTrialRegistry {
   // recorded. The values passed in must not correspond to any real field trial
   // in the code.
   //
-  // The registered trials are not persisted to disk and will not be applied
-  // after a restart.
+  // Synthetic trials are not automatically re-registered after a restart.
   //
-  // Note: Should not be used to replace trials that were
-  // registered with RegisterExternalExperiments().
+  // Note: Should not be used to replace trials that were registered with
+  // RegisterExternalExperiments().
   void RegisterSyntheticFieldTrial(const SyntheticTrialGroup& trial_group);
 
   // Returns the study name corresponding to |experiment_id| from the allowlist
@@ -119,10 +119,12 @@ class COMPONENT_EXPORT(VARIATIONS) SyntheticTrialRegistry {
                                          const std::string& experiment_id);
 
   // Returns a list of synthetic field trials that are either (1) older than
-  // |time|, or (2) specify |kCurrentLog| as |annotation_mode|.
+  // |time|, or (2) specify |kCurrentLog| as |annotation_mode|. The trial and
+  // group names are suffixed with |suffix| before being hashed.
   void GetSyntheticFieldTrialsOlderThan(
       base::TimeTicks time,
-      std::vector<ActiveGroupId>* synthetic_trials) const;
+      std::vector<ActiveGroupId>* synthetic_trials,
+      base::StringPiece suffix = "") const;
 
   // Notifies observers on a synthetic trial list change.
   void NotifySyntheticTrialObservers();

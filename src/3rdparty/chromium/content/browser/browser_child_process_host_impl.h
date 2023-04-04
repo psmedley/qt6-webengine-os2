@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,11 +79,6 @@ class BrowserChildProcessHostImpl
   void Launch(std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
               std::unique_ptr<base::CommandLine> cmd_line,
               bool terminate_on_shutdown) override;
-  void LaunchWithPreloadedFiles(
-      std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
-      std::unique_ptr<base::CommandLine> cmd_line,
-      std::map<std::string, base::FilePath> files_to_preload,
-      bool terminate_on_shutdown) override;
   const ChildProcessData& GetData() override;
   ChildProcessHost* GetHost() override;
   ChildProcessTerminationInfo GetTerminationInfo(bool known_dead) override;
@@ -113,6 +108,14 @@ class BrowserChildProcessHostImpl
   // Adds an IPC message filter.
   void AddFilter(BrowserMessageFilter* filter);
 
+  // Same as Launch(), but the process is launched with preloaded files and file
+  // descriptors containing in `file_data`.
+  void LaunchWithFileData(
+      std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
+      std::unique_ptr<base::CommandLine> cmd_line,
+      std::unique_ptr<ChildProcessLauncherFileData> file_data,
+      bool terminate_on_shutdown);
+
   // Unlike Launch(), AppendExtraCommandLineSwitches will not be called
   // in this function. If AppendExtraCommandLineSwitches has been called before
   // reaching launch, call this function instead so the command line switches
@@ -120,7 +123,7 @@ class BrowserChildProcessHostImpl
   void LaunchWithoutExtraCommandLineSwitches(
       std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
       std::unique_ptr<base::CommandLine> cmd_line,
-      std::map<std::string, base::FilePath> files_to_preload,
+      std::unique_ptr<ChildProcessLauncherFileData> file_data,
       bool terminate_on_shutdown);
 
   static void HistogramBadMessageTerminated(ProcessType process_type);
@@ -133,6 +136,7 @@ class BrowserChildProcessHostImpl
   BrowserChildProcessHostDelegate* delegate() const { return delegate_; }
 
   mojo::OutgoingInvitation* GetInProcessMojoInvitation() {
+    in_process_ = true;
     return &child_process_host_->GetMojoInvitation().value();
   }
 
@@ -215,8 +219,26 @@ class BrowserChildProcessHostImpl
   // transferred to the child process.
   base::WritableSharedMemoryRegion metrics_shared_region_;
 
+  // Indicates if the main browser process is used instead of a dedicated child
+  // process.
+  bool in_process_ = false;
+
+  // Indicates if legacy IPC is used to communicate with the child process. In
+  // this mode, the BrowserChildProcessHost waits for OnChannelConnected() to be
+  // called before sending the BrowserChildProcessLaunchedAndConnected
+  // notification.
   bool has_legacy_ipc_channel_ = false;
-  bool notify_child_connection_status_ = true;
+
+  // Indicates if the IPC channel is connected. Always true when not using
+  // legacy IPC.
+  bool is_channel_connected_ = true;
+
+  // Indicates if the BrowserChildProcessLaunchedAndConnected notification was
+  // sent for this instance.
+  bool launched_and_connected_ = false;
+
+  // Whether the child process exited abnormally (killed or crashed).
+  bool exited_abnormally_ = false;
 
 #if BUILDFLAG(IS_ANDROID)
   // whether the child process can use pre-warmed up connection for better

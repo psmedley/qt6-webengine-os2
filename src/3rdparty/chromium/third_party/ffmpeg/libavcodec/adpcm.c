@@ -43,7 +43,7 @@
 #include "adpcm.h"
 #include "adpcm_data.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 /**
  * @file
@@ -1062,10 +1062,9 @@ static int get_nb_samples(AVCodecContext *avctx, GetByteContext *gb,
     return nb_samples;
 }
 
-static int adpcm_decode_frame(AVCodecContext *avctx, void *data,
+static int adpcm_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                               int *got_frame_ptr, AVPacket *avpkt)
 {
-    AVFrame *frame     = data;
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     ADPCMDecodeContext *c = avctx->priv_data;
@@ -2288,16 +2287,15 @@ static const enum AVSampleFormat sample_fmts_both[] = { AV_SAMPLE_FMT_S16,
 #define ADPCM_DECODER_1(id_, sample_fmts_, name_, long_name_) \
 const FFCodec ff_ ## name_ ## _decoder = {                  \
     .p.name         = #name_,                               \
-    .p.long_name    = NULL_IF_CONFIG_SMALL(long_name_),     \
+    CODEC_LONG_NAME(long_name_),                            \
     .p.type         = AVMEDIA_TYPE_AUDIO,                   \
     .p.id           = id_,                                  \
     .p.capabilities = AV_CODEC_CAP_DR1,                     \
     .p.sample_fmts  = sample_fmts_,                         \
     .priv_data_size = sizeof(ADPCMDecodeContext),           \
     .init           = adpcm_decode_init,                    \
-    .decode         = adpcm_decode_frame,                   \
+    FF_CODEC_DECODE_CB(adpcm_decode_frame),                 \
     .flush          = adpcm_flush,                          \
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,         \
 };
 #define ADPCM_DECODER_2(enabled, codec_id, name, sample_fmts, long_name) \
     ADPCM_DECODER_ ## enabled(codec_id, name, sample_fmts, long_name)

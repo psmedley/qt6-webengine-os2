@@ -13,7 +13,6 @@
 #include "quiche/quic/platform/api/quic_test.h"
 #include "quiche/quic/test_tools/qpack/qpack_decoder_test_utils.h"
 #include "quiche/quic/test_tools/qpack/qpack_test_utils.h"
-#include "quiche/spdy/core/spdy_header_block.h"
 
 using ::testing::_;
 using ::testing::Eq;
@@ -224,10 +223,8 @@ TEST_P(QpackDecoderTest, ValueLenExceedsLimit) {
 }
 
 TEST_P(QpackDecoderTest, LineFeedInValue) {
-  EXPECT_CALL(handler_,
-              OnDecodingErrorDetected(QUIC_INVALID_CHARACTER_IN_FIELD_VALUE,
-                                      "Invalid character in field value."));
-
+  EXPECT_CALL(handler_, OnHeaderDecoded(Eq("foo"), Eq("ba\nr")));
+  EXPECT_CALL(handler_, OnDecodingCompleted());
   DecodeHeaderBlock(absl::HexStringToBytes("000023666f6f0462610a72"));
 }
 

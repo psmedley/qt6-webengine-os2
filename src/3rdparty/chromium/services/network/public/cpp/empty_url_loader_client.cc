@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,9 +65,16 @@ void EmptyURLLoaderClient::OnReceiveEarlyHints(
 
 void EmptyURLLoaderClient::OnReceiveResponse(
     const mojom::URLResponseHeadPtr head,
-    mojo::ScopedDataPipeConsumerHandle body) {
-  if (body)
-    OnStartLoadingResponseBody(std::move(body));
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
+  if (!body)
+    return;
+
+  // TODO(bashi): Consider failing the request rather than DCHECK in case a
+  // URLLoader is misbehaved.
+  DCHECK(!response_body_drainer_);
+  response_body_drainer_ =
+      std::make_unique<mojo::DataPipeDrainer>(this, std::move(body));
 }
 
 void EmptyURLLoaderClient::OnReceiveRedirect(
@@ -80,18 +87,7 @@ void EmptyURLLoaderClient::OnUploadProgress(int64_t current_position,
   std::move(callback).Run();
 }
 
-void EmptyURLLoaderClient::OnReceiveCachedMetadata(mojo_base::BigBuffer data) {}
-
 void EmptyURLLoaderClient::OnTransferSizeUpdated(int32_t transfer_size_diff) {}
-
-void EmptyURLLoaderClient::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle body) {
-  // TODO(bashi): Consider failing the request rather than DCHECK in case a
-  // URLLoader is misbehaved.
-  DCHECK(!response_body_drainer_);
-  response_body_drainer_ =
-      std::make_unique<mojo::DataPipeDrainer>(this, std::move(body));
-}
 
 void EmptyURLLoaderClient::OnComplete(const URLLoaderCompletionStatus& status) {
   done_status_ = status;

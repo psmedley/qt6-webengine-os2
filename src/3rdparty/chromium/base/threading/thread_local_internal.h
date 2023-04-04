@@ -1,11 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_THREADING_THREAD_LOCAL_INTERNAL_H_
 #define BASE_THREADING_THREAD_LOCAL_INTERNAL_H_
 
-#include "base/memory/raw_ptr.h"
+#include "base/dcheck_is_on.h"
 
 #if DCHECK_IS_ON()
 
@@ -13,6 +13,8 @@
 #include <memory>
 #include <ostream>
 
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_local_storage.h"
 
 namespace base {
@@ -28,7 +30,7 @@ class CheckedThreadLocalOwnedPointer {
  public:
   CheckedThreadLocalOwnedPointer() = default;
 
-  CheckedThreadLocalOwnedPointer<T>(const CheckedThreadLocalOwnedPointer<T>&) =
+  CheckedThreadLocalOwnedPointer(const CheckedThreadLocalOwnedPointer&) =
       delete;
   CheckedThreadLocalOwnedPointer<T>& operator=(
       const CheckedThreadLocalOwnedPointer<T>&) = delete;

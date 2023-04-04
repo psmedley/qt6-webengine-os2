@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
       base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub,
       gl::GLSurfaceFormat format) override;
   base::ScopedClosureRunner CacheGLSurface(gl::GLSurface* surface) override;
-  void PostTaskToClientThread(base::OnceClosure closure) override;
+  scoped_refptr<base::TaskRunner> GetClientTaskRunner() override;
   void ScheduleGrContextCleanup() override;
   void ScheduleDelayedGPUTaskFromGPUThread(base::OnceClosure task) override;
 
@@ -62,8 +62,6 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
       gpu::SurfaceHandle child_window) override;
 #endif
 
-  void RegisterDisplayContext(gpu::DisplayContext* display_context) override;
-  void UnregisterDisplayContext(gpu::DisplayContext* display_context) override;
   void DidLoseContext(gpu::error::ContextLostReason reason,
                       const GURL& active_url) override;
 

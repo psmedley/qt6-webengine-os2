@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,12 +93,14 @@ class CONTENT_EXPORT BrowsingInstance final
   // cross-origin-opener-policy set to same-origin and
   // cross-origin-embedder-policy set to require-corp, and if so, from which
   // top level origin. |is_guest| specifies whether this BrowsingInstance will
-  // be used in a <webview> guest; note that this cannot change over the
-  // lifetime of the BrowsingInstance.
+  // be used in a <webview> guest; |is_fenced| specifies whether this
+  // BrowsingInstance is used inside a fenced frame. Note that both |is_guest|
+  // and |is_fenced| cannot change over the lifetime of the BrowsingInstance.
   explicit BrowsingInstance(
       BrowserContext* context,
       const WebExposedIsolationInfo& web_exposed_isolation_info,
-      bool is_guest);
+      bool is_guest,
+      bool is_fenced);
 
   ~BrowsingInstance();
 
@@ -214,6 +216,8 @@ class CONTENT_EXPORT BrowsingInstance final
     return web_exposed_isolation_info_;
   }
 
+  SiteInstanceImpl* default_site_instance() { return default_site_instance_; }
+
   // The next available browser-global BrowsingInstance ID.
   static int next_browsing_instance_id_;
 
@@ -244,14 +248,15 @@ class CONTENT_EXPORT BrowsingInstance final
 
   // SiteInstance to use if a URL does not correspond to an instance in
   // |site_instance_map_| and it does not require a dedicated process.
-  // This field and |default_process_| are mutually exclusive and this field
-  // should only be set if kProcessSharingWithStrictSiteInstances is not
-  // enabled. This is a raw pointer to avoid a reference cycle between the
-  // BrowsingInstance and the SiteInstanceImpl.
-  // Note: This can hold cross-origin isolated SiteInstances. It will however
-  // only do so under certain specific circumstances (for example on a low
-  // memory device), which don't use the COOP isolation heuristic that normally
-  // prevents the use of default SiteInstances for cross-origin isolated pages.
+  // This field and site_instance_group_manager_.default_process_ are mutually
+  // exclusive and this field should only be set if
+  // kProcessSharingWithStrictSiteInstances is not enabled. This is a raw
+  // pointer to avoid a reference cycle between the BrowsingInstance and the
+  // SiteInstanceImpl. Note: This can hold cross-origin isolated SiteInstances.
+  // It will however only do so under certain specific circumstances (for
+  // example on a low memory device), which don't use the COOP isolation
+  // heuristic that normally prevents the use of default SiteInstances for
+  // cross-origin isolated pages.
   raw_ptr<SiteInstanceImpl> default_site_instance_;
 
   // The cross-origin isolation status of the BrowsingInstance. This indicates

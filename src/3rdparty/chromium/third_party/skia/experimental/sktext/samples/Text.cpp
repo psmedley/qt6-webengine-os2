@@ -13,7 +13,6 @@
 #include "include/core/SkTime.h"
 #include "samplecode/Sample.h"
 #include "src/core/SkOSFile.h"
-#include "src/shaders/SkColorShader.h"
 #include "src/utils/SkOSPath.h"
 #include "src/utils/SkUTF.h"
 #include "tools/Resources.h"
@@ -47,9 +46,6 @@ protected:
                   const std::u16string& text,
                   TextAlign align,
                   TextDirection direction = TextDirection::kLtr) {
-        const std::u16string& ellipsis = u"\u2026";
-        SkScalar margin = 20;
-
         SkAutoCanvasRestore acr(canvas, true);
 
         canvas->clipRect(SkRect::MakeWH(w, h));

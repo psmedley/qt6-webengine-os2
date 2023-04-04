@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,6 +52,7 @@ class MetricsCollector : public FrameNode::ObserverDefaultImpl,
   void OnTitleUpdated(const PageNode* page_node) override;
 
   // ProcessNodeObserver implementation:
+  void OnProcessLifetimeChange(const ProcessNode* process_node) override;
   void OnBeforeProcessNodeRemoved(const ProcessNode* process_node) override;
 
  protected:
@@ -98,7 +99,9 @@ class MetricsCollector : public FrameNode::ObserverDefaultImpl,
   bool ShouldReportMetrics(const PageNode* page_node);
   void UpdateUkmSourceIdForPage(const PageNode* page_node,
                                 ukm::SourceId ukm_source_id);
-  void ResetMetricsReportRecord(const PageNode* page_nod);
+  void ResetMetricsReportRecord(const PageNode* page_node);
+
+  void OnProcessDestroyed(const ProcessNode* process_node);
 
   // The graph to which this object belongs.
   raw_ptr<Graph> graph_ = nullptr;

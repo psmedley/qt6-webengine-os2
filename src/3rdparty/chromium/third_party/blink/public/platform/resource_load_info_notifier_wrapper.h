@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,9 @@ class BLINK_PLATFORM_EXPORT ResourceLoadInfoNotifierWrapper {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   ~ResourceLoadInfoNotifierWrapper();
 
+#if BUILDFLAG(IS_ANDROID)
+  void NotifyUpdateUserGestureCarryoverInfo();
+#endif
   void NotifyResourceLoadInitiated(
       int64_t request_id,
       const GURL& request_url,

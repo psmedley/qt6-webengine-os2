@@ -1,9 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_CAPTURE_VIDEO_MAC_VIDEO_CAPTURE_DEVICE_AVFOUNDATION_MAC_H_
 #define MEDIA_CAPTURE_VIDEO_MAC_VIDEO_CAPTURE_DEVICE_AVFOUNDATION_MAC_H_
+
+#include "base/memory/raw_ptr.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
@@ -63,7 +65,7 @@ class CAPTURE_EXPORT VideoCaptureDeviceAVFoundationFrameReceiver {
 // the capturer. These are available either when the camera supports it and
 // kAVFoundationCaptureV2ZeroCopy is enabled or when kInCaptureConvertToNv12 is
 // used to convert frames to NV12.
-CAPTURE_EXPORT extern const base::Feature kInCapturerScaling;
+CAPTURE_EXPORT BASE_DECLARE_FEATURE(kInCapturerScaling);
 
 // Find the best capture format from |formats| for the specified dimensions and
 // frame rate. Returns an element of |formats|, or nil.
@@ -98,7 +100,7 @@ CAPTURE_EXPORT
   base::Lock _lock;
   // Used to avoid UAF in -captureOutput.
   base::Lock _destructionLock;
-  media::VideoCaptureDeviceAVFoundationFrameReceiver* _frameReceiver
+  raw_ptr<media::VideoCaptureDeviceAVFoundationFrameReceiver> _frameReceiver
       GUARDED_BY(_lock);  // weak.
   bool _capturedFirstFrame GUARDED_BY(_lock);
   bool _capturedFrameSinceLastStallCheck GUARDED_BY(_lock);

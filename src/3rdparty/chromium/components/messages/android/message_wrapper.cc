@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -189,7 +189,8 @@ void MessageWrapper::SetSecondaryIconResourceId(int resource_id) {
                                                  resource_id);
 }
 
-void MessageWrapper::SetSecondaryActionCallback(base::OnceClosure callback) {
+void MessageWrapper::SetSecondaryActionCallback(
+    base::RepeatingClosure callback) {
   secondary_action_callback_ = std::move(callback);
 }
 
@@ -218,12 +219,12 @@ void MessageWrapper::HandleActionClick(JNIEnv* env) {
 
 void MessageWrapper::HandleSecondaryActionClick(JNIEnv* env) {
   if (!secondary_action_callback_.is_null())
-    std::move(secondary_action_callback_).Run();
+    secondary_action_callback_.Run();
 }
 
 void MessageWrapper::HandleSecondaryMenuItemSelected(JNIEnv* env, int item_id) {
   if (!secondary_menu_item_selected_callback_.is_null())
-    std::move(secondary_menu_item_selected_callback_).Run(item_id);
+    secondary_menu_item_selected_callback_.Run(item_id);
 }
 
 void MessageWrapper::HandleDismissCallback(JNIEnv* env, int dismiss_reason) {

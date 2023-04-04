@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,13 +32,33 @@
 
 namespace blink {
 
+namespace {
+
+bool CanUseConstraintSpaceForCaching(const NGLayoutResult* previous_result,
+                                     const LayoutBox& box) {
+  if (!previous_result)
+    return false;
+  const auto& space = previous_result->GetConstraintSpaceForCaching();
+  if (space.IsFixedInlineSize() && box.HasOverrideLogicalWidth()) {
+    if (space.AvailableSize().inline_size != box.OverrideLogicalWidth())
+      return false;
+  }
+  if (space.IsFixedBlockSize() && box.HasOverrideLogicalHeight()) {
+    if (space.AvailableSize().block_size != box.OverrideLogicalHeight())
+      return false;
+  }
+  return space.GetWritingMode() == box.StyleRef().GetWritingMode();
+}
+
+}  // namespace
+
 template <typename Base>
 LayoutNGMixin<Base>::LayoutNGMixin(ContainerNode* node) : Base(node) {
   Base::CheckIsNotDestroyed();
   static_assert(
       std::is_base_of<LayoutBlock, Base>::value,
       "Base class of LayoutNGMixin must be LayoutBlock or derived class.");
-  if (node && node->IsElementNode())
+  if (node)
     Base::GetDocument().IncLayoutBlockCounterNG();
 }
 
@@ -57,7 +77,10 @@ void LayoutNGMixin<Base>::Paint(const PaintInfo& paint_info) const {
              LayoutNGBlockFlow::kForbidBreaks ||
          !Base::CanTraversePhysicalFragments() ||
          !Base::Parent()->CanTraversePhysicalFragments());
-  DCHECK_LE(Base::PhysicalFragmentCount(), 1u);
+  // We may get here in multiple-fragment cases if the object is repeated
+  // (inside table headers and footers, for instance).
+  DCHECK(Base::PhysicalFragmentCount() <= 1u ||
+         Base::GetPhysicalFragment(0)->BreakToken()->IsRepeated());
 
   // Avoid painting dirty objects because descendants maybe already destroyed.
   if (UNLIKELY(Base::NeedsLayout() &&
@@ -81,7 +104,7 @@ template <typename Base>
 bool LayoutNGMixin<Base>::NodeAtPoint(HitTestResult& result,
                                       const HitTestLocation& hit_test_location,
                                       const PhysicalOffset& accumulated_offset,
-                                      HitTestAction action) {
+                                      HitTestPhase phase) {
   Base::CheckIsNotDestroyed();
 
   // See |Paint()|.
@@ -89,13 +112,16 @@ bool LayoutNGMixin<Base>::NodeAtPoint(HitTestResult& result,
              LayoutNGBlockFlow::kForbidBreaks ||
          !Base::CanTraversePhysicalFragments() ||
          !Base::Parent()->CanTraversePhysicalFragments());
-  DCHECK_LE(Base::PhysicalFragmentCount(), 1u);
+  // We may get here in multiple-fragment cases if the object is repeated
+  // (inside table headers and footers, for instance).
+  DCHECK(Base::PhysicalFragmentCount() <= 1u ||
+         Base::GetPhysicalFragment(0)->BreakToken()->IsRepeated());
 
   if (Base::PhysicalFragmentCount()) {
     const NGPhysicalBoxFragment* fragment = Base::GetPhysicalFragment(0);
     DCHECK(fragment);
     return NGBoxFragmentPainter(*fragment).NodeAtPoint(
-        result, hit_test_location, accumulated_offset, action);
+        result, hit_test_location, accumulated_offset, phase);
   }
 
   return false;
@@ -272,11 +298,13 @@ void LayoutNGMixin<Base>::UpdateOutOfFlowBlockLayout() {
   Base::CheckIsNotDestroyed();
 
   auto* css_container = To<LayoutBoxModelObject>(Base::Container());
-  LayoutBox* container = css_container->IsBox() ? To<LayoutBox>(css_container)
-                                                : Base::ContainingBlock();
+  DCHECK(!css_container->IsBox() || css_container->IsLayoutBlock());
+  auto* container = DynamicTo<LayoutBlock>(css_container);
+  if (!container)
+    container = Base::ContainingBlock();
   const ComputedStyle* container_style = container->Style();
   NGConstraintSpace constraint_space =
-      NGConstraintSpace::CreateFromLayoutObject(*this);
+      NGConstraintSpace::CreateFromLayoutObject(*container);
 
   // As this is part of the Legacy->NG bridge, the container_builder is used
   // for indicating the resolved size of the OOF-positioned containing-block
@@ -287,7 +315,7 @@ void LayoutNGMixin<Base>::UpdateOutOfFlowBlockLayout() {
   NGBlockNode container_node(container);
   NGBoxFragmentBuilder container_builder(
       container_node, scoped_refptr<const ComputedStyle>(container_style),
-      /* space */ nullptr, container_style->GetWritingDirection());
+      constraint_space, container_style->GetWritingDirection());
   container_builder.SetIsNewFormattingContext(
       container_node.CreatesNewFormattingContext());
 
@@ -335,25 +363,17 @@ void LayoutNGMixin<Base>::UpdateOutOfFlowBlockLayout() {
       NGBlockNode(this), static_position,
       DynamicTo<LayoutInline>(css_container));
 
-  absl::optional<LogicalSize> initial_containing_block_fixed_size;
-  auto* layout_view = DynamicTo<LayoutView>(container);
-  if (layout_view && !Base::GetDocument().Printing()) {
-    if (LocalFrameView* frame_view = layout_view->GetFrameView()) {
-      PhysicalSize size(
-          frame_view->LayoutViewport()->ExcludeScrollbars(frame_view->Size()));
-      initial_containing_block_fixed_size =
-          size.ConvertToLogical(container->Style()->GetWritingMode());
-    }
-  }
+  absl::optional<LogicalSize> initial_containing_block_fixed_size =
+      NGOutOfFlowLayoutPart::InitialContainingBlockFixedSize(
+          NGBlockNode(container));
   // We really only want to lay out ourselves here, so we pass |this| to
   // Run(). Otherwise, NGOutOfFlowLayoutPart may also lay out other objects
   // it discovers that are part of the same containing block, but those
   // should get laid out by the actual containing block.
   NGOutOfFlowLayoutPart(css_container->CanContainAbsolutePositionObjects(),
                         css_container->CanContainFixedPositionObjects(),
-                        css_container->IsLayoutGrid(), *container_style,
-                        constraint_space, &container_builder,
-                        initial_containing_block_fixed_size)
+                        css_container->IsLayoutGrid(), constraint_space,
+                        &container_builder, initial_containing_block_fixed_size)
       .Run(/* only_layout */ this);
   const NGLayoutResult* result = container_builder.ToBoxFragment();
 
@@ -394,15 +414,18 @@ template <typename Base>
 const NGLayoutResult* LayoutNGMixin<Base>::UpdateInFlowBlockLayout() {
   Base::CheckIsNotDestroyed();
 
-  const NGLayoutResult* previous_result = Base::GetCachedLayoutResult();
+  // This is an entry-point for LayoutNG from the legacy engine. This means that
+  // we need to be at a formatting context boundary, since NG and legacy don't
+  // cooperate on e.g. margin collapsing.
+  DCHECK(this->CreatesNewFormattingContext());
+
+  const NGLayoutResult* previous_result = Base::GetSingleCachedLayoutResult();
   bool is_layout_root = !Base::View()->GetLayoutState()->Next();
 
   // If we are a layout root, use the previous space if available. This will
   // include any stretched sizes if applicable.
   NGConstraintSpace constraint_space =
-      is_layout_root && previous_result &&
-              previous_result->GetConstraintSpaceForCaching()
-                      .GetWritingMode() == Base::StyleRef().GetWritingMode()
+      is_layout_root && CanUseConstraintSpaceForCaching(previous_result, *this)
           ? previous_result->GetConstraintSpaceForCaching()
           : NGConstraintSpace::CreateFromLayoutObject(*this);
 
@@ -419,13 +442,23 @@ const NGLayoutResult* LayoutNGMixin<Base>::UpdateInFlowBlockLayout() {
 
   // Even if we are a layout root, our baseline may have shifted. In this
   // (rare) case, mark our containing-block for layout.
-  // The baseline of SVG <text> doesn't affect other boxes.
-  if (is_layout_root && previous_result && !Base::IsNGSVGText()) {
+  if (is_layout_root && previous_result) {
     if (To<NGPhysicalBoxFragment>(previous_result->PhysicalFragment())
-            .Baseline() != physical_fragment.Baseline()) {
+            .FirstBaseline() != physical_fragment.FirstBaseline()) {
       if (auto* containing_block = Base::ContainingBlock()) {
-        containing_block->SetNeedsLayout(
-            layout_invalidation_reason::kChildChanged, kMarkContainerChain);
+        // Baselines inside replaced elements don't affect other boxes.
+        bool is_in_replaced = false;
+        for (auto* parent = Base::Parent();
+             parent && parent != containing_block; parent = parent->Parent()) {
+          if (parent->IsLayoutReplaced()) {
+            is_in_replaced = true;
+            break;
+          }
+        }
+        if (!is_in_replaced) {
+          containing_block->SetNeedsLayout(
+              layout_invalidation_reason::kChildChanged, kMarkContainerChain);
+        }
       }
     }
   }

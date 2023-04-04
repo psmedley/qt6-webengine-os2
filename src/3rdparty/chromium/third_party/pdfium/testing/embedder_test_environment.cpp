@@ -4,8 +4,11 @@
 
 #include "testing/embedder_test_environment.h"
 
+#include <ostream>
+
 #include "core/fxcrt/fx_system.h"
 #include "public/fpdfview.h"
+#include "testing/command_line_helpers.h"
 #include "third_party/base/check.h"
 
 #ifdef PDF_ENABLE_V8
@@ -18,7 +21,8 @@ EmbedderTestEnvironment* g_environment = nullptr;
 
 }  // namespace
 
-EmbedderTestEnvironment::EmbedderTestEnvironment() {
+EmbedderTestEnvironment::EmbedderTestEnvironment()
+    : renderer_type_(GetDefaultRendererType()) {
   DCHECK(!g_environment);
   g_environment = this;
 }
@@ -35,7 +39,7 @@ EmbedderTestEnvironment* EmbedderTestEnvironment::GetInstance() {
 
 void EmbedderTestEnvironment::SetUp() {
   FPDF_LIBRARY_CONFIG config;
-  config.version = 3;
+  config.version = 4;
   config.m_pUserFontPaths = nullptr;
   config.m_v8EmbedderSlot = 0;
   config.m_pPlatform = nullptr;
@@ -49,6 +53,7 @@ void EmbedderTestEnvironment::SetUp() {
   config.m_pIsolate = nullptr;
   config.m_pPlatform = nullptr;
 #endif  // PDF_ENABLE_V8
+  config.m_RendererType = renderer_type_;
 
   FPDF_InitLibraryWithConfig(&config);
 
@@ -57,4 +62,32 @@ void EmbedderTestEnvironment::SetUp() {
 
 void EmbedderTestEnvironment::TearDown() {
   FPDF_DestroyLibrary();
+}
+
+void EmbedderTestEnvironment::AddFlags(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i)
+    AddFlag(argv[i]);
+}
+
+void EmbedderTestEnvironment::AddFlag(const std::string& flag) {
+  if (flag == "--write-pngs") {
+    write_pngs_ = true;
+    return;
+  }
+#if defined(_SKIA_SUPPORT_)
+  std::string value;
+  if (ParseSwitchKeyValue(flag, "--use-renderer=", &value)) {
+    if (value == "agg") {
+      renderer_type_ = FPDF_RENDERERTYPE_AGG;
+    } else if (value == "skia") {
+      renderer_type_ = FPDF_RENDERERTYPE_SKIA;
+    } else {
+      std::cerr << "Invalid --use-renderer argument, value must be one of agg "
+                   "or skia\n";
+    }
+    return;
+  }
+#endif  // defined(_SKIA_SUPPORT_)
+
+  std::cerr << "Unknown flag: " << flag << "\n";
 }

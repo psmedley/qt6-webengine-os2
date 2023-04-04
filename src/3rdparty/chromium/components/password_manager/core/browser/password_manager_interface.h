@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,8 @@
 
 namespace password_manager {
 
+class PasswordManagerClient;
+
 // Abstract interface for PasswordManagers.
 class PasswordManagerInterface : public FormSubmissionObserver {
  public:
@@ -36,8 +38,7 @@ class PasswordManagerInterface : public FormSubmissionObserver {
   // Handles password forms being rendered.
   virtual void OnPasswordFormsRendered(
       PasswordManagerDriver* driver,
-      const std::vector<autofill::FormData>& visible_forms_data,
-      bool did_stop_loading) = 0;
+      const std::vector<autofill::FormData>& visible_forms_data) = 0;
 
   // Handles a password form being submitted.
   virtual void OnPasswordFormSubmitted(PasswordManagerDriver* driver,
@@ -53,6 +54,9 @@ class PasswordManagerInterface : public FormSubmissionObserver {
       autofill::FormRendererId form_id,
       autofill::FieldRendererId generation_element,
       autofill::password_generation::PasswordGenerationType type) = 0;
+
+  // Getter for the PasswordManagerClient.
+  virtual PasswordManagerClient* GetClient() = 0;
 
 #if BUILDFLAG(IS_IOS)
   // Handles a subframe form submission. In contrast to OnPasswordFormSubmitted

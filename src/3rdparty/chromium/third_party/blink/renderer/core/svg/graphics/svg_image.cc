@@ -29,6 +29,8 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 #include "third_party/blink/public/platform/web_back_forward_cache_loader_helper.h"
@@ -75,8 +77,10 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -90,11 +94,9 @@ using TaskRunnerHandle = scheduler::WebResourceLoadingTaskRunnerHandle;
 class FailingLoader final : public WebURLLoader {
  public:
   explicit FailingLoader(
-      std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle,
-      std::unique_ptr<TaskRunnerHandle> unfreezable_task_runner_handle)
-      : freezable_task_runner_handle_(std::move(freezable_task_runner_handle)),
-        unfreezable_task_runner_handle_(
-            std::move(unfreezable_task_runner_handle)) {}
+      std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle)
+      : freezable_task_runner_handle_(std::move(freezable_task_runner_handle)) {
+  }
   ~FailingLoader() override = default;
 
   // WebURLLoader implementation:
@@ -133,7 +135,6 @@ class FailingLoader final : public WebURLLoader {
 
  private:
   const std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle_;
-  const std::unique_ptr<TaskRunnerHandle> unfreezable_task_runner_handle_;
 };
 
 class FailingLoaderFactory final : public WebURLLoaderFactory {
@@ -148,8 +149,7 @@ class FailingLoaderFactory final : public WebURLLoaderFactory {
       WebBackForwardCacheLoaderHelper back_forward_cache_loader_helper)
       override {
     return std::make_unique<FailingLoader>(
-        std::move(freezable_task_runner_handle),
-        std::move(unfreezable_task_runner_handle));
+        std::move(freezable_task_runner_handle));
   }
 };
 
@@ -203,8 +203,10 @@ SVGImage::SVGImage(ImageObserver* observer, bool is_multipart)
       // smaller granularity. There is an active effort to mitigate
       // this which is called "Memory Cache Per Context"
       // (https://crbug.com/1127971).
-      agent_group_scheduler_(
-          Thread::MainThread()->Scheduler()->CreateAgentGroupScheduler()),
+      agent_group_scheduler_(Thread::MainThread()
+                                 ->Scheduler()
+                                 ->ToMainThreadScheduler()
+                                 ->CreateAgentGroupScheduler()),
       has_pending_timeline_rewind_(false) {}
 
 SVGImage::~SVGImage() {
@@ -768,8 +770,9 @@ void SVGImage::LoadCompleted() {
       // to make LoadEventFinished() true when AsyncLoadCompleted() is called.
       GetFrame()
           ->GetTaskRunner(TaskType::kInternalLoading)
-          ->PostTask(FROM_HERE, WTF::Bind(&SVGImage::NotifyAsyncLoadCompleted,
-                                          scoped_refptr<SVGImage>(this)));
+          ->PostTask(FROM_HERE,
+                     WTF::BindOnce(&SVGImage::NotifyAsyncLoadCompleted,
+                                   scoped_refptr<SVGImage>(this)));
       break;
 
     case kDataChangedNotStarted:
@@ -793,6 +796,8 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
 
   if (!all_data_received)
     return page_ ? kSizeAvailable : kSizeUnavailable;
+
+  SCOPED_BLINK_UMA_HISTOGRAM_TIMER_HIGHRES("Blink.SVGImage.DataChanged");
 
   CHECK(!page_);
 
@@ -823,7 +828,7 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
     // Because this page is detached, it can't get default font settings
     // from the embedder. Copy over font settings so we have sensible
     // defaults. These settings are fixed and will not update if changed.
-    if (!Page::OrdinaryPages().IsEmpty()) {
+    if (!Page::OrdinaryPages().empty()) {
       Settings& default_settings =
           (*Page::OrdinaryPages().begin())->GetSettings();
       page->GetSettings().GetGenericFontFamilySettings() =
@@ -839,6 +844,8 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
 
       page->GetSettings().SetImageAnimationPolicy(
           default_settings.GetImageAnimationPolicy());
+      page->GetSettings().SetPrefersReducedMotion(
+          default_settings.GetPrefersReducedMotion());
 
       // Also copy the preferred-color-scheme to ensure a responsiveness to
       // dark/light color schemes.
@@ -860,7 +867,8 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
         FrameInsertType::kInsertInConstructor, LocalFrameToken(), nullptr,
         nullptr);
     frame->SetView(MakeGarbageCollected<LocalFrameView>(*frame));
-    frame->Init(/*opener=*/nullptr, /*policy_container=*/nullptr);
+    frame->Init(/*opener=*/nullptr, DocumentToken(),
+                /*policy_container=*/nullptr, StorageKey());
   }
 
   // SVG Images will always synthesize a viewBox, if it's not available, and

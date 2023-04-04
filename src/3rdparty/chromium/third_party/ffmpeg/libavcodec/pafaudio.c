@@ -24,7 +24,7 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "mathops.h"
 #include "paf.h"
 
@@ -42,10 +42,9 @@ static av_cold int paf_audio_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int paf_audio_decode(AVCodecContext *avctx, void *data,
+static int paf_audio_decode(AVCodecContext *avctx, AVFrame *frame,
                             int *got_frame, AVPacket *pkt)
 {
-    AVFrame *frame = data;
     int16_t *output_samples;
     const uint8_t *src = pkt->data;
     int frames, ret, i, j;
@@ -76,11 +75,10 @@ static int paf_audio_decode(AVCodecContext *avctx, void *data,
 
 const FFCodec ff_paf_audio_decoder = {
     .p.name       = "paf_audio",
-    .p.long_name  = NULL_IF_CONFIG_SMALL("Amazing Studio Packed Animation File Audio"),
+    CODEC_LONG_NAME("Amazing Studio Packed Animation File Audio"),
     .p.type       = AVMEDIA_TYPE_AUDIO,
     .p.id         = AV_CODEC_ID_PAF_AUDIO,
     .init         = paf_audio_init,
-    .decode       = paf_audio_decode,
+    FF_CODEC_DECODE_CB(paf_audio_decode),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal = FF_CODEC_CAP_INIT_THREADSAFE,
 };

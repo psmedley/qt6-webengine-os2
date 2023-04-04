@@ -166,8 +166,8 @@ private:
                                                                const SkRect*) const override;
 #endif
 #ifdef SK_GRAPHITE_ENABLED
-    std::tuple<skgpu::graphite::TextureProxyView, SkColorType> onAsView(
-            skgpu::graphite::Recorder*, skgpu::graphite::Mipmapped, SkBudgeted) const override;
+    sk_sp<SkImage> onMakeTextureImage(skgpu::graphite::Recorder*,
+                                      RequiredImageProperties) const override;
 #endif
 
     SkBitmap fBitmap;
@@ -236,9 +236,11 @@ bool SkImage_Raster::onPinAsTexture(GrRecordingContext* rContext) const {
     } else {
         SkASSERT(fPinnedCount == 0);
         SkASSERT(fPinnedUniqueID == 0);
-        std::tie(fPinnedView, fPinnedColorType) = GrMakeCachedBitmapProxyView(rContext,
-                                                                              fBitmap,
-                                                                              GrMipmapped::kNo);
+        std::tie(fPinnedView, fPinnedColorType) =
+                GrMakeCachedBitmapProxyView(rContext,
+                                            fBitmap,
+                                            /*label=*/"SkImageRaster_PinAsTexture",
+                                            GrMipmapped::kNo);
         if (!fPinnedView) {
             fPinnedColorType = GrColorType::kUnknown;
             return false;
@@ -420,7 +422,9 @@ sk_sp<SkImage> SkImage_Raster::onMakeColorTypeAndColorSpace(SkColorType targetCT
     SkAssertResult(fBitmap.peekPixels(&src));
 
     SkBitmap dst;
-    dst.allocPixels(fBitmap.info().makeColorType(targetCT).makeColorSpace(targetCS));
+    if (!dst.tryAllocPixels(fBitmap.info().makeColorType(targetCT).makeColorSpace(targetCS))) {
+        return nullptr;
+    }
 
     SkAssertResult(dst.writePixels(src));
     dst.setImmutable();
@@ -444,16 +448,31 @@ std::tuple<GrSurfaceProxyView, GrColorType> SkImage_Raster::onAsView(
     if (fPinnedView) {
         // We ignore the mipmap request here. If the pinned view isn't mipmapped then we will
         // fallback to bilinear. The pin API is used by Android Framework which does not expose
-        // mipmapping.Moreover, we're moving towards requiring that images be made with mip levels
+        // mipmapping . Moreover, we're moving towards requiring that images be made with mip levels
         // if mipmapping is desired (skbug.com/10411)
         mipmapped = GrMipmapped::kNo;
         if (policy != GrImageTexGenPolicy::kDraw) {
-            return {CopyView(rContext, fPinnedView, mipmapped, policy), fPinnedColorType};
+            return {CopyView(rContext,
+                             fPinnedView,
+                             mipmapped,
+                             policy,
+                             /*label=*/"TextureForImageRasterWithPolicyNotEqualKDraw"),
+                    fPinnedColorType};
         }
         return {fPinnedView, fPinnedColorType};
     }
     if (policy == GrImageTexGenPolicy::kDraw) {
-        return GrMakeCachedBitmapProxyView(rContext, fBitmap, mipmapped);
+        // If the draw doesn't require mipmaps but this SkImage has them go ahead and make a
+        // mipmapped texture. There are three reasons for this:
+        // 1) Avoiding another texture creation if a later draw requires mipmaps.
+        // 2) Ensuring we upload the bitmap's levels instead of generating on the GPU from the base.
+        if (this->hasMipmaps()) {
+            mipmapped = GrMipmapped::kYes;
+        }
+        return GrMakeCachedBitmapProxyView(rContext,
+                                           fBitmap,
+                                           /*label=*/"TextureForImageRasterWithPolicyEqualKDraw",
+                                           mipmapped);
     }
     auto budgeted = (policy == GrImageTexGenPolicy::kNew_Uncached_Unbudgeted)
             ? SkBudgeted::kNo
@@ -485,11 +504,13 @@ std::unique_ptr<GrFragmentProcessor> SkImage_Raster::onAsFragmentProcessor(
 #endif
 
 #ifdef SK_GRAPHITE_ENABLED
-std::tuple<skgpu::graphite::TextureProxyView, SkColorType> SkImage_Raster::onAsView(
-        skgpu::graphite::Recorder* recorder,
-        skgpu::graphite::Mipmapped mipmapped,
-        SkBudgeted budgeted) const {
-    return MakeBitmapProxyView(recorder, fBitmap, mipmapped, budgeted);
+sk_sp<SkImage> SkImage_Raster::onMakeTextureImage(skgpu::graphite::Recorder* recorder,
+                                                  RequiredImageProperties requiredProps) const {
+    return skgpu::graphite::MakeFromBitmap(recorder,
+                                           this->imageInfo().colorInfo(),
+                                           fBitmap,
+                                           this->refMips(),
+                                           SkBudgeted::kNo,
+                                           requiredProps);
 }
-
 #endif

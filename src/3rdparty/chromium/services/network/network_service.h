@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,7 @@
 #include "net/dns/host_resolver.h"
 #include "net/dns/public/dns_over_https_config.h"
 #include "net/dns/public/secure_dns_mode.h"
+#include "net/first_party_sets/global_first_party_sets.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log.h"
 #include "net/log/trace_net_log_observer.h"
@@ -137,12 +138,9 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
 
   // mojom::NetworkService implementation:
   void SetParams(mojom::NetworkServiceParamsPtr params) override;
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  void ReinitializeLogging(mojom::LoggingSettingsPtr settings) override;
-#endif
   void StartNetLog(base::File file,
                    net::NetLogCaptureMode capture_mode,
-                   base::Value constants) override;
+                   base::Value::Dict constants) override;
   void AttachNetLogProxy(
       mojo::PendingRemote<mojom::NetLogProxySource> proxy_source,
       mojo::PendingReceiver<mojom::NetLogProxySink>) override;
@@ -214,9 +212,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
 #endif
   void BindTestInterface(
       mojo::PendingReceiver<mojom::NetworkServiceTest> receiver) override;
-  void SetFirstPartySets(
-      const base::flat_map<net::SchemefulSite, net::SchemefulSite>& sets)
-      override;
+  void SetFirstPartySets(net::GlobalFirstPartySets sets) override;
   void SetExplicitlyAllowedPorts(const std::vector<uint16_t>& ports) override;
 
   // Returns an HttpAuthHandlerFactory for the given NetworkContext.
@@ -253,7 +249,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   }
 #endif
 
-  FirstPartySetsManager* first_party_sets() const {
+  FirstPartySetsManager* first_party_sets_manager() const {
     return first_party_sets_manager_.get();
   }
 

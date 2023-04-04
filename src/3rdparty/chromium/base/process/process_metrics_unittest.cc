@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -203,15 +203,15 @@ TEST_F(SystemMetricsTest, ParseMeminfo) {
   EXPECT_EQ(meminfo.swap_free, 3672368);
   EXPECT_EQ(meminfo.dirty, 184);
   EXPECT_EQ(meminfo.reclaimable, 30936);
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   EXPECT_EQ(meminfo.shmem, 140204);
   EXPECT_EQ(meminfo.slab, 54212);
 #endif
-  EXPECT_EQ(355725,
+  EXPECT_EQ(355725u,
             base::SysInfo::AmountOfAvailablePhysicalMemory(meminfo) / 1024);
   // Simulate as if there is no MemAvailable.
   meminfo.available = 0;
-  EXPECT_EQ(374448,
+  EXPECT_EQ(374448u,
             base::SysInfo::AmountOfAvailablePhysicalMemory(meminfo) / 1024);
   meminfo = {};
   EXPECT_TRUE(ParseProcMeminfo(valid_input2, &meminfo));
@@ -223,7 +223,7 @@ TEST_F(SystemMetricsTest, ParseMeminfo) {
   EXPECT_EQ(meminfo.swap_total, 524280);
   EXPECT_EQ(meminfo.swap_free, 524200);
   EXPECT_EQ(meminfo.dirty, 4);
-  EXPECT_EQ(69936,
+  EXPECT_EQ(69936u,
             base::SysInfo::AmountOfAvailablePhysicalMemory(meminfo) / 1024);
 }
 
@@ -404,7 +404,7 @@ TEST_F(SystemMetricsTest, TestNoNegativeCpuUsage) {
         // BUILDFLAG(IS_CHROMEOS_LACROS) || BUILDFLAG(IS_WIN) ||
         // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 TEST_F(SystemMetricsTest, ParseZramMmStat) {
   SwapInfo swapinfo;
 
@@ -439,7 +439,7 @@ TEST_F(SystemMetricsTest, ParseZramStat) {
   EXPECT_EQ(299ULL, swapinfo.num_reads);
   EXPECT_EQ(1ULL, swapinfo.num_writes);
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
@@ -481,7 +481,7 @@ TEST(SystemMetrics2Test, GetSystemMemoryInfo) {
   EXPECT_GT(info.file_backed, 0);
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Chrome OS exposes shmem.
   EXPECT_GT(info.shmem, 0);
   EXPECT_LT(info.shmem, info.total);
@@ -601,7 +601,7 @@ TEST(ProcessMetricsTest, ParseProcTimeInState) {
 // http://crbug.com/396455
 TEST(ProcessMetricsTest, DISABLED_GetNumberOfThreads) {
   const ProcessHandle current = GetCurrentProcessHandle();
-  const int initial_threads = GetNumberOfThreads(current);
+  const int64_t initial_threads = GetNumberOfThreads(current);
   ASSERT_GT(initial_threads, 0);
   const int kNumAdditionalThreads = 10;
   {

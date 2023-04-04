@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,12 @@
 #include "components/password_manager/core/browser/password_scripts_fetcher.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 
-namespace url {
-class Origin;
-}
-
 namespace network {
 class SharedURLLoaderFactory;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace password_manager {
@@ -51,9 +51,11 @@ class PasswordScriptsFetcherImpl
   // The first constructor calls the second one. The second one is called
   // directly only from tests.
   PasswordScriptsFetcherImpl(
+      bool is_supervised_user,
       const base::Version& version,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   PasswordScriptsFetcherImpl(
+      bool is_supervised_user,
       const base::Version& version,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       std::string scripts_list_url);
@@ -67,7 +69,9 @@ class PasswordScriptsFetcherImpl
   void FetchScriptAvailability(const url::Origin& origin,
                                ResponseCallback callback) override;
   bool IsScriptAvailable(const url::Origin& origin) const override;
+  bool IsCacheStale() const override;
   base::Value::Dict GetDebugInformationForInternals() const override;
+  base::Value::List GetCacheEntries() const override;
 
 #if defined(UNIT_TEST)
   void make_cache_stale_for_testing() {
@@ -76,23 +80,28 @@ class PasswordScriptsFetcherImpl
 #endif
 
  private:
-  using CacheState = PasswordScriptsFetcher::CacheState;
   // Sends new request to gstatic.
   void StartFetch();
+
   // Callback for the request to gstatic.
   void OnFetchComplete(base::TimeTicks request_start_timestamp,
                        std::unique_ptr<std::string> response_body);
-  // Parses |response_body| and stores the result in |password_change_domains_|
-  // (always overwrites the old list). Sets an empty list if |response_body| is
+
+  // Parses |response_body| and stores the result in `password_change_domains_`
+  // (always overwrites the old list). Sets an empty list if `response_body` is
   // invalid. Returns a parsing result for a histogram. The function tries to be
   // forgiving and rather return warnings and skip an entry than cancel the
   // parsing.
   base::flat_set<ParsingResult> ParseResponse(
       std::unique_ptr<std::string> response_body);
-  // Returns whether a re-fetch is needed.
-  bool IsCacheStale() const;
-  // Runs |callback| immediately with the script availability for |origin|.
+
+  // Runs `callback` immediately with the script availability for `origin`.
   void RunResponseCallback(url::Origin origin, ResponseCallback callback);
+
+  // Indicates whether the user has a supervised account - for those, script
+  // availability already returns `false` unless overwritten by the
+  // `kForceEnablePasswordDomainCapabilities` feature.
+  const bool is_supervised_user_;
 
   const base::Version version_;
 

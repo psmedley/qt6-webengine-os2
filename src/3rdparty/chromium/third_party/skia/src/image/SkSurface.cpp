@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cmath>
 #include "include/core/SkCanvas.h"
+#include "include/core/SkCapabilities.h"
 #include "src/core/SkAutoPixmapStorage.h"
 #include "src/core/SkImagePriv.h"
 #include "src/core/SkPaintPriv.h"
@@ -84,7 +85,7 @@ void SkSurface_Base::onDraw(SkCanvas* canvas, SkScalar x, SkScalar y,
 }
 
 void SkSurface_Base::onAsyncRescaleAndReadPixels(const SkImageInfo& info,
-                                                 const SkIRect& origSrcRect,
+                                                 SkIRect origSrcRect,
                                                  SkSurface::RescaleGamma rescaleGamma,
                                                  RescaleMode rescaleMode,
                                                  SkSurface::ReadPixelsCallback callback,
@@ -109,8 +110,8 @@ void SkSurface_Base::onAsyncRescaleAndReadPixels(const SkImageInfo& info,
 }
 
 void SkSurface_Base::onAsyncRescaleAndReadPixelsYUV420(
-        SkYUVColorSpace yuvColorSpace, sk_sp<SkColorSpace> dstColorSpace, const SkIRect& srcRect,
-        const SkISize& dstSize, RescaleGamma rescaleGamma, RescaleMode,
+        SkYUVColorSpace yuvColorSpace, sk_sp<SkColorSpace> dstColorSpace, SkIRect srcRect,
+        SkISize dstSize, RescaleGamma rescaleGamma, RescaleMode,
         ReadPixelsCallback callback, ReadPixelsContext context) {
     // TODO: Call non-YUV asyncRescaleAndReadPixels and then make our callback convert to YUV and
     // call client's callback.
@@ -159,6 +160,10 @@ uint32_t SkSurface_Base::newGenerationID() {
     return nextID.fetch_add(1, std::memory_order_relaxed);
 }
 
+sk_sp<const SkCapabilities> SkSurface_Base::onCapabilities() {
+    return SkCapabilities::RasterBackend();
+}
+
 static SkSurface_Base* asSB(SkSurface* surface) {
     return static_cast<SkSurface_Base*>(surface);
 }
@@ -203,6 +208,10 @@ void SkSurface::notifyContentWillChange(ContentChangeMode mode) {
 
 SkCanvas* SkSurface::getCanvas() {
     return asSB(this)->getCachedCanvas();
+}
+
+sk_sp<const SkCapabilities> SkSurface::capabilities() {
+    return asSB(this)->onCapabilities();
 }
 
 sk_sp<SkImage> SkSurface::makeImageSnapshot() {
@@ -373,7 +382,7 @@ GrSemaphoresSubmitted SkSurface::flush(BackendSurfaceAccess access, const GrFlus
 }
 
 GrSemaphoresSubmitted SkSurface::flush(const GrFlushInfo& info,
-                                       const GrBackendSurfaceMutableState* newState) {
+                                       const skgpu::MutableTextureState* newState) {
     return asSB(this)->onFlush(BackendSurfaceAccess::kNoAccess, info, newState);
 }
 
@@ -410,6 +419,10 @@ protected:
     void onWritePixels(const SkPixmap&, int x, int y) override {}
     void onDraw(SkCanvas*, SkScalar, SkScalar, const SkSamplingOptions&, const SkPaint*) override {}
     bool onCopyOnWrite(ContentChangeMode) override { return true; }
+    sk_sp<const SkCapabilities> onCapabilities() override {
+        // Not really, but we have to return *something*
+        return SkCapabilities::RasterBackend();
+    }
 };
 
 sk_sp<SkSurface> SkSurface::MakeNull(int width, int height) {

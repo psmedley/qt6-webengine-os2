@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "components/autofill/core/browser/metrics/form_events/form_events.h"
 #include "components/autofill/core/browser/sync_utils.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "components/autofill_assistant/core/public/autofill_assistant_intent.h"
 
 namespace autofill {
 
@@ -69,6 +69,9 @@ class FormEventLoggerBase {
   void OnTypedIntoNonFilledField();
   void OnEditedAutofilledField();
 
+  void SetAutofillAssistantIntentForFilling(
+      const autofill_assistant::AutofillAssistantIntent intent);
+
   // See BrowserAutofillManager::SuggestionContext for the definitions of the
   // AblationGroup parameters.
   void SetAblationStatus(AblationGroup ablation_group,
@@ -76,7 +79,12 @@ class FormEventLoggerBase {
   void SetTimeFromInteractionToSubmission(
       base::TimeDelta time_from_interaction_to_submission);
 
+  void OnAutofilledFieldWasClearedByJavaScriptShortlyAfterFill(
+      const FormStructure& form);
+
   void Log(FormEvent event, const FormStructure& form) const;
+
+  autofill_assistant::AutofillAssistantIntent autofill_assistant_intent() const;
 
  protected:
   virtual ~FormEventLoggerBase();
@@ -87,6 +95,15 @@ class FormEventLoggerBase {
 
   virtual void LogWillSubmitForm(const FormStructure& form);
   virtual void LogFormSubmitted(const FormStructure& form);
+
+  // This is a temporary analysis for crbug.com/1352826. We apply local
+  // heuristics to forms if >= 3 fields are discovered by local heuristics. The
+  // working hypothesis is that we should change this to ">= 3 distinct field
+  // types are discovered by local heuristics". To test this hypothesis we want
+  // to calculate the FillingAcceptance for forms for which the stricter
+  // rule would make a difference.
+  // TODO(crbug.com/1352826): Remove this after investigating the impact.
+  void LogImpactOfHeuristicsThreshold(const FormStructure& form);
 
   // Only used for UKM backward compatibility since it depends on IsCreditCard.
   // TODO (crbug.com/925913): Remove IsCreditCard from UKM logs amd replace with
@@ -132,12 +149,21 @@ class FormEventLoggerBase {
   bool logged_suggestion_filled_was_server_data_ = false;
   bool has_logged_typed_into_non_filled_field_ = false;
   bool has_logged_edited_autofilled_field_ = false;
+  bool has_logged_autofilled_field_was_cleared_by_javascript_after_fill_ =
+      false;
   AblationGroup ablation_group_ = AblationGroup::kDefault;
   AblationGroup conditional_ablation_group_ = AblationGroup::kDefault;
   absl::optional<base::TimeDelta> time_from_interaction_to_submission_;
 
   // The last field that was polled for suggestions.
   FormFieldData last_polled_field_;
+
+  // The Autofill Assistant intent triggering Autofill, if existing
+  autofill_assistant::AutofillAssistantIntent intent_ =
+      autofill_assistant::AutofillAssistantIntent::UNDEFINED_INTENT;
+
+  // Form types of the submitted form
+  DenseSet<FormType> submitted_form_types_;
 
   // Weak reference.
   raw_ptr<AutofillMetrics::FormInteractionsUkmLogger>

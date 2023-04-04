@@ -573,7 +573,7 @@ void CollectVariablesTraverser::visitSymbol(TIntermSymbol *symbol)
                 recordBuiltInAttributeUsed(symbol->variable(), &mLocalInvocationIndexAdded);
                 return;
             case EvqInstanceID:
-                // Whenever the SH_INITIALIZE_BUILTINS_FOR_INSTANCED_MULTIVIEW option is set,
+                // Whenever the initializeBuiltinsForInstancedMultiview option is set,
                 // gl_InstanceID is added inside expressions to initialize ViewID_OVR and
                 // InstanceID. Note that gl_InstanceID is not added to the symbol table for ESSL1
                 // shaders.
@@ -630,14 +630,10 @@ void CollectVariablesTraverser::visitSymbol(TIntermSymbol *symbol)
                                              mInputVaryings);
                 }
                 break;
-            case EvqLayer:
+            case EvqLayerOut:
                 if (mShaderType == GL_GEOMETRY_SHADER_EXT)
                 {
                     recordBuiltInVaryingUsed(symbol->variable(), &mLayerAdded, mOutputVaryings);
-                }
-                else if (mShaderType == GL_FRAGMENT_SHADER)
-                {
-                    recordBuiltInVaryingUsed(symbol->variable(), &mLayerAdded, mInputVaryings);
                 }
                 else
                 {
@@ -645,6 +641,10 @@ void CollectVariablesTraverser::visitSymbol(TIntermSymbol *symbol)
                            (IsExtensionEnabled(mExtensionBehavior, TExtension::OVR_multiview2) ||
                             IsExtensionEnabled(mExtensionBehavior, TExtension::OVR_multiview)));
                 }
+                break;
+            case EvqLayerIn:
+                ASSERT(mShaderType == GL_FRAGMENT_SHADER);
+                recordBuiltInVaryingUsed(symbol->variable(), &mLayerAdded, mInputVaryings);
                 break;
             case EvqShared:
                 if (mShaderType == GL_COMPUTE_SHADER)
@@ -1061,10 +1061,11 @@ ShaderVariable CollectVariablesTraverser::recordUniform(const TIntermSymbol &var
     uniform.binding = variable.getType().getLayoutQualifier().binding;
     uniform.imageUnitFormat =
         GetImageInternalFormatType(variable.getType().getLayoutQualifier().imageInternalFormat);
-    uniform.location  = variable.getType().getLayoutQualifier().location;
-    uniform.offset    = variable.getType().getLayoutQualifier().offset;
-    uniform.readonly  = variable.getType().getMemoryQualifier().readonly;
-    uniform.writeonly = variable.getType().getMemoryQualifier().writeonly;
+    uniform.location      = variable.getType().getLayoutQualifier().location;
+    uniform.offset        = variable.getType().getLayoutQualifier().offset;
+    uniform.rasterOrdered = variable.getType().getLayoutQualifier().rasterOrdered;
+    uniform.readonly      = variable.getType().getMemoryQualifier().readonly;
+    uniform.writeonly     = variable.getType().getMemoryQualifier().writeonly;
     return uniform;
 }
 

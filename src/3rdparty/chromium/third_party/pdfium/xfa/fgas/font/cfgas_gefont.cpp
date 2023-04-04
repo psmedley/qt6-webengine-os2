@@ -36,10 +36,9 @@ RetainPtr<CFGAS_GEFont> CFGAS_GEFont::LoadFont(const wchar_t* pszFontFamily,
 }
 
 // static
-RetainPtr<CFGAS_GEFont> CFGAS_GEFont::LoadFont(
-    const RetainPtr<CPDF_Font>& pPDFFont) {
+RetainPtr<CFGAS_GEFont> CFGAS_GEFont::LoadFont(RetainPtr<CPDF_Font> pPDFFont) {
   auto pFont = pdfium::MakeRetain<CFGAS_GEFont>();
-  if (!pFont->LoadFontInternal(pPDFFont))
+  if (!pFont->LoadFontInternal(std::move(pPDFFont)))
     return nullptr;
 
   return pFont;
@@ -61,7 +60,7 @@ RetainPtr<CFGAS_GEFont> CFGAS_GEFont::LoadStockFont(
     const ByteString& font_family) {
   RetainPtr<CPDF_Font> stock_font =
       CPDF_Font::GetStockFont(pDoc, font_family.AsStringView());
-  return stock_font ? CFGAS_GEFont::LoadFont(stock_font) : nullptr;
+  return stock_font ? CFGAS_GEFont::LoadFont(std::move(stock_font)) : nullptr;
 }
 
 CFGAS_GEFont::CFGAS_GEFont() = default;
@@ -94,16 +93,15 @@ bool CFGAS_GEFont::LoadFontInternal(const wchar_t* pszFontFamily,
 }
 #endif  // BUILDFLAG(IS_WIN)
 
-bool CFGAS_GEFont::LoadFontInternal(const RetainPtr<CPDF_Font>& pPDFFont) {
+bool CFGAS_GEFont::LoadFontInternal(RetainPtr<CPDF_Font> pPDFFont) {
+  DCHECK(pPDFFont);
+
   if (m_pFont)
     return false;
 
-  m_pFont = pPDFFont->GetFont();
-  if (!InitFont())
-    return false;
-
-  m_pPDFFont = pPDFFont;  // Keep pPDFFont alive for the duration.
-  return true;
+  m_pPDFFont = std::move(pPDFFont);  // Keep `pPDFFont` alive for the duration.
+  m_pFont = m_pPDFFont->GetFont();
+  return InitFont();
 }
 
 bool CFGAS_GEFont::LoadFontInternal(std::unique_ptr<CFX_Font> pInternalFont) {

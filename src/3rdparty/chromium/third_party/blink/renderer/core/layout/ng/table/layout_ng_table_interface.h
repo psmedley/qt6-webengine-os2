@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,15 +34,18 @@ class LayoutNGTableInterface {
   // TODO(crbug.com/1081425) Method not used by NG, should be removed.
   virtual LayoutUnit RowOffsetFromRepeatingHeader() const = 0;
   virtual LayoutNGTableSectionInterface* FirstBodyInterface() const = 0;
-  virtual LayoutNGTableSectionInterface* TopSectionInterface() const = 0;
+  virtual LayoutNGTableSectionInterface* FirstSectionInterface() const = 0;
   // TODO(crbug.com/1081425) Method not used by NG, should be removed.
-  virtual LayoutNGTableSectionInterface* TopNonEmptySectionInterface()
+  virtual LayoutNGTableSectionInterface* FirstNonEmptySectionInterface()
       const = 0;
+  virtual LayoutNGTableSectionInterface* LastSectionInterface() const = 0;
   // TODO(crbug.com/1081425) Method not used by NG, should be removed.
-  virtual LayoutNGTableSectionInterface* BottomSectionInterface() const = 0;
-  virtual LayoutNGTableSectionInterface* BottomNonEmptySectionInterface()
+  virtual LayoutNGTableSectionInterface* LastNonEmptySectionInterface()
       const = 0;
-  virtual LayoutNGTableSectionInterface* SectionBelowInterface(
+  virtual LayoutNGTableSectionInterface* NextSectionInterface(
+      const LayoutNGTableSectionInterface*,
+      SkipEmptySectionsValue) const = 0;
+  virtual LayoutNGTableSectionInterface* PreviousSectionInterface(
       const LayoutNGTableSectionInterface*,
       SkipEmptySectionsValue) const = 0;
   virtual bool IsFirstCell(const LayoutNGTableCellInterface&) const = 0;

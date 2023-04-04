@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/gfx/image/image_unittest_util.h"
 
 void CopyTextItem() {
   {
@@ -23,9 +24,7 @@ void CopyTextItem() {
 void CopyBitmapItem() {
   {
     ui::ScopedClipboardWriter scw(ui::ClipboardBuffer::kCopyPaste);
-    SkBitmap input_bitmap;
-    input_bitmap.allocN32Pixels(3, 2);
-    input_bitmap.eraseARGB(255, 0, 255, 0);
+    SkBitmap input_bitmap = gfx::test::CreateBitmap(3, 2);
     scw.WriteImage(input_bitmap);
   }
   base::RunLoop().RunUntilIdle();
@@ -77,7 +76,13 @@ class VirtualKeyboardPrivateApiTest : public extensions::ExtensionApiTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(VirtualKeyboardPrivateApiTest, Multipaste) {
+// TODO(crbug.com/1352320): Flaky on release bots.
+#if defined(NDEBUG)
+#define MAYBE_Multipaste DISABLED_Multipaste
+#else
+#define MAYBE_Multipaste Multipaste
+#endif
+IN_PROC_BROWSER_TEST_F(VirtualKeyboardPrivateApiTest, MAYBE_Multipaste) {
   // Copy to the clipboard an item of each display format type.
   CopyHtmlItem();
   CopyTextItem();

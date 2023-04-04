@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,9 +99,7 @@ bool PasswordManagerClientHelper::ShouldPromptToEnableAutoSignIn() const {
   return password_bubble_experiment::
              ShouldShowAutoSignInPromptFirstRunExperience(
                  delegate_->GetPrefs()) &&
-         password_manager_util::IsAutoSignInEnabled(
-             delegate_->GetPrefs(), delegate_->GetSyncService()) &&
-         !delegate_->IsIncognito();
+         delegate_->IsAutoSignInEnabled() && !delegate_->IsIncognito();
 }
 
 bool PasswordManagerClientHelper::ShouldPromptToMovePasswordToAccount(

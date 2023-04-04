@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,9 +54,9 @@ void PaintController::ReserveCapacity() {
       display_item_list_capacity =
           current_paint_artifact_->GetDisplayItemList().size();
     }
-    new_paint_artifact_->PaintChunks().ReserveCapacity(
+    new_paint_artifact_->PaintChunks().reserve(
         current_paint_artifact_->PaintChunks().size());
-    new_subsequences_.tree.ReserveCapacity(current_subsequences_.tree.size());
+    new_subsequences_.tree.reserve(current_subsequences_.tree.size());
     new_subsequences_.map.ReserveCapacityForSize(
         current_subsequences_.map.size());
   }
@@ -108,7 +108,6 @@ void PaintController::RecordScrollHitTestData(
   CheckNewChunkId(id);
   ValidateNewChunkClient(client);
   paint_chunker_.CreateScrollHitTestChunk(id, client, scroll_translation, rect);
-  RecordDebugInfo(client);
   CheckNewChunk();
 }
 
@@ -225,7 +224,7 @@ bool PaintController::UseCachedSubsequenceIfPossible(
   ++num_cached_new_subsequences_;
 
   if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled()) {
-    EnsureUnderInvalidationChecker().WouldUseCachedSubsequence(client);
+    EnsureUnderInvalidationChecker().WouldUseCachedSubsequence(client.Id());
     // Return false to let the painter actually paint. We will check if the new
     // painting is the same as the cached one.
     return false;
@@ -376,7 +375,7 @@ void PaintController::CheckNewChunkId(const PaintChunk::Id& id) {
   if (it != new_paint_chunk_id_index_map_.end()) {
     ShowDebugData();
     NOTREACHED() << "New paint chunk id " << id.ToString(*new_paint_artifact_)
-                 << " has duplicated id with previous chuck "
+                 << " is already used by a previous chuck "
                  << new_paint_artifact_->PaintChunks()[it->value].ToString(
                         *new_paint_artifact_);
   }
@@ -385,10 +384,12 @@ void PaintController::CheckNewChunkId(const PaintChunk::Id& id) {
 
 void PaintController::CheckNewChunk() {
 #if DCHECK_IS_ON()
-  auto& chunks = new_paint_artifact_->PaintChunks();
-  if (chunks.back().is_cacheable) {
-    AddToIdIndexMap(chunks.back().id, chunks.size() - 1,
-                    new_paint_chunk_id_index_map_);
+  if (usage_ == kMultiplePaints) {
+    auto& chunks = new_paint_artifact_->PaintChunks();
+    if (chunks.back().is_cacheable) {
+      AddToIdIndexMap(chunks.back().id, chunks.size() - 1,
+                      new_paint_chunk_id_index_map_);
+    }
   }
 #endif
 
@@ -736,7 +737,7 @@ size_t PaintController::ApproximateUnsharedMemoryUsage() const {
   memory_usage += current_subsequences_.map.Capacity() *
                   sizeof(decltype(current_subsequences_.map)::value_type);
   memory_usage += current_subsequences_.tree.CapacityInBytes();
-  DCHECK(new_subsequences_.map.IsEmpty());
+  DCHECK(new_subsequences_.map.empty());
   memory_usage += new_subsequences_.map.Capacity() *
                   sizeof(decltype(new_subsequences_.map)::value_type);
   memory_usage += new_subsequences_.tree.CapacityInBytes();
@@ -789,6 +790,7 @@ FrameFirstPaint PaintController::EndFrame(const void* frame) {
 }
 
 void PaintController::ValidateNewChunkClient(const DisplayItemClient& client) {
+  RecordDebugInfo(client);
   if (IsSkippingCache() && usage_ == kMultiplePaints)
     client.Invalidate(PaintInvalidationReason::kUncacheable);
 }

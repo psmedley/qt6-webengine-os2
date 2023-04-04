@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,9 +70,6 @@ class CONTENT_EXPORT BrowserProcessIOThread : public base::Thread {
   void CompleteInitializationOnBrowserThread();
 
   void IOThreadRun(base::RunLoop* run_loop);
-
-  // This method encapsulates cleanup that needs to happen on the IO thread.
-  void IOThreadCleanUp();
 
   // BrowserThreads are not allowed to do file I/O nor wait on synchronization
   // primivives except when explicitly allowed in tests.

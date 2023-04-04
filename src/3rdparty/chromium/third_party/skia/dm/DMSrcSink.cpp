@@ -17,6 +17,7 @@
 #include "include/core/SkImageGenerator.h"
 #include "include/core/SkMallocPixelRef.h"
 #include "include/core/SkPictureRecorder.h"
+#include "include/core/SkSerialProcs.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkSurface.h"
 #include "include/core/SkSurfaceCharacterization.h"
@@ -28,10 +29,10 @@
 #include "include/ports/SkImageGeneratorWIC.h"
 #include "include/private/SkImageInfoPriv.h"
 #include "include/private/SkTLogic.h"
-#include "include/third_party/skcms/skcms.h"
 #include "include/utils/SkNullCanvas.h"
 #include "include/utils/SkPaintFilterCanvas.h"
 #include "include/utils/SkRandom.h"
+#include "modules/skcms/skcms.h"
 #include "modules/skottie/utils/SkottieUtils.h"
 #include "src/codec/SkCodecImageGenerator.h"
 #include "src/codec/SkSwizzler.h"
@@ -39,8 +40,8 @@
 #include "src/core/SkAutoPixmapStorage.h"
 #include "src/core/SkOSFile.h"
 #include "src/core/SkOpts.h"
-#include "src/core/SkPictureCommon.h"
 #include "src/core/SkPictureData.h"
+#include "src/core/SkPicturePriv.h"
 #include "src/core/SkRecordDraw.h"
 #include "src/core/SkRecorder.h"
 #include "src/core/SkTLazy.h"
@@ -55,6 +56,7 @@
 #include "tools/DDLTileHelper.h"
 #include "tools/Resources.h"
 #include "tools/RuntimeBlendUtils.h"
+#include "tools/ToolUtils.h"
 #include "tools/UrlDataManager.h"
 #include "tools/debugger/DebugCanvas.h"
 #include "tools/gpu/BackendSurfaceFactory.h"
@@ -81,10 +83,10 @@
 #endif
 
 #ifdef SK_GRAPHITE_ENABLED
+#include "include/gpu/graphite/CombinationBuilder.h"
 #include "include/gpu/graphite/Context.h"
 #include "include/gpu/graphite/Recorder.h"
 #include "include/gpu/graphite/Recording.h"
-#include "include/gpu/graphite/SkStuff.h"
 // TODO: Remove this src include once we figure out public readPixels call for Graphite.
 #include "src/gpu/graphite/Surface_Graphite.h"
 #include "tools/graphite/ContextFactory.h"
@@ -1093,12 +1095,43 @@ static DEFINE_int(skpViewportSize, 1000,
 
 SKPSrc::SKPSrc(Path path) : fPath(path) { }
 
-Result SKPSrc::draw(GrDirectContext*, SkCanvas* canvas) const {
+Result SKPSrc::draw(GrDirectContext* dContext, SkCanvas* canvas) const {
+
+    struct DeserializationContext {
+        GrDirectContext*           fDirectContext = nullptr;
+#ifdef SK_GRAPHITE_ENABLED
+        skgpu::graphite::Recorder* fRecorder = nullptr;
+#endif
+    } ctx {
+        dContext,
+#ifdef SK_GRAPHITE_ENABLED
+        canvas->recorder()
+#endif
+    };
+
+    SkDeserialProcs procs;
+    procs.fImageProc = [](const void* data, size_t size, void* ctx) -> sk_sp<SkImage> {
+        sk_sp<SkData> tmpData = SkData::MakeWithoutCopy(data, size);
+        sk_sp<SkImage> image = SkImage::MakeFromEncoded(std::move(tmpData));
+        image = image->makeRasterImage(); // force decoding
+
+        if (image) {
+            DeserializationContext* context = reinterpret_cast<DeserializationContext*>(ctx);
+
+            if (context->fDirectContext) {
+                image = image->makeTextureImage(context->fDirectContext);
+            }
+        }
+
+        return image;
+    };
+    procs.fImageCtx = &ctx;
+
     std::unique_ptr<SkStream> stream = SkStream::MakeFromFile(fPath.c_str());
     if (!stream) {
         return Result::Fatal("Couldn't read %s.", fPath.c_str());
     }
-    sk_sp<SkPicture> pic(SkPicture::MakeFromStream(stream.get()));
+    sk_sp<SkPicture> pic(SkPicture::MakeFromStream(stream.get(), &procs));
     if (!pic) {
         return Result::Fatal("Couldn't parse file %s.", fPath.c_str());
     }
@@ -1223,7 +1256,7 @@ Result SkottieSrc::draw(GrDirectContext*, SkCanvas* canvas) const {
     // frame progression. The film strip will still be in order left-to-right,
     // top-down, just not drawn in that order.
     static constexpr int frameOrder[] = { 4, 0, 3, 1, 2 };
-    static_assert(SK_ARRAY_COUNT(frameOrder) == kTileCount, "");
+    static_assert(std::size(frameOrder) == kTileCount, "");
 
     for (int i = 0; i < kTileCount; ++i) {
         const SkScalar y = frameOrder[i] * kTileSize;
@@ -2094,32 +2127,10 @@ Result RasterSink::draw(const Src& src, SkBitmap* dst, SkWStream*, SkString*) co
 
 #ifdef SK_GRAPHITE_ENABLED
 
-namespace {
-
-// For the sprint Graphite only handles:
-//    solid colors with src or srcOver
-//    repeated or clamped linear gradients with src or srcOver
-void precompile(skgpu::graphite::Context* context) {
-    using ShaderType = skgpu::graphite::ShaderCombo::ShaderType;
-
-    skgpu::graphite::PaintCombo c1 { { skgpu::graphite::ShaderCombo({ ShaderType::kSolidColor },
-                                                                    { SkTileMode::kRepeat }) },
-                                     { SkBlendMode::kSrcOver, SkBlendMode::kSrc } };
-    context->preCompile(c1);
-
-    skgpu::graphite::PaintCombo c2 { { skgpu::graphite::ShaderCombo({ ShaderType::kLinearGradient },
-                                                     { SkTileMode::kRepeat, SkTileMode::kClamp }) },
-                                     { SkBlendMode::kSrcOver, SkBlendMode::kSrc } };
-    context->preCompile(c2);
-}
-
-} // anonymous namespace
-
 GraphiteSink::GraphiteSink(const SkCommandLineConfigGraphite* config)
         : fContextType(config->getContextType())
         , fColorType(config->getColorType())
-        , fAlphaType(config->getAlphaType())
-        , fTestPrecompile(config->getTestPrecompile()) {
+        , fAlphaType(config->getAlphaType()) {
 }
 
 Result GraphiteSink::draw(const Src& src,
@@ -2134,11 +2145,8 @@ Result GraphiteSink::draw(const Src& src,
         return Result::Fatal("Could not create a context.");
     }
 
-    if (fTestPrecompile) {
-        precompile(context);
-    }
-
-    std::unique_ptr<skgpu::graphite::Recorder> recorder = context->makeRecorder();
+    std::unique_ptr<skgpu::graphite::Recorder> recorder =
+                                context->makeRecorder(ToolUtils::CreateTestingRecorderOptions());
     if (!recorder) {
         return Result::Fatal("Could not create a recorder.");
     }
@@ -2146,7 +2154,7 @@ Result GraphiteSink::draw(const Src& src,
     dst->allocPixels(ii);
 
     {
-        sk_sp<SkSurface> surface = MakeGraphite(recorder.get(), ii);
+        sk_sp<SkSurface> surface = SkSurface::MakeGraphite(recorder.get(), ii);
         if (!surface) {
             return Result::Fatal("Could not create a surface.");
         }
@@ -2155,7 +2163,7 @@ Result GraphiteSink::draw(const Src& src,
             return result;
         }
 
-        // For now we cast and call directly into Surface. Once we have a been idea of
+        // For now we cast and call directly into Surface. Once we have a better idea of
         // what the public API for synchronous graphite readPixels we can update this call to use
         // that instead.
         SkPixmap pm;

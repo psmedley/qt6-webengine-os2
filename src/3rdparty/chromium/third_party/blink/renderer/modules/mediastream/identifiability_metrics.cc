@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -225,6 +225,7 @@ void Visit(IdentifiableTokenBuilder& builder,
   Visit(builder, set.getTiltOr(nullptr));
   Visit(builder, set.getZoomOr(nullptr));
   Visit(builder, set.getTorchOr(nullptr));
+  Visit(builder, set.getBackgroundBlurOr(nullptr));
 }
 
 void Visit(IdentifiableTokenBuilder& builder,

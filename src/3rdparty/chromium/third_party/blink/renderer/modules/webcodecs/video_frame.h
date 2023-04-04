@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include "base/feature_list.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_typedefs.h"
@@ -25,10 +26,6 @@
 // Note: Don't include "media/base/video_frame.h" here without good reason,
 // since it includes a lot of non-blink types which can pollute the namespace.
 
-namespace base {
-struct Feature;
-}
-
 namespace media {
 class VideoFrame;
 }
@@ -46,7 +43,7 @@ class VideoFrameBufferInit;
 class VideoFrameCopyToOptions;
 class VideoFrameInit;
 
-extern const MODULES_EXPORT base::Feature kRemoveWebCodecsSpecViolations;
+MODULES_EXPORT BASE_DECLARE_FEATURE(kRemoveWebCodecsSpecViolations);
 
 class MODULES_EXPORT VideoFrame final : public ScriptWrappable,
                                         public CanvasImageSource,
@@ -131,6 +128,8 @@ class MODULES_EXPORT VideoFrame final : public ScriptWrappable,
   bool IsVideoFrame() const override;
   bool IsOpaque() const override;
   bool IsAccelerated() const override;
+
+  void ResetExternalMemory();
 
   // ImageBitmapSource implementation
   static constexpr uint64_t kCpuEfficientFrameSize = 320u * 240u;

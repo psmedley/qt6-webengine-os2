@@ -122,7 +122,7 @@ bool SVGGeometryElement::isPointInStroke(SVGPointTearOff* point) const {
     // Un-scale to get back to the root-transform (cheaper than re-computing
     // the root transform from scratch).
     root_transform.Scale(layout_shape.StyleRef().EffectiveZoom())
-        .Multiply(transform);
+        .PreConcat(transform);
   } else {
     root_transform = layout_shape.ComputeRootTransform();
   }
@@ -230,7 +230,7 @@ float SVGGeometryElement::PathLengthScaleFactor(float computed_path_length,
   // However, since 0 * Infinity is not zero (but rather NaN) per
   // IEEE, we need to make sure to clamp the result below - avoiding
   // the actual Infinity (and using max()) instead.
-  return ClampTo<float>(computed_path_length / author_path_length);
+  return ClampTo<float>(computed_path_length / std::fabs(author_path_length));
 }
 
 void SVGGeometryElement::GeometryPresentationAttributeChanged(

@@ -56,6 +56,13 @@ class CORE_EXPORT LayoutTextFragment : public LayoutText {
                                              unsigned start,
                                              unsigned length,
                                              LegacyLayout);
+  static LayoutTextFragment* CreateAnonymous(Document&,
+                                             StringImpl*,
+                                             unsigned start,
+                                             unsigned length,
+                                             LegacyLayout);
+
+  void Trace(Visitor*) const override;
 
   Position PositionForCaretOffset(unsigned) const override;
   absl::optional<unsigned> CaretOffsetForPosition(
@@ -134,13 +141,14 @@ class CORE_EXPORT LayoutTextFragment : public LayoutText {
   void UpdateHitTestResult(HitTestResult&,
                            const PhysicalOffset&) const override;
 
+  DOMNodeId OwnerNodeId() const final;
+
   unsigned start_;
   unsigned fragment_length_;
   bool is_remaining_text_layout_object_;
   scoped_refptr<StringImpl> content_string_;
-  // Reference back to FirstLetterPseudoElement; cleared by
-  // FirstLetterPseudoElement::detachLayoutTree() if it goes away first.
-  UntracedMember<FirstLetterPseudoElement> first_letter_pseudo_element_;
+
+  Member<FirstLetterPseudoElement> first_letter_pseudo_element_;
 };
 
 template <>

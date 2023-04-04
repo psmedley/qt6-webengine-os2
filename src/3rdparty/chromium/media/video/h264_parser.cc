@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -192,6 +192,23 @@ VideoColorSpace H264SPS::GetColorSpace() const {
                               : gfx::ColorSpace::RangeID::LIMITED);
   } else {
     return VideoColorSpace();
+  }
+}
+
+VideoChromaSampling H264SPS::GetChromaSampling() const {
+  // Spec section 6.2
+  switch (chroma_format_idc) {
+    case 0:
+      return VideoChromaSampling::k400;
+    case 1:
+      return VideoChromaSampling::k420;
+    case 2:
+      return VideoChromaSampling::k422;
+    case 3:
+      return VideoChromaSampling::k444;
+    default:
+      DVLOG(1) << "Unknown chroma subsampling format.";
+      return VideoChromaSampling::kUnknown;
   }
 }
 

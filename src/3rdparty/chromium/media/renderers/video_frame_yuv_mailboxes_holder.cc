@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -182,16 +182,21 @@ GrYUVABackendTextures VideoFrameYUVMailboxesHolder::VideoFrameToSkiaTextures(
 
 sk_sp<SkImage> VideoFrameYUVMailboxesHolder::VideoFrameToSkImage(
     const VideoFrame* video_frame,
-    viz::RasterContextProvider* raster_context_provider) {
+    viz::RasterContextProvider* raster_context_provider,
+    sk_sp<SkColorSpace> reinterpret_color_space) {
   GrDirectContext* gr_context = raster_context_provider->GrContext();
   DCHECK(gr_context);
 
   GrYUVABackendTextures yuva_backend_textures = VideoFrameToSkiaTextures(
       video_frame, raster_context_provider, /*for_surface=*/false);
+  auto rgb_color_space =
+      reinterpret_color_space
+          ? reinterpret_color_space
+          : video_frame->ColorSpace().GetAsFullRangeRGB().ToSkColorSpace();
 
   DCHECK(yuva_backend_textures.isValid());
   auto result = SkImage::MakeFromYUVATextures(gr_context, yuva_backend_textures,
-                                              SkColorSpace::MakeSRGB());
+                                              rgb_color_space);
   DCHECK(result);
   return result;
 }
@@ -239,30 +244,6 @@ bool VideoFrameYUVMailboxesHolder::VideoFrameToPlaneSkSurfaces(
     surfaces[plane] = surface;
   }
   return result;
-}
-
-SkYUVAPixmaps VideoFrameYUVMailboxesHolder::VideoFrameToSkiaPixmaps(
-    const VideoFrame* video_frame) {
-  yuva_info_ = VideoFrameGetSkYUVAInfo(video_frame);
-  num_planes_ = yuva_info_.planeDimensions(plane_sizes_);
-
-  // Create SkImageInfos with the appropriate color types for 8 bit unorm data
-  // based on plane config.
-  size_t row_bytes[kMaxPlanes];
-  for (size_t plane = 0; plane < num_planes_; ++plane) {
-    row_bytes[plane] = VideoFrame::RowBytes(plane, video_frame->format(),
-                                            plane_sizes_[plane].width());
-  }
-
-  SkYUVAPixmapInfo pixmaps_infos(yuva_info_, SkYUVAPixmaps::DataType::kUnorm8,
-                                 row_bytes);
-  SkPixmap pixmaps[SkYUVAInfo::kMaxPlanes];
-  for (size_t plane = 0; plane < num_planes_; ++plane) {
-    pixmaps[plane].reset(pixmaps_infos.planeInfo(plane),
-                         video_frame->data(plane),
-                         pixmaps_infos.rowBytes(plane));
-  }
-  return SkYUVAPixmaps::FromExternalPixmaps(yuva_info_, pixmaps);
 }
 
 void VideoFrameYUVMailboxesHolder::ImportTextures(bool for_surface) {
@@ -321,6 +302,7 @@ VideoFrameYUVMailboxesHolder::VideoPixelFormatToSkiaValues(
   // we do assume 8 bit formats. With that exception, anything else should work.
   switch (video_format) {
     case PIXEL_FORMAT_NV12:
+    case PIXEL_FORMAT_P016LE:
       return {SkYUVAInfo::PlaneConfig::kY_UV, SkYUVAInfo::Subsampling::k420};
     case PIXEL_FORMAT_I420:
       return {SkYUVAInfo::PlaneConfig::kY_U_V, SkYUVAInfo::Subsampling::k420};

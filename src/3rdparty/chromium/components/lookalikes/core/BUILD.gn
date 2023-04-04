@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,7 +19,6 @@ jumbo_static_library("core") {
     "//components/reputation/core:core",
     "//components/reputation/core:proto",
     "//components/security_interstitials/core",
-    "//components/security_state/core:features",
     "//components/strings",
     "//components/url_formatter",
     "//components/url_formatter/spoof_checks/common_words:common",

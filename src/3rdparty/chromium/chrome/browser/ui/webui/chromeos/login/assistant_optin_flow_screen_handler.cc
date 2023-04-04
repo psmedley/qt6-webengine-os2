@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,11 @@
 
 #include <utility>
 
+#include "ash/constants/ash_switches.h"
+#include "ash/public/cpp/tablet_mode.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "chrome/browser/ash/login/oobe_screen.h"
@@ -18,12 +21,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/assistant_optin/assistant_optin_utils.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/ash/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/ash/services/assistant/public/cpp/assistant_service.h"
+#include "chromeos/ash/services/assistant/public/cpp/features.h"
+#include "chromeos/ash/services/assistant/public/proto/get_settings_ui.pb.h"
+#include "chromeos/ash/services/assistant/public/proto/settings_ui.pb.h"
 #include "chromeos/dbus/power/power_manager_client.h"
-#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
-#include "chromeos/services/assistant/public/cpp/assistant_service.h"
-#include "chromeos/services/assistant/public/cpp/features.h"
-#include "chromeos/services/assistant/public/proto/get_settings_ui.pb.h"
-#include "chromeos/services/assistant/public/proto/settings_ui.pb.h"
 #include "components/login/localized_values_builder.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
@@ -32,6 +35,18 @@
 #include "ui/chromeos/devicetype_utils.h"
 
 namespace chromeos {
+
+// TODO(https://crbug.com/1164001): remove after migrating to ash.
+namespace assistant {
+using ::ash::assistant::ConsentFlowUi_ConsentStatus_ALREADY_CONSENTED;
+using ::ash::assistant::ConsentFlowUi_ConsentStatus_ASK_FOR_CONSENT;
+using ::ash::assistant::ConsentFlowUiUpdateResult;
+using ::ash::assistant::EmailOptInUpdateResult;
+using ::ash::assistant::GetSettingsUiResponse;
+using ::ash::assistant::SettingsResponseHeader_AcceptRejectLayout_EQUAL_WEIGHT;
+using ::ash::assistant::SettingsUiSelector;
+using ::ash::assistant::SettingsUiUpdateResult;
+}  // namespace assistant
 
 namespace {
 
@@ -237,27 +252,23 @@ void AssistantOptInFlowScreenHandler::InitializeDeprecated() {
 }
 
 void AssistantOptInFlowScreenHandler::OnListeningHotword() {
-  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate",
-         base::Value("listen"));
+  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate", "listen");
 }
 
 void AssistantOptInFlowScreenHandler::OnProcessingHotword() {
-  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate",
-         base::Value("process"));
+  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate", "process");
 }
 
 void AssistantOptInFlowScreenHandler::OnSpeakerIdEnrollmentDone() {
   StopSpeakerIdEnrollment();
-  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate",
-         base::Value("done"));
+  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate", "done");
 }
 
 void AssistantOptInFlowScreenHandler::OnSpeakerIdEnrollmentFailure() {
   StopSpeakerIdEnrollment();
   RecordAssistantOptInStatus(VOICE_MATCH_ENROLLMENT_ERROR);
   voice_match_enrollment_error_ = true;
-  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate",
-         base::Value("failure"));
+  CallJS("login.AssistantOptInFlowScreen.onVoiceMatchUpdate", "failure");
   LOG(ERROR) << "Speaker ID enrollment failure.";
 }
 
@@ -288,6 +299,7 @@ void AssistantOptInFlowScreenHandler::ShowNextScreen() {
 void AssistantOptInFlowScreenHandler::OnActivityControlOptInResult(
     bool opted_in) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
+  CHECK(!pending_consent_data_.empty());
   auto data = pending_consent_data_.front();
   pending_consent_data_.pop_front();
   RecordActivityControlConsent(profile, data.ui_audit_key, opted_in,
@@ -295,6 +307,7 @@ void AssistantOptInFlowScreenHandler::OnActivityControlOptInResult(
   if (opted_in) {
     has_opted_in_any_consent_ = true;
     RecordAssistantActivityControlOptInStatus(data.setting_type, opted_in);
+    CHECK(assistant::AssistantSettings::Get());
     assistant::AssistantSettings::Get()->UpdateSettings(
         GetSettingsUiUpdate(data.consent_token).SerializeAsString(),
         base::BindOnce(
@@ -360,6 +373,7 @@ void AssistantOptInFlowScreenHandler::SendGetSettingsRequest() {
   }
 
   assistant::SettingsUiSelector selector = GetSettingsUiSelector();
+  CHECK(assistant::AssistantSettings::Get());
   assistant::AssistantSettings::Get()->GetSettingsWithHeader(
       selector.SerializeAsString(),
       base::BindOnce(&AssistantOptInFlowScreenHandler::OnGetSettingsResponse,
@@ -370,17 +384,18 @@ void AssistantOptInFlowScreenHandler::SendGetSettingsRequest() {
 void AssistantOptInFlowScreenHandler::StopSpeakerIdEnrollment() {
   DCHECK(voice_match_enrollment_started_);
   voice_match_enrollment_started_ = false;
+  CHECK(assistant::AssistantSettings::Get());
   assistant::AssistantSettings::Get()->StopSpeakerIdEnrollment();
   // Reset the mojom receiver of |SpeakerIdEnrollmentClient|.
   ResetReceiver();
 }
 
-void AssistantOptInFlowScreenHandler::ReloadContent(base::Value dict) {
+void AssistantOptInFlowScreenHandler::ReloadContent(base::Value::Dict dict) {
   CallJS("login.AssistantOptInFlowScreen.reloadContent", std::move(dict));
 }
 
 void AssistantOptInFlowScreenHandler::AddSettingZippy(const std::string& type,
-                                                      base::Value data) {
+                                                      base::Value::List data) {
   CallJS("login.AssistantOptInFlowScreen.addSettingZippy", type,
          std::move(data));
 }
@@ -442,7 +457,7 @@ void AssistantOptInFlowScreenHandler::OnGetSettingsResponse(
 
   RecordAssistantOptInStatus(FLOW_STARTED);
 
-  base::Value zippy_data(base::Value::Type::LIST);
+  base::Value::List zippy_data;
   bool skip_activity_control = true;
   pending_consent_data_.clear();
   // We read from `multi_consent_ui` field if it is populated and we assume user
@@ -506,13 +521,15 @@ void AssistantOptInFlowScreenHandler::OnGetSettingsResponse(
   auto dictionary = GetSettingsUiStrings(settings_ui, activity_control_needed_,
                                          equal_weight_buttons);
   PrefService* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
-  dictionary.SetKey(
-      "voiceMatchEnforcedOff",
-      base::Value(IsVoiceMatchEnforcedOff(prefs, is_oobe_in_progress)));
-  dictionary.SetKey(
-      "shouldSkipVoiceMatch",
-      base::Value(!ash::AssistantState::Get()->HasAudioInputDevice()));
-  dictionary.SetKey("childName", base::Value(GetGivenNameIfIsChild()));
+  dictionary.Set("voiceMatchEnforcedOff",
+                 IsVoiceMatchEnforcedOff(prefs, is_oobe_in_progress));
+  dictionary.Set("shouldSkipVoiceMatch",
+                 !ash::AssistantState::Get()->HasAudioInputDevice());
+  dictionary.Set("childName", GetGivenNameIfIsChild());
+  dictionary.Set("isTabletMode",
+                 ash::TabletMode::Get()->InTabletMode() ||
+                     (is_oobe_in_progress &&
+                      ash::switches::ShouldOobeUseTabletModeFirstRun()));
   ReloadContent(std::move(dictionary));
 
   // Skip activity control and users will be in opted out mode.
@@ -606,6 +623,7 @@ void AssistantOptInFlowScreenHandler::HandleVoiceMatchScreenUserAction(
 
     DCHECK(!voice_match_enrollment_started_);
     voice_match_enrollment_started_ = true;
+    CHECK(assistant::AssistantSettings::Get());
     assistant::AssistantSettings::Get()->StartSpeakerIdEnrollment(
         flow_type_ == ash::FlowType::kSpeakerIdRetrain,
         weak_factory_.GetWeakPtr());
@@ -659,15 +677,18 @@ void AssistantOptInFlowScreenHandler::HandleFlowInitialized(
     AllowJavascript();
 
   auto* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
-  if (!prefs->GetBoolean(chromeos::assistant::prefs::kAssistantEnabled)) {
+  // Do not skip the flow if the OOBE debug overlay is present. Otherwise it is
+  // not possible to test the screen manually.
+  const bool debugger_enabled =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kShowOobeDevOverlay);
+  if (!prefs->GetBoolean(chromeos::assistant::prefs::kAssistantEnabled) &&
+      !debugger_enabled) {
     HandleFlowFinished();
     return;
   }
 
   initialized_ = true;
-
-  if (on_initialized_)
-    std::move(on_initialized_).Run();
 
   DCHECK(IsKnownEnumValue(static_cast<ash::FlowType>(flow_type)));
   flow_type_ = static_cast<ash::FlowType>(flow_type);

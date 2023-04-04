@@ -40,14 +40,20 @@ cc_proto_library(
     ],
 )
 
-filegroup(
-    name = "connections_enums_proto_config",
-    srcs = ["connections_enums_proto_config.asciipb"],
-)
-
 proto_library(
     name = "sharing_enums_proto",
     srcs = ["sharing_enums.proto"],
+)
+
+cc_proto_library(
+    name = "sharing_enums_cc_proto",
+    visibility = [
+        "//location/nearby/cpp/sharing:__subpackages__",
+        "//third_party/nearby:__subpackages__",
+    ],
+    deps = [
+        ":sharing_enums_proto",
+    ],
 )
 
 java_lite_proto_library(

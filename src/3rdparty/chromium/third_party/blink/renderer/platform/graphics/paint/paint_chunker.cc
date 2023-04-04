@@ -1,10 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunker.h"
 
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_display_item.h"
+#include "third_party/blink/renderer/platform/graphics/paint/scrollbar_display_item.h"
 
 namespace blink {
 
@@ -16,7 +17,7 @@ void PaintChunker::ResetChunks(Vector<PaintChunk>* chunks) {
   }
   chunks_ = chunks;
 #if DCHECK_IS_ON()
-  DCHECK(!chunks || chunks->IsEmpty());
+  DCHECK(!chunks || chunks->empty());
   DCHECK(IsInInitialState());
 #endif
 }
@@ -25,10 +26,10 @@ void PaintChunker::ResetChunks(Vector<PaintChunk>* chunks) {
 bool PaintChunker::IsInInitialState() const {
   if (current_properties_ != PropertyTreeState::Uninitialized())
     return false;
-  DCHECK_EQ(candidate_background_color_.Rgb(), Color::kTransparent);
+  DCHECK(candidate_background_color_ == Color::kTransparent);
   DCHECK_EQ(candidate_background_area_, 0u);
   DCHECK(will_force_new_chunk_);
-  DCHECK(!chunks_ || chunks_->IsEmpty());
+  DCHECK(!chunks_ || chunks_->empty());
   return true;
 }
 #endif
@@ -77,7 +78,7 @@ void PaintChunker::AppendByMoving(PaintChunk&& chunk) {
   DCHECK(chunks_);
   FinalizeLastChunkProperties();
   wtf_size_t next_chunk_begin_index =
-      chunks_->IsEmpty() ? 0 : chunks_->back().end_index;
+      chunks_->empty() ? 0 : chunks_->back().end_index;
   chunks_->emplace_back(next_chunk_begin_index, std::move(chunk));
 }
 
@@ -98,7 +99,7 @@ bool PaintChunker::EnsureCurrentChunk(const PaintChunk::Id& id,
       next_chunk_id_.emplace(id, client);
     }
     FinalizeLastChunkProperties();
-    wtf_size_t begin = chunks_->IsEmpty() ? 0 : chunks_->back().end_index;
+    wtf_size_t begin = chunks_->empty() ? 0 : chunks_->back().end_index;
     MarkClientForValidation(next_chunk_id_->second);
     chunks_->emplace_back(begin, begin, next_chunk_id_->second,
                           next_chunk_id_->first, current_properties_,
@@ -129,16 +130,17 @@ bool PaintChunker::IncrementDisplayItemIndex(const DisplayItemClient& client,
   // set the candidate to be this item.
   if (item.IsDrawing() && item.DrawsContent()) {
     float item_area;
-    Color item_color = To<DrawingDisplayItem>(item).BackgroundColor(item_area);
+    // TODO(https://crbug.com/1351544): This should be SkColor4f and not Color.
+    Color item_color = Color::FromSkColor(
+        To<DrawingDisplayItem>(item).BackgroundColor(item_area));
     ProcessBackgroundColorCandidate(chunk.id, client, item_color, item_area);
   }
 
-  if (item.IsDrawing()) {
-    const DrawingDisplayItem& drawing = To<DrawingDisplayItem>(item);
+  if (const auto* drawing = DynamicTo<DrawingDisplayItem>(item)) {
     chunk.rect_known_to_be_opaque = gfx::MaximumCoveredRect(
-        chunk.rect_known_to_be_opaque, drawing.RectKnownToBeOpaque());
+        chunk.rect_known_to_be_opaque, drawing->RectKnownToBeOpaque());
     if (chunk.text_known_to_be_on_opaque_background) {
-      if (const auto* paint_record = drawing.GetPaintRecord().get()) {
+      if (const auto* paint_record = drawing->GetPaintRecord().get()) {
         if (paint_record->has_draw_text_ops()) {
           chunk.has_text = true;
           chunk.text_known_to_be_on_opaque_background =
@@ -150,6 +152,9 @@ bool PaintChunker::IncrementDisplayItemIndex(const DisplayItemClient& client,
       // we see any text.
       DCHECK(chunk.has_text);
     }
+  } else if (const auto* scrollbar = DynamicTo<ScrollbarDisplayItem>(item)) {
+    if (scrollbar->IsOpaque())
+      chunk.rect_known_to_be_opaque = item.VisualRect();
   }
 
   chunk.raster_effect_outset =
@@ -205,7 +210,7 @@ void PaintChunker::AddSelectionToCurrentChunk(
     absl::optional<PaintedSelectionBound> end) {
   // We should have painted the selection when calling this method.
   DCHECK(chunks_);
-  DCHECK(!chunks_->IsEmpty());
+  DCHECK(!chunks_->empty());
 
   auto& chunk = chunks_->back();
 
@@ -231,6 +236,15 @@ void PaintChunker::AddSelectionToCurrentChunk(
     DCHECK(!selection_data.end);
     selection_data.end = end;
   }
+}
+
+void PaintChunker::RecordAnySelectionWasPainted() {
+  DCHECK(chunks_);
+  DCHECK(!chunks_->empty());
+
+  auto& chunk = chunks_->back();
+  LayerSelectionData& selection_data = chunk.EnsureLayerSelectionData();
+  selection_data.any_selection_was_painted = true;
 }
 
 void PaintChunker::CreateScrollHitTestChunk(
@@ -294,7 +308,7 @@ void PaintChunker::ProcessBackgroundColorCandidate(
 
 void PaintChunker::FinalizeLastChunkProperties() {
   DCHECK(chunks_);
-  if (chunks_->IsEmpty() || chunks_->back().is_moved_from_cached_subsequence)
+  if (chunks_->empty() || chunks_->back().is_moved_from_cached_subsequence)
     return;
 
   auto& chunk = chunks_->back();

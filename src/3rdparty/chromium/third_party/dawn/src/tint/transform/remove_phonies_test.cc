@@ -26,32 +26,32 @@ namespace {
 using RemovePhoniesTest = TransformTest;
 
 TEST_F(RemovePhoniesTest, ShouldRunEmptyModule) {
-  auto* src = R"()";
+    auto* src = R"()";
 
-  EXPECT_FALSE(ShouldRun<RemovePhonies>(src));
+    EXPECT_FALSE(ShouldRun<RemovePhonies>(src));
 }
 
 TEST_F(RemovePhoniesTest, ShouldRunHasPhony) {
-  auto* src = R"(
+    auto* src = R"(
 fn f() {
   _ = 1;
 }
 )";
 
-  EXPECT_TRUE(ShouldRun<RemovePhonies>(src));
+    EXPECT_TRUE(ShouldRun<RemovePhonies>(src));
 }
 
 TEST_F(RemovePhoniesTest, EmptyModule) {
-  auto* src = "";
-  auto* expect = "";
+    auto* src = "";
+    auto* expect = "";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, NoSideEffects) {
-  auto* src = R"(
+    auto* src = R"(
 @group(0) @binding(0) var t : texture_2d<f32>;
 
 fn f() {
@@ -65,10 +65,14 @@ fn f() {
   _ = vec2<f32>(5.0);
   _ = vec3<i32>(6, 7, 8);
   _ = mat2x2<f32>(9.0, 10.0, 11.0, 12.0);
+  _ = atan2(1.0, 2.0);
+  _ = clamp(1.0, 2.0, 3.0);
+  atan2(1.0, 2.0);
+  clamp(1.0, 2.0, 3.0);
 }
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 @group(0) @binding(0) var t : texture_2d<f32>;
 
 fn f() {
@@ -76,13 +80,13 @@ fn f() {
 }
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, SingleSideEffects) {
-  auto* src = R"(
+    auto* src = R"(
 fn neg(a : i32) -> i32 {
   return -(a);
 }
@@ -103,7 +107,7 @@ fn f() {
 }
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 fn neg(a : i32) -> i32 {
   return -(a);
 }
@@ -124,13 +128,13 @@ fn f() {
 }
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, SingleSideEffects_OutOfOrder) {
-  auto* src = R"(
+    auto* src = R"(
 fn f() {
   _ = neg(1);
   _ = add(2, 3);
@@ -151,7 +155,7 @@ fn neg(a : i32) -> i32 {
 }
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 fn f() {
   neg(1);
   add(2, 3);
@@ -172,13 +176,13 @@ fn neg(a : i32) -> i32 {
 }
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, MultipleSideEffects) {
-  auto* src = R"(
+    auto* src = R"(
 fn neg(a : i32) -> i32 {
   return -(a);
 }
@@ -199,7 +203,7 @@ fn f() {
 }
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 fn neg(a : i32) -> i32 {
   return -(a);
 }
@@ -229,13 +233,13 @@ fn f() {
 }
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, MultipleSideEffects_OutOfOrder) {
-  auto* src = R"(
+    auto* src = R"(
 fn f() {
   _ = (1 + add(2 + add(3, 4), 5)) * add(6, 7) * neg(8);
   _ = add(9, neg(10)) + neg(11);
@@ -256,7 +260,7 @@ fn xor(a : u32, b : u32) -> u32 {
 }
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 fn phony_sink(p0 : i32, p1 : i32, p2 : i32) {
 }
 
@@ -286,13 +290,13 @@ fn xor(a : u32, b : u32) -> u32 {
 }
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, ForLoop) {
-  auto* src = R"(
+    auto* src = R"(
 struct S {
   arr : array<i32>,
 };
@@ -321,7 +325,7 @@ fn f() {
 }
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 struct S {
   arr : array<i32>,
 }
@@ -353,13 +357,13 @@ fn f() {
 }
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 TEST_F(RemovePhoniesTest, ForLoop_OutOfOrder) {
-  auto* src = R"(
+    auto* src = R"(
 fn f() {
   for (_ = &s.arr; ;_ = &s.arr) {
     break;
@@ -388,7 +392,7 @@ struct S {
 @group(0) @binding(0) var<storage, read_write> s : S;
 )";
 
-  auto* expect = R"(
+    auto* expect = R"(
 fn phony_sink(p0 : i32, p1 : i32) {
 }
 
@@ -420,9 +424,9 @@ struct S {
 @group(0) @binding(0) var<storage, read_write> s : S;
 )";
 
-  auto got = Run<RemovePhonies>(src);
+    auto got = Run<RemovePhonies>(src);
 
-  EXPECT_EQ(expect, str(got));
+    EXPECT_EQ(expect, str(got));
 }
 
 }  // namespace

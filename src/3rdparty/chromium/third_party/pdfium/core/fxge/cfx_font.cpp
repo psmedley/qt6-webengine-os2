@@ -6,13 +6,15 @@
 
 #include "core/fxge/cfx_font.h"
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <limits>
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "build/build_config.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_codepage.h"
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/unowned_ptr.h"
@@ -26,7 +28,6 @@
 #include "core/fxge/fx_font.h"
 #include "core/fxge/scoped_font_transform.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "third_party/base/span.h"
 
@@ -241,9 +242,9 @@ constexpr uint8_t kWeightPowShiftJis[] = {
 };
 
 constexpr size_t kWeightPowArraySize = 100;
-static_assert(kWeightPowArraySize == pdfium::size(kWeightPow), "Wrong size");
-static_assert(kWeightPowArraySize == pdfium::size(kWeightPow11), "Wrong size");
-static_assert(kWeightPowArraySize == pdfium::size(kWeightPowShiftJis),
+static_assert(kWeightPowArraySize == std::size(kWeightPow), "Wrong size");
+static_assert(kWeightPowArraySize == std::size(kWeightPow11), "Wrong size");
+static_assert(kWeightPowArraySize == std::size(kWeightPowShiftJis),
               "Wrong size");
 
 }  // namespace
@@ -274,7 +275,7 @@ const char CFX_Font::kUniversalDefaultFontName[] = "Arial Unicode MS";
 
 // static
 ByteString CFX_Font::GetDefaultFontNameByCharset(FX_Charset nCharset) {
-  for (size_t i = 0; i < pdfium::size(kDefaultTTFMap) - 1; ++i) {
+  for (size_t i = 0; i < std::size(kDefaultTTFMap) - 1; ++i) {
     if (static_cast<int>(nCharset) == kDefaultTTFMap[i].charset)
       return kDefaultTTFMap[i].fontname;
   }
@@ -419,7 +420,7 @@ int CFX_Font::GetGlyphWidth(uint32_t glyph_index,
                             int weight) const {
   if (!m_Face)
     return 0;
-  if (m_pSubstFont && m_pSubstFont->m_bFlagMM)
+  if (m_pSubstFont && m_pSubstFont->IsBuiltInGenericFont())
     AdjustMMParams(glyph_index, dest_width, weight);
   int err =
       FT_Load_Glyph(m_Face->GetRec(), glyph_index,
@@ -440,8 +441,7 @@ bool CFX_Font::LoadEmbedded(pdfium::span<const uint8_t> src_span,
                             uint64_t object_tag) {
   m_bVertical = force_vertical;
   m_ObjectTag = object_tag;
-  m_FontDataAllocation = std::vector<uint8_t, FxAllocAllocator<uint8_t>>(
-      src_span.begin(), src_span.end());
+  m_FontDataAllocation = DataVector<uint8_t>(src_span.begin(), src_span.end());
   m_Face = CFX_GEModule::Get()->GetFontMgr()->NewFixedFace(
       nullptr, m_FontDataAllocation, 0);
   m_bEmbedded = true;
@@ -702,7 +702,7 @@ std::unique_ptr<CFX_Path> CFX_Font::LoadGlyphPathImpl(uint32_t glyph_index,
       else
         ft_matrix.xy -= ft_matrix.xx * skew / 100;
     }
-    if (m_pSubstFont->m_bFlagMM)
+    if (m_pSubstFont->IsBuiltInGenericFont())
       AdjustMMParams(glyph_index, dest_width, m_pSubstFont->m_Weight);
   }
   ScopedFontTransform scoped_transform(m_Face, &ft_matrix);
@@ -712,7 +712,7 @@ std::unique_ptr<CFX_Path> CFX_Font::LoadGlyphPathImpl(uint32_t glyph_index,
     load_flags |= FT_LOAD_NO_HINTING;
   if (FT_Load_Glyph(m_Face->GetRec(), glyph_index, load_flags))
     return nullptr;
-  if (m_pSubstFont && !m_pSubstFont->m_bFlagMM &&
+  if (m_pSubstFont && !m_pSubstFont->IsBuiltInGenericFont() &&
       m_pSubstFont->m_Weight > 400) {
     uint32_t index = std::min<uint32_t>((m_pSubstFont->m_Weight - 400) / 10,
                                         kWeightPowArraySize - 1);
@@ -780,7 +780,7 @@ int CFX_Font::GetSkewFromAngle(int angle) {
   // |angle| is non-positive so |-angle| is used as the index. Need to make sure
   // |angle| != INT_MIN since -INT_MIN is undefined.
   if (angle > 0 || angle == std::numeric_limits<int>::min() ||
-      static_cast<size_t>(-angle) >= pdfium::size(kAngleSkew)) {
+      static_cast<size_t>(-angle) >= std::size(kAngleSkew)) {
     return -58;
   }
   return kAngleSkew[-angle];

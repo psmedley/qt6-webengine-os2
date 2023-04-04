@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,6 @@
 
 #if BUILDFLAG(IS_APPLE)
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/process/port_provider_mac.h"
 #endif  // BUILDFLAG(IS_APPLE)
 
 #if BUILDFLAG(IS_IOS)
@@ -72,7 +71,7 @@
 #endif
 
 #if BUILDFLAG(IS_FUCHSIA)
-#include "base/fuchsia/build_info.h"
+#include "base/fuchsia/system_info.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
@@ -80,6 +79,8 @@
 #include <crtdbg.h>
 #endif  // _DEBUG
 #include <windows.h>
+
+#include "base/debug/handle_hooks_win.h"
 #endif  // BUILDFLAG(IS_WIN)
 
 namespace base {
@@ -136,13 +137,12 @@ class FeatureListScopedToEachTest : public testing::EmptyTestEventListener {
       delete;
 
   void OnTestStart(const testing::TestInfo& test_info) override {
-    field_trial_list_ = std::make_unique<FieldTrialList>(
-        std::make_unique<MockEntropyProvider>());
-
     const CommandLine* command_line = CommandLine::ForCurrentProcess();
 
-    // Set up a FeatureList instance, so that code using that API will not hit a
-    // an error that it's not set. It will be cleared automatically.
+    // We set up a FeatureList via ScopedFeatureList::InitFromCommandLine().
+    // This ensures that code using that API will not hit an error that it's
+    // not set. It will be cleared by ~ScopedFeatureList().
+
     // TestFeatureForBrowserTest1 and TestFeatureForBrowserTest2 used in
     // ContentBrowserTestScopedFeatureListTest to ensure ScopedFeatureList keeps
     // features from command line.
@@ -172,11 +172,9 @@ class FeatureListScopedToEachTest : public testing::EmptyTestEventListener {
 
   void OnTestEnd(const testing::TestInfo& test_info) override {
     scoped_feature_list_.Reset();
-    field_trial_list_.reset();
   }
 
  private:
-  std::unique_ptr<FieldTrialList> field_trial_list_;
   test::ScopedFeatureList scoped_feature_list_;
 };
 
@@ -218,8 +216,10 @@ class CheckForLeakedGlobals : public testing::EmptyTestEventListener {
   ThreadPoolInstance* thread_pool_set_before_case_ = nullptr;
 };
 
-// base::Process is not available on iOS
-#if !BUILDFLAG(IS_IOS)
+// iOS: base::Process is not available.
+// macOS: Tests may run at background priority locally (crbug.com/1358639#c6) or
+// on bots (crbug.com/931721#c7).
+#if !BUILDFLAG(IS_APPLE)
 class CheckProcessPriority : public testing::EmptyTestEventListener {
  public:
   CheckProcessPriority() { CHECK(!IsProcessBackgrounded()); }
@@ -231,34 +231,15 @@ class CheckProcessPriority : public testing::EmptyTestEventListener {
     EXPECT_FALSE(IsProcessBackgrounded());
   }
   void OnTestEnd(const testing::TestInfo& test) override {
-#if !BUILDFLAG(IS_MAC)
-    // Flakes are found on Mac OS 10.11. See https://crbug.com/931721#c7.
     EXPECT_FALSE(IsProcessBackgrounded());
-#endif
   }
 
  private:
-#if BUILDFLAG(IS_APPLE)
-  // Returns the calling process's task port, ignoring its argument.
-  class CurrentProcessPortProvider : public PortProvider {
-    mach_port_t TaskForPid(ProcessHandle process) const override {
-      // This PortProvider implementation only works for the current process.
-      CHECK_EQ(process, base::GetCurrentProcessHandle());
-      return mach_task_self();
-    }
-  };
-#endif
-
   bool IsProcessBackgrounded() const {
-#if BUILDFLAG(IS_APPLE)
-    CurrentProcessPortProvider port_provider;
-    return Process::Current().IsProcessBackgrounded(&port_provider);
-#else
     return Process::Current().IsProcessBackgrounded();
-#endif
   }
 };
-#endif  // !BUILDFLAG(IS_IOS)
+#endif  // !BUILDFLAG(IS_APPLE)
 
 const std::string& GetProfileName() {
   static const NoDestructor<std::string> profile_name([]() {
@@ -343,6 +324,10 @@ void TestSuite::InitializeFromCommandLine(int argc, wchar_t** argv) {
 void TestSuite::PreInitialize() {
   DCHECK(!is_initialized_);
 
+#if BUILDFLAG(IS_WIN)
+  base::debug::HandleHooks::PatchLoadedModules();
+#endif  // BUILDFLAG(IS_WIN)
+
   // The default death_test_style of "fast" is a frequent source of subtle test
   // flakiness. And on some platforms like macOS, use of system libraries after
   // fork() but before exec() is unsafe. Using the threadsafe style by default
@@ -425,13 +410,13 @@ int TestSuite::Run() {
           switches::kTestChildProcess);
 
 #if BUILDFLAG(IS_FUCHSIA)
-  // Cache the BuildInfo so individual tests do not need to worry about it.
+  // Cache the system info so individual tests do not need to worry about it.
   // Some ProcessUtilTest cases, which use kTestChildProcess, do not pass any
-  // services, so skip this if that switch is not found.
+  // services, so skip this if that switch was present.
   // This must be called before Initialize() because, for example,
   // content::ContentTestSuite::Initialize() may use the cached values.
   if (client_func.empty())
-    FetchAndCacheSystemBuildInfo();
+    CHECK(FetchAndCacheSystemInfo());
 #endif
 
   Initialize();
@@ -587,7 +572,7 @@ void TestSuite::Initialize() {
   }
 #endif
 
-#if defined(DCHECK_IS_CONFIGURABLE)
+#if BUILDFLAG(DCHECK_IS_CONFIGURABLE)
   // Default the configurable DCHECK level to FATAL when running death tests'
   // child process, so that they behave as expected.
   // TODO(crbug.com/1057995): Remove this in favor of the codepath in
@@ -595,7 +580,7 @@ void TestSuite::Initialize() {
   // are fixed to be invoked in the child process as expected.
   if (command_line->HasSwitch("gtest_internal_run_death_test"))
     logging::LOGGING_DCHECK = logging::LOG_FATAL;
-#endif
+#endif  // BUILDFLAG(DCHECK_IS_CONFIGURABLE)
 
 #if BUILDFLAG(IS_IOS)
   InitIOSTestMessageLoop();
@@ -643,7 +628,7 @@ void TestSuite::Initialize() {
   if (check_for_leaked_globals_)
     listeners.Append(new CheckForLeakedGlobals);
   if (check_for_thread_and_process_priority_) {
-#if !BUILDFLAG(IS_IOS)
+#if !BUILDFLAG(IS_APPLE)
     listeners.Append(new CheckProcessPriority);
 #endif
   }

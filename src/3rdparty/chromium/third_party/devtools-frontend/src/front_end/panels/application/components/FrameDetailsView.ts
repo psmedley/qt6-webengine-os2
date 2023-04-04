@@ -2,15 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import type {StackTraceData} from './StackTrace.js';
-import {StackTrace} from './StackTrace.js';
-import type {PermissionsPolicySectionData} from './PermissionsPolicySection.js';
-import {PermissionsPolicySection, renderIconLink} from './PermissionsPolicySection.js';
+import {StackTrace, type StackTraceData} from './StackTrace.js';
+
+import {
+  PermissionsPolicySection,
+  renderIconLink,
+  type PermissionsPolicySectionData,
+} from './PermissionsPolicySection.js';
 import * as Bindings from '../../../models/bindings/bindings.js';
 import * as Common from '../../../core/common/common.js';
 import * as i18n from '../../../core/i18n/i18n.js';
 import * as NetworkForward from '../../../panels/network/forward/forward.js';
-import type * as Platform from '../../../core/platform/platform.js';
+import * as Platform from '../../../core/platform/platform.js';
 import * as Root from '../../../core/root/root.js';
 import * as SDK from '../../../core/sdk/sdk.js';
 import * as LitHtml from '../../../ui/lit-html/lit-html.js';
@@ -22,11 +25,12 @@ import * as UI from '../../../ui/legacy/legacy.js';
 import * as Workspace from '../../../models/workspace/workspace.js';
 import * as Components from '../../../ui/legacy/components/utils/utils.js';
 import * as Protocol from '../../../generated/protocol.js';
-import type {OriginTrialTreeViewData} from './OriginTrialTreeView.js';
-import {OriginTrialTreeView} from './OriginTrialTreeView.js';
+
+import {OriginTrialTreeView, type OriginTrialTreeViewData} from './OriginTrialTreeView.js';
 import * as Coordinator from '../../../ui/components/render_coordinator/render_coordinator.js';
 
 import frameDetailsReportViewStyles from './frameDetailsReportView.css.js';
+import {Prerender2ReasonDescription} from './Prerender2.js';
 
 const UIStrings = {
   /**
@@ -240,6 +244,18 @@ const UIStrings = {
   *@description Label for a button which when clicked causes some information to be refreshed/updated.
   */
   refresh: 'Refresh',
+  /**
+  *@description Label for section of frame details view
+  */
+  prerendering: 'Prerendering',
+  /**
+  *@description Label for subtitle of frame details view
+  */
+  prerenderingStatus: 'Prerendering Status',
+  /**
+  *@description Label for a link to an ad script, which created the current iframe.
+  */
+  creatorAdScript: 'Creator Ad Script',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/components/FrameDetailsView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -253,10 +269,15 @@ export class FrameDetailsView extends UI.ThrottledWidget.ThrottledWidget {
     this.contentElement.classList.add('overflow-auto');
     this.contentElement.appendChild(this.#reportView);
     this.update();
+    frame.resourceTreeModel().addEventListener(
+        SDK.ResourceTreeModel.Events.PrerenderingStatusUpdated, this.update, this);
   }
 
   async doUpdate(): Promise<void> {
-    this.#reportView.data = {frame: this.#frame};
+    const debuggerId = this.#frame?.getDebuggerId();
+    const debuggerModel = debuggerId ? await SDK.DebuggerModel.DebuggerModel.modelForDebuggerId(debuggerId) : null;
+    const target = debuggerModel?.target();
+    this.#reportView.data = {frame: this.#frame, target};
   }
 }
 
@@ -264,16 +285,19 @@ const coordinator = Coordinator.RenderCoordinator.RenderCoordinator.instance();
 
 export interface FrameDetailsReportViewData {
   frame: SDK.ResourceTreeModel.ResourceTreeFrame;
+  target?: SDK.Target.Target;
 }
 
 export class FrameDetailsReportView extends HTMLElement {
   static readonly litTagName = LitHtml.literal`devtools-resources-frame-details-view`;
   readonly #shadow = this.attachShadow({mode: 'open'});
   #frame?: SDK.ResourceTreeModel.ResourceTreeFrame;
+  #target?: SDK.Target.Target;
   #protocolMonitorExperimentEnabled = false;
   #permissionsPolicies: Promise<Protocol.Page.PermissionsPolicyFeatureState[]|null>|null = null;
   #permissionsPolicySectionData: PermissionsPolicySectionData = {policies: [], showDetails: false};
   #originTrialTreeView: OriginTrialTreeView = new OriginTrialTreeView();
+  #linkifier = new Components.Linkifier.Linkifier();
 
   connectedCallback(): void {
     this.#protocolMonitorExperimentEnabled = Root.Runtime.experiments.isEnabled('protocolMonitor');
@@ -282,6 +306,7 @@ export class FrameDetailsReportView extends HTMLElement {
 
   set data(data: FrameDetailsReportViewData) {
     this.#frame = data.frame;
+    this.#target = data.target;
     if (!this.#permissionsPolicies && this.#frame) {
       this.#permissionsPolicies = this.#frame.getPermissionsPolicyState();
     }
@@ -311,6 +336,7 @@ export class FrameDetailsReportView extends HTMLElement {
               </${PermissionsPolicySection.litTagName}>
             `;
           }), LitHtml.nothing)}
+          ${this.#renderPrerenderingSection()}
           ${this.#protocolMonitorExperimentEnabled ? this.#renderAdditionalInfoSection() : LitHtml.nothing}
         </${ReportView.ReportView.Report.litTagName}>
       `, this.#shadow, {host: this});
@@ -318,7 +344,7 @@ export class FrameDetailsReportView extends HTMLElement {
     });
   }
 
-  #renderOriginTrial(): LitHtml.TemplateResult|{} {
+  #renderOriginTrial(): LitHtml.LitTemplate {
     if (!this.#frame) {
       return LitHtml.nothing;
     }
@@ -354,7 +380,7 @@ export class FrameDetailsReportView extends HTMLElement {
     `;
   }
 
-  #renderDocumentSection(): LitHtml.TemplateResult|{} {
+  #renderDocumentSection(): LitHtml.LitTemplate {
     if (!this.#frame) {
       return LitHtml.nothing;
     }
@@ -381,7 +407,7 @@ export class FrameDetailsReportView extends HTMLElement {
     `;
   }
 
-  #maybeRenderSourcesLinkForURL(): LitHtml.TemplateResult|{} {
+  #maybeRenderSourcesLinkForURL(): LitHtml.LitTemplate {
     if (!this.#frame || this.#frame.unreachableUrl()) {
       return LitHtml.nothing;
     }
@@ -393,7 +419,7 @@ export class FrameDetailsReportView extends HTMLElement {
     );
   }
 
-  #maybeRenderNetworkLinkForURL(): LitHtml.TemplateResult|{} {
+  #maybeRenderNetworkLinkForURL(): LitHtml.LitTemplate {
     if (this.#frame) {
       const resource = this.#frame.resourceForURL(this.#frame.url);
       if (resource && resource.request) {
@@ -422,7 +448,7 @@ export class FrameDetailsReportView extends HTMLElement {
     return null;
   }
 
-  #maybeRenderUnreachableURL(): LitHtml.TemplateResult|{} {
+  #maybeRenderUnreachableURL(): LitHtml.LitTemplate {
     if (!this.#frame || !this.#frame.unreachableUrl()) {
       return LitHtml.nothing;
     }
@@ -438,7 +464,7 @@ export class FrameDetailsReportView extends HTMLElement {
     `;
   }
 
-  #renderNetworkLinkForUnreachableURL(): LitHtml.TemplateResult|{} {
+  #renderNetworkLinkForUnreachableURL(): LitHtml.LitTemplate {
     if (this.#frame) {
       const unreachableUrl = Common.ParsedURL.ParsedURL.fromString(this.#frame.unreachableUrl());
       if (unreachableUrl) {
@@ -464,7 +490,7 @@ export class FrameDetailsReportView extends HTMLElement {
     return LitHtml.nothing;
   }
 
-  #maybeRenderOrigin(): LitHtml.TemplateResult|{} {
+  #maybeRenderOrigin(): LitHtml.LitTemplate {
     if (this.#frame && this.#frame.securityOrigin && this.#frame.securityOrigin !== '://') {
       return LitHtml.html`
         <${ReportView.ReportView.ReportKey.litTagName}>${i18nString(UIStrings.origin)}</${
@@ -477,7 +503,7 @@ export class FrameDetailsReportView extends HTMLElement {
     return LitHtml.nothing;
   }
 
-  async #renderOwnerElement(): Promise<LitHtml.TemplateResult|{}> {
+  async #renderOwnerElement(): Promise<LitHtml.LitTemplate> {
     if (this.#frame) {
       const linkTargetDOMNode = await this.#frame.getOwnerDOMNodeOrDocument();
       if (linkTargetDOMNode) {
@@ -507,7 +533,7 @@ export class FrameDetailsReportView extends HTMLElement {
     return LitHtml.nothing;
   }
 
-  #maybeRenderCreationStacktrace(): LitHtml.TemplateResult|{} {
+  #maybeRenderCreationStacktrace(): LitHtml.LitTemplate {
     const creationStackTraceData = this.#frame?.getCreationStackTraceData();
     if (creationStackTraceData && creationStackTraceData.creationStackTrace) {
       // Disabled until https://crbug.com/1079231 is fixed.
@@ -549,7 +575,7 @@ export class FrameDetailsReportView extends HTMLElement {
     }
   }
 
-  #maybeRenderAdStatus(): LitHtml.TemplateResult|{} {
+  #maybeRenderAdStatus(): LitHtml.LitTemplate {
     if (!this.#frame) {
       return LitHtml.nothing;
     }
@@ -562,17 +588,32 @@ export class FrameDetailsReportView extends HTMLElement {
     for (const explanation of this.#frame.adFrameStatus()?.explanations || []) {
       rows.push(LitHtml.html`<div>${this.#getAdFrameExplanationString(explanation)}</div>`);
     }
+
+    const adScriptLinkElement = this.#target ?
+        this.#linkifier.linkifyScriptLocation(
+            this.#target, this.#frame.getAdScriptId(), Platform.DevToolsPath.EmptyUrlString, undefined, undefined) :
+        null;
+
+    // Disabled until https://crbug.com/1079231 is fixed.
+    // clang-format off
     return LitHtml.html`
       <${ReportView.ReportView.ReportKey.litTagName}>${i18nString(UIStrings.adStatus)}</${
         ReportView.ReportView.ReportKey.litTagName}>
       <${ReportView.ReportView.ReportValue.litTagName}>
-         <${ExpandableList.ExpandableList.ExpandableList.litTagName} .data=${
-        {rows} as ExpandableList.ExpandableList.ExpandableListData}></${
+        <${ExpandableList.ExpandableList.ExpandableList.litTagName} .data=${
+          {rows} as ExpandableList.ExpandableList.ExpandableListData}></${
         ExpandableList.ExpandableList.ExpandableList.litTagName}></${ReportView.ReportView.ReportValue.litTagName}>
-      `;
+      ${this.#target ? LitHtml.html`
+        <${ReportView.ReportView.ReportKey.litTagName}>${i18nString(UIStrings.creatorAdScript)}</${
+          ReportView.ReportView.ReportKey.litTagName}>
+        <${ReportView.ReportView.ReportValue.litTagName} class="ad-script-link">${adScriptLinkElement}</${
+          ReportView.ReportView.ReportValue.litTagName}>
+      ` : LitHtml.nothing}
+    `;
+    // clang-format on
   }
 
-  #renderIsolationSection(): LitHtml.TemplateResult|{} {
+  #renderIsolationSection(): LitHtml.LitTemplate {
     if (!this.#frame) {
       return LitHtml.nothing;
     }
@@ -596,7 +637,7 @@ export class FrameDetailsReportView extends HTMLElement {
     `;
   }
 
-  #maybeRenderSecureContextExplanation(): LitHtml.TemplateResult|{} {
+  #maybeRenderSecureContextExplanation(): LitHtml.LitTemplate {
     const explanation = this.#getSecureContextExplanation();
     if (explanation) {
       return LitHtml.html`<span class="inline-comment">${explanation}</span>`;
@@ -618,7 +659,7 @@ export class FrameDetailsReportView extends HTMLElement {
     return null;
   }
 
-  async #maybeRenderCoopCoepStatus(): Promise<LitHtml.TemplateResult|{}> {
+  async #maybeRenderCoopCoepStatus(): Promise<LitHtml.LitTemplate> {
     if (this.#frame) {
       const model = this.#frame.resourceTreeModel().target().model(SDK.NetworkManager.NetworkManager);
       const info = model && await model.getSecurityIsolationStatus(this.#frame.id);
@@ -642,7 +683,7 @@ export class FrameDetailsReportView extends HTMLElement {
       info: Protocol.Network.CrossOriginEmbedderPolicyStatus|Protocol.Network.CrossOriginOpenerPolicyStatus|undefined,
       policyName: string,
       noneValue: Protocol.Network.CrossOriginEmbedderPolicyValue|
-      Protocol.Network.CrossOriginOpenerPolicyValue): LitHtml.TemplateResult|{} {
+      Protocol.Network.CrossOriginOpenerPolicyValue): LitHtml.LitTemplate {
     if (!info) {
       return LitHtml.nothing;
     }
@@ -661,7 +702,7 @@ export class FrameDetailsReportView extends HTMLElement {
     `;
   }
 
-  #renderApiAvailabilitySection(): LitHtml.TemplateResult|{} {
+  #renderApiAvailabilitySection(): LitHtml.LitTemplate {
     if (!this.#frame) {
       return LitHtml.nothing;
     }
@@ -680,7 +721,7 @@ export class FrameDetailsReportView extends HTMLElement {
     `;
   }
 
-  #renderSharedArrayBufferAvailability(): LitHtml.TemplateResult|{} {
+  #renderSharedArrayBufferAvailability(): LitHtml.LitTemplate {
     if (this.#frame) {
       const features = this.#frame.getGatedAPIFeatures();
       if (features) {
@@ -694,7 +735,7 @@ export class FrameDetailsReportView extends HTMLElement {
             i18nString(UIStrings.sharedarraybufferConstructorIs) :
             (sabAvailable ? i18nString(UIStrings.sharedarraybufferConstructorIsAvailable) : '');
 
-        function renderHint(frame: SDK.ResourceTreeModel.ResourceTreeFrame): LitHtml.TemplateResult|{} {
+        function renderHint(frame: SDK.ResourceTreeModel.ResourceTreeFrame): LitHtml.LitTemplate {
           switch (frame.getCrossOriginIsolatedContextType()) {
             case Protocol.Page.CrossOriginIsolatedContextType.Isolated:
               return LitHtml.nothing;
@@ -730,7 +771,7 @@ export class FrameDetailsReportView extends HTMLElement {
     return LitHtml.nothing;
   }
 
-  #renderMeasureMemoryAvailability(): LitHtml.TemplateResult|{} {
+  #renderMeasureMemoryAvailability(): LitHtml.LitTemplate {
     if (this.#frame) {
       const measureMemoryAvailable = this.#frame.isCrossOriginIsolated();
       const availabilityText =
@@ -750,7 +791,44 @@ export class FrameDetailsReportView extends HTMLElement {
     return LitHtml.nothing;
   }
 
-  #renderAdditionalInfoSection(): LitHtml.TemplateResult|{} {
+  #renderPrerenderingSection(): LitHtml.LitTemplate {
+    if (!this.#frame || !this.#frame.prerenderFinalStatus) {
+      return LitHtml.nothing;
+    }
+    const finalStatus = Prerender2ReasonDescription[this.#frame.prerenderFinalStatus].name();
+
+    if (this.#frame.prerenderDisallowedApiMethod) {
+      const detailSection = Prerender2ReasonDescription['DisallowedApiMethod'].name();
+      return LitHtml.html`
+      <${ReportView.ReportView.ReportSectionHeader.litTagName}>
+      ${i18nString(UIStrings.prerendering)}</${ReportView.ReportView.ReportSectionHeader.litTagName}>
+      <${ReportView.ReportView.ReportKey.litTagName}>${i18nString(UIStrings.prerenderingStatus)}</${
+          ReportView.ReportView.ReportKey.litTagName}>
+      <${ReportView.ReportView.ReportValue.litTagName}>
+      <div class="text-ellipsis" title=${finalStatus}>${finalStatus}</div>
+      </${ReportView.ReportView.ReportValue.litTagName}>
+      <${ReportView.ReportView.ReportKey.litTagName}>${detailSection}</${ReportView.ReportView.ReportKey.litTagName}>
+      <${ReportView.ReportView.ReportValue.litTagName}>
+      <div class="text-ellipsis" title=${this.#frame.prerenderDisallowedApiMethod}>
+        ${this.#frame.prerenderDisallowedApiMethod}
+      </div>
+      </${ReportView.ReportView.ReportValue.litTagName}>
+      <${ReportView.ReportView.ReportSectionDivider.litTagName}></${
+          ReportView.ReportView.ReportSectionDivider.litTagName}>`;
+    }
+    return LitHtml.html`
+      <${ReportView.ReportView.ReportSectionHeader.litTagName}>
+      ${i18nString(UIStrings.prerendering)}</${ReportView.ReportView.ReportSectionHeader.litTagName}>
+      <${ReportView.ReportView.ReportKey.litTagName}>${i18nString(UIStrings.prerenderingStatus)}</${
+        ReportView.ReportView.ReportKey.litTagName}>
+      <${ReportView.ReportView.ReportValue.litTagName}>
+      <div class="text-ellipsis" title=${finalStatus}>${finalStatus}</div>
+      </${ReportView.ReportView.ReportValue.litTagName}>
+      <${ReportView.ReportView.ReportSectionDivider.litTagName}></${
+        ReportView.ReportView.ReportSectionDivider.litTagName}>`;
+  }
+
+  #renderAdditionalInfoSection(): LitHtml.LitTemplate {
     if (!this.#frame) {
       return LitHtml.nothing;
     }

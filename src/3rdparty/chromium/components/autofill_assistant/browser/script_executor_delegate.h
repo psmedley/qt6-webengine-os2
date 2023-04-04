@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/details.h"
 #include "components/autofill_assistant/browser/info_box.h"
+#include "components/autofill_assistant/browser/js_flow_devtools_wrapper.h"
 #include "components/autofill_assistant/browser/state.h"
 #include "components/autofill_assistant/browser/tts_button_state.h"
 #include "components/autofill_assistant/browser/user_action.h"
@@ -36,11 +37,11 @@ class WebContents;
 namespace autofill_assistant {
 
 class Service;
-class WebController;
-struct ClientSettings;
 class TriggerContext;
-class WebsiteLoginManager;
 class UserModel;
+class WebController;
+class WebsiteLoginManager;
+struct ClientSettings;
 
 class ScriptExecutorDelegate {
  public:
@@ -63,6 +64,11 @@ class ScriptExecutorDelegate {
   virtual password_manager::PasswordChangeSuccessTracker*
   GetPasswordChangeSuccessTracker() = 0;
   virtual content::WebContents* GetWebContents() = 0;
+  virtual const std::string GetLocale() = 0;
+
+  virtual void SetJsFlowLibrary(const std::string& js_flow_library) = 0;
+  virtual JsFlowDevtoolsWrapper* GetJsFlowDevtoolsWrapper() = 0;
+
   virtual std::string GetEmailAddressForAccessTokenAccount() = 0;
   virtual ukm::UkmRecorder* GetUkmRecorder() = 0;
 
@@ -87,6 +93,7 @@ class ScriptExecutorDelegate {
   virtual void SetClientSettings(
       const ClientSettingsProto& client_settings) = 0;
   virtual UserModel* GetUserModel() = 0;
+  virtual UserData* GetUserData() = 0;
 
   // The next navigation is expected and will not cause an error.
   virtual void ExpectNavigation() = 0;
@@ -147,8 +154,25 @@ class ScriptExecutorDelegate {
   // gets attached to the action's response if non empty.
   virtual ProcessedActionStatusDetailsProto& GetLogInfo() = 0;
 
+  // Returns whether or not this instance of Autofill Assistant must use a
+  // backend endpoint to query data.
+  virtual bool MustUseBackendData() const = 0;
+
+  // Checks if given XML is signed or not.
+  virtual bool IsXmlSigned(const std::string& xml_string) const = 0;
+
+  // Extracts attribute values from the |xml_string| corresponding to the
+  // |keys|.
+  virtual const std::vector<std::string> ExtractValuesFromSingleTagXml(
+      const std::string& xml_string,
+      const std::vector<std::string>& keys) const = 0;
+
+  // Called when a new action response has been received. Used for metrics.
+  virtual void OnActionsResponseReceived(
+      const RoundtripNetworkStats& network_stats) = 0;
+
  protected:
-  virtual ~ScriptExecutorDelegate() {}
+  virtual ~ScriptExecutorDelegate() = default;
 };
 }  // namespace autofill_assistant
 

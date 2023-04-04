@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/field_formatter.h"
 #include "components/autofill_assistant/browser/web/element_action_util.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "components/autofill_assistant/browser/web/web_controller.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -194,7 +194,8 @@ void RequiredFieldsFallbackHandler::OnGetRequiredFieldValue(
     const ClientStatus& element_status,
     const std::string& value) {
   required_fields_[required_fields_index].status =
-      value.empty() ? RequiredField::EMPTY : RequiredField::NOT_EMPTY;
+      value.empty() ? RequiredField::FieldValueStatus::kEmpty
+                    : RequiredField::FieldValueStatus::kNotEmpty;
 }
 
 void RequiredFieldsFallbackHandler::OnCheckRequiredFieldsDone(

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,9 +21,9 @@ void TimeDomain::OnAssignedToSequenceManager(
   sequence_manager_ = sequence_manager;
 }
 
-Value TimeDomain::AsValue() const {
-  Value state(Value::Type::DICTIONARY);
-  state.SetStringKey("name", GetName());
+Value::Dict TimeDomain::AsValue() const {
+  Value::Dict state;
+  state.Set("name", GetName());
   return state;
 }
 

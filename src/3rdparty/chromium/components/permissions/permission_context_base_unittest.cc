@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,6 +40,7 @@
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_renderer_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom.h"
 #include "url/url_util.h"
 
 namespace permissions {
@@ -88,26 +89,23 @@ class TestPermissionContext : public PermissionContextBase {
                                   content_settings_type());
   }
 
-  void RequestPermission(content::WebContents* web_contents,
-                         const PermissionRequestID& id,
+  void RequestPermission(const PermissionRequestID& id,
                          const GURL& requesting_frame,
                          bool user_gesture,
                          BrowserPermissionCallback callback) override {
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
-    PermissionContextBase::RequestPermission(web_contents, id, requesting_frame,
-                                             true /* user_gesture */,
-                                             std::move(callback));
+    PermissionContextBase::RequestPermission(
+        id, requesting_frame, true /* user_gesture */, std::move(callback));
     run_loop.Run();
   }
 
-  void DecidePermission(content::WebContents* web_contents,
-                        const PermissionRequestID& id,
+  void DecidePermission(const PermissionRequestID& id,
                         const GURL& requesting_origin,
                         const GURL& embedding_origin,
                         bool user_gesture,
                         BrowserPermissionCallback callback) override {
-    PermissionContextBase::DecidePermission(web_contents, id, requesting_origin,
+    PermissionContextBase::DecidePermission(id, requesting_origin,
                                             embedding_origin, user_gesture,
                                             std::move(callback));
     if (respond_permission_) {
@@ -231,14 +229,14 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     base::HistogramTester histograms;
 
     const PermissionRequestID id(
-        web_contents()->GetMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
         PermissionRequestID::RequestLocalId());
     permission_context.SetRespondPermissionCallback(base::BindOnce(
         &PermissionContextBaseTests::RespondToPermission,
         base::Unretained(this), &permission_context, id, url, decision));
     permission_context.RequestPermission(
-        web_contents(), id, url, true /* user_gesture */,
+        id, url, true /* user_gesture */,
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
     ASSERT_EQ(1u, permission_context.decisions().size());
@@ -331,8 +329,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
       TestPermissionContext permission_context(browser_context(),
                                                content_settings_type);
       const PermissionRequestID id(
-          web_contents()->GetMainFrame()->GetProcess()->GetID(),
-          web_contents()->GetMainFrame()->GetRoutingID(),
+          web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+          web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
           PermissionRequestID::RequestLocalId());
 
       permission_context.SetRespondPermissionCallback(
@@ -341,7 +339,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                          CONTENT_SETTING_ASK));
 
       permission_context.RequestPermission(
-          web_contents(), id, url, true /* user_gesture */,
+          id, url, true /* user_gesture */,
           base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                          base::Unretained(&permission_context)));
       histograms.ExpectTotalCount(
@@ -384,8 +382,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     TestPermissionContext permission_context(browser_context(),
                                              content_settings_type);
     const PermissionRequestID id(
-        web_contents()->GetMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
         PermissionRequestID::RequestLocalId());
 
     permission_context.SetRespondPermissionCallback(
@@ -394,7 +392,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                        CONTENT_SETTING_ASK));
 
     permission_context.RequestPermission(
-        web_contents(), id, url, true /* user_gesture */,
+        id, url, true /* user_gesture */,
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -424,8 +422,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
             browser_context(), ContentSettingsType::GEOLOCATION);
 
         const PermissionRequestID id(
-            web_contents()->GetMainFrame()->GetProcess()->GetID(),
-            web_contents()->GetMainFrame()->GetRoutingID(),
+            web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+            web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
             PermissionRequestID::RequestLocalId(i + 1));
 
         permission_context.SetRespondPermissionCallback(
@@ -433,7 +431,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                            base::Unretained(this), &permission_context, id, url,
                            CONTENT_SETTING_ASK));
         permission_context.RequestPermission(
-            web_contents(), id, url, true /* user_gesture */,
+            id, url, true /* user_gesture */,
             base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                            base::Unretained(&permission_context)));
         histograms.ExpectTotalCount(
@@ -499,15 +497,15 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                                                ContentSettingsType::MIDI_SYSEX);
 
       const PermissionRequestID id(
-          web_contents()->GetMainFrame()->GetProcess()->GetID(),
-          web_contents()->GetMainFrame()->GetRoutingID(),
+          web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+          web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
           PermissionRequestID::RequestLocalId(i + 1));
       permission_context.SetRespondPermissionCallback(
           base::BindOnce(&PermissionContextBaseTests::RespondToPermission,
                          base::Unretained(this), &permission_context, id, url,
                          CONTENT_SETTING_ASK));
       permission_context.RequestPermission(
-          web_contents(), id, url, true /* user_gesture */,
+          id, url, true /* user_gesture */,
           base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                          base::Unretained(&permission_context)));
 
@@ -561,11 +559,11 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                          std::string());
 
     const PermissionRequestID id(
-        web_contents()->GetMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
         PermissionRequestID::RequestLocalId());
     permission_context.RequestPermission(
-        web_contents(), id, url, true /* user_gesture */,
+        id, url, true /* user_gesture */,
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -586,8 +584,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     SetUpUrl(url);
 
     const PermissionRequestID id(
-        web_contents()->GetMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
         PermissionRequestID::RequestLocalId());
     permission_context.SetRespondPermissionCallback(
         base::BindOnce(&PermissionContextBaseTests::RespondToPermission,
@@ -595,7 +593,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                        CONTENT_SETTING_ALLOW));
 
     permission_context.RequestPermission(
-        web_contents(), id, url, true /* user_gesture */,
+        id, url, true /* user_gesture */,
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -669,17 +667,17 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     SetUpUrl(url);
 
     const PermissionRequestID id1(
-        web_contents()->GetMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
         PermissionRequestID::RequestLocalId(1));
     const PermissionRequestID id2(
-        web_contents()->GetMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
         PermissionRequestID::RequestLocalId(2));
 
     // Request a permission without setting the callback to DecidePermission.
     permission_context.RequestPermission(
-        web_contents(), id1, url, true /* user_gesture */,
+        id1, url, true /* user_gesture */,
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -690,7 +688,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
         &PermissionContextBaseTests::RespondToPermission,
         base::Unretained(this), &permission_context, id1, url, response));
     permission_context.RequestPermission(
-        web_contents(), id2, url, true /* user_gesture */,
+        id2, url, true /* user_gesture */,
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -714,7 +712,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
         virtual_url);
 
     PermissionResult result = permission_context.GetPermissionStatus(
-        web_contents()->GetMainFrame(), virtual_url, virtual_url);
+        web_contents()->GetPrimaryMainFrame(), virtual_url, virtual_url);
     EXPECT_EQ(result.content_setting, want_response);
     EXPECT_EQ(result.source, want_source);
   }
@@ -906,5 +904,47 @@ TEST_F(PermissionContextBaseTests, TestVirtualURLSameOrigin) {
                  GURL("http://www.google.com/foo"), CONTENT_SETTING_ASK,
                  PermissionStatusSource::UNSPECIFIED);
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+TEST_F(PermissionContextBaseTests, ExpirationAllow) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      {features::kRecordPermissionExpirationTimestamps}, {});
+
+  base::Time now = base::Time::Now();
+  TestAskAndDecide_TestContent(ContentSettingsType::NOTIFICATIONS,
+                               CONTENT_SETTING_ALLOW);
+
+  GURL primary_url("https://www.google.com");
+  GURL secondary_url;
+  auto* hcsm = PermissionsClient::Get()->GetSettingsMap(browser_context());
+  content_settings::SettingInfo info;
+  hcsm->GetWebsiteSetting(primary_url, secondary_url,
+                          ContentSettingsType::NOTIFICATIONS, &info);
+
+  // The last_visited should lie between today and a week ago.
+  EXPECT_GE(info.metadata.last_visited, now - base::Days(7));
+  EXPECT_LE(info.metadata.last_visited, now);
+}
+
+TEST_F(PermissionContextBaseTests, ExpirationBlock) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      {features::kRecordPermissionExpirationTimestamps}, {});
+
+  TestAskAndDecide_TestContent(ContentSettingsType::NOTIFICATIONS,
+                               CONTENT_SETTING_BLOCK);
+
+  GURL primary_url("https://www.google.com");
+  GURL secondary_url;
+  auto* hcsm = PermissionsClient::Get()->GetSettingsMap(browser_context());
+  content_settings::SettingInfo info;
+  hcsm->GetWebsiteSetting(primary_url, secondary_url,
+                          ContentSettingsType::NOTIFICATIONS, &info);
+
+  // last_visited is not set for BLOCKed permissions.
+  EXPECT_EQ(base::Time(), info.metadata.last_visited);
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace permissions

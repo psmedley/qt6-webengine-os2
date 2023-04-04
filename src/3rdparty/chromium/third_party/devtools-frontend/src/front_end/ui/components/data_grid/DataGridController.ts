@@ -5,11 +5,18 @@
 import * as LitHtml from '../../../ui/lit-html/lit-html.js';
 import * as ComponentHelpers from '../helpers/helpers.js';
 import type * as TextUtils from '../../../models/text_utils/text_utils.js';
-import type {SortState, Column, Row} from './DataGridUtils.js';
-import {SortDirection, getRowEntryForColumnId, getStringifiedCellValues} from './DataGridUtils.js';
-import type {DataGridData, DataGridContextMenusConfiguration} from './DataGrid.js';
-import type {ContextMenuColumnSortClickEvent, ColumnHeaderClickEvent} from './DataGridEvents.js';
-import {DataGrid} from './DataGrid.js';
+
+import {
+  SortDirection,
+  getRowEntryForColumnId,
+  getStringifiedCellValues,
+  type SortState,
+  type Column,
+  type Row,
+} from './DataGridUtils.js';
+
+import {type ContextMenuColumnSortClickEvent, type ColumnHeaderClickEvent} from './DataGridEvents.js';
+import {DataGrid, type DataGridData, type DataGridContextMenusConfiguration} from './DataGrid.js';
 import dataGridControllerStyles from './dataGridController.css.js';
 
 export interface DataGridControllerData {
@@ -23,6 +30,8 @@ export interface DataGridControllerData {
    */
   initialSort?: SortState;
   contextMenus?: DataGridContextMenusConfiguration;
+  label?: string;
+  paddingRowsCount?: number;
 }
 
 export class DataGridController extends HTMLElement {
@@ -33,6 +42,7 @@ export class DataGridController extends HTMLElement {
   #columns: readonly Column[] = [];
   #rows: Row[] = [];
   #contextMenus?: DataGridContextMenusConfiguration = undefined;
+  #label?: string = undefined;
 
   /**
    * Because the controller will sort data in place (e.g. mutate it) when we get
@@ -46,6 +56,8 @@ export class DataGridController extends HTMLElement {
   #sortState: Readonly<SortState>|null = null;
   #filters: readonly TextUtils.TextUtils.ParsedFilter[] = [];
 
+  #paddingRowsCount?: number;
+
   connectedCallback(): void {
     this.#shadow.adoptedStyleSheets = [dataGridControllerStyles];
   }
@@ -56,6 +68,8 @@ export class DataGridController extends HTMLElement {
       rows: this.#originalRows as Row[],
       filters: this.#filters,
       contextMenus: this.#contextMenus,
+      label: this.#label,
+      paddingRowsCount: this.#paddingRowsCount,
     };
   }
 
@@ -65,6 +79,7 @@ export class DataGridController extends HTMLElement {
     this.#contextMenus = data.contextMenus;
     this.#filters = data.filters || [];
     this.#contextMenus = data.contextMenus;
+    this.#label = data.label;
 
     this.#columns = [...this.#originalColumns];
     this.#rows = this.#cloneAndFilterRows(data.rows, this.#filters);
@@ -76,6 +91,8 @@ export class DataGridController extends HTMLElement {
     if (this.#sortState) {
       this.#sortRows(this.#sortState);
     }
+
+    this.#paddingRowsCount = data.paddingRowsCount;
 
     this.#render();
   }
@@ -210,6 +227,8 @@ export class DataGridController extends HTMLElement {
           rows: this.#rows,
           activeSort: this.#sortState,
           contextMenus: this.#contextMenus,
+          label: this.#label,
+          paddingRowsCount: this.#paddingRowsCount,
         } as DataGridData}
         @columnheaderclick=${this.#onColumnHeaderClick}
         @contextmenucolumnsortclick=${this.#onContextMenuColumnSortClick}

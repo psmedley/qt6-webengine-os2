@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,9 +7,7 @@ import web_idl
 from . import name_style
 from .blink_v8_bridge import blink_class_name
 from .blink_v8_bridge import blink_type_info
-from .blink_v8_bridge import make_blink_to_v8_value
 from .blink_v8_bridge import make_default_value_expr
-from .blink_v8_bridge import make_v8_to_blink_value
 from .blink_v8_bridge import native_value_tag
 from .code_node import EmptyNode
 from .code_node import FormatNode
@@ -217,9 +215,9 @@ def bind_local_vars(code_node, cg_context):
         S("is_cross_origin_isolated",
           ("const bool ${is_cross_origin_isolated} = "
            "${execution_context}->CrossOriginIsolatedCapability();")),
-        S("is_direct_socket_enabled",
-          ("const bool ${is_direct_socket_enabled} = "
-           "${execution_context}->DirectSocketCapability();")),
+        S("is_isolated_application",
+          ("const bool ${is_isolated_application} = "
+           "${execution_context}->IsolatedApplicationCapability();")),
         S("is_in_secure_context",
           ("const bool ${is_in_secure_context} = "
            "${execution_context}->IsSecureContext();")),

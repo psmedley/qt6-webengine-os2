@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Runs captured sites framework recording and tests.
@@ -209,6 +209,11 @@ def _add_run_args(parser):
                       default='',
                       type=str,
                       help='Location of "pipe: file')
+  parser.add_argument('-w',
+                      '--wpr_verbose',
+                      dest='wpr_verbose',
+                      action='store_true',
+                      help='Also include verbose WPR output.')
 
 
 def _add_shared_args(parser):
@@ -359,6 +364,9 @@ def _launch_test(options, forward_args, gtest_filter_autofill,
   if options.add_break_on_failure:
     command_args.append(_RUN_DEBUGGING_TESTS)
 
+  if options.wpr_verbose:
+    command_args.append('--wpr_verbose')
+
   if options.retry_count > 0:
     command_args.append('--test-launcher-retry-limit=%d' % options.retry_count)
 
@@ -367,7 +375,8 @@ def _launch_test(options, forward_args, gtest_filter_autofill,
     command_args.append('--autofill-server-type=%s ' % full_cache_type)
 
   if options.command_file:
-    command_args.append('--command_file=%s' % options.command_file)
+    command_args.append('--command_file=%s' %
+                        os.path.expanduser(options.command_file))
 
   if options.store_log:
     if not os.path.isdir(_LOG_DATA_DIR_PATH):

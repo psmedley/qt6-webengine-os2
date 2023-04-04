@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/flags_ui/flags_ui_switches.h"
 #include "components/metrics/delegating_provider.h"
 #include "components/metrics/environment_recorder.h"
 #include "components/metrics/histogram_encoder.h"
@@ -51,6 +52,11 @@
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #include "base/win/current_module.h"
+#endif
+
+#if BUILDFLAG(IS_LINUX)
+#include "base/environment.h"
+#include "base/nix/xdg_util.h"
 #endif
 
 using base::SampleCountIterator;
@@ -137,6 +143,62 @@ void RecordCurrentTime(
     time->set_time_zone_offset_from_gmt_sec(time_zone_offset.InSeconds());
   }
 }
+
+#if BUILDFLAG(IS_LINUX)
+metrics::SystemProfileProto::OS::XdgSessionType ToProtoSessionType(
+    base::nix::SessionType session_type) {
+  switch (session_type) {
+    case base::nix::SessionType::kUnset:
+      return metrics::SystemProfileProto::OS::UNSET;
+    case base::nix::SessionType::kOther:
+      return metrics::SystemProfileProto::OS::OTHER_SESSION_TYPE;
+    case base::nix::SessionType::kUnspecified:
+      return metrics::SystemProfileProto::OS::UNSPECIFIED;
+    case base::nix::SessionType::kTty:
+      return metrics::SystemProfileProto::OS::TTY;
+    case base::nix::SessionType::kX11:
+      return metrics::SystemProfileProto::OS::X11;
+    case base::nix::SessionType::kWayland:
+      return metrics::SystemProfileProto::OS::WAYLAND;
+    case base::nix::SessionType::kMir:
+      return metrics::SystemProfileProto::OS::MIR;
+  }
+
+  NOTREACHED();
+  return metrics::SystemProfileProto::OS::UNSET;
+}
+
+metrics::SystemProfileProto::OS::XdgCurrentDesktop ToProtoCurrentDesktop(
+    base::nix::DesktopEnvironment desktop_environment) {
+  switch (desktop_environment) {
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_OTHER:
+      return metrics::SystemProfileProto::OS::OTHER;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_CINNAMON:
+      return metrics::SystemProfileProto::OS::CINNAMON;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_DEEPIN:
+      return metrics::SystemProfileProto::OS::DEEPIN;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_GNOME:
+      return metrics::SystemProfileProto::OS::GNOME;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_KDE3:
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_KDE4:
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_KDE5:
+      return metrics::SystemProfileProto::OS::KDE;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_PANTHEON:
+      return metrics::SystemProfileProto::OS::PANTHEON;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_UKUI:
+      return metrics::SystemProfileProto::OS::UKUI;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_UNITY:
+      return metrics::SystemProfileProto::OS::UNITY;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_XFCE:
+      return metrics::SystemProfileProto::OS::XFCE;
+    case base::nix::DesktopEnvironment::DESKTOP_ENVIRONMENT_LXQT:
+      return metrics::SystemProfileProto::OS::LXQT;
+  }
+
+  NOTREACHED();
+  return metrics::SystemProfileProto::OS::OTHER;
+}
+#endif  // BUILDFLAG(IS_LINUX)
 
 }  // namespace
 
@@ -278,9 +340,19 @@ void MetricsLog::RecordCoreSystemProfile(MetricsServiceClient* client,
     system_profile->set_brand_code(brand_code);
 
   // Records 32-bit hashes of the command line keys.
-  const auto command_line_switches =
-      base::CommandLine::ForCurrentProcess()->GetSwitches();
-  for (const auto& command_line_switch : command_line_switches) {
+  base::CommandLine command_line_copy(*base::CommandLine::ForCurrentProcess());
+
+  // Exclude these switches which are very frequently on the command line but
+  // serve no meaningful purpose.
+  static const char* const kSwitchesToFilter[] = {
+      ::switches::kFlagSwitchesBegin,
+      ::switches::kFlagSwitchesEnd,
+  };
+
+  for (const char* filter_switch : kSwitchesToFilter)
+    command_line_copy.RemoveSwitch(filter_switch);
+
+  for (const auto& command_line_switch : command_line_copy.GetSwitches()) {
     system_profile->add_command_line_key_hash(
         variations::HashName(command_line_switch.first));
   }
@@ -358,6 +430,13 @@ void MetricsLog::RecordCoreSystemProfile(
       internal::ToInstallerPackage(build_info->installer_package_name()));
 #elif BUILDFLAG(IS_IOS)
   os->set_build_number(base::SysInfo::GetIOSBuildNumber());
+#endif
+
+#if BUILDFLAG(IS_LINUX)
+  std::unique_ptr<base::Environment> env = base::Environment::Create();
+  os->set_xdg_session_type(ToProtoSessionType(base::nix::GetSessionType(*env)));
+  os->set_xdg_current_desktop(
+      ToProtoCurrentDesktop(base::nix::GetDesktopEnvironment(env.get())));
 #endif
 }
 

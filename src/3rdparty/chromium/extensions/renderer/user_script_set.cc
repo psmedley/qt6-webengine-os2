@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,19 +134,17 @@ bool UserScriptSet::UpdateUserScripts(
     // Note that this is a pointer into shared memory. We don't own it. It
     // gets cleared up when the last renderer or browser process drops their
     // reference to the shared memory.
-    for (size_t j = 0; j < script->js_scripts().size(); ++j) {
-      const char* body = NULL;
-      int body_length = 0;
+    for (const auto& js_script : script->js_scripts()) {
+      const char* body = nullptr;
+      size_t body_length = 0;
       CHECK(iter.ReadData(&body, &body_length));
-      script->js_scripts()[j]->set_external_content(
-          base::StringPiece(body, body_length));
+      js_script->set_external_content(base::StringPiece(body, body_length));
     }
-    for (size_t j = 0; j < script->css_scripts().size(); ++j) {
-      const char* body = NULL;
-      int body_length = 0;
+    for (const auto& css_script : script->css_scripts()) {
+      const char* body = nullptr;
+      size_t body_length = 0;
       CHECK(iter.ReadData(&body, &body_length));
-      script->css_scripts()[j]->set_external_content(
-          base::StringPiece(body, body_length));
+      css_script->set_external_content(base::StringPiece(body, body_length));
     }
 
     if (only_inject_incognito && !script->is_incognito_enabled())
@@ -209,7 +207,7 @@ std::unique_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
       ScriptContext::GetEffectiveDocumentURLForInjection(
           web_frame, document_url, script->match_origin_as_fallback());
 
-  bool is_subframe = web_frame->Parent() || web_frame->IsInFencedFrameTree();
+  bool is_subframe = !web_frame->IsOutermostMainFrame();
   if (!script->MatchesDocument(effective_document_url, is_subframe))
     return injection;
 

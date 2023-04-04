@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -134,6 +134,8 @@ jumbo_source_set("base") {
     "container_names.h",
     "content_decryption_module.cc",
     "content_decryption_module.h",
+    "converting_audio_fifo.cc",
+    "converting_audio_fifo.h",
     "crc_16.h",
     "data_buffer.cc",
     "data_buffer.h",
@@ -174,10 +176,10 @@ jumbo_source_set("base") {
     "format_utils.h",
     "frame_rate_estimator.cc",
     "frame_rate_estimator.h",
+    "key_system_info.cc",
+    "key_system_info.h",
     "key_system_names.cc",
     "key_system_names.h",
-    "key_system_properties.cc",
-    "key_system_properties.h",
     "key_systems.cc",
     "key_systems.h",
     "localized_strings.cc",
@@ -207,6 +209,8 @@ jumbo_source_set("base") {
     "media_observer.h",
     "media_permission.cc",
     "media_permission.h",
+    "media_player_logging_id.cc",
+    "media_player_logging_id.h",
     "media_resource.cc",
     "media_resource.h",
     "media_serializers.h",
@@ -314,8 +318,6 @@ jumbo_source_set("base") {
     "timestamp_constants.h",
     "tuneable.cc",
     "tuneable.h",
-    "unaligned_shared_memory.cc",
-    "unaligned_shared_memory.h",
     "use_after_free_checker.h",
     "user_input_monitor.cc",
     "user_input_monitor.h",
@@ -410,7 +412,7 @@ jumbo_source_set("base") {
     deps += [ "//third_party/libvpx" ]
   }
 
-  if (is_linux && !is_chromecast) {
+  if (is_linux && !is_castos) {
     sources += [ "user_input_monitor_linux.cc" ]
   } else if (is_mac) {
     sources += [ "user_input_monitor_mac.cc" ]
@@ -441,6 +443,7 @@ jumbo_source_set("base") {
     public_deps += [
       "//media/base/win:dcomp_texture_wrapper",
       "//media/base/win:mf_cdm_proxy",
+      "//media/base/win:overlay_state_observer_subscription",
     ]
     sources += [
       "win/mf_feature_checks.cc",
@@ -448,11 +451,9 @@ jumbo_source_set("base") {
     ]
   }
 
-  # TODO(ziyangch): Check |is_chromecast| first when using cast media pipeline
-  # on Android cast devices.
   if (is_android) {
     sources += [ "demuxer_memory_limit_android.cc" ]
-  } else if (is_chromecast) {
+  } else if (is_castos) {
     sources += [ "demuxer_memory_limit_cast.cc" ]
   } else if (is_fuchsia) {
     sources += [ "demuxer_memory_limit_low.cc" ]
@@ -581,6 +582,7 @@ source_set("unit_tests") {
     "channel_mixer_unittest.cc",
     "channel_mixing_matrix_unittest.cc",
     "container_names_unittest.cc",
+    "converting_audio_fifo_unittest.cc",
     "crc_16_unittest.cc",
     "data_buffer_unittest.cc",
     "decoder_buffer_queue_unittest.cc",
@@ -618,7 +620,6 @@ source_set("unit_tests") {
     "text_renderer_unittest.cc",
     "time_delta_interpolator_unittest.cc",
     "tuneable_unittest.cc",
-    "unaligned_shared_memory_unittest.cc",
     "user_input_monitor_unittest.cc",
     "vector_math_unittest.cc",
     "video_aspect_ratio_unittest.cc",
@@ -666,7 +667,7 @@ source_set("unit_tests") {
     ]
   }
 
-  if (is_chromecast && !is_android) {
+  if (is_castos) {
     sources += [ "demuxer_memory_limit_cast_unittest.cc" ]
   }
 }

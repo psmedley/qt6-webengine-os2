@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,11 +46,13 @@ class TestProfileOAuth2TokenServiceDelegateChromeOS
       OAuth2AccessTokenConsumer* consumer) override;
   bool RefreshTokenIsAvailable(const CoreAccountId& account_id) const override;
   void UpdateAuthError(const CoreAccountId& account_id,
-                       const GoogleServiceAuthError& error) override;
+                       const GoogleServiceAuthError& error,
+                       bool fire_auth_error_changed) override;
   GoogleServiceAuthError GetAuthError(
       const CoreAccountId& account_id) const override;
   std::vector<CoreAccountId> GetAccounts() const override;
-  void LoadCredentials(const CoreAccountId& primary_account_id) override;
+  void LoadCredentials(const CoreAccountId& primary_account_id,
+                       bool is_syncing) override;
   void UpdateCredentials(const CoreAccountId& account_id,
                          const std::string& refresh_token) override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
@@ -58,6 +60,9 @@ class TestProfileOAuth2TokenServiceDelegateChromeOS
   void RevokeCredentials(const CoreAccountId& account_id) override;
   void RevokeAllCredentials() override;
   const net::BackoffEntry* BackoffEntry() const override;
+  void ClearAuthError(const absl::optional<CoreAccountId>& account_id) override;
+  GoogleServiceAuthError BackOffError() const override;
+  void ResetBackOffEntry() override;
 
   // |ProfileOAuth2TokenServiceObserver| implementation.
   void OnRefreshTokenAvailable(const CoreAccountId& account_id) override;

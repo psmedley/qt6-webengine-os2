@@ -5,12 +5,25 @@
  * found in the LICENSE file.
  */
 
-#include "src/sksl/SkSLContext.h"
 #include "src/sksl/ir/SkSLFieldAccess.h"
+
+#include "include/core/SkTypes.h"
+#include "include/private/SkSLDefines.h"
+#include "include/private/SkSLSymbol.h"
+#include "include/private/SkTArray.h"
+#include "include/sksl/SkSLErrorReporter.h"
+#include "include/sksl/SkSLOperator.h"
+#include "src/sksl/SkSLAnalysis.h"
+#include "src/sksl/SkSLBuiltinTypes.h"
+#include "src/sksl/SkSLConstantFolder.h"
+#include "src/sksl/SkSLContext.h"
+#include "src/sksl/ir/SkSLConstructorStruct.h"
+#include "src/sksl/ir/SkSLFunctionDeclaration.h"
 #include "src/sksl/ir/SkSLMethodReference.h"
 #include "src/sksl/ir/SkSLSetting.h"
 #include "src/sksl/ir/SkSLSymbolTable.h"
-#include "src/sksl/ir/SkSLUnresolvedFunction.h"
+
+#include <cstddef>
 
 namespace SkSL {
 
@@ -23,26 +36,13 @@ std::unique_ptr<Expression> FieldAccess::Convert(const Context& context,
     if (baseType.isEffectChild()) {
         // Turn the field name into a free function name, prefixed with '$':
         std::string methodName = "$" + std::string(field);
-        const Symbol* result = symbolTable[methodName];
-        if (result) {
-            switch (result->kind()) {
-                case Symbol::Kind::kFunctionDeclaration: {
-                    std::vector<const FunctionDeclaration*> f = {
-                            &result->as<FunctionDeclaration>()};
-                    return std::make_unique<MethodReference>(
-                            context, pos, std::move(base), f);
-                }
-                case Symbol::Kind::kUnresolvedFunction: {
-                    const UnresolvedFunction& f = result->as<UnresolvedFunction>();
-                    return std::make_unique<MethodReference>(
-                            context, pos, std::move(base), f.functions());
-                }
-                default:
-                    break;
-            }
+        const Symbol* result = symbolTable.find(methodName);
+        if (result && result->is<FunctionDeclaration>()) {
+            return std::make_unique<MethodReference>(context, pos, std::move(base),
+                                                     &result->as<FunctionDeclaration>());
         }
         context.fErrors->error(pos, "type '" + baseType.displayName() + "' has no method named '" +
-                std::string(field) + "'");
+                                    std::string(field) + "'");
         return nullptr;
     }
     if (baseType.isStruct()) {
@@ -58,8 +58,27 @@ std::unique_ptr<Expression> FieldAccess::Convert(const Context& context,
     }
 
     context.fErrors->error(pos, "type '" + baseType.displayName() +
-            "' does not have a field named '" + std::string(field) + "'");
+                                "' does not have a field named '" + std::string(field) + "'");
     return nullptr;
+}
+
+static std::unique_ptr<Expression> extract_field(Position pos,
+                                                 const ConstructorStruct& ctor,
+                                                 int fieldIndex) {
+    // Confirm that the fields that are being removed are side-effect free.
+    const ExpressionArray& args = ctor.arguments();
+    int numFields = args.count();
+    for (int index = 0; index < numFields; ++index) {
+        if (fieldIndex == index) {
+            continue;
+        }
+        if (Analysis::HasSideEffects(*args[index])) {
+            return nullptr;
+        }
+    }
+
+    // Return the desired field.
+    return args[fieldIndex]->clone(pos);
 }
 
 std::unique_ptr<Expression> FieldAccess::Make(const Context& context,
@@ -70,7 +89,22 @@ std::unique_ptr<Expression> FieldAccess::Make(const Context& context,
     SkASSERT(base->type().isStruct());
     SkASSERT(fieldIndex >= 0);
     SkASSERT(fieldIndex < (int) base->type().fields().size());
+
+    // Replace `knownStruct.field` with the field's value if there are no side-effects involved.
+    const Expression* expr = ConstantFolder::GetConstantValueForVariable(*base);
+    if (expr->is<ConstructorStruct>()) {
+        if (std::unique_ptr<Expression> field = extract_field(pos, expr->as<ConstructorStruct>(),
+                                                              fieldIndex)) {
+            return field;
+        }
+    }
+
     return std::make_unique<FieldAccess>(pos, std::move(base), fieldIndex, ownerKind);
+}
+
+std::string FieldAccess::description(OperatorPrecedence) const {
+    return this->base()->description(OperatorPrecedence::kPostfix) + "." +
+           std::string(this->base()->type().fields()[this->fieldIndex()].fName);
 }
 
 }  // namespace SkSL

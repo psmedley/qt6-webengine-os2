@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,7 +79,7 @@ export class PrintServerStore extends EventTarget {
     this.updatePrintServersConfig_(printServersConfig);
     const eventData = {
       printServerNames: Array.from(this.printServersByName_.keys()),
-      isSingleServerFetchingMode: this.isSingleServerFetchingMode_
+      isSingleServerFetchingMode: this.isSingleServerFetchingMode_,
     };
     this.dispatchEvent(new CustomEvent(
         PrintServerStoreEventType.PRINT_SERVERS_CHANGED, {detail: eventData}));

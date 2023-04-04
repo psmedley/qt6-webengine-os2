@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -235,8 +235,8 @@ TEST_F(EnumSetTest, HasAll) {
 TEST_F(EnumSetTest, Iterators) {
   const TestEnumSet enums1(TestEnum::TEST_4, TestEnum::TEST_5);
   TestEnumSet enums2;
-  for (TestEnumSet::Iterator it = enums1.begin(); it != enums1.end(); it++) {
-    enums2.Put(*it);
+  for (TestEnum e : enums1) {
+    enums2.Put(e);
   }
   EXPECT_EQ(enums2, enums1);
 }

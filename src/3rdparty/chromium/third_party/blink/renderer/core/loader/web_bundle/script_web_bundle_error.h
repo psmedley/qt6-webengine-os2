@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,20 +17,21 @@ class ScriptWebBundleError final {
   // TODO: figure out what to show the user when
   // the type is kSystemError.
   enum class Type {
-    kParseError,
+    kTypeError,
+    kSyntaxError,
     kSystemError,
   };
 
   ScriptWebBundleError(Type type, String message)
       : type_(type), message_(std::move(message)) {
-    DCHECK(!message_.IsEmpty());
+    DCHECK(!message_.empty());
   }
 
   ~ScriptWebBundleError() = default;
 
   v8::Local<v8::Value> ToV8(ScriptState* script_state);
-  Type GetType();
-  const String& GetMessage() { return message_; }
+  Type GetType() const { return type_; }
+  const String& GetMessage() const { return message_; }
 
  private:
   Type type_;

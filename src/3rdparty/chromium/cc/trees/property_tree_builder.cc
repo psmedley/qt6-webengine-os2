@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ struct DataForRecursion {
   int closest_ancestor_with_cached_render_surface;
   int closest_ancestor_with_copy_request;
   int closest_ancestor_being_captured;
-  SkColor safe_opaque_background_color;
+  SkColor4f safe_opaque_background_color;
   bool animation_axis_aligned_since_render_target;
   bool not_axis_aligned_since_last_clip;
   gfx::Transform compound_transform_since_render_target;
@@ -112,14 +112,16 @@ class PropertyTreeBuilderContext {
 
 // Methods to query state from the AnimationHost ----------------------
 bool OpacityIsAnimating(const MutatorHost& host, Layer* layer) {
-  return host.IsAnimatingOpacityProperty(layer->element_id(),
-                                         layer->GetElementTypeForAnimation());
+  return host.IsAnimatingProperty(layer->element_id(),
+                                  layer->GetElementTypeForAnimation(),
+                                  TargetProperty::OPACITY);
 }
 
 bool HasPotentiallyRunningOpacityAnimation(const MutatorHost& host,
                                            Layer* layer) {
-  return host.HasPotentiallyRunningOpacityAnimation(
-      layer->element_id(), layer->GetElementTypeForAnimation());
+  return host.HasPotentiallyRunningAnimationForProperty(
+      layer->element_id(), layer->GetElementTypeForAnimation(),
+      TargetProperty::OPACITY);
 }
 
 bool HasPotentialOpacityAnimation(const MutatorHost& host, Layer* layer) {
@@ -128,25 +130,49 @@ bool HasPotentialOpacityAnimation(const MutatorHost& host, Layer* layer) {
 }
 
 bool FilterIsAnimating(const MutatorHost& host, Layer* layer) {
-  return host.IsAnimatingFilterProperty(layer->element_id(),
-                                        layer->GetElementTypeForAnimation());
+  return host.IsAnimatingProperty(layer->element_id(),
+                                  layer->GetElementTypeForAnimation(),
+                                  TargetProperty::FILTER);
 }
 
 bool HasPotentiallyRunningFilterAnimation(const MutatorHost& host,
                                           Layer* layer) {
-  return host.HasPotentiallyRunningFilterAnimation(
-      layer->element_id(), layer->GetElementTypeForAnimation());
+  return host.HasPotentiallyRunningAnimationForProperty(
+      layer->element_id(), layer->GetElementTypeForAnimation(),
+      TargetProperty::FILTER);
 }
 
 bool TransformIsAnimating(const MutatorHost& host, Layer* layer) {
-  return host.IsAnimatingTransformProperty(layer->element_id(),
-                                           layer->GetElementTypeForAnimation());
+  DCHECK(!host.IsAnimatingProperty(layer->element_id(),
+                                   layer->GetElementTypeForAnimation(),
+                                   TargetProperty::SCALE) &&
+         !host.IsAnimatingProperty(layer->element_id(),
+                                   layer->GetElementTypeForAnimation(),
+                                   TargetProperty::ROTATE) &&
+         !host.IsAnimatingProperty(layer->element_id(),
+                                   layer->GetElementTypeForAnimation(),
+                                   TargetProperty::TRANSLATE))
+      << "individual transform properties only supported in layer lists mode";
+  return host.IsAnimatingProperty(layer->element_id(),
+                                  layer->GetElementTypeForAnimation(),
+                                  TargetProperty::TRANSFORM);
 }
 
 bool HasPotentiallyRunningTransformAnimation(const MutatorHost& host,
                                              Layer* layer) {
-  return host.HasPotentiallyRunningTransformAnimation(
-      layer->element_id(), layer->GetElementTypeForAnimation());
+  DCHECK(!host.HasPotentiallyRunningAnimationForProperty(
+             layer->element_id(), layer->GetElementTypeForAnimation(),
+             TargetProperty::SCALE) &&
+         !host.HasPotentiallyRunningAnimationForProperty(
+             layer->element_id(), layer->GetElementTypeForAnimation(),
+             TargetProperty::ROTATE) &&
+         !host.HasPotentiallyRunningAnimationForProperty(
+             layer->element_id(), layer->GetElementTypeForAnimation(),
+             TargetProperty::TRANSLATE))
+      << "individual transform properties only supported in layer lists mode";
+  return host.HasPotentiallyRunningAnimationForProperty(
+      layer->element_id(), layer->GetElementTypeForAnimation(),
+      TargetProperty::TRANSFORM);
 }
 
 float MaximumAnimationScale(const MutatorHost& host, Layer* layer) {
@@ -189,21 +215,17 @@ void PropertyTreeBuilderContext::AddClipNodeIfNeeded(
     data_for_children->clip_tree_parent = parent_id;
   } else {
     ClipNode node;
-    node.clip = layer->EffectiveClipRect();
-
-    // Move the clip bounds so that it is relative to the transform parent.
-    node.clip += layer->offset_to_transform_parent();
-
+    if (layer_clips_subtree) {
+      node.clip = layer->EffectiveClipRect();
+      // Move the clip bounds so that it is relative to the transform parent.
+      node.clip += layer->offset_to_transform_parent();
+    } else {
+      DCHECK(layer->filters().HasFilterThatMovesPixels());
+      node.pixel_moving_filter_id = layer->effect_tree_index();
+    }
     node.transform_id = created_transform_node
                             ? data_for_children->transform_tree_parent
                             : data_from_ancestor.transform_tree_parent;
-    if (layer_clips_subtree) {
-      node.clip_type = ClipNode::ClipType::APPLIES_LOCAL_CLIP;
-    } else {
-      DCHECK(layer->filters().HasFilterThatMovesPixels());
-      node.clip_type = ClipNode::ClipType::EXPANDS_CLIP;
-      node.clip_expander = ClipExpander(layer->effect_tree_index());
-    }
     data_for_children->clip_tree_parent = clip_tree_.Insert(node, parent_id);
   }
 
@@ -236,6 +258,13 @@ bool PropertyTreeBuilderContext::AddTransformNodeIfNeeded(
   // the Running state right after commit on the compositor thread.
   const bool has_any_transform_animation = HasAnyAnimationTargetingProperty(
       mutator_host_, layer, TargetProperty::TRANSFORM);
+  DCHECK(!HasAnyAnimationTargetingProperty(mutator_host_, layer,
+                                           TargetProperty::SCALE) &&
+         !HasAnyAnimationTargetingProperty(mutator_host_, layer,
+                                           TargetProperty::ROTATE) &&
+         !HasAnyAnimationTargetingProperty(mutator_host_, layer,
+                                           TargetProperty::TRANSLATE))
+      << "individual transform properties only supported in layer lists mode";
 
   const bool has_surface = created_render_surface;
 
@@ -683,9 +712,9 @@ void PropertyTreeBuilderContext::AddScrollNodeIfNeeded(
 void SetSafeOpaqueBackgroundColor(const DataForRecursion& data_from_ancestor,
                                   Layer* layer,
                                   DataForRecursion* data_for_children) {
-  SkColor background_color = layer->background_color();
+  SkColor4f background_color = layer->background_color();
   data_for_children->safe_opaque_background_color =
-      SkColorGetA(background_color) == 255
+      background_color.isOpaque()
           ? background_color
           : data_from_ancestor.safe_opaque_background_color;
   layer->SetSafeOpaqueBackgroundColor(
@@ -771,16 +800,15 @@ void PropertyTreeBuilderContext::BuildPropertyTrees() {
   data_for_recursion.animation_axis_aligned_since_render_target = true;
   data_for_recursion.not_axis_aligned_since_last_clip = false;
 
-  SkColor root_background_color = layer_tree_host_->background_color();
-  if (SkColorGetA(root_background_color) != 255)
-    root_background_color = SkColorSetA(root_background_color, 255);
-  data_for_recursion.safe_opaque_background_color = root_background_color;
+  data_for_recursion.safe_opaque_background_color =
+      layer_tree_host_->background_color().isOpaque()
+          ? layer_tree_host_->background_color()
+          : layer_tree_host_->background_color().makeOpaque();
 
   property_trees_.clear();
   transform_tree_.set_device_scale_factor(
       layer_tree_host_->device_scale_factor());
   ClipNode root_clip;
-  root_clip.clip_type = ClipNode::ClipType::APPLIES_LOCAL_CLIP;
   root_clip.clip = gfx::RectF(layer_tree_host_->device_viewport_rect());
   root_clip.transform_id = kRootPropertyNodeId;
   data_for_recursion.clip_tree_parent =

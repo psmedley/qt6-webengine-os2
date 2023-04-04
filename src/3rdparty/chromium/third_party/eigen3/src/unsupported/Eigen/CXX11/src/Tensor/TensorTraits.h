@@ -52,8 +52,8 @@ struct traits<Tensor<Scalar_, NumIndices_, Options_, IndexType_> >
   typedef Scalar_ Scalar;
   typedef Dense StorageKind;
   typedef IndexType_ Index;
-  static const int NumDimensions = NumIndices_;
-  static const int Layout = Options_ & RowMajor ? RowMajor : ColMajor;
+  static constexpr int NumDimensions = NumIndices_;
+  static constexpr int Layout = Options_ & RowMajor ? RowMajor : ColMajor;
   enum {
     Options = Options_,
     Flags = compute_tensor_flags<Scalar_, Options_>::ret | (is_const<Scalar_>::value ? 0 : LvalueBit)
@@ -71,8 +71,8 @@ struct traits<TensorFixedSize<Scalar_, Dimensions, Options_, IndexType_> >
   typedef Scalar_ Scalar;
   typedef Dense StorageKind;
   typedef IndexType_ Index;
-  static const int NumDimensions = array_size<Dimensions>::value;
-  static const int Layout = Options_ & RowMajor ? RowMajor : ColMajor;
+  static constexpr int NumDimensions = array_size<Dimensions>::value;
+  static constexpr int Layout = Options_ & RowMajor ? RowMajor : ColMajor;
   enum {
     Options = Options_,
     Flags = compute_tensor_flags<Scalar_, Options_>::ret | (is_const<Scalar_>::value ? 0: LvalueBit)
@@ -92,8 +92,8 @@ struct traits<TensorMap<PlainObjectType, Options_, MakePointer_> >
   typedef typename BaseTraits::Scalar Scalar;
   typedef typename BaseTraits::StorageKind StorageKind;
   typedef typename BaseTraits::Index Index;
-  static const int NumDimensions = BaseTraits::NumDimensions;
-  static const int Layout = BaseTraits::Layout;
+  static constexpr int NumDimensions = BaseTraits::NumDimensions;
+  static constexpr int Layout = BaseTraits::Layout;
   enum {
     Options = Options_,
     Flags = BaseTraits::Flags
@@ -114,8 +114,8 @@ struct traits<TensorRef<PlainObjectType> >
   typedef typename BaseTraits::Scalar Scalar;
   typedef typename BaseTraits::StorageKind StorageKind;
   typedef typename BaseTraits::Index Index;
-  static const int NumDimensions = BaseTraits::NumDimensions;
-  static const int Layout = BaseTraits::Layout;
+  static constexpr int NumDimensions = BaseTraits::NumDimensions;
+  static constexpr int Layout = BaseTraits::Layout;
   enum {
     Options = BaseTraits::Options,
     Flags = BaseTraits::Flags
@@ -256,10 +256,10 @@ struct nested<const TensorRef<PlainObjectType> >
 // the SAME case.
 // When the stride is 1, we have the simplified case R'=R-K+1, C'=C-K+1, Pr=0,
 // Pc=0.
-typedef enum {
+enum PaddingType {
   PADDING_VALID = 1,
   PADDING_SAME = 2
-} PaddingType;
+};
 
 }  // end namespace Eigen
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,6 +134,16 @@ class MockInputMethodBase : public InputMethodBase {
   void OnCaretBoundsChanged(const TextInputClient* client) override {}
   void CancelComposition(const TextInputClient* client) override {}
   bool IsCandidatePopupOpen() const override { return false; }
+
+#if BUILDFLAG(IS_WIN)
+  bool OnUntranslatedIMEMessage(
+      const CHROME_MSG event,
+      InputMethod::NativeEventResult* result) override {
+    return false;
+  }
+  void OnInputLocaleChanged() override {}
+  bool IsInputLocaleCJK() const override { return false; }
+#endif
 
   // InputMethodBase:
   void OnWillChangeFocusedClient(TextInputClient* focused_before,

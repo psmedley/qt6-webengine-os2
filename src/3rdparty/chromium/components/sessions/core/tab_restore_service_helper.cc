@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -193,6 +193,7 @@ void TabRestoreServiceHelper::BrowserClosing(LiveTabContext* context) {
   closing_contexts_.insert(context);
 
   auto window = std::make_unique<Window>();
+  window->type = context->GetWindowType();
   window->selected_tab_index = context->GetSelectedIndex();
   window->timestamp = TimeNow();
   window->app_name = context->GetAppName();
@@ -464,7 +465,7 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
   // Normally an entry's ID should match the ID that is being restored. If it
   // does not, then the entry is a window or group from which a single tab will
   // be restored (reachable through OS-level menus like Mac > History).
-  bool entry_id_matches_restore_id = entry.id == id;
+  bool entry_id_matches_restore_id = entry.id == id || entry.original_id == id;
 
   // |context| will be NULL in cases where one isn't already available (eg,
   // when invoked on Mac OS X with no windows open). In this case, create a
@@ -489,8 +490,9 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
       // restored.
       if (entry_id_matches_restore_id || !window.app_name.empty()) {
         context = client_->CreateLiveTabContext(
-            context, window.app_name, window.bounds, window.show_state,
-            window.workspace, window.user_title, window.extra_data);
+            context, window.type, window.app_name, window.bounds,
+            window.show_state, window.workspace, window.user_title,
+            window.extra_data);
 
         base::flat_map<tab_groups::TabGroupId, tab_groups::TabGroupId>
             new_group_ids;
@@ -548,7 +550,7 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
           SessionID::id_type restored_tab_browser_id;
           {
             const Tab& tab = *window.tabs[tab_i];
-            if (tab.id != id)
+            if (tab.id != id && tab.original_id != id)
               continue;
 
             restored_tab_browser_id = tab.browser_id;
@@ -708,7 +710,7 @@ void TabRestoreServiceHelper::PruneEntries() {
 TabRestoreService::Entries::iterator
 TabRestoreServiceHelper::GetEntryIteratorById(SessionID id) {
   for (auto i = entries_.begin(); i != entries_.end(); ++i) {
-    if ((*i)->id == id)
+    if ((*i)->id == id || (*i)->original_id == id)
       return i;
 
     // For Window and Group entries, see if the ID matches a tab. If so, report
@@ -716,14 +718,14 @@ TabRestoreServiceHelper::GetEntryIteratorById(SessionID id) {
     if ((*i)->type == TabRestoreService::WINDOW) {
       auto& window = static_cast<const Window&>(**i);
       for (const auto& tab : window.tabs) {
-        if (tab->id == id) {
+        if (tab->id == id || tab->original_id == id) {
           return i;
         }
       }
     } else if ((*i)->type == TabRestoreService::GROUP) {
       auto& group = static_cast<const Group&>(**i);
       for (const auto& tab : group.tabs) {
-        if (tab->id == id) {
+        if (tab->id == id || tab->original_id == id) {
           return i;
         }
       }
@@ -878,8 +880,9 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
       tab_index = tab.tabstrip_index;
     } else {
       context = client_->CreateLiveTabContext(
-          context, std::string(), gfx::Rect(), ui::SHOW_STATE_NORMAL,
-          std::string(), std::string(), std::map<std::string, std::string>());
+          context, SessionWindow::TYPE_NORMAL, std::string(), gfx::Rect(),
+          ui::SHOW_STATE_NORMAL, std::string(), std::string(),
+          std::map<std::string, std::string>());
       if (tab.browser_id)
         UpdateTabBrowserIDs(tab.browser_id, context->GetSessionID());
     }

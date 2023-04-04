@@ -1,5 +1,5 @@
 <!--
-Copyright 2021 The Chromium Authors. All rights reserved.
+Copyright 2021 The Chromium Authors
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -134,7 +134,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.ClientAppMetadata.IsManufacturerEmpty"
     enum="BooleanEmpty" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates whether or not the device manufacturer name returned in the
@@ -145,7 +145,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.ClientAppMetadata.IsModelEmpty" enum="BooleanEmpty"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates whether or not the device model name returned in the hardware info
@@ -155,7 +155,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.ClientAppMetadataInstanceIdTokenFetch.Result"
     enum="InstanceIDResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates the result of fetching an InstanceId token during the construction
@@ -165,7 +165,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.ClientAppMetadataInstanceIdTokenFetch.Retries"
     units="retries" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Counts the number of times the InstanceId token fetch got retried because it
@@ -184,7 +184,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncService.ClientAppMetadataFetch.AsyncTaskResult"
     enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async ClientAppMetadata retrieval performed during
@@ -196,7 +196,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncService.ClientAppMetadataFetch.ExecutionTime"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async ClientAppMetadata retrieval
@@ -207,7 +207,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncService.GcmRegistration.ExecutionTime"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of GCM registration performed during
@@ -218,7 +218,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncService.GcmRegistration.Success"
     enum="BooleanSuccess" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of GCM registration performed during initialization of
@@ -228,7 +228,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncService.Initialization.ExecutionTime"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the DeviceSync service initialization.
@@ -263,8 +263,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceActivityGetter.ApiCallResult.GetDevicesActivityStatus"
-    enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthApiCallResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async GetDevicesActivityStatus API call to
@@ -276,7 +276,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceActivityGetter.ExecutionTime.GetDevicesActivityStatus"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async GetDevicesActivityStatus API call
@@ -288,7 +288,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceNotifier.ApiCallResult.NotifyGroupDevices"
     enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async BatchNotifyGroupDevices API call to
@@ -300,7 +300,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceNotifier.ExecutionTime.NotifyGroupDevices"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async BatchNotifyGroupDevices API call to
@@ -311,8 +311,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceSyncer.AsyncTaskResult.DeviceMetadataDecryption"
-    enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthAsyncTaskResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async device metadata decryption during the
@@ -326,8 +326,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceSyncer.AsyncTaskResult.GroupPrivateKeyDecryption"
-    enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthAsyncTaskResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async group private key decryption during the
@@ -339,7 +339,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceSyncer.ExecutionTime.DeviceMetadataDecryption"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async device metadata decryption during
@@ -351,7 +351,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceSyncer.ExecutionTime.GroupPrivateKeyDecryption"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async group private key decryption during
@@ -363,7 +363,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceSyncer.IsGroupPrivateKeyConsistent"
     enum="BooleanConsistent" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the group private key sent by CryptAuth matches the
@@ -375,7 +375,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.DeviceSyncer.IsLocalDeviceMetadataConsistent"
     enum="BooleanConsistent" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the local device metadata agrees with that sent by
@@ -385,8 +385,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.DeviceSyncV2.DeviceSyncer.MetadataDecryptionSuccess"
-    enum="BooleanSuccess" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="BooleanSuccess" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not device metadata sent by CryptAuth in the SyncMetadata
@@ -397,7 +397,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncV2.DeviceSyncer.MetadataParsingSuccess"
     enum="BooleanSuccess" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not device metadata sent by CryptAuth in the SyncMetadata
@@ -410,7 +410,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.ApiCallResult.GetFeatureStatuses"
     enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async BatchGetFeatureStatuses API call during the
@@ -422,7 +422,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.CorrectNumberOfDevicesInResponse"
     enum="BooleanExpected" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the expected number of devices were sent in the
@@ -434,7 +434,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.ExecutionTime.GetFeatureStatuses"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async BatchGetFeatureStatuses API call
@@ -446,7 +446,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.IsDuplicateDeviceId"
     enum="BooleanDuplicate" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not a device ID in the BatchGetFeatureStatuses response
@@ -458,7 +458,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.IsKnownFeatureType"
     enum="BooleanKnown" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the feature type strings returned in the
@@ -472,7 +472,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.IsUnsupportedFeatureMarkedEnabled"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not a feature is marked as enabled even though it is
@@ -485,7 +485,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusGetter.WasDeviceInResponseRequested"
     enum="BooleanRequested" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not a device in the BatchGetFeatureStatuses response was
@@ -496,8 +496,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusSetter.ApiCallResult.SetFeatureStatuses"
-    enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthApiCallResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async BatchSetFeatureStatuses API call to
@@ -509,7 +509,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.FeatureStatusSetter.ExecutionTime.SetFeatureStatuses"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async BatchSetFeatureStatuses API call to
@@ -520,8 +520,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.GroupPrivateKeySharer.ApiCallResult.ShareGroupPrivateKey"
-    enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthApiCallResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async ShareGroupPrivateKey API call during the
@@ -533,7 +533,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.GroupPrivateKeySharer.AsyncTaskResult.GroupPrivateKeyEncryption"
     enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async group private key encryption during the
@@ -547,8 +547,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.GroupPrivateKeySharer.EncryptionSuccess"
-    enum="BooleanSuccess" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="BooleanSuccess" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the group private key was able to be encrypted using
@@ -561,7 +561,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.GroupPrivateKeySharer.ExecutionTime.GroupPrivateKeyEncryption"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async group private key encryption during
@@ -573,7 +573,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.GroupPrivateKeySharer.ExecutionTime.ShareGroupPrivateKey"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async ShareGroupPrivateKey API call during
@@ -585,7 +585,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.GroupPrivateKeySharer.IsEncryptingKeyEmpty"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not a device's key used to encrypt the group private key
@@ -598,7 +598,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncV2.InvocationReason"
     enum="CryptAuthV2InvocationReason" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The clients' reasons for making CryptAuth v2 DeviceSync requests. Recorded
@@ -608,8 +608,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.ApiCallResult.FirstSyncMetadata"
-    enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthApiCallResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the first async SyncMetadata API call during the
@@ -620,8 +620,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.ApiCallResult.SecondSyncMetadata"
-    enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthApiCallResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the second async SyncMetadata API call during the
@@ -632,8 +632,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.AsyncTaskResult.GroupKeyCreation"
-    enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthAsyncTaskResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async group key creation during the CryptAuth v2
@@ -644,8 +644,8 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.AsyncTaskResult.LocalDeviceMetadataEncryption"
-    enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthAsyncTaskResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async local device metadata encryption during the
@@ -657,7 +657,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.ExecutionTime.FirstSyncMetadata"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the first async SyncMetadata API call during
@@ -669,7 +669,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.ExecutionTime.GroupKeyCreation"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async group key creation during the
@@ -681,7 +681,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.ExecutionTime.LocalDeviceMetadataEncryption"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async local device metadata encryption
@@ -693,7 +693,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.ExecutionTime.SecondSyncMetadata"
     units="ms" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the second async SyncMetadata API call during
@@ -705,7 +705,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.MetadataSyncer.IsDeviceMetadataPacketValid"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the device metadata packets sent by CryptAuth have
@@ -716,7 +716,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncV2.MetadataSyncer.IsDuplicateDeviceId"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the device ID from a device metadata packet sent by
@@ -728,7 +728,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncV2.RemoteDeviceProvider.NumV1Devices"
     units="count" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the number of devices returned by a v1 DeviceSync. Only recorded
@@ -740,7 +740,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.DeviceSyncV2.RemoteDeviceProvider.NumV2Devices"
     units="count" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the number of devices returned by a v2 DeviceSync. Only recorded
@@ -753,7 +753,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.RemoteDeviceProvider.PercentageOfV1DevicesReplacedByV2Devices"
     units="%" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the percentage of devices returned by a v2 DeviceSync that replace
@@ -768,7 +768,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.RemoteDeviceProvider.PercentageOfV2DevicesWithDecryptedPublicKey"
     units="%" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the percentage of devices returned by a v2 DeviceSync that have a
@@ -782,7 +782,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.DeviceSyncV2.RemoteDeviceProvider.RatioOfV2ToV1Devices"
     units="%" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the ratio of the number of devices returned by a v2 DeviceSync to
@@ -798,8 +798,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.DeviceSyncV2.Result.DidDeviceRegistryChange"
-    enum="BooleanChanged" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="BooleanChanged" expires_after="2023-04-09">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates whether or not any device data in the device registry changed as a
@@ -809,8 +809,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.DeviceSyncV2.Result.ResultCode"
-    enum="CryptAuthV2DeviceSyncResultCode" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthV2DeviceSyncResultCode" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The CryptAuth v2 DeviceSync attempt results broken down by result code.
@@ -819,8 +819,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.DeviceSyncV2.Result.ResultType"
-    enum="CryptAuthV2DeviceSyncResultType" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthV2DeviceSyncResultType" expires_after="2023-04-09">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates whether the CryptAuth v2 DeviceSync attempt succeeded, failed, or
@@ -830,7 +830,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Enrollment.Result" enum="BooleanSuccess"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The top-level result of the CryptAuth device enrollment process.
@@ -839,7 +839,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.ApiCallResult.EnrollKeys"
     enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async EnrollKeys API call to CryptAuth during the
@@ -850,7 +850,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.ApiCallResult.SyncKeys"
     enum="CryptAuthApiCallResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async SyncKeys API call to CryptAuth during the
@@ -860,8 +860,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.EnrollmentV2.AsyncTaskResult.KeyCreation"
-    enum="CryptAuthAsyncTaskResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthAsyncTaskResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the result of the async key creation call during the CryptAuth v2
@@ -872,7 +872,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.ExecutionTime.EnrollKeys" units="ms"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async EnrollKeys API call to CryptAuth
@@ -883,7 +883,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.ExecutionTime.KeyCreation" units="ms"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async key creation call during the
@@ -894,7 +894,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.ExecutionTime.SyncKeys" units="ms"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the execution time of the async SyncKeys API call to CryptAuth
@@ -905,7 +905,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.InvocationReason"
     enum="CryptAuthV2InvocationReason" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The clients' reasons for making CryptAuth v2 Enrollment requests. Recorded
@@ -914,8 +914,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.EnrollmentV2.Result.ResultCode"
-    enum="CryptAuthV2EnrollmentResult" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    enum="CryptAuthV2EnrollmentResult" expires_after="2023-04-02">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The CryptAuth v2 Enrollment attempt results broken down by result code.
@@ -925,7 +925,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.Result.Success" enum="BooleanSuccess"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The success or failure of CryptAuth v2 Enrollment requests. Recorded when an
@@ -935,7 +935,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.EnrollmentV2.UserKeyPairState"
     enum="CryptAuthV2EnrollmentUserKeyPairState" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The state--at system start time--of persisted user key pairs, generated
@@ -946,7 +946,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Gcm.Message.FeatureType" enum="CryptAuthFeatureType"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records the multi-device feature type sent in a GCM message from CryptAuth
@@ -957,7 +957,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Gcm.Message.IsDeviceSyncGroupNameValid"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the DeviceSync group name sent in a GCM message from
@@ -969,7 +969,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Gcm.Message.IsKnownFeatureType" enum="Boolean"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the multi-device feature type sent in a GCM message
@@ -981,7 +981,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.Gcm.Message.TargetService.AreTickleTypeAndTargetServiceBothSpecified"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the CryptAuth TargetService was specified in a GCM
@@ -995,7 +995,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="CryptAuth.Gcm.Message.TargetService.FromRegistrationTickleType"
     enum="CryptAuthTargetService" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The CryptAuth TargetService--Enrollment or DeviceSync--indicated by the
@@ -1007,7 +1007,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Gcm.Message.TargetService.FromTargetServiceValue"
     enum="CryptAuthTargetService" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The CryptAuth TargetService--Enrollment or DeviceSync--indicated by the
@@ -1019,7 +1019,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Gcm.Registration.AttemptTimeWithRetries" units="ms"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The time it takes the GCM driver to return the result of a GCM registration
@@ -1035,7 +1035,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.Gcm.Registration.Result" enum="GCMClientResult"
     expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     The result code from a GCM registration request made by the CryptAuth GCM
@@ -1050,8 +1050,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.GetLocalDeviceMetadata.HasId" enum="BooleanPresent"
-    expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    expires_after="2023-04-09">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the loaded local-device has a non-trivial identifier.
@@ -1062,8 +1062,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.GetLocalDeviceMetadata.IsReady" enum="BooleanReady"
-    expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    expires_after="2023-04-09">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the DeviceSync client is fully set up/ready when
@@ -1075,8 +1075,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CryptAuth.GetLocalDeviceMetadata.Result" enum="BooleanSuccess"
-    expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+    expires_after="2023-04-09">
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the local-device-data request to the DeviceSync
@@ -1087,7 +1087,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.InstanceId.DidInstanceIdChange"
     enum="BooleanChanged" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates whether or not the Instance ID used by the CryptAuth client
@@ -1098,7 +1098,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="CryptAuth.InstanceId.DidInstanceIdTokenChange"
     enum="BooleanChanged" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates whether or not the Instance ID token used by the CryptAuth client
@@ -1112,15 +1112,18 @@ chromium-metrics-reviews@google.com.
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
-    Upon a successful Smart Lock unlock or signin, records whether the user's
-    phone was locked during any point while the lock screen was up. This can be
-    used to get a sense for whether users are using Smart Lock for Chromebook
-    without something like Smart Lock for Android to keep their phones unlocked.
+    Upon a successful Smart Lock unlock, records whether the user's phone was
+    locked during any point while the lock screen was up. This can be used to
+    get a sense for whether users are using Smart Lock for Chromebook without
+    something like Smart Lock for Android to keep their phones unlocked.
   </summary>
 </histogram>
 
 <histogram name="EasyUnlock.AuthEvent.SignIn" enum="EasyUnlockAuthEvent"
     expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1133,6 +1136,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="EasyUnlock.AuthEvent.SignIn.Duration" units="ms"
     expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1142,7 +1148,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="EasyUnlock.AuthEvent.Unlock" enum="EasyUnlockAuthEvent"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1243,7 +1249,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.BluetoothDiscoverySessionStarted"
-    enum="BooleanSuccess" expires_after="2023-02-01">
+    enum="BooleanSuccess" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1252,7 +1258,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.BluetoothDiscoverySessionStopped"
-    enum="BooleanSuccess" expires_after="2023-02-01">
+    enum="BooleanSuccess" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1353,7 +1359,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="InstantTethering.ConnectionToHostResult.SuccessRate.Background"
     enum="InstantTethering_ConnectionToHostResult_SuccessRate"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1370,7 +1376,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.FeatureState"
-    enum="InstantTethering_FeatureState" expires_after="2023-02-01">
+    enum="InstantTethering_FeatureState" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1402,7 +1408,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.HostScanResult"
-    enum="InstantTethering_HostScanResult" expires_after="2023-02-01">
+    enum="InstantTethering_HostScanResult" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1420,7 +1426,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.HotspotUsageDuration" units="ms"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1431,7 +1437,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.KeepAliveTickle.Result" enum="BooleanSuccess"
-    expires_after="2023-02-01">
+    expires_after="2023-04-02">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1441,7 +1447,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.MultiDeviceFeatureState"
-    enum="MultiDevice_FeatureState" expires_after="2023-02-01">
+    enum="MultiDevice_FeatureState" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1453,7 +1459,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="InstantTethering.NotificationInteractionType"
     enum="InstantTethering_NotificationInteractionType"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1463,7 +1469,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.Performance.ConnectTetheringResponseDuration"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1473,7 +1479,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.Performance.ConnectToHostDuration.Background"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1484,7 +1490,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.Performance.ConnectToHotspotDuration"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1496,7 +1502,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="InstantTethering.Performance.DisconnectTetheringRequestDuration"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1506,7 +1512,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.Performance.KeepAliveTickleResponseDuration"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1517,7 +1523,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="InstantTethering.Performance.TetherAvailabilityResponseDuration"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1527,7 +1533,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.SessionCompletionReason"
-    enum="InstantTethering_SessionCompletionReason" expires_after="2023-02-01">
+    enum="InstantTethering_SessionCompletionReason" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1539,7 +1545,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InstantTethering.UserPreference.OnStartup"
-    enum="BooleanEnabled" expires_after="2023-02-01">
+    enum="BooleanEnabled" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1561,7 +1567,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.BetterTogetherSuite.MultiDeviceFeatureState"
-    enum="MultiDevice_FeatureState" expires_after="2023-02-01">
+    enum="MultiDevice_FeatureState" expires_after="2023-04-02">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1573,7 +1579,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.BetterTogetherSuite.MultiDeviceFeatureState.MojoClient"
-    enum="MultiDevice_FeatureState" expires_after="2023-02-01">
+    enum="MultiDevice_FeatureState" expires_after="2023-04-09">
   <owner>julietlevesque@google.com</owner>
   <owner>chromeos-cross-device-eng@google.com</owner>
   <summary>
@@ -1613,7 +1619,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="MultiDevice.DeviceSyncService.ForceSyncNow.Result"
     enum="MultiDevice_DeviceSyncService_ForceCryptAuthOperationResult"
-    expires_after="2023-02-01">
+    expires_after="2023-04-02">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>Result for when ForceSyncNow is called.</summary>
@@ -1667,7 +1673,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.PostOOBESetupFlow.PageShown"
-    enum="MultiDevice_PostOOBESetupFlow_Page" expires_after="2023-02-01">
+    enum="MultiDevice_PostOOBESetupFlow_Page" expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1697,7 +1703,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.Performance.ConnectionToAuthenticationDuration.Background"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1713,7 +1719,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.Performance.ReceiveAdvertisementToConnectionDuration.Background"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1729,7 +1735,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.Performance.StartScanToAuthenticationDuration.Background"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-02">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1746,7 +1752,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.Performance.StartScanToConnectionDuration.Background"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1762,7 +1768,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.Performance.StartScanToReceiveAdvertisementDuration.Background"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-02">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1778,7 +1784,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.ReceiveAdvertisementToAuthentication.EffectiveSuccessRateWithRetries"
-    enum="BooleanSuccess" expires_after="2023-02-01">
+    enum="BooleanSuccess" expires_after="2023-04-02">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1790,7 +1796,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="MultiDevice.SecureChannel.BLE.ReceiveAdvertisementToGattConnection.EffectiveSuccessRateWithRetries"
-    enum="BooleanSuccess" expires_after="2023-02-01">
+    enum="BooleanSuccess" expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1801,7 +1807,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.ConnectionMedium"
-    enum="SecureChannelNearbyConnectionMedium" expires_after="2023-02-01">
+    enum="SecureChannelNearbyConnectionMedium" expires_after="2023-04-02">
   <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1816,7 +1822,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="MultiDevice.SecureChannel.Nearby.ConnectionResult"
     enum="MultiDeviceNearbyConnectionsInitiatorResult"
-    expires_after="2023-02-01">
+    expires_after="2023-04-02">
   <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1829,7 +1835,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.DisconnectionReason"
-    enum="MultiDeviceNearbyDisconnectionReason" expires_after="2023-02-01">
+    enum="MultiDeviceNearbyDisconnectionReason" expires_after="2023-04-09">
   <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1844,7 +1850,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.EffectiveConnectionResult"
-    enum="BooleanSuccess" expires_after="2023-02-01">
+    enum="BooleanSuccess" expires_after="2023-04-02">
   <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1860,7 +1866,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.FileAction"
-    enum="MultiDeviceNearbyFileAction" expires_after="2023-02-01">
+    enum="MultiDeviceNearbyFileAction" expires_after="2023-04-09">
   <owner>jasonsun@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1871,7 +1877,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.FileTransferResult"
-    enum="MultiDeviceNearbyFileTransferResult" expires_after="2023-02-01">
+    enum="MultiDeviceNearbyFileTransferResult" expires_after="2023-04-09">
   <owner>jasonsun@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1882,7 +1888,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.MessageAction"
-    enum="MultiDeviceNearbyMessageAction" expires_after="2023-02-01">
+    enum="MultiDeviceNearbyMessageAction" expires_after="2023-04-02">
   <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1926,7 +1932,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.SecureChannel.Nearby.WebRtcUpgradeDuration"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-09">
   <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1940,8 +1946,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.Setup.HasDuplicateEligibleHostDeviceNames"
-    enum="BooleanDuplicate" expires_after="2023-02-01">
-  <owner>nohle@google.com</owner>
+    enum="BooleanDuplicate" expires_after="2023-04-09">
+  <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records whether or not the list of eligible host phones has duplicate
@@ -1952,7 +1958,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDevice.Setup.HostStatus"
-    enum="MultiDevice_Setup_HostStatus" expires_after="2023-02-01">
+    enum="MultiDevice_Setup_HostStatus" expires_after="2023-04-02">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1964,7 +1970,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="MultiDevice.Setup.HostVerifier.DoesHostHaveCryptoData"
     enum="Boolean" expires_after="2023-02-01">
-  <owner>nohle@chromium.org</owner>
+  <owner>hansenmichael@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Records if a multi-device host device has all of the crypto data necessary
@@ -1978,7 +1984,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="MultiDevice.VerifyButtonClicked"
     enum="MultiDevice_VerifyAndForgetHostConfirmationState"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -1987,7 +1993,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="MultiDeviceSetup.OOBE.UserChoice"
-    enum="MultiDeviceSetupOOBEUserChoice" expires_after="2023-02-01">
+    enum="MultiDeviceSetupOOBEUserChoice" expires_after="2023-04-09">
   <owner>danlee@google.com</owner>
   <owner>better-together-dev@google.com</owner>
   <owner>hsuregan@chromium.org</owner>
@@ -2028,7 +2034,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ProximityAuth.BleWeaveConnectionResult"
-    enum="ProximityAuth_BleWeaveConnectionResult" expires_after="2023-02-01">
+    enum="ProximityAuth_BleWeaveConnectionResult" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2039,7 +2045,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="ProximityAuth.BluetoothGattConnectionResult"
     enum="ProximityAuth_BluetoothGattConnectionResult"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2055,7 +2061,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="ProximityAuth.BluetoothGattNotifySessionResult"
     enum="ProximityAuth_BluetoothGattServiceOperationResult"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2071,7 +2077,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="ProximityAuth.BluetoothGattWriteCharacteristicResult"
     enum="ProximityAuth_BluetoothGattServiceOperationResult"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2083,6 +2089,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.AuthMethodChoice.SignIn"
     enum="SmartLockAuthMethodChoice" expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>Records the user's sign in method choice.</summary>
@@ -2090,6 +2099,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.AuthMethodChoice.SignIn.PasswordState"
     enum="SmartLockAuthEventPasswordState" expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2099,14 +2111,14 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.AuthMethodChoice.Unlock"
-    enum="SmartLockAuthMethodChoice" expires_after="2023-02-01">
+    enum="SmartLockAuthMethodChoice" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>Records the user's unlock method choice.</summary>
 </histogram>
 
 <histogram name="SmartLock.AuthMethodChoice.Unlock.PasswordState"
-    enum="SmartLockAuthEventPasswordState" expires_after="2023-02-01">
+    enum="SmartLockAuthEventPasswordState" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2116,7 +2128,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.AuthResult" enum="BooleanSuccess"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2127,6 +2139,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.AuthResult.SignIn" enum="BooleanSuccess"
     expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2137,6 +2152,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.AuthResult.SignIn.Failure"
     enum="SmartLockAuthResultFailureReason" expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2147,6 +2165,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.AuthResult.SignIn.Failure.UserControllerAuth"
     enum="LoginFailureReason" expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2156,7 +2177,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.AuthResult.Unlock" enum="BooleanSuccess"
-    expires_after="2023-02-01">
+    expires_after="2023-04-02">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2166,7 +2187,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.AuthResult.Unlock.Failure"
-    enum="SmartLockAuthResultFailureReason" expires_after="2023-02-01">
+    enum="SmartLockAuthResultFailureReason" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2176,7 +2197,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.EnabledDevicesCount" units="devices"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2187,7 +2208,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.EnabledState" enum="SmartLockEnabledState"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2201,6 +2222,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.FindAndConnectToHostResult.SignIn"
     enum="SmartLockFindAndConnectToHostResult" expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2210,7 +2234,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.FindAndConnectToHostResult.Unlock"
-    enum="SmartLockFindAndConnectToHostResult" expires_after="2023-02-01">
+    enum="SmartLockFindAndConnectToHostResult" expires_after="2023-04-02">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2219,8 +2243,22 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="SmartLock.FirstStatusToUser" enum="FirstSmartLockStatus"
+    expires_after="2023-04-09">
+  <owner>cclem@google.com</owner>
+  <owner>chromeos-cross-device-eng@google.com</owner>
+  <summary>
+    The first status visible to the user. Emitted on the lock screen, only for
+    users with Smart Lock enabled, when the first non-trivial Smart Lock state
+    is detected by the Chromebook.
+  </summary>
+</histogram>
+
 <histogram name="SmartLock.GetRemoteStatus.SignIn" enum="BooleanSuccess"
     expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2232,6 +2270,9 @@ chromium-metrics-reviews@google.com.
 <histogram name="SmartLock.GetRemoteStatus.SignIn.Failure"
     enum="SmartLockGetRemoteStatusResultFailureReason"
     expires_after="2023-02-01">
+  <obsolete>
+    Sign in with Smart Lock deprecated.
+  </obsolete>
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2241,7 +2282,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.GetRemoteStatus.Unlock" enum="BooleanSuccess"
-    expires_after="2023-02-01">
+    expires_after="2023-04-02">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2252,7 +2293,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SmartLock.GetRemoteStatus.Unlock.Failure"
     enum="SmartLockGetRemoteStatusResultFailureReason"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2262,7 +2303,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.MultiDeviceFeatureState"
-    enum="MultiDevice_FeatureState" expires_after="2023-02-01">
+    enum="MultiDevice_FeatureState" expires_after="2023-04-09">
   <owner>hansberry@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
@@ -2297,7 +2338,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="SmartLock.Performance.ShowLockScreenToShowFirstStatusToUserDuration.Unlock"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-02">
 <!-- Name completed by histogram_suffixes name="SmartLockStatusTypes" -->
 
   <owner>hansberry@chromium.org</owner>
@@ -2305,9 +2346,8 @@ chromium-metrics-reviews@google.com.
   <summary>
     The duration of time between when the user locks their screen or wakes their
     device (either opening a clamshell device or waking up a tablet), and when
-    the user is first provided a visible indication of Smart Lock's status (the
-    Smart Lock icon presents as either yellow or green, with a tooltip
-    explaining the status).
+    the user is first provided a visible indication of Smart Lock's status after
+    Smart Lock has communicated with the phone.
 
     Suffixed by the type of status which the user is first presented with. View
     the base histogram to see results for all status types aggregated together,
@@ -2321,7 +2361,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="SmartLock.Performance.StartScanToReceiveFirstRemoteStatusDuration.Unlock"
-    units="ms" expires_after="2023-02-01">
+    units="ms" expires_after="2023-04-02">
 <!-- Name completed by histogram_suffixes name="SmartLockStatusTypes" -->
 
   <owner>hansberry@chromium.org</owner>
@@ -2349,7 +2389,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SmartLock.Toggle" enum="SmartLockToggle"
-    expires_after="2023-02-01">
+    expires_after="2023-04-09">
   <owner>cclem@chromium.org</owner>
   <owner>chromeos-cross-device-eng@google.com</owner>
   <summary>
@@ -2360,8 +2400,8 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="WifiSync.MultiDeviceFeatureState"
-    enum="MultiDevice_FeatureState" expires_after="2023-02-01">
-  <owner>cvandermerwe@google.com</owner>
+    enum="MultiDevice_FeatureState" expires_after="2023-04-09">
+  <owner>jonmann@chromium.org</owner>
   <owner>better-together-dev@google.com</owner>
   <summary>
     Indicates the feature state of the Wifi Sync V2 feature. This metric is

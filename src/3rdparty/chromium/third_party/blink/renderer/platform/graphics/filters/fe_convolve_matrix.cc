@@ -27,7 +27,8 @@
 #include <memory>
 
 #include "base/numerics/checked_math.h"
-#include "base/stl_util.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/types/optional_util.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
@@ -113,7 +114,7 @@ bool FEConvolveMatrix::ParametersValid() const {
   uint64_t kernel_area = kernel_size_.Area64();
   if (!base::CheckedNumeric<int>(kernel_area).IsValid())
     return false;
-  if (SafeCast<size_t>(kernel_area) != kernel_matrix_.size())
+  if (base::checked_cast<size_t>(kernel_area) != kernel_matrix_.size())
     return false;
   if (target_offset_.x() < 0 || target_offset_.x() >= kernel_size_.width())
     return false;
@@ -133,7 +134,7 @@ sk_sp<PaintFilter> FEConvolveMatrix::CreateImageFilter() {
   SkISize kernel_size(
       SkISize::Make(kernel_size_.width(), kernel_size_.height()));
   // parametersValid() above checks that the kernel area fits in int.
-  int num_elements = SafeCast<int>(kernel_size_.Area64());
+  int num_elements = base::checked_cast<int>(kernel_size_.Area64());
   SkScalar gain = SkFloatToScalar(1.0f / divisor_);
   SkScalar bias = SkFloatToScalar(bias_ * 255);
   SkIPoint target = SkIPoint::Make(target_offset_.x(), target_offset_.y());
@@ -145,7 +146,7 @@ sk_sp<PaintFilter> FEConvolveMatrix::CreateImageFilter() {
   absl::optional<PaintFilter::CropRect> crop_rect = GetCropRect();
   return sk_make_sp<MatrixConvolutionPaintFilter>(
       kernel_size, kernel.get(), gain, bias, target, tile_mode, convolve_alpha,
-      std::move(input), base::OptionalOrNullptr(crop_rect));
+      std::move(input), base::OptionalToPtr(crop_rect));
 }
 
 static WTF::TextStream& operator<<(WTF::TextStream& ts,

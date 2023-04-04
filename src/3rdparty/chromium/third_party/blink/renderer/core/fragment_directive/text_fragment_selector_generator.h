@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,9 @@ class TextFragmentSelector;
 //
 // TextFragmentSelectorGenerator works by starting with a candidate selector
 // and repeatedly trying it against the page content to ensure the correct and
-// unique match. While we don't have a unique match, we repeatedly adding
-// context/range to the selector until the correct match is uniquely identified
-// or no new context/range can be added.
+// unique match. While the match isn't unique, repeatedly add context/range to
+// the selector until the correct match is uniquely identified or no new
+// context/range can be added.
 class CORE_EXPORT TextFragmentSelectorGenerator final
     : public GarbageCollected<TextFragmentSelectorGenerator>,
       public TextFragmentFinder::Client {
@@ -65,6 +65,11 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
 
   LocalFrame* GetFrame() { return frame_; }
 
+  // Returns the text value of the range this generator is attempting to
+  // generate a selector for. Returns empty string if the range is invalid or
+  // if called before calling Generate().
+  String GetSelectorTargetText() const;
+
  private:
   friend class TextFragmentSelectorGeneratorTest;
 
@@ -98,17 +103,18 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
                            GetNextTextStartPosition_NoNextNode);
   FRIEND_TEST_ALL_PREFIXES(TextFragmentSelectorGeneratorTest,
                            ExactTextSelector_Long);
-
   FRIEND_TEST_ALL_PREFIXES(
       TextFragmentSelectorGeneratorTest,
       GetPreviousTextEndPosition_ShouldSkipNodesWithNoLayoutObject);
+  FRIEND_TEST_ALL_PREFIXES(TextFragmentSelectorGeneratorTest,
+                           RemoveLayoutObjectAsync);
 
   // Used for determining the next step of selector generation.
   enum GenerationStep { kExact, kRange, kContext };
 
   // Used for determining the current state of |selector_|.
   enum SelectorState {
-    // Sreach for candidate selector didn't start.
+    // Search for candidate selector didn't start.
     kNotStarted,
 
     // Candidate selector should be generated or extended.
@@ -129,9 +135,7 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   };
 
   // TextFragmentFinder::Client interface
-  void DidFindMatch(const RangeInFlatTree& match,
-                    const TextFragmentAnchorMetrics::Match match_metrics,
-                    bool is_unique) override;
+  void DidFindMatch(const RangeInFlatTree& match, bool is_unique) override;
   void NoMatchFound() override;
 
   // Adjust the selection start/end to a valid position. That includes skipping
@@ -164,9 +168,6 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   // Called when selector generation is complete.
   void OnSelectorReady(const TextFragmentSelector& selector);
 
-  // Called to notify clients of the result of |Generate|.
-  void NotifyClientSelectorReady(const TextFragmentSelector& selector);
-
   // Called by tests to change default parameters. A negative value will reset
   // the override.
   static void OverrideExactTextMaxCharsForTesting(int value);
@@ -180,6 +181,10 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   std::unique_ptr<TextFragmentSelector> selector_;
 
   GenerateCallback pending_generate_selector_callback_;
+
+  // Callback invoked each time DidFindMatch is called; for testing only.
+  // Allows inserting code to run between asynchronous generation steps.
+  base::OnceCallback<void(bool is_unique)> did_find_match_callback_for_testing_;
 
   GenerationStep step_ = kExact;
   SelectorState state_ = kNeedsNewCandidate;
@@ -197,6 +202,10 @@ class CORE_EXPORT TextFragmentSelectorGenerator final
   int num_context_words_ = 0;
 
   int num_range_words_ = 0;
+
+  // Indicates the Max Context Words allowed for the
+  // SharedHighlightsMaxContextWords experiment
+  int max_context_words_ = 10;
 
   int iteration_ = 0;
   base::TimeTicks generation_start_time_;

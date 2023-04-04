@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -43,6 +43,7 @@ static_library("test_support") {
     "../task/sequence_manager/test/test_task_time_observer.h",
     "../timer/mock_timer.cc",
     "../timer/mock_timer.h",
+    "allow_check_is_test_to_be_called.h",
     "bind.cc",
     "bind.h",
     "copy_only_int.cc",
@@ -88,13 +89,13 @@ static_library("test_support") {
     "perf_time_logger.h",
     "power_monitor_test.cc",
     "power_monitor_test.h",
+    "power_monitor_test_utils.cc",
+    "power_monitor_test_utils.h",
     "repeating_test_future.h",
     "scoped_command_line.cc",
     "scoped_command_line.h",
     "scoped_feature_list.cc",
     "scoped_feature_list.h",
-    "scoped_field_trial_list_resetter.cc",
-    "scoped_field_trial_list_resetter.h",
     "scoped_mock_clock_override.cc",
     "scoped_mock_clock_override.h",
     "scoped_mock_time_message_loop_task_runner.cc",
@@ -391,6 +392,7 @@ if (is_android) {
 
     deps = [
       "//base:base_java",
+      "//base:jni_java",
       "//testing/android/native_test:native_main_runner_java",
       "//third_party/android_deps:com_google_code_findbugs_jsr305_java",
     ]

@@ -209,12 +209,10 @@ void QQuickWebEngineProfilePrivate::downloadRequested(DownloadItemInfo &info)
     Q_Q(QQuickWebEngineProfile);
 
     Q_ASSERT(!m_ongoingDownloads.contains(info.id));
-    QWebEngineDownloadRequestPrivate *itemPrivate =
-            new QWebEngineDownloadRequestPrivate(m_profileAdapter);
+    QWebEngineDownloadRequestPrivate *itemPrivate = new QWebEngineDownloadRequestPrivate(m_profileAdapter, info.url);
     itemPrivate->downloadId = info.id;
     itemPrivate->downloadState = QWebEngineDownloadRequest::DownloadRequested;
     itemPrivate->startTime = info.startTime;
-    itemPrivate->downloadUrl = info.url;
     itemPrivate->totalBytes = info.totalBytes;
     itemPrivate->mimeType = info.mimeType;
     itemPrivate->downloadDirectory = QFileInfo(info.path).path();
@@ -820,6 +818,41 @@ QString QQuickWebEngineProfile::downloadPath() const
 {
     const Q_D(QQuickWebEngineProfile);
     return d->profileAdapter()->downloadPath();
+}
+
+/*!
+    \qmlproperty bool WebEngineProfile::isPushServiceEnabled
+    \since  QtWebEngine 6.5
+
+    Whether the push messaging service is enabled.
+    \note By default the push messaging service is disabled.
+    \note \QWE uses the \l {https://firebase.google.com}{Firebase Cloud Messaging (FCM)} as a browser push service.
+    Therefore, all push messages will go through the Google push service and its respective servers.
+*/
+
+/*!
+    \property QQuickWebEngineProfile::isPushServiceEnabled
+    \since QtWebEngine 6.5
+
+    Whether the push messaging service is enabled.
+    \note By default the push messaging service is disabled.
+    \note \QWE uses the \l {https://firebase.google.com}{Firebase Cloud Messaging (FCM)} as a browser push service.
+    Therefore, all push messages will go through the Google push service and its respective servers.
+*/
+
+bool QQuickWebEngineProfile::isPushServiceEnabled() const
+{
+    const Q_D(QQuickWebEngineProfile);
+    return d->profileAdapter()->pushServiceEnabled();
+}
+
+void QQuickWebEngineProfile::setPushServiceEnabled(bool enabled)
+{
+    Q_D(QQuickWebEngineProfile);
+    if (isPushServiceEnabled() == enabled)
+        return;
+    d->profileAdapter()->setPushServiceEnabled(enabled);
+    emit pushServiceEnabledChanged();
 }
 
 /*!

@@ -1,8 +1,8 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {$} from 'chrome://resources/js/util.m.js';
+import {$} from 'chrome://resources/js/util.js';
 
 import {ClientInfo, SegmentInfo} from './segmentation_internals.mojom-webui.js';
 import {SegmentationInternalsBrowserProxy} from './segmentation_internals_browser_proxy.js';
@@ -95,7 +95,7 @@ function initialize() {
       });
 
   getProxy().getCallbackRouter().onClientInfoAvailable.addListener(
-      (clientInfos: Array<ClientInfo>) => {
+      (clientInfos: ClientInfo[]) => {
         const parent = $('client-container');
         // Remove all current children.
         while (parent.firstChild) {

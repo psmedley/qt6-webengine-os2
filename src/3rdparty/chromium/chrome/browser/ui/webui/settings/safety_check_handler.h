@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -281,9 +281,7 @@ class SafetyCheckHandler
                         password_manager::IsLeaked is_leaked) override;
 
   // InsecureCredentialsManager::Observer implementation.
-  void OnInsecureCredentialsChanged(
-      password_manager::InsecureCredentialsManager::CredentialsView credentials)
-      override;
+  void OnInsecureCredentialsChanged() override;
 
   // SettingsPageUIHandler implementation.
   void OnJavascriptAllowed() override;

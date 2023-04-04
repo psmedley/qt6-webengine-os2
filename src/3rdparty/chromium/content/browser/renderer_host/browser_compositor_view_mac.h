@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/surfaces/local_surface_id.h"
@@ -164,11 +165,12 @@ class CONTENT_EXPORT BrowserCompositorMac : public DelegatedFrameHostClient,
   // is an observer of |parent_ui_layer_|, to ensure that |parent_ui_layer_|
   // always be valid when non-null. The UpdateState function will re-parent
   // |root_layer_| to be under |parent_ui_layer_|, if needed.
-  ui::Layer* parent_ui_layer_ = nullptr;
+  raw_ptr<ui::Layer> parent_ui_layer_ = nullptr;
   bool render_widget_host_is_hidden_ = true;
 
-  BrowserCompositorMacClient* client_ = nullptr;
-  ui::AcceleratedWidgetMacNSView* accelerated_widget_mac_ns_view_ = nullptr;
+  raw_ptr<BrowserCompositorMacClient> client_ = nullptr;
+  raw_ptr<ui::AcceleratedWidgetMacNSView> accelerated_widget_mac_ns_view_ =
+      nullptr;
   std::unique_ptr<ui::RecyclableCompositorMac> recyclable_compositor_;
 
   std::unique_ptr<DelegatedFrameHost> delegated_frame_host_;

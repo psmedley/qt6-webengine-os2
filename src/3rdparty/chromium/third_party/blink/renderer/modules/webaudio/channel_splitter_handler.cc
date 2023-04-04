@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,12 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
+
+namespace {
+
+constexpr unsigned kNumberOfOutputChannels = 1;
+
+}  // namespace
 
 ChannelSplitterHandler::ChannelSplitterHandler(AudioNode& node,
                                                float sample_rate,
@@ -24,7 +30,7 @@ ChannelSplitterHandler::ChannelSplitterHandler(AudioNode& node,
   // Create a fixed number of outputs (able to handle the maximum number of
   // channels fed to an input).
   for (unsigned i = 0; i < number_of_outputs; ++i) {
-    AddOutput(1);
+    AddOutput(kNumberOfOutputChannels);
   }
 
   Initialize();

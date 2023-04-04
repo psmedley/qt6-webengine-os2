@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,84 +58,6 @@ bool HasLogBestEffortTasksSwitch() {
          CommandLine::ForCurrentProcess()->HasSwitch(
              switches::kLogBestEffortTasks);
 }
-
-// Needed for PostTaskHere and CurrentThread. This executor lives for the
-// duration of a threadpool task invocation.
-class EphemeralTaskExecutor : public TaskExecutor {
- public:
-  // |sequenced_task_runner| and |single_thread_task_runner| must outlive this
-  // EphemeralTaskExecutor.
-  EphemeralTaskExecutor(SequencedTaskRunner* sequenced_task_runner,
-                        SingleThreadTaskRunner* single_thread_task_runner,
-                        const TaskTraits* sequence_traits)
-      : sequenced_task_runner_(sequenced_task_runner),
-        single_thread_task_runner_(single_thread_task_runner),
-        sequence_traits_(sequence_traits) {
-    SetTaskExecutorForCurrentThread(this);
-  }
-
-  ~EphemeralTaskExecutor() override {
-    SetTaskExecutorForCurrentThread(nullptr);
-  }
-
-  // TaskExecutor:
-  bool PostDelayedTask(const Location& from_here,
-                       const TaskTraits& traits,
-                       OnceClosure task,
-                       TimeDelta delay) override {
-    CheckTraitsCompatibleWithSequenceTraits(traits);
-    return sequenced_task_runner_->PostDelayedTask(from_here, std::move(task),
-                                                   delay);
-  }
-
-  scoped_refptr<TaskRunner> CreateTaskRunner(
-      const TaskTraits& traits) override {
-    CheckTraitsCompatibleWithSequenceTraits(traits);
-    return sequenced_task_runner_;
-  }
-
-  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(
-      const TaskTraits& traits) override {
-    CheckTraitsCompatibleWithSequenceTraits(traits);
-    return sequenced_task_runner_;
-  }
-
-  scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(
-      const TaskTraits& traits,
-      SingleThreadTaskRunnerThreadMode thread_mode) override {
-    CheckTraitsCompatibleWithSequenceTraits(traits);
-    return single_thread_task_runner_;
-  }
-
-#if BUILDFLAG(IS_WIN)
-  scoped_refptr<SingleThreadTaskRunner> CreateCOMSTATaskRunner(
-      const TaskTraits& traits,
-      SingleThreadTaskRunnerThreadMode thread_mode) override {
-    CheckTraitsCompatibleWithSequenceTraits(traits);
-    return single_thread_task_runner_;
-  }
-#endif  // BUILDFLAG(IS_WIN)
-
- private:
-  // Currently ignores |traits.priority()|.
-  void CheckTraitsCompatibleWithSequenceTraits(const TaskTraits& traits) {
-    if (traits.shutdown_behavior_set_explicitly()) {
-      DCHECK_EQ(traits.shutdown_behavior(),
-                sequence_traits_->shutdown_behavior());
-    }
-
-    DCHECK(!traits.may_block() ||
-           traits.may_block() == sequence_traits_->may_block());
-
-    DCHECK(!traits.with_base_sync_primitives() ||
-           traits.with_base_sync_primitives() ==
-               sequence_traits_->with_base_sync_primitives());
-  }
-
-  SequencedTaskRunner* const sequenced_task_runner_;
-  SingleThreadTaskRunner* const single_thread_task_runner_;
-  const TaskTraits* const sequence_traits_;
-};
 
 #if BUILDFLAG(ENABLE_BASE_TRACING)
 ChromeThreadPoolTask::Priority TaskPriorityToProto(TaskPriority priority) {
@@ -401,7 +323,7 @@ bool TaskTracker::WillPostTask(Task* task,
   }
 
   // TODO(scheduler-dev): Record the task traits here.
-  task_annotator_.WillQueueTask("ThreadPool_PostTask", task, "");
+  task_annotator_.WillQueueTask("ThreadPool_PostTask", task);
 
   return true;
 }
@@ -518,13 +440,12 @@ void TaskTracker::RunTask(Task task,
     ScopedSetSequenceLocalStorageMapForCurrentThread
         scoped_set_sequence_local_storage_map_for_current_thread(
             environment.sequence_local_storage
-                ? environment.sequence_local_storage
+                ? environment.sequence_local_storage.get()
                 : &local_storage_map.value());
 
     // Set up TaskRunnerHandle as expected for the scope of the task.
     absl::optional<SequencedTaskRunnerHandle> sequenced_task_runner_handle;
     absl::optional<ThreadTaskRunnerHandle> single_thread_task_runner_handle;
-    absl::optional<EphemeralTaskExecutor> ephemeral_task_executor;
     switch (task_source->execution_mode()) {
       case TaskSourceExecutionMode::kJob:
       case TaskSourceExecutionMode::kParallel:
@@ -533,18 +454,11 @@ void TaskTracker::RunTask(Task task,
         DCHECK(task_source->task_runner());
         sequenced_task_runner_handle.emplace(
             static_cast<SequencedTaskRunner*>(task_source->task_runner()));
-        ephemeral_task_executor.emplace(
-            static_cast<SequencedTaskRunner*>(task_source->task_runner()),
-            nullptr, &traits);
         break;
       case TaskSourceExecutionMode::kSingleThread:
         DCHECK(task_source->task_runner());
         single_thread_task_runner_handle.emplace(
             static_cast<SingleThreadTaskRunner*>(task_source->task_runner()));
-        ephemeral_task_executor.emplace(
-            static_cast<SequencedTaskRunner*>(task_source->task_runner()),
-            static_cast<SingleThreadTaskRunner*>(task_source->task_runner()),
-            &traits);
         break;
     }
 

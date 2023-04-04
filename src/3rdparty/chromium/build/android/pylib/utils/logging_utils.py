@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,6 +24,7 @@ class _ColorFormatter(logging.Formatter):
   # pylint: disable=no-member
   color_map = {
     logging.DEBUG: (FORE.CYAN),
+    logging.INFO: (),  # Use default style.
     logging.WARNING: (FORE.YELLOW),
     logging.ERROR: (FORE.RED),
     logging.CRITICAL: (BACK.RED),

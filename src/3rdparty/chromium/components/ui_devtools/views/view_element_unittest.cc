@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,7 +114,7 @@ class SelfReorderingTestView : public views::View, public views::ViewObserver {
 
   // views::ViewObserver
   void OnChildViewAdded(View* observed_view, View* child) override {
-    ReorderChildView(always_on_top_view_, -1);
+    ReorderChildView(always_on_top_view_, children().size());
   }
 
  private:
@@ -329,9 +329,15 @@ TEST_F(ViewElementTest, GetSources) {
 
   // ViewElement should have two sources: from MockNamedTestView and from View.
   EXPECT_EQ(sources.size(), 2U);
+#if defined(__clang__) && defined(_MSC_VER)
+  EXPECT_EQ(sources[0].path_,
+            "components\\ui_devtools\\views\\view_element_unittest.cc");
+  EXPECT_EQ(sources[1].path_, "ui\\views\\view.h");
+#else
   EXPECT_EQ(sources[0].path_,
             "components/ui_devtools/views/view_element_unittest.cc");
   EXPECT_EQ(sources[1].path_, "ui/views/view.h");
+#endif
 }
 
 TEST_F(ViewElementTest, DispatchMouseEvent) {

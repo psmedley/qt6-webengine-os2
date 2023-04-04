@@ -1,7 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/cfi_buildflags.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
@@ -172,12 +173,12 @@ class DestructiveScriptTest : public ExecuteScriptApiTestBase,
  protected:
   // The test extension selects the sub test based on the host name.
   bool RunSubtest(const std::string& test_host) {
-    const std::string page_url =
+    const std::string extension_url =
         "test.html?" + test_host + "#bucketcount=" +
         base::NumberToString(kDestructiveScriptTestBucketCount) +
         "&bucketindex=" + base::NumberToString(GetParam());
     return RunExtensionTest("executescript/destructive",
-                            {.page_url = page_url.c_str()});
+                            {.extension_url = extension_url.c_str()});
   }
 };
 
@@ -196,8 +197,9 @@ class BackForwardCacheDisabledDestructiveScriptTest
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-// Flaky on ASAN and -dbg. crbug.com/1293865
-#if defined(ADDRESS_SANITIZER) || !defined(NDEBUG)
+// Flaky on ASAN and -dbg, and Linux CFI bots. crbug.com/1293865
+#if defined(ADDRESS_SANITIZER) || !defined(NDEBUG) || \
+    (BUILDFLAG(CFI_ICALL_CHECK) && BUILDFLAG(IS_LINUX))
 #define MAYBE_SynchronousRemoval DISABLED_SynchronousRemoval
 #else
 #define MAYBE_SynchronousRemoval SynchronousRemoval
@@ -208,8 +210,9 @@ IN_PROC_BROWSER_TEST_P(BackForwardCacheDisabledDestructiveScriptTest,
   ASSERT_TRUE(RunSubtest("synchronous")) << message_;
 }
 
-// Flaky on ASAN and -dbg. crbug.com/1293865
-#if defined(ADDRESS_SANITIZER) || !defined(NDEBUG)
+// Flaky on ASAN and -dbg and Linux CFI. crbug.com/1293865
+#if defined(ADDRESS_SANITIZER) || !defined(NDEBUG) || \
+    (BUILDFLAG(CFI_ICALL_CHECK) && BUILDFLAG(IS_LINUX))
 #define MAYBE_MicrotaskRemoval DISABLED_MicrotaskRemoval
 #else
 #define MAYBE_MicrotaskRemoval MicrotaskRemoval

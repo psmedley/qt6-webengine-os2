@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -457,10 +457,10 @@ bool RequestManager::TryPrepareReprocessRequest(
 
   // Consume reprocess task.
   ReprocessJobInfo* reprocess_job_info;
-  for (auto& it : buffer_id_reprocess_job_info_map_) {
-    if (processing_buffer_ids_.count(it.first) == 0) {
-      *input_buffer_id = it.first;
-      reprocess_job_info = &it.second;
+  for (auto& [buffer_id, job_info] : buffer_id_reprocess_job_info_map_) {
+    if (processing_buffer_ids_.count(buffer_id) == 0) {
+      *input_buffer_id = buffer_id;
+      reprocess_job_info = &job_info;
       break;
     }
   }
@@ -594,10 +594,20 @@ void RequestManager::ProcessCaptureResult(
     cros::mojom::Camera3CaptureResultPtr result) {
   DCHECK(ipc_task_runner_->BelongsToCurrentThread());
 
+  uint32_t frame_number = result->frame_number;
   if (!capturing_) {
+    if (result->output_buffers) {
+      for (auto& stream_buffer : result->output_buffers.value()) {
+        TRACE_EVENT_END("camera",
+                        GetTraceTrack(CameraTraceEvent::kCaptureStream,
+                                      frame_number, stream_buffer->stream_id));
+      }
+    }
+    TRACE_EVENT("camera", "Capture Result", "frame_number", frame_number);
+    TRACE_EVENT_END("camera", GetTraceTrack(CameraTraceEvent::kCaptureRequest,
+                                            frame_number));
     return;
   }
-  uint32_t frame_number = result->frame_number;
   // A new partial result may be created in either ProcessCaptureResult or
   // Notify.
   CaptureResult& pending_result = pending_results_[frame_number];

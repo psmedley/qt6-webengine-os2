@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/check.h"
 #include "base/containers/intrusive_heap.h"
 #include "base/memory/raw_ptr.h"
-#include "base/task/sequence_manager/lazy_now.h"
+#include "base/task/common/lazy_now.h"
 #include "base/task/sequence_manager/task_queue_impl.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -41,7 +41,7 @@ class BASE_EXPORT WakeUpQueue {
   absl::optional<WakeUp> GetNextDelayedWakeUp() const;
 
   // Debug info.
-  Value AsValue(TimeTicks now) const;
+  Value::Dict AsValue(TimeTicks now) const;
 
   bool has_pending_high_resolution_tasks() const {
     return pending_high_res_wake_up_count_;
@@ -72,7 +72,7 @@ class BASE_EXPORT WakeUpQueue {
 
  protected:
   explicit WakeUpQueue(
-      scoped_refptr<internal::AssociatedThreadId> associated_thread);
+      scoped_refptr<const internal::AssociatedThreadId> associated_thread);
 
   // Called every time the next `next_wake_up` changes. absl::nullopt is used to
   // cancel the next wake-up. Subclasses may use this to tell SequenceManager to
@@ -109,7 +109,7 @@ class BASE_EXPORT WakeUpQueue {
   IntrusiveHeap<ScheduledWakeUp, std::greater<>> wake_up_queue_;
   int pending_high_res_wake_up_count_ = 0;
 
-  scoped_refptr<internal::AssociatedThreadId> associated_thread_;
+  const scoped_refptr<const internal::AssociatedThreadId> associated_thread_;
 };
 
 // Default WakeUpQueue implementation that forwards wake-ups to

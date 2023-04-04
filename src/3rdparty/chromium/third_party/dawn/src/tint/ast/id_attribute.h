@@ -18,30 +18,32 @@
 #include <string>
 
 #include "src/tint/ast/attribute.h"
+#include "src/tint/ast/expression.h"
 
 namespace tint::ast {
 
 /// An id attribute for pipeline-overridable constants
 class IdAttribute final : public Castable<IdAttribute, Attribute> {
- public:
-  /// Create an id attribute.
-  /// @param pid the identifier of the program that owns this node
-  /// @param src the source of this node
-  /// @param val the numeric id value
-  IdAttribute(ProgramID pid, const Source& src, uint32_t val);
-  ~IdAttribute() override;
+  public:
+    /// Create an id attribute.
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param src the source of this node
+    /// @param expr the numeric id expression
+    IdAttribute(ProgramID pid, NodeID nid, const Source& src, const ast::Expression* expr);
+    ~IdAttribute() override;
 
-  /// @returns the WGSL name for the attribute
-  std::string Name() const override;
+    /// @returns the WGSL name for the attribute
+    std::string Name() const override;
 
-  /// Clones this node and all transitive child nodes using the `CloneContext`
-  /// `ctx`.
-  /// @param ctx the clone context
-  /// @return the newly cloned node
-  const IdAttribute* Clone(CloneContext* ctx) const override;
+    /// Clones this node and all transitive child nodes using the `CloneContext`
+    /// `ctx`.
+    /// @param ctx the clone context
+    /// @return the newly cloned node
+    const IdAttribute* Clone(CloneContext* ctx) const override;
 
-  /// The id value
-  const uint32_t value;
+    /// The id expression
+    const ast::Expression* const expr;
 };
 
 }  // namespace tint::ast

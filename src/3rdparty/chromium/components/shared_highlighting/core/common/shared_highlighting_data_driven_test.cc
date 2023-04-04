@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,9 @@ const char kEndOffsetInParentField[] = "endOffsetInParent";
 const char kEndTextOffsetField[] = "endTextOffset";
 const char kSelectedTextField[] = "selectedText";
 const char kHighlightTextField[] = "highlightText";
+
+const std::string kTestSuccess = "Success";
+const std::string kTestFailure = "Failure";
 
 // Reads |file| into |content|, and converts Windows line-endings to Unix ones.
 // Returns true on success.
@@ -134,9 +137,15 @@ void SharedHighlightingDataDrivenTest::GenerateResults(const std::string& input,
 
   std::string html_content;
   ReadFile(GetHtmlDir().AppendASCII(html_file_name), &html_content);
-  GenerateAndNavigate(html_content, start_parent_id, start_offset_in_parent,
-                      start_text_offset, end_parent_id, end_offset_in_parent,
-                      end_text_offset, selected_text, highlight_text);
+  auto results = GenerateAndNavigate(
+      html_content, start_parent_id, start_offset_in_parent, start_text_offset,
+      end_parent_id, end_offset_in_parent, end_text_offset, selected_text,
+      highlight_text);
+
+  *output = "GENERATION: " +
+            (results.generation_success ? kTestSuccess : kTestFailure) + "\n" +
+            "HIGHLIGHTING: " +
+            (results.highlighting_success ? kTestSuccess : kTestFailure) + "\n";
 }
 
 }  // namespace shared_highlighting

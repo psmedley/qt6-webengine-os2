@@ -34,7 +34,6 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "libavutil/common.h"
@@ -42,7 +41,6 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
-#include "internal.h"
 
 
 typedef uint8_t cvid_codebook[12];
@@ -449,9 +447,8 @@ static av_cold int cinepak_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int cinepak_decode_frame(AVCodecContext *avctx,
-                                void *data, int *got_frame,
-                                AVPacket *avpkt)
+static int cinepak_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
+                                int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int ret = 0, buf_size = avpkt->size;
@@ -489,7 +486,7 @@ static int cinepak_decode_frame(AVCodecContext *avctx,
     if (s->palette_video)
         memcpy (s->frame->data[1], s->pal, AVPALETTE_SIZE);
 
-    if ((ret = av_frame_ref(data, s->frame)) < 0)
+    if ((ret = av_frame_ref(rframe, s->frame)) < 0)
         return ret;
 
     *got_frame = 1;
@@ -509,13 +506,12 @@ static av_cold int cinepak_decode_end(AVCodecContext *avctx)
 
 const FFCodec ff_cinepak_decoder = {
     .p.name         = "cinepak",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Cinepak"),
+    CODEC_LONG_NAME("Cinepak"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_CINEPAK,
     .priv_data_size = sizeof(CinepakContext),
     .init           = cinepak_decode_init,
     .close          = cinepak_decode_end,
-    .decode         = cinepak_decode_frame,
+    FF_CODEC_DECODE_CB(cinepak_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

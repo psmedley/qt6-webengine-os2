@@ -14,7 +14,7 @@
 #include "src/gpu/ganesh/GrDynamicAtlas.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
 #include "src/gpu/ganesh/GrOnFlushResourceProvider.h"
-#include "src/gpu/ganesh/v1/PathRenderer.h"
+#include "src/gpu/ganesh/PathRenderer.h"
 
 class GrOp;
 class GrRecordingContext;
@@ -87,7 +87,7 @@ private:
 
     // Instantiates texture(s) for all atlases we've created since the last flush. Atlases that are
     // the same size will be instantiated with the same backing texture.
-    void preFlush(GrOnFlushResourceProvider*, SkSpan<const uint32_t> taskIDs) override;
+    bool preFlush(GrOnFlushResourceProvider*) override;
 
     float fAtlasMaxSize = 0;
     float fAtlasMaxPathWidth = 0;

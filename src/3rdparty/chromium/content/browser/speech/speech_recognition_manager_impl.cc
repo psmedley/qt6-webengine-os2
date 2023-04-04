@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -295,7 +295,7 @@ void SpeechRecognitionManagerImpl::RecognitionAllowedCallback(int session_id,
 
 void SpeechRecognitionManagerImpl::MediaRequestPermissionCallback(
     int session_id,
-    const blink::MediaStreamDevices& devices,
+    const blink::mojom::StreamDevicesSet& stream_devices_set,
     std::unique_ptr<MediaStreamUIProxy> stream_ui) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -303,10 +303,18 @@ void SpeechRecognitionManagerImpl::MediaRequestPermissionCallback(
   if (iter == sessions_.end())
     return;
 
-  bool is_allowed = !devices.empty();
+  // The SpeechRecognictionManager is not used with multiple streams
+  // which is only supported in combination with the getDisplayMediaSet API.
+  // The |stream_devices| vector can be empty e.g. if the permission
+  // was denied.
+  DCHECK_LE(stream_devices_set.stream_devices.size(), 1u);
+
+  blink::MediaStreamDevices devices_list =
+      blink::ToMediaStreamDevicesList(stream_devices_set);
+  const bool is_allowed = !devices_list.empty();
   if (is_allowed) {
     // Copy the approved devices array to the context for UI indication.
-    iter->second->context.devices = devices;
+    iter->second->context.devices = devices_list;
 
     // Save the UI object.
     iter->second->ui = std::move(stream_ui);

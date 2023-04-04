@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -237,6 +237,10 @@ class TabStrip : public View, public gfx::AnimationDelegate {
   void OnPaintBorder(gfx::Canvas* canvas) override;
 
  private:
+  struct Coordinates {
+    int start, end;
+  };
+
   // The orientation of the tab alignment.
   const TabbedPane::Orientation orientation_;
 
@@ -254,8 +258,8 @@ class TabStrip : public View, public gfx::AnimationDelegate {
       std::make_unique<gfx::LinearAnimation>(this);
 
   // The x-coordinate ranges of the old selection and the new selection.
-  gfx::Range animating_from_;
-  gfx::Range animating_to_;
+  Coordinates animating_from_;
+  Coordinates animating_to_;
 };
 
 }  // namespace views

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,7 +106,6 @@ void ServiceWorkerNewScriptFetcher::StartScriptLoadingWithNewResourceID(
 
   // Notify to DevTools that the request for fetching the service worker script
   // is about to start. It fires `Network.onRequestWillBeSent` event.
-  request.devtools_request_id = version_->reporting_source().ToString();
   devtools_instrumentation::OnServiceWorkerMainScriptRequestWillBeSent(
       requesting_frame_id_, context_.wrapper(), version_->version_id(),
       request);
@@ -127,20 +126,15 @@ void ServiceWorkerNewScriptFetcher::OnReceiveEarlyHints(
 
 void ServiceWorkerNewScriptFetcher::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head,
-    mojo::ScopedDataPipeConsumerHandle response_body) {
-  response_head_ = std::move(response_head);
-  if (response_body)
-    OnStartLoadingResponseBody(std::move(response_body));
-}
-
-void ServiceWorkerNewScriptFetcher::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle response_body) {
-  DCHECK(response_head_);
+    mojo::ScopedDataPipeConsumerHandle response_body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
+  if (!response_body)
+    return;
 
   blink::mojom::WorkerMainScriptLoadParamsPtr main_script_load_params =
       blink::mojom::WorkerMainScriptLoadParams::New();
   main_script_load_params->request_id = request_id_;
-  main_script_load_params->response_head = std::move(response_head_);
+  main_script_load_params->response_head = std::move(response_head);
   main_script_load_params->response_body = std::move(response_body);
   main_script_load_params->url_loader_client_endpoints =
       network::mojom::URLLoaderClientEndpoints::New(
@@ -160,10 +154,6 @@ void ServiceWorkerNewScriptFetcher::OnReceiveRedirect(
 void ServiceWorkerNewScriptFetcher::OnUploadProgress(int64_t,
                                                      int64_t,
                                                      OnUploadProgressCallback) {
-  mojo::ReportBadMessage("SWNSF_BAD_MSG");
-}
-void ServiceWorkerNewScriptFetcher::OnReceiveCachedMetadata(
-    mojo_base::BigBuffer data) {
   mojo::ReportBadMessage("SWNSF_BAD_MSG");
 }
 void ServiceWorkerNewScriptFetcher::OnTransferSizeUpdated(int32_t) {

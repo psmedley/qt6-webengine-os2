@@ -22,29 +22,31 @@ namespace tint::ast {
 
 /// A return statement
 class ReturnStatement final : public Castable<ReturnStatement, Statement> {
- public:
-  /// Constructor
-  /// @param pid the identifier of the program that owns this node
-  /// @param src the source of this node
-  ReturnStatement(ProgramID pid, const Source& src);
+  public:
+    /// Constructor
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param src the source of this node
+    ReturnStatement(ProgramID pid, NodeID nid, const Source& src);
 
-  /// Constructor
-  /// @param pid the identifier of the program that owns this node
-  /// @param src the source of this node
-  /// @param value the return value
-  ReturnStatement(ProgramID pid, const Source& src, const Expression* value);
-  /// Move constructor
-  ReturnStatement(ReturnStatement&&);
-  ~ReturnStatement() override;
+    /// Constructor
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param src the source of this node
+    /// @param value the return value
+    ReturnStatement(ProgramID pid, NodeID nid, const Source& src, const Expression* value);
+    /// Move constructor
+    ReturnStatement(ReturnStatement&&);
+    ~ReturnStatement() override;
 
-  /// Clones this node and all transitive child nodes using the `CloneContext`
-  /// `ctx`.
-  /// @param ctx the clone context
-  /// @return the newly cloned node
-  const ReturnStatement* Clone(CloneContext* ctx) const override;
+    /// Clones this node and all transitive child nodes using the `CloneContext`
+    /// `ctx`.
+    /// @param ctx the clone context
+    /// @return the newly cloned node
+    const ReturnStatement* Clone(CloneContext* ctx) const override;
 
-  /// The value returned. May be null.
-  const Expression* const value;
+    /// The value returned. May be null.
+    const Expression* const value;
 };
 
 }  // namespace tint::ast

@@ -12,12 +12,13 @@
 #include "include/core/SkSpan.h"
 #include "include/private/SkColorData.h"
 #include "include/private/SkTDArray.h"
+#include "include/private/SkVx.h"
 #include "src/core/SkSLTypeShared.h"
-#include "src/gpu/graphite/geom/VectorTypes.h"
+#include "src/core/SkUniform.h"
 
+class SkM44;
 struct SkPoint;
 struct SkRect;
-class SkUniform;
 class SkUniformDataBlock;
 
 namespace skgpu::graphite {
@@ -30,23 +31,45 @@ enum class Layout {
     kMetal, /** This is our own self-imposed layout we use for Metal. */
 };
 
-// TODO: This is only used in the SkPipelineDataGatherer - maybe hide it better.
-class UniformManager {
+class UniformOffsetCalculator {
 public:
-    UniformManager(Layout layout);
+    UniformOffsetCalculator(Layout layout, uint32_t startingOffset);
 
-    SkUniformDataBlock peekData() const;
-    int size() const { return fStorage.count(); }
+    size_t size() const { return fCurUBOOffset; }
+
+    size_t calculateOffset(SkSLType type, unsigned int count);
+
+protected:
+    SkSLType getUniformTypeForLayout(SkSLType type);
+
+    using WriteUniformFn = uint32_t (*)(SkSLType type,
+                                        CType ctype,
+                                        void *dest,
+                                        int n,
+                                        const void *src);
+
+    WriteUniformFn fWriteUniform;
+    Layout fLayout;  // TODO: eventually 'fLayout' will not need to be stored
+    uint32_t fOffset = 0;
+    uint32_t fCurUBOOffset = 0;
+};
+
+class UniformManager : public UniformOffsetCalculator {
+public:
+    UniformManager(Layout layout) : UniformOffsetCalculator(layout, /*startingOffset=*/0) {}
+
+    SkUniformDataBlock finishUniformDataBlock();
+    size_t size() const { return fStorage.size(); }
 
     void reset();
-#ifdef SK_DEBUG
+
     void checkReset() const;
     void setExpectedUniforms(SkSpan<const SkUniform>);
     void checkExpected(SkSLType, unsigned int count);
     void doneWithExpectedUniforms();
-#endif
 
     // TODO: do we need to add a 'makeArray' parameter to these?
+    void write(const SkM44&);
     void write(const SkColor4f*, int count);
     void write(const SkPMColor4f*, int count);
     void write(const SkPMColor4f& color) { this->write(&color, 1); }
@@ -55,30 +78,18 @@ public:
     void write(const float*, int count);
     void write(float f) { this->write(&f, 1); }
     void write(int);
-    void write(float2);
-
-private:
-    SkSLType getUniformTypeForLayout(SkSLType type);
+    void write(skvx::float2);
+    void write(skvx::float4);
     void write(SkSLType type, unsigned int count, const void* src);
 
-    using WriteUniformFn = uint32_t(*)(SkSLType type,
-                                       CType ctype,
-                                       void *dest,
-                                       int n,
-                                       const void *src);
-
-    WriteUniformFn fWriteUniform;
-    Layout fLayout;  // TODO: eventually 'fLayout' will not need to be stored
+private:
 #ifdef SK_DEBUG
-    uint32_t fCurUBOOffset;
-    uint32_t fCurUBOMaxAlignment;
-
     SkSpan<const SkUniform> fExpectedUniforms;
     int fExpectedUniformIndex = 0;
 #endif // SK_DEBUG
-    uint32_t fOffset;
 
     SkTDArray<char> fStorage;
+    uint32_t fReqAlignment = 0;
 };
 
 } // namespace skgpu

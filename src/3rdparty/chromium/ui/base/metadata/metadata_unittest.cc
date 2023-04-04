@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -212,7 +212,11 @@ TEST_F(MetadataTest, TestTypeCacheContainsTestClass) {
 TEST_F(MetadataTest, TestMetaDataFile) {
   UM::ClassMetaData* metadata = MetadataTestBaseClass::MetaData();
 
+#if defined(__clang__) && defined(_MSC_VER)
+  EXPECT_EQ(metadata->file(), "ui\\base\\metadata\\metadata_unittest.cc");
+#else
   EXPECT_EQ(metadata->file(), "ui/base/metadata/metadata_unittest.cc");
+#endif
 }
 
 TEST_F(MetadataTest, TestClassPropertyMetaData) {

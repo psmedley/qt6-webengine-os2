@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,7 @@ class UrlSignalHandler {
   void OnHistoryVisit(const GURL& url);
 
   // Called when |urls| are removed from the history database.
-  void OnUrlsRemovedFromHistory(const std::vector<GURL>& urls);
+  void OnUrlsRemovedFromHistory(const std::vector<GURL>& urls, bool all_urls);
 
   // Add/Remove history delegates.
   void AddHistoryDelegate(HistoryDelegate* history_delegate);

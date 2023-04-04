@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,8 @@ namespace device {
 // information.
 class COMPONENT_EXPORT(DEVICE_FIDO) DiscoverableCredentialMetadata {
  public:
-  DiscoverableCredentialMetadata(std::vector<uint8_t> cred_id,
+  DiscoverableCredentialMetadata(std::string rp_id,
+                                 std::vector<uint8_t> cred_id,
                                  PublicKeyCredentialUserEntity user);
 
   DiscoverableCredentialMetadata();
@@ -28,9 +29,15 @@ class COMPONENT_EXPORT(DEVICE_FIDO) DiscoverableCredentialMetadata {
   DiscoverableCredentialMetadata& operator=(
       DiscoverableCredentialMetadata&& other);
   ~DiscoverableCredentialMetadata();
+  bool operator==(const DiscoverableCredentialMetadata& other) const;
 
+  std::string rp_id;
   std::vector<uint8_t> cred_id;
   PublicKeyCredentialUserEntity user;
+  // system_created is set to true for credentials that were created
+  // automatically by the system. This can happen on Windows where (at least) a
+  // credential for login.microsoft.com can be auto-created for users.
+  bool system_created = false;
 };
 
 }  // namespace device

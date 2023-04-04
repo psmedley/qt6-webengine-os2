@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,6 +56,8 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/url_util.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "services/network/public/mojom/client_security_state.mojom.h"
 #include "storage/browser/quota/quota_client_type.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/quota/special_storage_policy.h"
@@ -68,6 +70,14 @@
 namespace content {
 
 namespace {
+
+#if BUILDFLAG(IS_ANDROID)
+// Enables running ServiceWorkerStorageControl on IO thread instead of UI thread
+// on Android.
+BASE_FEATURE(kServiceWorkerStorageControlOnIOThread,
+             "ServiceWorkerStorageControlOnIOThread",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
 
 void DidFindRegistrationForStartActiveWorker(
     ServiceWorkerContextWrapper::StatusCallback callback,
@@ -479,6 +489,11 @@ void ServiceWorkerContextWrapper::RegisterServiceWorker(
   blink::mojom::ServiceWorkerRegistrationOptions options_to_pass(
       net::SimplifyUrlForRequest(options.scope), options.type,
       options.update_via_cache);
+
+  // TODO(https://crbug.com/1239551): initialize remaining fields
+  PolicyContainerPolicies policy_container_policies;
+  policy_container_policies.is_web_secure_context =
+      network::IsUrlPotentiallyTrustworthy(script_url);
   // TODO(bashi): Pass a valid outside fetch client settings object. Perhaps
   // changing this method to take a settings object.
   context()->RegisterServiceWorker(
@@ -491,7 +506,8 @@ void ServiceWorkerContextWrapper::RegisterServiceWorker(
           [](StatusCodeCallback callback, blink::ServiceWorkerStatusCode status,
              const std::string&, int64_t) { std::move(callback).Run(status); },
           std::move(callback)),
-      /*requesting_frame_id=*/GlobalRenderFrameHostId());
+      /*requesting_frame_id=*/GlobalRenderFrameHostId(),
+      policy_container_policies);
 }
 
 void ServiceWorkerContextWrapper::UnregisterServiceWorker(
@@ -686,6 +702,10 @@ void ServiceWorkerContextWrapper::StartServiceWorkerAndDispatchMessage(
       },
       std::move(result_callback));
 
+  // As we don't track tasks between workers and renderers, we can nullify the
+  // message's parent task ID.
+  message.parent_task_id = absl::nullopt;
+
   // TODO(https://crbug.com/1295029): Don't post task to the UI thread. Instead,
   // make all call sites run on the UI thread.
   RunOrPostTaskOnUIThread(
@@ -834,6 +854,39 @@ const base::flat_map<int64_t, ServiceWorkerRunningInfo>&
 ServiceWorkerContextWrapper::GetRunningServiceWorkerInfos() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return running_service_workers_;
+}
+
+bool ServiceWorkerContextWrapper::IsLiveRunningServiceWorker(
+    int64_t service_worker_version_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // We might be shutting down.
+  if (!context())
+    return false;
+
+  auto* version = context()->GetLiveVersion(service_worker_version_id);
+  if (!version)
+    return false;
+
+  auto running_status = version->running_status();
+  if (running_status != EmbeddedWorkerStatus::STARTING &&
+      running_status != EmbeddedWorkerStatus::RUNNING) {
+    return false;
+  }
+
+  return true;
+}
+
+service_manager::InterfaceProvider&
+ServiceWorkerContextWrapper::GetRemoteInterfaces(
+    int64_t service_worker_version_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK(IsLiveRunningServiceWorker(service_worker_version_id));
+
+  // This function should only be called on live running service workers
+  // so it should be safe to dereference the returned pointer without
+  // checking it first.
+  auto& version = *context()->GetLiveVersion(service_worker_version_id);
+  return version.worker_host()->remote_interfaces();
 }
 
 scoped_refptr<ServiceWorkerRegistration>
@@ -1349,7 +1402,7 @@ void ServiceWorkerContextWrapper::DidGetAllRegistrationsForGetAllOrigins(
     auto it = origins.find(origin);
     if (it == origins.end()) {
       origins[origin] = StorageUsageInfo(
-          url::Origin::Create(origin),
+          blink::StorageKey(url::Origin::Create(origin)),
           registration_info.stored_version_size_bytes, base::Time());
     } else {
       it->second.total_size_bytes +=
@@ -1469,15 +1522,25 @@ void ServiceWorkerContextWrapper::BindStorageControl(
     mojo::PendingReceiver<storage::mojom::ServiceWorkerStorageControl>
         receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  bool run_storage_control_on_ui_thread =
+#if BUILDFLAG(IS_ANDROID)
+      // Run ServiceWorkerStorageControl mojo receiver on IO thread on Android
+      // for performance reasons if it's specified.
+      // TODO(chikamune): Use a thread pool sequence instead of IO thread.
+      !base::FeatureList::IsEnabled(kServiceWorkerStorageControlOnIOThread);
+#else
+      // The storage service always runs out of process on Desktop platforms.
+      // TODO(crbug.com/1055677): ServiceWorkerStorageControlImpl instance
+      // should live in the storage service. Currently,
+      // ServiceWorkerStorageControlImpl runs on UI thread to keep the previous
+      // behavior.
+      true;
+#endif
+
   if (storage_control_binder_for_test_) {
     storage_control_binder_for_test_.Run(std::move(receiver));
-  } else {
-    // The storage service always runs out of process on Desktop platforms.
-    // TODO(crbug.com/1055677): ServiceWorkerStorageControlImpl instance
-    // should live in the storage service. Currently,
-    // ServiceWorkerStorageControlImpl runs on UI thread to keep the previous
-    // behavior.
-
+  } else if (run_storage_control_on_ui_thread) {
     // TODO(crbug.com/1055677): Use storage_partition() to bind the control when
     // ServiceWorkerStorageControl is sandboxed in the Storage Service.
     DCHECK(!storage_control_);
@@ -1494,6 +1557,14 @@ void ServiceWorkerContextWrapper::BindStorageControl(
         std::make_unique<storage::ServiceWorkerStorageControlImpl>(
             user_data_directory_, std::move(database_task_runner),
             std::move(receiver));
+  } else {
+    // Drop `receiver` when the browser is shutting down.
+    if (!storage_partition())
+      return;
+    DCHECK(storage_partition()->GetStorageServicePartition());
+    storage_partition()
+        ->GetStorageServicePartition()
+        ->BindServiceWorkerStorageControl(std::move(receiver));
   }
 }
 
@@ -1510,27 +1581,32 @@ void ServiceWorkerContextWrapper::SetLoaderFactoryForUpdateCheckForTest(
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
-ServiceWorkerContextWrapper::GetLoaderFactoryForUpdateCheck(const GURL& scope) {
+ServiceWorkerContextWrapper::GetLoaderFactoryForUpdateCheck(
+    const GURL& scope,
+    network::mojom::ClientSecurityStatePtr client_security_state) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // TODO(https://crbug.com/1211361): Do we want to instrument this with
   // devtools? It is currently not recorded at all.
   return GetLoaderFactoryForBrowserInitiatedRequest(
       scope,
-      /*version_id=*/absl::nullopt);
+      /*version_id=*/absl::nullopt, std::move(client_security_state));
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
 ServiceWorkerContextWrapper::GetLoaderFactoryForMainScriptFetch(
     const GURL& scope,
-    int64_t version_id) {
+    int64_t version_id,
+    network::mojom::ClientSecurityStatePtr client_security_state) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return GetLoaderFactoryForBrowserInitiatedRequest(scope, version_id);
+  return GetLoaderFactoryForBrowserInitiatedRequest(
+      scope, version_id, std::move(client_security_state));
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
 ServiceWorkerContextWrapper::GetLoaderFactoryForBrowserInitiatedRequest(
     const GURL& scope,
-    absl::optional<int64_t> version_id) {
+    absl::optional<int64_t> version_id,
+    network::mojom::ClientSecurityStatePtr client_security_state) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // TODO(falken): Replace this with URLLoaderInterceptor.
@@ -1577,12 +1653,21 @@ ServiceWorkerContextWrapper::GetLoaderFactoryForBrowserInitiatedRequest(
         std::move(header_client), std::move(pending_receiver),
         storage_partition());
   } else {
-    // Set up a Mojo connection to the network loader factory if it's not been
-    // created yet.
     DCHECK(storage_partition());
-    scoped_refptr<network::SharedURLLoaderFactory> network_factory =
-        storage_partition_->GetURLLoaderFactoryForBrowserProcess();
-    network_factory->Clone(std::move(pending_receiver));
+    if (base::FeatureList::IsEnabled(
+            features::kPrivateNetworkAccessForWorkers)) {
+      network::mojom::URLLoaderFactoryParamsPtr params =
+          storage_partition_->CreateURLLoaderFactoryParams();
+      params->client_security_state = std::move(client_security_state);
+      storage_partition_->GetNetworkContext()->CreateURLLoaderFactory(
+          std::move(pending_receiver), std::move(params));
+    } else {
+      // Set up a Mojo connection to the network loader factory if it's not been
+      // created yet.
+      scoped_refptr<network::SharedURLLoaderFactory> network_factory =
+          storage_partition_->GetURLLoaderFactoryForBrowserProcess();
+      network_factory->Clone(std::move(pending_receiver));
+    }
   }
 
   // Clone context()->loader_factory_bundle_for_update_check() and set up the

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,7 +93,7 @@ PdfNavigationThrottle::WillStartRequest() {
   //
   // TODO(crbug.com/1382761): This should be fixed in a more systematic way.
   DCHECK_EQ(params.source_site_instance,
-            contents->GetMainFrame()->GetSiteInstance());
+            contents->GetPrimaryMainFrame()->GetSiteInstance());
   params.source_site_instance.reset();
 
   base::SequencedTaskRunnerHandle::Get()->PostTask(
@@ -108,7 +108,7 @@ PdfNavigationThrottle::WillStartRequest() {
             // original OpenURLParams.
             content::OpenURLParams new_params = params;
             new_params.source_site_instance =
-                web_contents->GetMainFrame()->GetSiteInstance();
+                web_contents->GetPrimaryMainFrame()->GetSiteInstance();
 
             // `MimeHandlerViewGuest` navigates its embedder for calls to
             // `WebContents::OpenURL()`, so use `LoadURLWithParams()` directly

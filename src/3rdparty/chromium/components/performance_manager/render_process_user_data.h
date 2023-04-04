@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,6 +50,10 @@ class RenderProcessUserData : public base::SupportsUserData::Data,
   // vice-versa.
   void SetDestructionObserver(DestructionObserver* destruction_observer);
 
+  // Invoked when a process is launched for this RenderProcessHost
+  // (immediately after RenderProcessHost::GetProcess() becomes valid).
+  void OnProcessLaunched();
+
   ProcessNodeImpl* process_node() { return process_node_.get(); }
 
  private:
@@ -64,7 +68,6 @@ class RenderProcessUserData : public base::SupportsUserData::Data,
       content::RenderProcessHost* host);
 
   // RenderProcessHostObserver overrides
-  void RenderProcessReady(content::RenderProcessHost* host) override;
   void RenderProcessExited(
       content::RenderProcessHost* host,
       const content::ChildProcessTerminationInfo& info) override;

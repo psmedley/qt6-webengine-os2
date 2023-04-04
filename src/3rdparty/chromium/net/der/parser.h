@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
 
-namespace net {
-
-namespace der {
+namespace net::der {
 
 class BitString;
 struct GeneralizedTime;
@@ -174,11 +172,12 @@ class NET_EXPORT Parser {
   // input may or may not have been advanced).
   [[nodiscard]] bool ReadUint64(uint64_t* out);
 
-  // Reads a BIT STRING. On success fills |out| and returns true.
+  // Reads a BIT STRING. On success returns BitString. On failure, returns
+  // absl::nullopt.
   //
   // Note that on failure the Parser is left in an undefined state (the
   // input may or may not have been advanced).
-  [[nodiscard]] bool ReadBitString(BitString* out);
+  [[nodiscard]] absl::optional<BitString> ReadBitString();
 
   // Reads a GeneralizeTime. On success fills |out| and returns true.
   //
@@ -204,11 +203,9 @@ class NET_EXPORT Parser {
 
  private:
   CBS cbs_;
-  size_t advance_len_;
+  size_t advance_len_ = 0;
 };
 
-}  // namespace der
-
-}  // namespace net
+}  // namespace net::der
 
 #endif  // NET_DER_PARSER_H_

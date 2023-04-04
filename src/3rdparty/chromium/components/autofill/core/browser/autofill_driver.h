@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,6 @@
 #include "ui/accessibility/ax_tree_id.h"
 #include "url/origin.h"
 
-#if !BUILDFLAG(IS_IOS) && !defined(TOOLKIT_QT)
-#include "components/webauthn/core/browser/internal_authenticator.h"
-#endif
-
 namespace network {
 class SharedURLLoaderFactory;
 }
@@ -29,18 +25,47 @@ namespace autofill {
 
 class FormStructure;
 
-// Interface that allows Autofill core code to interact with its driver (i.e.,
-// obtain information from it and give information to it). A concrete
-// implementation must be provided by the driver.
+// AutofillDriver is Autofill's lowest-level abstraction of a frame that is
+// shared among all platforms.
+//
+// Most notably, it is a gateway for all communication from the browser code to
+// the DOM, or more precisely, to the AutofillAgent (which are different classes
+// of the same name in non-iOS vs iOS).
+//
+// The reverse communication, from the AutofillAgent to the browser code, goes
+// through mojom::AutofillDriver on non-iOS, and directly to AutofillManager on
+// iOS.
+//
+// An AutofillDriver corresponds to a frame, rather than a document, in the
+// sense that it may survive navigations.
+//
+// AutofillDriver has two implementations:
+// - AutofillDriverIOS for iOS,
+// - ContentAutofillDriver for all other platforms.
+//
+// An AutofillDriver's lifetime should be contained by the associated frame.
+//
+// AutofillDriverIOS is co-owned by AutofillDriverIOSWebFrame, which itself is
+// owned by the WebFrame, and the iOS-specific AutofillAgent, which extends the
+// driver's lifetime beyond the WebFrame's (crbug.com/892612).
+//
+// ContentAutofillDriver is owned by ContentAutofillDriverFactory, which ensures
+// that the associated RenderFrameHost's lifetime contains the driver's
+// lifetime.
 class AutofillDriver {
  public:
-  virtual ~AutofillDriver() {}
+  virtual ~AutofillDriver() = default;
 
   // Returns whether the user is currently operating in an incognito context.
   virtual bool IsIncognito() const = 0;
 
-  // Returns whether AutofillDriver instance is associated with a main frame,
-  // and this can be a primary or non-primary main frame.
+  // Returns whether the AutofillDriver instance is associated with an active
+  // frame in the MPArch sense.
+  virtual bool IsInActiveFrame() const = 0;
+
+  // Returns whether the AutofillDriver instance is associated with a main
+  // frame, in the MPArch sense. This can be a primary or non-primary main
+  // frame.
   virtual bool IsInAnyMainFrame() const = 0;
 
   // Returns whether the AutofillDriver instance is associated with a
@@ -60,12 +85,6 @@ class AutofillDriver {
 
   // Returns true iff the renderer is available for communication.
   virtual bool RendererIsAvailable() = 0;
-
-#if !BUILDFLAG(IS_IOS) && !defined(TOOLKIT_QT)
-  // Gets or creates a pointer to an implementation of InternalAuthenticator.
-  virtual webauthn::InternalAuthenticator*
-  GetOrCreateCreditCardInternalAuthenticator() = 0;
-#endif
 
   // Forwards |data| to the renderer which shall preview or fill the values of
   // |data|'s fields into the relevant DOM elements.
@@ -92,13 +111,8 @@ class AutofillDriver {
       const url::Origin& triggered_origin,
       const base::flat_map<FieldGlobalId, ServerFieldType>& field_type_map) = 0;
 
-  // Pass the form structures to the password manager to choose correct username
-  // and to the password generation manager to detect account creation forms.
-  virtual void PropagateAutofillPredictions(
-      const std::vector<autofill::FormStructure*>& forms) = 0;
-
   // Forwards parsed |forms| to the embedder.
-  virtual void HandleParsedForms(const std::vector<const FormData*>& forms) = 0;
+  virtual void HandleParsedForms(const std::vector<FormData>& forms) = 0;
 
   // Sends the field type predictions specified in |forms| to the renderer. This
   // method is a no-op if the renderer is not available or the appropriate

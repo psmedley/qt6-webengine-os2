@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/supports_user_data.h"
 #include "base/synchronization/lock.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -71,6 +72,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_ui_url_loader_factory.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/url_constants.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -192,8 +194,7 @@ class DownloadItemFactoryImpl : public download::DownloadItemFactory {
         start_time, end_time, etag, last_modified, received_bytes, total_bytes,
         auto_resume_count, hash, state, danger_type, interrupt_reason,
         false /* paused */, false /* allow_metered */, opened, last_access_time,
-        transient, received_slices, reroute_info,
-        absl::nullopt /*download_schedule*/, download::kInvalidRange,
+        transient, received_slices, reroute_info, download::kInvalidRange,
         download::kInvalidRange, nullptr /* download_entry */);
   }
 
@@ -499,7 +500,7 @@ void DownloadManagerImpl::DetermineDownloadTarget(
         target_path, download::DownloadItem::TARGET_DISPOSITION_OVERWRITE,
         download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
         download::DownloadItem::MixedContentStatus::UNKNOWN, target_path,
-        base::FilePath(), absl::nullopt /*download_schedule*/,
+        base::FilePath(), std::string() /*mime_type*/,
         download::DOWNLOAD_INTERRUPT_REASON_NONE);
   }
 }

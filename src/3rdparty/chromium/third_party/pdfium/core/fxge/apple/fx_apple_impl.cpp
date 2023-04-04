@@ -4,11 +4,14 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
+#include <stdint.h>
+
 #include <memory>
 #include <vector>
 
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_system.h"
+#include "core/fxge/agg/fx_agg_driver.h"
 #include "core/fxge/apple/fx_apple_platform.h"
 #include "core/fxge/cfx_cliprgn.h"
 #include "core/fxge/cfx_font.h"
@@ -18,19 +21,13 @@
 #include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/cfx_substfont.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
-#include "core/fxge/fx_freetype.h"
+#include "core/fxge/freetype/fx_freetype.h"
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/span.h"
 
 #if defined(OS_IOS)
 #include <CoreGraphics/CoreGraphics.h>
 #endif
-
-#if !defined(_SKIA_SUPPORT_)
-#include "core/fxge/agg/fx_agg_driver.h"
-#endif
-
-#if !defined(_SKIA_SUPPORT_)
 
 namespace {
 
@@ -61,8 +58,7 @@ bool CGDrawGlyphRun(CGContextRef pContext,
     if (!pFont->GetPlatformFont())
       return false;
   }
-  std::vector<uint16_t, FxAllocAllocator<uint16_t>> glyph_indices(
-      pCharPos.size());
+  DataVector<uint16_t> glyph_indices(pCharPos.size());
   std::vector<CGPoint> glyph_positions(pCharPos.size());
   for (size_t i = 0; i < pCharPos.size(); i++) {
     glyph_indices[i] =
@@ -168,8 +164,6 @@ bool CFX_AggDeviceDriver::DrawDeviceText(
 }
 
 }  // namespace pdfium
-
-#endif  // !defined(_SKIA_SUPPORT_)
 
 void CFX_GlyphCache::InitPlatform() {}
 

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ class MediaResourceProviderFuchsia final
 
  private:
   MediaResourceProviderFuchsia(
-      content::RenderFrameHost* render_frame_host,
+      content::RenderFrameHost& render_frame_host,
       mojo::PendingReceiver<media::mojom::FuchsiaMediaResourceProvider>
           receiver);
 
@@ -36,6 +36,11 @@ class MediaResourceProviderFuchsia final
       const std::string& key_system,
       fidl::InterfaceRequest<fuchsia::media::drm::ContentDecryptionModule>
           request) final;
+  void CreateVideoDecoder(
+      media::VideoCodec codec,
+      media::mojom::VideoDecoderSecureMemoryMode secure_mode,
+      fidl::InterfaceRequest<fuchsia::media::StreamProcessor>
+          stream_processor_request) final;
 };
 
 }  // namespace content

@@ -9,12 +9,12 @@ type WriteCanvasMethod = 'draw' | 'copy';
 
 export function run(
   format: GPUTextureFormat,
-  compositingAlphaMode: GPUCanvasCompositingAlphaMode,
+  alphaMode: GPUCanvasAlphaMode,
   writeCanvasMethod: WriteCanvasMethod
 ) {
   runRefTest(async t => {
     const ctx = cvs.getContext('webgpu');
-    assert(ctx !== null, 'Failed to get WebGPU context from canvas');
+    assert(ctx instanceof GPUCanvasContext, 'Failed to get WebGPU context from canvas');
 
     switch (format) {
       case 'bgra8unorm':
@@ -26,9 +26,6 @@ export function run(
       default:
         unreachable();
     }
-
-    // This is mimic globalAlpha in 2d context blending behavior
-    const a = compositingAlphaMode === 'opaque' ? (1.0).toFixed(1) : (0.5).toFixed(1);
 
     let usage = 0;
     switch (writeCanvasMethod) {
@@ -43,19 +40,36 @@ export function run(
       device: t.device,
       format,
       usage,
-      compositingAlphaMode,
+      alphaMode,
     });
 
+    // The blending behavior here is to mimic 2d context blending behavior
+    // of drawing rects in order
+    // https://drafts.fxtf.org/compositing/#porterduffcompositingoperators_srcover
+    const kBlendStateSourceOver = {
+      color: {
+        srcFactor: 'src-alpha',
+        dstFactor: 'one-minus-src-alpha',
+        operation: 'add',
+      },
+      alpha: {
+        srcFactor: 'one',
+        dstFactor: 'one-minus-src-alpha',
+        operation: 'add',
+      },
+    } as const;
+
     const pipeline = t.device.createRenderPipeline({
+      layout: 'auto',
       vertex: {
         module: t.device.createShaderModule({
           code: `
 struct VertexOutput {
-@builtin(position) Position : vec4<f32>;
-@location(0) fragColor : vec4<f32>;
-};
+@builtin(position) Position : vec4<f32>,
+@location(0) fragColor : vec4<f32>,
+}
 
-@stage(vertex)
+@vertex
 fn main(@builtin(vertex_index) VertexIndex : u32) -> VertexOutput {
 var pos = array<vec2<f32>, 6>(
     vec2<f32>( 0.75,  0.75),
@@ -71,11 +85,13 @@ vec2<f32>( 0.25, 0.25),
 vec2<f32>(-0.25, -0.25),
 vec2<f32>( 0.25,  -0.25));
 
+// Alpha channel value is set to 0.5 regardless of the canvas alpha mode.
+// For 'opaque' mode, it shouldn't affect the end result, as the alpha channel should always get cleared to 1.0.
 var color = array<vec4<f32>, 4>(
-    vec4<f32>(0.4, 0.0, 0.0, ${a}),
-    vec4<f32>(0.0, 0.4, 0.0, ${a}),
-    vec4<f32>(0.0, 0.0, 0.4, ${a}),
-    vec4<f32>(0.4, 0.4, 0.0, ${a})); // 0.4 -> 0x66
+    vec4<f32>(0.4, 0.0, 0.0, 0.5),
+    vec4<f32>(0.0, 0.4, 0.0, 0.5),
+    vec4<f32>(0.0, 0.0, 0.4, 0.5),
+    vec4<f32>(0.4, 0.4, 0.0, 0.5)); // 0.4 -> 0x66
 
 var output : VertexOutput;
 output.Position = vec4<f32>(pos[VertexIndex % 6u] + offset[VertexIndex / 6u], 0.0, 1.0);
@@ -89,7 +105,7 @@ return output;
       fragment: {
         module: t.device.createShaderModule({
           code: `
-@stage(fragment)
+@fragment
 fn main(@location(0) fragColor: vec4<f32>) -> @location(0) vec4<f32> {
 return fragColor;
 }
@@ -99,24 +115,7 @@ return fragColor;
         targets: [
           {
             format,
-            blend:
-              compositingAlphaMode === 'opaque'
-                ? undefined
-                : {
-                    // The blending behavior here is to mimic 2d context blending behavior
-                    // of drawing rects in order
-                    // https://drafts.fxtf.org/compositing/#porterduffcompositingoperators_srcover
-                    color: {
-                      srcFactor: 'src-alpha',
-                      dstFactor: 'one-minus-src-alpha',
-                      operation: 'add',
-                    },
-                    alpha: {
-                      srcFactor: 'one',
-                      dstFactor: 'one-minus-src-alpha',
-                      operation: 'add',
-                    },
-                  },
+            blend: { premultiplied: kBlendStateSourceOver, opaque: undefined }[alphaMode],
           },
         ],
       },

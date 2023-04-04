@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,6 +58,7 @@ bool VulkanSwapChain::Initialize(
     uint32_t min_image_count,
     VkImageUsageFlags image_usage_flags,
     VkSurfaceTransformFlagBitsKHR pre_transform,
+    VkCompositeAlphaFlagBitsKHR composite_alpha,
     std::unique_ptr<VulkanSwapChain> old_swap_chain) {
   base::AutoLock auto_lock(lock_);
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -70,7 +71,7 @@ bool VulkanSwapChain::Initialize(
   device_queue_->GetFenceHelper()->ProcessCleanupTasks();
   return InitializeSwapChain(surface, surface_format, image_size,
                              min_image_count, image_usage_flags, pre_transform,
-                             std::move(old_swap_chain)) &&
+                             composite_alpha, std::move(old_swap_chain)) &&
          InitializeSwapImages(surface_format) && AcquireNextImage();
 }
 
@@ -164,6 +165,7 @@ bool VulkanSwapChain::InitializeSwapChain(
     uint32_t min_image_count,
     VkImageUsageFlags image_usage_flags,
     VkSurfaceTransformFlagBitsKHR pre_transform,
+    VkCompositeAlphaFlagBitsKHR composite_alpha,
     std::unique_ptr<VulkanSwapChain> old_swap_chain) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
@@ -182,7 +184,7 @@ bool VulkanSwapChain::InitializeSwapChain(
       swap_chain_create_info.imageUsage = image_usage_flags;
       swap_chain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
       swap_chain_create_info.preTransform = pre_transform;
-      swap_chain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+      swap_chain_create_info.compositeAlpha = composite_alpha;
       swap_chain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
       swap_chain_create_info.clipped = VK_TRUE;
       swap_chain_create_info.oldSwapchain = VK_NULL_HANDLE;
@@ -419,17 +421,16 @@ bool VulkanSwapChain::AcquireNextImage() {
     return false;
 
   uint32_t next_image;
-  VkResult result;
-  {
+  auto result = [&]{
     base::ScopedBlockingCall scoped_blocking_call(
         FROM_HERE, base::BlockingType::MAY_BLOCK);
     static auto* kCrashKey = base::debug::AllocateCrashKeyString(
         "inside_acquire_next_image", base::debug::CrashKeySize::Size32);
     base::debug::ScopedCrashKeyString scoped_crash_key(kCrashKey, "1");
-    result = vkAcquireNextImageKHR(device, swap_chain_, acquire_next_image_timeout_ns_,
+    return vkAcquireNextImageKHR(device, swap_chain_, acquire_next_image_timeout_ns_,
                           acquire_semaphore, /*fence=*/VK_NULL_HANDLE,
                           &next_image);
-  }
+  }();
 
   if (UNLIKELY(result == VK_TIMEOUT)) {
     LOG(ERROR) << "vkAcquireNextImageKHR() hangs.";

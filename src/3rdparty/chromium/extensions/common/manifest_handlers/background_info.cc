@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -186,8 +186,8 @@ bool BackgroundInfo::LoadBackgroundScripts(const Extension* extension,
     return false;
   }
 
-  base::Value::ConstListView background_scripts =
-      background_scripts_value->GetListDeprecated();
+  const base::Value::List& background_scripts =
+      background_scripts_value->GetList();
   for (size_t i = 0; i < background_scripts.size(); ++i) {
     if (!background_scripts[i].is_string()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(

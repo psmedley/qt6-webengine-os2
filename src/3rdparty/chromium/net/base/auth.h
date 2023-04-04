@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@ class NET_EXPORT AuthChallengeInfo {
   bool MatchesExceptPath(const AuthChallengeInfo& other) const;
 
   // Whether this came from a server or a proxy.
-  bool is_proxy;
+  bool is_proxy = false;
 
   // The service issuing the challenge.
   url::SchemeHostPort challenger;

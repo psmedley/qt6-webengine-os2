@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -232,7 +232,9 @@ class ChromeBrowserCloudManagementController
   // Returns whether the enterprise startup dialog is being diaplayed.
   bool IsEnterpriseStartupDialogShowing();
 
-  void UnenrollBrowser();
+  // Unenrolls the browser from cloud management by either invalidating or
+  // deleting the stored DMToken.
+  void UnenrollBrowser(bool delete_dm_token);
 
   // CloudPolicyClient::Observer implementation:
   void OnPolicyFetched(CloudPolicyClient* client) override;
@@ -266,7 +268,7 @@ class ChromeBrowserCloudManagementController
       const std::string& client_id);
 
   void InvalidatePolicies();
-  void InvalidateDMTokenCallback(bool success);
+  void UnenrollCallback(const std::string& metric_name, bool success);
 
   void CreateReportScheduler();
 

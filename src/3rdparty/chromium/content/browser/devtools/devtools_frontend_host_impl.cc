@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,11 +84,13 @@ DevToolsFrontendHostImpl::DevToolsFrontendHostImpl(
 DevToolsFrontendHostImpl::~DevToolsFrontendHostImpl() = default;
 
 void DevToolsFrontendHostImpl::BadMessageReceived() {
-  bad_message::ReceivedBadMessage(web_contents_->GetMainFrame()->GetProcess(),
-                                  bad_message::DFH_BAD_EMBEDDER_MESSAGE);
+  bad_message::ReceivedBadMessage(
+      web_contents_->GetPrimaryMainFrame()->GetProcess(),
+      bad_message::DFH_BAD_EMBEDDER_MESSAGE);
 }
 
-void DevToolsFrontendHostImpl::DispatchEmbedderMessage(base::Value message) {
+void DevToolsFrontendHostImpl::DispatchEmbedderMessage(
+    base::Value::Dict message) {
   handle_message_callback_.Run(std::move(message));
 }
 

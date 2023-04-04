@@ -20,6 +20,8 @@ limitations under the License.
 #ifndef SENTENCE_FEATURES_H_
 #define SENTENCE_FEATURES_H_
 
+#include "build/build_config.h"
+
 #include "feature_extractor.h"
 #include "cld_3/protos/sentence.pb.h"
 
@@ -34,7 +36,7 @@ using WholeSentenceExtractor = FeatureExtractor<Sentence>;
 // for clang's -Wundefined-var-template.  However, MSVC has a bug which treats
 // this declaration as a definition, leading to multiple definition errors, so
 // omit this on MSVC.
-#if !defined(_MSC_VER)
+#if !defined(COMPILER_MSVC)
 template <>
 WholeSentenceFeature::Registry
     *RegisterableClass<WholeSentenceFeature>::registry_;

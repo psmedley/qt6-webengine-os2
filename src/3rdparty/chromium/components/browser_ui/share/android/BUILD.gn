@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -40,6 +40,7 @@ android_library("java") {
     ":constants_java",
     ":java_resources",
     "//base:base_java",
+    "//base:jni_java",
     "//components/browser_ui/util/android:java",
     "//components/browser_ui/widget/android:java_resources",
     "//components/dom_distiller/core/android:dom_distiller_core_java",

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
+#include "base/types/optional_util.h"
 #include "cc/paint/decoded_draw_image.h"
 #include "cc/paint/display_item_list.h"
 #include "cc/paint/image_provider.h"
@@ -23,6 +23,7 @@
 #include "cc/paint/paint_record.h"
 #include "cc/paint/scoped_raster_flags.h"
 #include "cc/paint/skottie_serialization_history.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 #include "third_party/skia/include/core/SkAnnotation.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
@@ -84,6 +85,42 @@ SkRect MapRect(const SkMatrix& matrix, const SkRect& src) {
   matrix.mapRect(&dst, src);
   return dst;
 }
+
+void DrawImageRect(SkCanvas* canvas,
+                   const SkImage* image,
+                   const SkRect& src,
+                   const SkRect& dst,
+                   const SkSamplingOptions& options,
+                   const SkPaint* paint,
+                   SkCanvas::SrcRectConstraint constraint) {
+  if (!image)
+    return;
+  if (constraint == SkCanvas::kStrict_SrcRectConstraint &&
+      options.mipmap != SkMipmapMode::kNone &&
+      src.contains(SkRect::Make(image->dimensions()))) {
+    SkMatrix m;
+    m.setRectToRect(src, dst, SkMatrix::ScaleToFit::kFill_ScaleToFit);
+    canvas->save();
+    canvas->concat(m);
+    canvas->drawImage(image, 0, 0, options, paint);
+    canvas->restore();
+    return;
+  }
+  canvas->drawImageRect(image, src, dst, options, paint, constraint);
+}
+
+bool GrSlugAreEqual(sk_sp<GrSlug> left, sk_sp<GrSlug> right) {
+  if (!left && !right) {
+    return true;
+  }
+  if (left && right) {
+    auto left_data = left->serialize();
+    auto right_data = right->serialize();
+    return left_data->equals(right_data.get());
+  }
+  return false;
+}
+
 }  // namespace
 
 #define TYPES(M)      \
@@ -350,10 +387,9 @@ PlaybackParams::PlaybackParams(ImageProvider* image_provider,
     : image_provider(image_provider),
       original_ctm(original_ctm),
       custom_callback(custom_callback),
-      did_draw_op_callback(did_draw_op_callback),
-      raw_draw_analysis(false) {}
+      did_draw_op_callback(did_draw_op_callback) {}
 
-PlaybackParams::~PlaybackParams() {}
+PlaybackParams::~PlaybackParams() = default;
 
 PlaybackParams::PlaybackParams(const PlaybackParams& other) = default;
 PlaybackParams& PlaybackParams::operator=(const PlaybackParams& other) =
@@ -368,8 +404,7 @@ PaintOp::SerializeOptions::SerializeOptions(
     SkottieSerializationHistory* skottie_serialization_history,
     bool can_use_lcd_text,
     bool context_supports_distance_field_text,
-    int max_texture_size,
-    bool raw_draw)
+    int max_texture_size)
     : image_provider(image_provider),
       transfer_cache(transfer_cache),
       paint_cache(paint_cache),
@@ -379,8 +414,7 @@ PaintOp::SerializeOptions::SerializeOptions(
       can_use_lcd_text(can_use_lcd_text),
       context_supports_distance_field_text(
           context_supports_distance_field_text),
-      max_texture_size(max_texture_size),
-      raw_draw(raw_draw) {}
+      max_texture_size(max_texture_size) {}
 
 PaintOp::SerializeOptions::SerializeOptions() = default;
 PaintOp::SerializeOptions::SerializeOptions(const SerializeOptions&) = default;
@@ -538,7 +572,7 @@ size_t DrawImageOp::Serialize(const PaintOp* base_op,
   helper.Write(
       CreateDrawImage(op->image, flags_to_serialize, op->sampling, current_ctm),
       &scale_adjustment);
-  helper.AlignMemory(alignof(SkScalar));
+  helper.AssertAlignment(alignof(SkScalar));
   helper.Write(scale_adjustment.width());
   helper.Write(scale_adjustment.height());
 
@@ -569,7 +603,7 @@ size_t DrawImageRectOp::Serialize(const PaintOp* base_op,
   helper.Write(
       CreateDrawImage(op->image, flags_to_serialize, op->sampling, matrix),
       &scale_adjustment);
-  helper.AlignMemory(alignof(SkScalar));
+  helper.AssertAlignment(alignof(SkScalar));
   helper.Write(scale_adjustment.width());
   helper.Write(scale_adjustment.height());
 
@@ -608,7 +642,7 @@ size_t DrawLineOp::Serialize(const PaintOp* base_op,
   if (!flags_to_serialize)
     flags_to_serialize = &op->flags;
   helper.Write(*flags_to_serialize, current_ctm);
-  helper.AlignMemory(alignof(SkScalar));
+  helper.AssertAlignment(alignof(SkScalar));
   helper.Write(op->x0);
   helper.Write(op->y0);
   helper.Write(op->x1);
@@ -717,11 +751,14 @@ void SerializeSkottieFrameData(const SkM44& current_ctm,
   // |scale_adjustment| is not ultimately used; Skottie handles image
   // scale adjustment internally when rastering.
   SkSize scale_adjustment = SkSize::MakeEmpty();
-  helper.Write(DrawImage(frame_data.image, /*use_dark_mode=*/false,
-                         SkIRect::MakeWH(frame_data.image.width(),
-                                         frame_data.image.height()),
-                         frame_data.quality, current_ctm),
-               &scale_adjustment);
+  DrawImage draw_image;
+  if (frame_data.image) {
+    draw_image = DrawImage(
+        frame_data.image, /*use_dark_mode=*/false,
+        SkIRect::MakeWH(frame_data.image.width(), frame_data.image.height()),
+        frame_data.quality, current_ctm);
+  }
+  helper.Write(draw_image, &scale_adjustment);
   helper.Write(frame_data.quality);
 }
 
@@ -783,18 +820,11 @@ size_t DrawTextBlobOp::Serialize(const PaintOp* base_op,
   if (!flags_to_serialize)
     flags_to_serialize = &op->flags;
   helper.Write(*flags_to_serialize, current_ctm);
-  helper.AlignMemory(alignof(SkScalar));
-  helper.Write(op->x);
-  helper.Write(op->y);
-  unsigned int count = options.raw_draw ? (op->extra_slugs.size() + 1) : 0;
+  unsigned int count = op->extra_slugs.size() + 1;
   helper.Write(count);
-  if (options.raw_draw) {
-    helper.Write(op->slug);
-    for (const auto& slug : op->extra_slugs) {
-      helper.Write(slug);
-    }
-  } else {
-    helper.Write(op->blob);
+  helper.Write(op->slug);
+  for (const auto& slug : op->extra_slugs) {
+    helper.Write(slug);
   }
   return helper.size();
 }
@@ -988,7 +1018,7 @@ class PaintOpDeserializer {
 
   void ReadSize(size_t* size) { reader_.ReadSize(size); }
 
-  void AlignMemory(size_t alignment) { reader_.AlignMemory(alignment); }
+  void AssertAlignment(size_t alignment) { reader_.AssertAlignment(alignment); }
 
  private:
   PaintOpReader reader_;
@@ -1115,7 +1145,7 @@ PaintOp* DrawImageOp::Deserialize(const volatile void* input,
   deserializer.Read(&deserializer->flags);
 
   deserializer.Read(&deserializer->image);
-  deserializer.AlignMemory(alignof(SkScalar));
+  deserializer.AssertAlignment(alignof(SkScalar));
   deserializer.Read(&deserializer->scale_adjustment.fWidth);
   deserializer.Read(&deserializer->scale_adjustment.fHeight);
 
@@ -1136,7 +1166,7 @@ PaintOp* DrawImageRectOp::Deserialize(const volatile void* input,
   deserializer.Read(&deserializer->flags);
 
   deserializer.Read(&deserializer->image);
-  deserializer.AlignMemory(alignof(SkScalar));
+  deserializer.AssertAlignment(alignof(SkScalar));
   deserializer.Read(&deserializer->scale_adjustment.fWidth);
   deserializer.Read(&deserializer->scale_adjustment.fHeight);
 
@@ -1169,7 +1199,7 @@ PaintOp* DrawLineOp::Deserialize(const volatile void* input,
   PaintOpDeserializer<DrawLineOp> deserializer(input, input_size, options,
                                                new (output) DrawLineOp);
   deserializer.Read(&deserializer->flags);
-  deserializer.AlignMemory(alignof(SkScalar));
+  deserializer.AssertAlignment(alignof(SkScalar));
   deserializer.Read(&deserializer->x0);
   deserializer.Read(&deserializer->y0);
   deserializer.Read(&deserializer->x1);
@@ -1284,9 +1314,6 @@ absl::optional<SkottieFrameData> DeserializeSkottieFrameData(
     PaintOpDeserializer<DrawSkottieOp>& deserializer) {
   SkottieFrameData frame_data;
   deserializer.Read(&frame_data.image);
-  if (!frame_data.image)
-    return absl::nullopt;
-
   deserializer.Read(&frame_data.quality);
   return frame_data;
 }
@@ -1359,19 +1386,12 @@ PaintOp* DrawTextBlobOp::Deserialize(const volatile void* input,
   PaintOpDeserializer<DrawTextBlobOp> deserializer(input, input_size, options,
                                                    new (output) DrawTextBlobOp);
   deserializer.Read(&deserializer->flags);
-  deserializer.AlignMemory(alignof(SkScalar));
-  deserializer.Read(&deserializer->x);
-  deserializer.Read(&deserializer->y);
   unsigned int count = 0;
   deserializer.Read(&count);
-  if (count) {
-    deserializer.Read(&deserializer->slug);
-    deserializer->extra_slugs.resize(count - 1);
-    for (auto& slug : deserializer->extra_slugs) {
-      deserializer.Read(&slug);
-    }
-  } else {
-    deserializer.Read(&deserializer->blob);
+  deserializer.Read(&deserializer->slug);
+  deserializer->extra_slugs.resize(count - 1);
+  for (auto& slug : deserializer->extra_slugs) {
+    deserializer.Read(&slug);
   }
   return deserializer.FinalizeOp();
 }
@@ -1661,8 +1681,8 @@ void DrawImageRectOp::RasterWithFlags(const DrawImageRectOp* op,
       }
       if (!sk_image)
         sk_image = op->image.GetSwSkImage();
-      c->drawImageRect(sk_image.get(), adjusted_src, op->dst, op->sampling, &p,
-                       op->constraint);
+      DrawImageRect(c, sk_image.get(), adjusted_src, op->dst, op->sampling, &p,
+                    op->constraint);
     });
     return;
   }
@@ -1695,8 +1715,8 @@ void DrawImageRectOp::RasterWithFlags(const DrawImageRectOp* op,
                                                              const SkPaint& p) {
     SkSamplingOptions options = PaintFlags::FilterQualityToSkSamplingOptions(
         decoded_image.filter_quality());
-    c->drawImageRect(decoded_image.image().get(), adjusted_src, op->dst,
-                     options, &p, op->constraint);
+    DrawImageRect(c, decoded_image.image().get(), adjusted_src, op->dst,
+                  options, &p, op->constraint);
   });
 }
 
@@ -1788,7 +1808,9 @@ SkottieWrapper::FrameDataFetchResult DrawSkottieOp::GetImageAssetForRaster(
     return SkottieWrapper::FrameDataFetchResult::NO_UPDATE;
 
   const SkottieFrameData& frame_data = images_iter->second;
-  if (params.image_provider) {
+  if (!frame_data.image) {
+    sk_image = nullptr;
+  } else if (params.image_provider) {
     // There is no use case for applying dark mode filters to skottie images
     // currently.
     DrawImage draw_image(
@@ -1808,8 +1830,6 @@ SkottieWrapper::FrameDataFetchResult DrawSkottieOp::GetImageAssetForRaster(
     if (!sk_image)
       sk_image = frame_data.image.GetSwSkImage();
   }
-  DCHECK(sk_image) << "Failed to fetch SkImage for Skottie image asset "
-                   << asset_id;
   sampling_out =
       PaintFlags::FilterQualityToSkSamplingOptions(frame_data.quality);
   return SkottieWrapper::FrameDataFetchResult::NEW_DATA_AVAILABLE;
@@ -1825,7 +1845,7 @@ void DrawTextBlobOp::RasterWithFlags(const DrawTextBlobOp* op,
   // The PaintOpBuffer could be rasterized with different global matrix. It is
   // used for over scall on Android. So we cannot reuse slugs, they have to be
   // recreated.
-  if (params.raw_draw_analysis) {
+  if (params.is_analyzing) {
     const_cast<DrawTextBlobOp*>(op)->slug.reset();
     const_cast<DrawTextBlobOp*>(op)->extra_slugs.clear();
   }
@@ -1836,7 +1856,7 @@ void DrawTextBlobOp::RasterWithFlags(const DrawTextBlobOp* op,
   flags->DrawToSk(canvas, [op, &params, &i](SkCanvas* c, const SkPaint& p) {
     if (op->blob) {
       c->drawTextBlob(op->blob.get(), op->x, op->y, p);
-      if (params.raw_draw_analysis) {
+      if (params.is_analyzing) {
         auto s = GrSlug::ConvertBlob(c, *op->blob, {op->x, op->y}, p);
         if (i == 0) {
           const_cast<DrawTextBlobOp*>(op)->slug = std::move(s);
@@ -1845,7 +1865,7 @@ void DrawTextBlobOp::RasterWithFlags(const DrawTextBlobOp* op,
         }
       }
     } else if (i < 1 + op->extra_slugs.size()) {
-      DCHECK(!params.raw_draw_analysis);
+      DCHECK(!params.is_analyzing);
       const auto& draw_slug = i == 0 ? op->slug : op->extra_slugs[i - 1];
       if (draw_slug)
         draw_slug->draw(c);
@@ -1891,12 +1911,12 @@ void SaveLayerAlphaOp::Raster(const SaveLayerAlphaOp* op,
   // See PaintOp::kUnsetRect
   bool unset = op->bounds.left() == SK_ScalarInfinity;
   absl::optional<SkPaint> paint;
-  if (op->alpha != 0xFF) {
+  if (op->alpha != 1.0f) {
     paint.emplace();
-    paint->setAlpha(op->alpha);
+    paint->setAlpha(op->alpha * 255.0f);
   }
   SkCanvas::SaveLayerRec rec(unset ? nullptr : &op->bounds,
-                             base::OptionalOrNullptr(paint));
+                             base::OptionalToPtr(paint));
   if (params.save_layer_alpha_should_preserve_lcd_text.has_value() &&
       *params.save_layer_alpha_should_preserve_lcd_text) {
     rec.fSaveLayerFlags = SkCanvas::kPreserveLCDText_SaveLayerFlag |
@@ -2310,10 +2330,7 @@ bool DrawTextBlobOp::AreEqual(const PaintOp* base_left,
     return false;
   if (left->node_id != right->node_id)
     return false;
-
-  SkSerialProcs default_procs;
-  return left->blob->serialize(default_procs)
-      ->equals(right->blob->serialize(default_procs).get());
+  return GrSlugAreEqual(left->slug, right->slug);
 }
 
 bool NoopOp::AreEqual(const PaintOp* base_left, const PaintOp* base_right) {
@@ -2485,79 +2502,78 @@ PaintOp* PaintOp::Deserialize(const volatile void* input,
 }
 
 // static
-bool PaintOp::GetBounds(const PaintOp* op, SkRect* rect) {
-  DCHECK(op->IsDrawOp());
+bool PaintOp::GetBounds(const PaintOp& op, SkRect* rect) {
+  DCHECK(op.IsDrawOp());
 
-  switch (op->GetType()) {
+  switch (op.GetType()) {
     case PaintOpType::DrawColor:
       return false;
     case PaintOpType::DrawDRRect: {
-      auto* rect_op = static_cast<const DrawDRRectOp*>(op);
-      *rect = rect_op->outer.getBounds();
+      const auto& rect_op = static_cast<const DrawDRRectOp&>(op);
+      *rect = rect_op.outer.getBounds();
       rect->sort();
       return true;
     }
     case PaintOpType::DrawImage: {
-      auto* image_op = static_cast<const DrawImageOp*>(op);
-      *rect =
-          SkRect::MakeXYWH(image_op->left, image_op->top,
-                           image_op->image.width(), image_op->image.height());
+      const auto& image_op = static_cast<const DrawImageOp&>(op);
+      *rect = SkRect::MakeXYWH(image_op.left, image_op.top,
+                               image_op.image.width(), image_op.image.height());
       rect->sort();
       return true;
     }
     case PaintOpType::DrawImageRect: {
-      auto* image_rect_op = static_cast<const DrawImageRectOp*>(op);
-      *rect = image_rect_op->dst;
+      const auto& image_rect_op = static_cast<const DrawImageRectOp&>(op);
+      *rect = image_rect_op.dst;
       rect->sort();
       return true;
     }
     case PaintOpType::DrawIRect: {
-      auto* rect_op = static_cast<const DrawIRectOp*>(op);
-      *rect = SkRect::Make(rect_op->rect);
+      const auto& rect_op = static_cast<const DrawIRectOp&>(op);
+      *rect = SkRect::Make(rect_op.rect);
       rect->sort();
       return true;
     }
     case PaintOpType::DrawLine: {
-      auto* line_op = static_cast<const DrawLineOp*>(op);
-      rect->setLTRB(line_op->x0, line_op->y0, line_op->x1, line_op->y1);
+      const auto& line_op = static_cast<const DrawLineOp&>(op);
+      rect->setLTRB(line_op.x0, line_op.y0, line_op.x1, line_op.y1);
       rect->sort();
       return true;
     }
     case PaintOpType::DrawOval: {
-      auto* oval_op = static_cast<const DrawOvalOp*>(op);
-      *rect = oval_op->oval;
+      const auto& oval_op = static_cast<const DrawOvalOp&>(op);
+      *rect = oval_op.oval;
       rect->sort();
       return true;
     }
     case PaintOpType::DrawPath: {
-      auto* path_op = static_cast<const DrawPathOp*>(op);
-      *rect = path_op->path.getBounds();
+      const auto& path_op = static_cast<const DrawPathOp&>(op);
+      *rect = path_op.path.getBounds();
       rect->sort();
       return true;
     }
     case PaintOpType::DrawRect: {
-      auto* rect_op = static_cast<const DrawRectOp*>(op);
-      *rect = rect_op->rect;
+      const auto& rect_op = static_cast<const DrawRectOp&>(op);
+      *rect = rect_op.rect;
       rect->sort();
       return true;
     }
     case PaintOpType::DrawRRect: {
-      auto* rect_op = static_cast<const DrawRRectOp*>(op);
-      *rect = rect_op->rrect.rect();
+      const auto& rect_op = static_cast<const DrawRRectOp&>(op);
+      *rect = rect_op.rrect.rect();
       rect->sort();
       return true;
     }
     case PaintOpType::DrawRecord:
       return false;
     case PaintOpType::DrawSkottie: {
-      auto* skottie_op = static_cast<const DrawSkottieOp*>(op);
-      *rect = skottie_op->dst;
+      const auto& skottie_op = static_cast<const DrawSkottieOp&>(op);
+      *rect = skottie_op.dst;
       rect->sort();
       return true;
     }
     case PaintOpType::DrawTextBlob: {
-      auto* text_op = static_cast<const DrawTextBlobOp*>(op);
-      *rect = text_op->blob->bounds().makeOffset(text_op->x, text_op->y);
+      const auto& text_op = static_cast<const DrawTextBlobOp&>(op);
+      *rect = text_op.blob->bounds().makeOffset(text_op.x, text_op.y);
       rect->sort();
       return true;
     }
@@ -2568,20 +2584,20 @@ bool PaintOp::GetBounds(const PaintOp* op, SkRect* rect) {
 }
 
 // static
-gfx::Rect PaintOp::ComputePaintRect(const PaintOp* op,
+gfx::Rect PaintOp::ComputePaintRect(const PaintOp& op,
                                     const SkRect& clip_rect,
                                     const SkMatrix& ctm) {
   gfx::Rect transformed_rect;
   SkRect op_rect;
-  if (!op->IsDrawOp() || !PaintOp::GetBounds(op, &op_rect)) {
+  if (!op.IsDrawOp() || !PaintOp::GetBounds(op, &op_rect)) {
     // If we can't provide a conservative bounding rect for the op, assume it
     // covers the complete current clip.
     // TODO(khushalsagar): See if we can do something better for non-draw ops.
     transformed_rect = gfx::ToEnclosingRect(gfx::SkRectToRectF(clip_rect));
   } else {
     const PaintFlags* flags =
-        op->IsPaintOpWithFlags()
-            ? &(static_cast<const PaintOpWithFlags*>(op)->flags)
+        op.IsPaintOpWithFlags()
+            ? &(static_cast<const PaintOpWithFlags&>(op).flags)
             : nullptr;
     SkRect paint_rect = MapRect(ctm, op_rect);
     if (flags) {
@@ -2612,8 +2628,8 @@ gfx::Rect PaintOp::ComputePaintRect(const PaintOp* op,
 }
 
 // static
-bool PaintOp::QuickRejectDraw(const PaintOp* op, const SkCanvas* canvas) {
-  if (!op->IsDrawOp())
+bool PaintOp::QuickRejectDraw(const PaintOp& op, const SkCanvas* canvas) {
+  if (!op.IsDrawOp())
     return false;
 
   SkRect rect;
@@ -2622,8 +2638,8 @@ bool PaintOp::QuickRejectDraw(const PaintOp* op, const SkCanvas* canvas) {
   if (!rect.isFinite())
     return true;
 
-  if (op->IsPaintOpWithFlags()) {
-    SkPaint paint = static_cast<const PaintOpWithFlags*>(op)->flags.ToSkPaint();
+  if (op.IsPaintOpWithFlags()) {
+    SkPaint paint = static_cast<const PaintOpWithFlags&>(op).flags.ToSkPaint();
     if (!paint.canComputeFastBounds())
       return false;
     // canvas->quickReject tried to be very fast, and sometimes give a false
@@ -2642,23 +2658,23 @@ bool PaintOp::QuickRejectDraw(const PaintOp* op, const SkCanvas* canvas) {
 }
 
 // static
-bool PaintOp::OpHasDiscardableImages(const PaintOp* op) {
-  if (op->IsPaintOpWithFlags() && static_cast<const PaintOpWithFlags*>(op)
-                                      ->HasDiscardableImagesFromFlags()) {
+bool PaintOp::OpHasDiscardableImages(const PaintOp& op) {
+  if (op.IsPaintOpWithFlags() && static_cast<const PaintOpWithFlags&>(op)
+                                     .HasDiscardableImagesFromFlags()) {
     return true;
   }
 
-  if (op->GetType() == PaintOpType::DrawImage &&
-      static_cast<const DrawImageOp*>(op)->HasDiscardableImages()) {
+  if (op.GetType() == PaintOpType::DrawImage &&
+      static_cast<const DrawImageOp&>(op).HasDiscardableImages()) {
     return true;
-  } else if (op->GetType() == PaintOpType::DrawImageRect &&
-             static_cast<const DrawImageRectOp*>(op)->HasDiscardableImages()) {
+  } else if (op.GetType() == PaintOpType::DrawImageRect &&
+             static_cast<const DrawImageRectOp&>(op).HasDiscardableImages()) {
     return true;
-  } else if (op->GetType() == PaintOpType::DrawRecord &&
-             static_cast<const DrawRecordOp*>(op)->HasDiscardableImages()) {
+  } else if (op.GetType() == PaintOpType::DrawRecord &&
+             static_cast<const DrawRecordOp&>(op).HasDiscardableImages()) {
     return true;
-  } else if (op->GetType() == PaintOpType::DrawSkottie &&
-             static_cast<const DrawSkottieOp*>(op)->HasDiscardableImages()) {
+  } else if (op.GetType() == PaintOpType::DrawSkottie &&
+             static_cast<const DrawSkottieOp&>(op).HasDiscardableImages()) {
     return true;
   }
 
@@ -2721,7 +2737,7 @@ int DrawPathOp::CountSlowPaths() const {
 }
 
 int DrawRecordOp::CountSlowPaths() const {
-  return record->num_slow_paths();
+  return record->num_slow_paths_up_to_min_for_MSAA();
 }
 
 bool DrawRecordOp::HasNonAAPaint() const {
@@ -2762,8 +2778,7 @@ DrawImageOp::DrawImageOp(const PaintImage& image, SkScalar left, SkScalar top)
     : PaintOpWithFlags(kType, PaintFlags()),
       image(image),
       left(left),
-      top(top),
-      sampling(SkSamplingOptions()) {}
+      top(top) {}
 
 DrawImageOp::DrawImageOp(const PaintImage& image,
                          SkScalar left,
@@ -2792,7 +2807,6 @@ DrawImageRectOp::DrawImageRectOp(const PaintImage& image,
       image(image),
       src(src),
       dst(dst),
-      sampling(SkSamplingOptions()),
       constraint(constraint) {}
 
 DrawImageRectOp::DrawImageRectOp(const PaintImage& image,
@@ -2877,12 +2891,14 @@ DrawTextBlobOp::~DrawTextBlobOp() = default;
 PaintOpBuffer::CompositeIterator::CompositeIterator(
     const PaintOpBuffer* buffer,
     const std::vector<size_t>* offsets)
-    : using_offsets_(!!offsets) {
+    : iter_(offsets == nullptr ? absl::variant<Iterator, OffsetIterator>(
+                                     absl::in_place_type<Iterator>,
+                                     buffer)
+                               : absl::variant<Iterator, OffsetIterator>(
+                                     absl::in_place_type<OffsetIterator>,
+                                     buffer,
+                                     offsets)) {
   DCHECK(!buffer->are_ops_destroyed());
-  if (using_offsets_)
-    offset_iter_.emplace(buffer, offsets);
-  else
-    iter_.emplace(buffer);
 }
 
 PaintOpBuffer::CompositeIterator::CompositeIterator(
@@ -2913,7 +2929,7 @@ PaintOpBuffer& PaintOpBuffer::operator=(PaintOpBuffer&& other) {
   used_ = other.used_;
   reserved_ = other.reserved_;
   op_count_ = other.op_count_;
-  num_slow_paths_ = other.num_slow_paths_;
+  num_slow_paths_up_to_min_for_MSAA_ = other.num_slow_paths_up_to_min_for_MSAA_;
   subrecord_bytes_used_ = other.subrecord_bytes_used_;
   subrecord_op_count_ = other.subrecord_op_count_;
   has_non_aa_paint_ = other.has_non_aa_paint_;
@@ -2935,8 +2951,8 @@ PaintOpBuffer& PaintOpBuffer::operator=(PaintOpBuffer&& other) {
 
 void PaintOpBuffer::Reset() {
   if (!are_ops_destroyed_) {
-    for (auto* op : Iterator(this)) {
-      op->DestroyThis();
+    for (PaintOp& op : Iterator(this)) {
+      op.DestroyThis();
     }
   }
 
@@ -2944,7 +2960,7 @@ void PaintOpBuffer::Reset() {
   // that if called.
   used_ = 0;
   op_count_ = 0;
-  num_slow_paths_ = 0;
+  num_slow_paths_up_to_min_for_MSAA_ = 0;
   has_non_aa_paint_ = false;
   subrecord_bytes_used_ = 0;
   subrecord_op_count_ = 0;
@@ -2974,7 +2990,7 @@ static const PaintOp* GetNestedSingleDrawingOp(const PaintOp* op) {
 
     // Recurse into the single-op DrawRecordOp and make sure it's a
     // drawing op.
-    op = draw_record_op->record->GetFirstOp();
+    op = &draw_record_op->record->GetFirstOp();
     if (!op->IsDrawOp())
       return nullptr;
   }
@@ -2995,7 +3011,7 @@ PaintOpBuffer::PlaybackFoldingIterator::PlaybackFoldingIterator(
     const PaintOpBuffer* buffer,
     const std::vector<size_t>* offsets)
     : iter_(buffer, offsets),
-      folded_draw_color_(SK_ColorTRANSPARENT, SkBlendMode::kSrcOver) {
+      folded_draw_color_(SkColors::kTransparent, SkBlendMode::kSrcOver) {
   DCHECK(!buffer->are_ops_destroyed());
   FindNextOp();
 }
@@ -3003,7 +3019,7 @@ PaintOpBuffer::PlaybackFoldingIterator::PlaybackFoldingIterator(
 PaintOpBuffer::PlaybackFoldingIterator::~PlaybackFoldingIterator() = default;
 
 void PaintOpBuffer::PlaybackFoldingIterator::FindNextOp() {
-  current_alpha_ = 255u;
+  current_alpha_ = 1.0f;
   for (current_op_ = NextUnfoldedOp(); current_op_;
        current_op_ = NextUnfoldedOp()) {
     if (current_op_->GetType() != PaintOpType::SaveLayerAlpha)
@@ -3042,10 +3058,9 @@ void PaintOpBuffer::PlaybackFoldingIterator::FindNextOp() {
                    static_cast<const DrawColorOp*>(draw_op)->mode ==
                        SkBlendMode::kSrcOver) {
           auto* draw_color_op = static_cast<const DrawColorOp*>(draw_op);
-          SkColor color = draw_color_op->color;
-          folded_draw_color_.color = SkColorSetARGB(
-              SkMulDiv255Round(save_op->alpha, SkColorGetA(color)),
-              SkColorGetR(color), SkColorGetG(color), SkColorGetB(color));
+          SkColor4f color = draw_color_op->color;
+          folded_draw_color_.color = {color.fR, color.fG, color.fB,
+                                      save_op->alpha * color.fA};
           current_op_ = &folded_draw_color_;
           break;
         }
@@ -3070,9 +3085,9 @@ const PaintOp* PaintOpBuffer::PlaybackFoldingIterator::NextUnfoldedOp() {
   }
   if (!iter_)
     return nullptr;
-  const PaintOp* op = *iter_;
+  const PaintOp& op = *iter_;
   ++iter_;
-  return op;
+  return &op;
 }
 
 void PaintOpBuffer::Playback(SkCanvas* canvas,
@@ -3108,8 +3123,9 @@ void PaintOpBuffer::Playback(SkCanvas* canvas,
                             params.did_draw_op_callback);
   new_params.save_layer_alpha_should_preserve_lcd_text =
       save_layer_alpha_should_preserve_lcd_text;
+  new_params.is_analyzing = params.is_analyzing;
   for (PlaybackFoldingIterator iter(this, offsets); iter; ++iter) {
-    const PaintOp* op = *iter;
+    const PaintOp& op = *iter;
 
     // This is an optimization to replicate the behaviour in SkCanvas
     // which rejects ops that draw outside the current clip. In the
@@ -3122,17 +3138,17 @@ void PaintOpBuffer::Playback(SkCanvas* canvas,
     if (skip_op)
       continue;
 
-    if (op->IsPaintOpWithFlags()) {
-      const auto* flags_op = static_cast<const PaintOpWithFlags*>(op);
+    if (op.IsPaintOpWithFlags()) {
+      const auto& flags_op = static_cast<const PaintOpWithFlags&>(op);
       auto* context = canvas->recordingContext();
       const ScopedRasterFlags scoped_flags(
-          &flags_op->flags, new_params.image_provider, canvas->getTotalMatrix(),
-          context ? context->maxTextureSize() : 0, iter.alpha());
+          &flags_op.flags, new_params.image_provider, canvas->getTotalMatrix(),
+          context ? context->maxTextureSize() : 0, iter.alpha() / 255.0f);
       if (const auto* raster_flags = scoped_flags.flags())
-        flags_op->RasterWithFlags(canvas, raster_flags, new_params);
+        flags_op.RasterWithFlags(canvas, raster_flags, new_params);
     } else {
       DCHECK_EQ(iter.alpha(), 255);
-      op->Raster(canvas, new_params);
+      op.Raster(canvas, new_params);
     }
 
     if (!new_params.did_draw_op_callback.is_null())
@@ -3269,7 +3285,8 @@ void PaintOpBuffer::ShrinkToFit() {
 bool PaintOpBuffer::operator==(const PaintOpBuffer& other) const {
   if (op_count_ != other.op_count_)
     return false;
-  if (num_slow_paths_ != other.num_slow_paths_)
+  if (num_slow_paths_up_to_min_for_MSAA_ !=
+      other.num_slow_paths_up_to_min_for_MSAA_)
     return false;
   if (subrecord_bytes_used_ != other.subrecord_bytes_used_)
     return false;
@@ -3280,11 +3297,11 @@ bool PaintOpBuffer::operator==(const PaintOpBuffer& other) const {
   if (has_discardable_images_ != other.has_discardable_images_)
     return false;
 
-  auto left_iter = Iterator(this);
-  auto right_iter = Iterator(&other);
+  Iterator left_iter(this);
+  Iterator right_iter(&other);
 
   for (; left_iter != left_iter.end(); ++left_iter, ++right_iter) {
-    if (**left_iter != **right_iter)
+    if (*left_iter != *right_iter)
       return false;
   }
 

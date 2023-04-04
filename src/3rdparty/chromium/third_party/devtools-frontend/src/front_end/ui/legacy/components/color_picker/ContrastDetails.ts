@@ -9,8 +9,7 @@ import * as Platform from '../../../../core/platform/platform.js';
 import * as Root from '../../../../core/root/root.js';
 import * as UI from '../../legacy.js';
 
-import type {ContrastInfo} from './ContrastInfo.js';
-import {Events as ContrastInfoEvents} from './ContrastInfo.js';
+import {Events as ContrastInfoEvents, type ContrastInfo} from './ContrastInfo.js';
 
 const UIStrings = {
   /**
@@ -359,10 +358,8 @@ export class ContrastDetails extends Common.ObjectWrapper.ObjectWrapper<EventTyp
   }
 
   private static showHelp(): void {
-    // TODO(crbug.com/1253323): Cast to UrlString will be removed when migration to branded types is complete.
-    Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(
-        UI.UIUtils.addReferrerToURL('https://web.dev/color-and-contrast-accessibility/') as
-        Platform.DevToolsPath.UrlString);
+    Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(UI.UIUtils.addReferrerToURL(
+        'https://web.dev/color-and-contrast-accessibility/' as Platform.DevToolsPath.UrlString));
   }
 
   setVisible(visible: boolean): void {

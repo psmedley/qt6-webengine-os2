@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,7 @@ class UntrustedSource : public content::URLDataSource,
       const GURL& url,
       const content::WebContents::Getter& wc_getter,
       content::URLDataSource::GotDataCallback callback) override;
-  std::string GetMimeType(const std::string& path) override;
+  std::string GetMimeType(const GURL& url) override;
   bool AllowCaching() override;
   bool ShouldReplaceExistingSource() override;
   bool ShouldServeMimeTypeAsContentTypeHeader() override;
@@ -76,6 +76,7 @@ class UntrustedSource : public content::URLDataSource,
                             const std::string& repeat_y,
                             const std::string& position_x,
                             const std::string& position_y,
+                            const std::string& scrim_display,
                             content::URLDataSource::GotDataCallback callback);
 
   std::vector<content::URLDataSource::GotDataCallback>

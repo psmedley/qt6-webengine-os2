@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -170,7 +170,7 @@ Process GetDebuggerProcess() {
   if (num_read <= 0)
     return Process();
 
-  StringPiece status(buf, num_read);
+  StringPiece status(buf, static_cast<size_t>(num_read));
   StringPiece tracer("TracerPid:\t");
 
   StringPiece::size_type pid_index = status.find(tracer);

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,8 @@ void HTMLCanvasPainter::PaintReplaced(const PaintInfo& paint_info,
     if (layout_html_canvas_.DrawsBackgroundOntoContentLayer()) {
       Color background_color =
           layout_html_canvas_.ResolveColor(GetCSSPropertyBackgroundColor());
-      layer->SetBackgroundColor(background_color.Rgb());
+      // TODO(crbug/1308932): Remove FromColor and use just SkColor4f.
+      layer->SetBackgroundColor(SkColor4f::FromColor(background_color.Rgb()));
     }
     // We do not take the foreign layer code path when printing because it
     // prevents painting canvas content as vector graphics.

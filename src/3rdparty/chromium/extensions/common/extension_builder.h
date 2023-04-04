@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
@@ -113,15 +114,15 @@ class ExtensionBuilder {
   // Can be used in conjuction with ListBuilder and DictionaryBuilder for more
   // complex types.
   template <typename T>
-  ExtensionBuilder& SetManifestKey(base::StringPiece key, T value) {
-    SetManifestKeyImpl(key, base::Value(value));
+  ExtensionBuilder& SetManifestKey(base::StringPiece key, T&& value) {
+    SetManifestKeyImpl(key, base::Value(std::forward<T>(value)));
     return *this;
   }
   template <typename T>
   ExtensionBuilder& SetManifestPath(
       std::initializer_list<base::StringPiece> path,
-      T value) {
-    SetManifestPathImpl(path, base::Value(value));
+      T&& value) {
+    SetManifestPathImpl(path, base::Value(std::forward<T>(value)));
     return *this;
   }
   // Specializations for unique_ptr<> to allow passing unique_ptr<base::Value>.

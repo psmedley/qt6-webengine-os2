@@ -36,7 +36,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/modules/mediastream/identifiability_metrics.h"
 #include "third_party/blink/renderer/modules/mediastream/media_error_state.h"
-#include "third_party/blink/renderer/modules/mediastream/user_media_controller.h"
+#include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_request.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
@@ -58,9 +58,11 @@ class V8Callbacks final : public blink::UserMediaRequest::Callbacks {
     UserMediaRequest::Callbacks::Trace(visitor);
   }
 
-  void OnSuccess(MediaStream* stream) override {
-    success_callback_->InvokeAndReportException(nullptr, stream);
+  void OnSuccess(const MediaStreamVector& streams) override {
+    DCHECK_EQ(streams.size(), 1u);
+    success_callback_->InvokeAndReportException(nullptr, streams[0]);
   }
+
   void OnError(ScriptWrappable* callback_this_value,
                const V8MediaStreamError* error) override {
     error_callback_->InvokeAndReportException(callback_this_value, error);
@@ -84,12 +86,15 @@ void NavigatorMediaStream::getUserMedia(
   if (!navigator.DomWindow()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
-        "No user media controller available; is this a detached window?");
+        "No user media client available; is this a detached window?");
     return;
   }
 
-  UserMediaController* user_media =
-      UserMediaController::From(navigator.DomWindow());
+  UserMediaClient* user_media = UserMediaClient::From(navigator.DomWindow());
+  // Navigator::DomWindow() should not return a non-null detached window, so we
+  // should also successfully get a UserMediaClient from it.
+  DCHECK(user_media) << "Missing UserMediaClient on a non-null DomWindow";
+
   IdentifiableSurface surface;
   constexpr IdentifiableSurface::Type surface_type =
       IdentifiableSurface::Type::kNavigator_GetUserMedia;
@@ -99,8 +104,8 @@ void NavigatorMediaStream::getUserMedia(
   }
   MediaErrorState error_state;
   UserMediaRequest* request = UserMediaRequest::Create(
-      navigator.DomWindow(), user_media,
-      UserMediaRequest::MediaType::kUserMedia, options,
+      navigator.DomWindow(), user_media, UserMediaRequestType::kUserMedia,
+      options,
       MakeGarbageCollected<V8Callbacks>(success_callback, error_callback),
       error_state, surface);
   if (!request) {

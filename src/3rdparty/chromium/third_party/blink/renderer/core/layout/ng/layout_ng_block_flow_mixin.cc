@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -140,7 +140,7 @@ LayoutUnit LayoutNGBlockFlowMixin<Base>::FirstLineBoxBaseline() const {
   // |OffsetFromOwnerLayoutBox| is not needed here, because the block offset of
   // all fragments are 0 for multicol.
   for (const NGPhysicalBoxFragment& fragment : Base::PhysicalFragments()) {
-    if (const absl::optional<LayoutUnit> offset = fragment.Baseline())
+    if (const absl::optional<LayoutUnit> offset = fragment.FirstBaseline())
       return *offset;
   }
 
@@ -173,7 +173,7 @@ LayoutUnit LayoutNGBlockFlowMixin<Base>::InlineBlockBaseline(
   if (Base::PhysicalFragmentCount()) {
     const NGPhysicalBoxFragment* fragment = Base::GetPhysicalFragment(0);
     DCHECK(fragment);
-    if (absl::optional<LayoutUnit> offset = fragment->Baseline())
+    if (absl::optional<LayoutUnit> offset = fragment->FirstBaseline())
       return *offset;
   }
 
@@ -196,7 +196,7 @@ bool LayoutNGBlockFlowMixin<Base>::NodeAtPoint(
     HitTestResult& result,
     const HitTestLocation& hit_test_location,
     const PhysicalOffset& accumulated_offset,
-    HitTestAction action) {
+    HitTestPhase phase) {
   Base::CheckIsNotDestroyed();
 
   // Please see |LayoutNGMixin<Base>::Paint()| for these DCHECKs.
@@ -204,7 +204,10 @@ bool LayoutNGBlockFlowMixin<Base>::NodeAtPoint(
              LayoutNGBlockFlow::kForbidBreaks ||
          !Base::CanTraversePhysicalFragments() ||
          !Base::Parent()->CanTraversePhysicalFragments());
-  DCHECK_LE(Base::PhysicalFragmentCount(), 1u);
+  // We may get here in multiple-fragment cases if the object is repeated
+  // (inside table headers and footers, for instance).
+  DCHECK(Base::PhysicalFragmentCount() <= 1u ||
+         Base::GetPhysicalFragment(0)->BreakToken()->IsRepeated());
 
   if (!Base::MayIntersect(result, hit_test_location, accumulated_offset))
     return false;
@@ -215,15 +218,15 @@ bool LayoutNGBlockFlowMixin<Base>::NodeAtPoint(
     if (fragment->HasItems() ||
         // Check descendants of this fragment because floats may be in the
         // |NGFragmentItems| of the descendants.
-        (action == kHitTestFloat &&
+        (phase == HitTestPhase::kFloat &&
          fragment->HasFloatingDescendantsForPaint())) {
       return NGBoxFragmentPainter(*fragment).NodeAtPoint(
-          result, hit_test_location, accumulated_offset, action);
+          result, hit_test_location, accumulated_offset, phase);
     }
   }
 
   return LayoutBlockFlow::NodeAtPoint(result, hit_test_location,
-                                      accumulated_offset, action);
+                                      accumulated_offset, phase);
 }
 
 template <typename Base>

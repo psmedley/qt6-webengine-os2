@@ -1,16 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_METRICS_PERSISTENT_HISTOGRAM_ALLOCATOR_H_
 #define BASE_METRICS_PERSISTENT_HISTOGRAM_ALLOCATOR_H_
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/atomicops.h"
 #include "base/base_export.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
@@ -31,8 +31,7 @@ class PersistentSparseHistogramDataManager;
 class WritableSharedMemoryRegion;
 
 // Feature definition for enabling histogram persistence.
-BASE_EXPORT extern const Feature kPersistentHistogramsFeature;
-
+BASE_EXPORT BASE_DECLARE_FEATURE(kPersistentHistogramsFeature);
 
 // A data manager for sparse histograms so each instance of such doesn't have
 // to separately iterate over the entire memory segment. Though this class
@@ -314,8 +313,8 @@ class BASE_EXPORT PersistentHistogramAllocator {
 
   // Gets the reference of the last histogram created, used to avoid
   // trying to import what was just created.
-  PersistentHistogramAllocator::Reference last_created() {
-    return subtle::NoBarrier_Load(&last_created_);
+  Reference last_created() {
+    return last_created_.load(std::memory_order_relaxed);
   }
 
   // Gets the next histogram in persistent data based on iterator while
@@ -350,8 +349,7 @@ class BASE_EXPORT PersistentHistogramAllocator {
 
   // A reference to the last-created histogram in the allocator, used to avoid
   // trying to import what was just created.
-  // TODO(bcwhite): Change this to std::atomic<PMA::Reference> when available.
-  subtle::Atomic32 last_created_ = 0;
+  std::atomic<Reference> last_created_ = 0;
 };
 
 

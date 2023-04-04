@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,8 +40,9 @@ namespace {
 int64_t StringAtIndexToInt64(const base::Value::List& list, size_t index) {
   if (list.size() > index && list[index].is_string()) {
     int64_t integer = 0;
-    if (base::StringToInt64(list[index].GetString(), &integer))
+    if (base::StringToInt64(list[index].GetString(), &integer)) {
       return integer;
+    }
   }
   return 0;
 }
@@ -179,13 +180,13 @@ void SyncInternalsMessageHandler::HandleRequestListOfTypes(
   DCHECK(args.empty());
   AllowJavascript();
 
-  DictionaryValue event_details;
-  base::Value type_list(base::Value::Type::LIST);
+  base::Value::Dict event_details;
+  base::Value::List type_list;
   syncer::ModelTypeSet protocol_types = syncer::ProtocolTypes();
   for (syncer::ModelType type : protocol_types) {
     type_list.Append(ModelTypeToDebugString(type));
   }
-  event_details.SetKey(syncer::sync_ui_util::kTypes, std::move(type_list));
+  event_details.Set(syncer::sync_ui_util::kTypes, std::move(type_list));
   FireWebUIListener(syncer::sync_ui_util::kOnReceivedListOfTypes,
                     event_details);
 }
@@ -195,9 +196,9 @@ void SyncInternalsMessageHandler::HandleRequestIncludeSpecificsInitialState(
   DCHECK(args.empty());
   AllowJavascript();
 
-  DictionaryValue value;
-  value.SetBoolKey(syncer::sync_ui_util::kIncludeSpecifics,
-                   GetIncludeSpecificsInitialState());
+  base::Value::Dict value;
+  value.Set(syncer::sync_ui_util::kIncludeSpecifics,
+            GetIncludeSpecificsInitialState());
 
   FireWebUIListener(
       syncer::sync_ui_util::kOnReceivedIncludeSpecificsInitialState, value);
@@ -259,8 +260,9 @@ void SyncInternalsMessageHandler::HandleRequestStart(
   DCHECK_EQ(0U, args.size());
 
   SyncService* service = GetSyncService();
-  if (!service)
+  if (!service) {
     return;
+  }
 
   service->GetUserSettings()->SetSyncRequested(true);
   // If the service was previously stopped via StopAndClear(), then the
@@ -275,8 +277,9 @@ void SyncInternalsMessageHandler::HandleRequestStopKeepData(
   DCHECK_EQ(0U, args.size());
 
   SyncService* service = GetSyncService();
-  if (!service)
+  if (!service) {
     return;
+  }
 
   service->GetUserSettings()->SetSyncRequested(false);
 }
@@ -286,8 +289,9 @@ void SyncInternalsMessageHandler::HandleRequestStopClearData(
   DCHECK_EQ(0U, args.size());
 
   SyncService* service = GetSyncService();
-  if (!service)
+  if (!service) {
     return;
+  }
 
   service->StopAndClear();
 }
@@ -295,16 +299,17 @@ void SyncInternalsMessageHandler::HandleRequestStopClearData(
 void SyncInternalsMessageHandler::HandleTriggerRefresh(
     const base::Value::List& args) {
   SyncService* service = GetSyncService();
-  if (!service)
+  if (!service) {
     return;
+  }
 
   service->TriggerRefresh(syncer::ModelTypeSet::All());
 }
 
 void SyncInternalsMessageHandler::OnReceivedAllNodes(
     const std::string& callback_id,
-    std::unique_ptr<base::ListValue> nodes) {
-  ResolveJavascriptCallback(base::Value(callback_id), *nodes);
+    base::Value::List nodes) {
+  ResolveJavascriptCallback(base::Value(callback_id), nodes);
 }
 
 void SyncInternalsMessageHandler::OnStateChanged(SyncService* sync) {
@@ -313,8 +318,8 @@ void SyncInternalsMessageHandler::OnStateChanged(SyncService* sync) {
 
 void SyncInternalsMessageHandler::OnProtocolEvent(
     const syncer::ProtocolEvent& event) {
-  std::unique_ptr<DictionaryValue> value(event.ToValue(include_specifics_));
-  FireWebUIListener(syncer::sync_ui_util::kOnProtocolEvent, *value);
+  FireWebUIListener(syncer::sync_ui_util::kOnProtocolEvent,
+                    event.ToValue(include_specifics_));
 }
 
 void SyncInternalsMessageHandler::OnInvalidationReceived(
@@ -324,7 +329,7 @@ void SyncInternalsMessageHandler::OnInvalidationReceived(
     return;
   }
 
-  base::Value data_types_list(base::Value::Type::LIST);
+  base::Value::List data_types_list;
   for (const auto& data_type_invalidation :
        payload_message.data_type_invalidations()) {
     const int field_number = data_type_invalidation.data_type_id();
@@ -340,10 +345,10 @@ void SyncInternalsMessageHandler::OnInvalidationReceived(
 }
 
 void SyncInternalsMessageHandler::SendAboutInfoAndEntityCounts() {
-  std::unique_ptr<DictionaryValue> value = about_sync_data_delegate_.Run(
+  base::Value::Dict value = about_sync_data_delegate_.Run(
       GetSyncService(),
       chrome::GetChannelName(chrome::WithExtendedStable(true)));
-  FireWebUIListener(syncer::sync_ui_util::kOnAboutInfoUpdated, *value);
+  FireWebUIListener(syncer::sync_ui_util::kOnAboutInfoUpdated, value);
 
   if (SyncService* service = GetSyncService()) {
     service->GetEntityCountsForDebugging(
@@ -356,23 +361,21 @@ void SyncInternalsMessageHandler::SendAboutInfoAndEntityCounts() {
 
 void SyncInternalsMessageHandler::OnGotEntityCounts(
     const std::vector<syncer::TypeEntitiesCount>& entity_counts) {
-  base::Value count_list(base::Value::Type::LIST);
+  base::Value::List count_list;
   for (const syncer::TypeEntitiesCount& count : entity_counts) {
-    DictionaryValue count_dictionary;
-    count_dictionary.SetStringPath(syncer::sync_ui_util::kModelType,
-                                   ModelTypeToDebugString(count.type));
-    count_dictionary.SetIntPath(syncer::sync_ui_util::kEntities,
-                                count.entities);
-    count_dictionary.SetIntPath(syncer::sync_ui_util::kNonTombstoneEntities,
-                                count.non_tombstone_entities);
+    base::Value::Dict count_dictionary;
+    count_dictionary.Set(syncer::sync_ui_util::kModelType,
+                         ModelTypeToDebugString(count.type));
+    count_dictionary.Set(syncer::sync_ui_util::kEntities, count.entities);
+    count_dictionary.Set(syncer::sync_ui_util::kNonTombstoneEntities,
+                         count.non_tombstone_entities);
     count_list.Append(std::move(count_dictionary));
   }
 
-  DictionaryValue event_details;
-  event_details.SetKey(syncer::sync_ui_util::kEntityCounts,
-                       std::move(count_list));
+  base::Value::Dict event_details;
+  event_details.Set(syncer::sync_ui_util::kEntityCounts, std::move(count_list));
   FireWebUIListener(syncer::sync_ui_util::kOnEntityCountsUpdated,
-                    std::move(event_details));
+                    event_details);
 }
 
 SyncService* SyncInternalsMessageHandler::GetSyncService() {
@@ -388,8 +391,9 @@ SyncInternalsMessageHandler::GetSyncInvalidationsService() {
 
 void SyncInternalsMessageHandler::UnregisterModelNotifications() {
   SyncService* service = GetSyncService();
-  if (!service)
+  if (!service) {
     return;
+  }
 
   // Cannot use ScopedObserver to do all the tracking because most don't follow
   // AddObserver/RemoveObserver method naming style.

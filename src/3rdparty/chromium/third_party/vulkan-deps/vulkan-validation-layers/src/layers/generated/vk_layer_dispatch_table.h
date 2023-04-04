@@ -275,6 +275,9 @@ typedef struct VkLayerInstanceDispatchTable_ {
 #ifdef VK_USE_PLATFORM_SCREEN_QNX
     PFN_vkGetPhysicalDeviceScreenPresentationSupportQNX GetPhysicalDeviceScreenPresentationSupportQNX;
 #endif // VK_USE_PLATFORM_SCREEN_QNX
+
+    // ---- VK_NV_optical_flow extension commands
+    PFN_vkGetPhysicalDeviceOpticalFlowImageFormatsNV GetPhysicalDeviceOpticalFlowImageFormatsNV;
 } VkLayerInstanceDispatchTable;
 
 // Device function pointer dispatch table
@@ -665,6 +668,9 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkCmdBlitImage2KHR CmdBlitImage2KHR;
     PFN_vkCmdResolveImage2KHR CmdResolveImage2KHR;
 
+    // ---- VK_KHR_ray_tracing_maintenance1 extension commands
+    PFN_vkCmdTraceRaysIndirect2KHR CmdTraceRaysIndirect2KHR;
+
     // ---- VK_KHR_maintenance4 extension commands
     PFN_vkGetDeviceBufferMemoryRequirementsKHR GetDeviceBufferMemoryRequirementsKHR;
     PFN_vkGetDeviceImageMemoryRequirementsKHR GetDeviceImageMemoryRequirementsKHR;
@@ -864,8 +870,19 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkSetPrivateDataEXT SetPrivateDataEXT;
     PFN_vkGetPrivateDataEXT GetPrivateDataEXT;
 
+    // ---- VK_EXT_metal_objects extension commands
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    PFN_vkExportMetalObjectsEXT ExportMetalObjectsEXT;
+#endif // VK_USE_PLATFORM_METAL_EXT
+
     // ---- VK_NV_fragment_shading_rate_enums extension commands
     PFN_vkCmdSetFragmentShadingRateEnumNV CmdSetFragmentShadingRateEnumNV;
+
+    // ---- VK_EXT_image_compression_control extension commands
+    PFN_vkGetImageSubresourceLayout2EXT GetImageSubresourceLayout2EXT;
+
+    // ---- VK_EXT_device_fault extension commands
+    PFN_vkGetDeviceFaultInfoEXT GetDeviceFaultInfoEXT;
 
     // ---- VK_EXT_vertex_input_dynamic_state extension commands
     PFN_vkCmdSetVertexInputEXT CmdSetVertexInputEXT;
@@ -913,6 +930,9 @@ typedef struct VkLayerDispatchTable_ {
     // ---- VK_NV_external_memory_rdma extension commands
     PFN_vkGetMemoryRemoteAddressNV GetMemoryRemoteAddressNV;
 
+    // ---- VK_EXT_pipeline_properties extension commands
+    PFN_vkGetPipelinePropertiesEXT GetPipelinePropertiesEXT;
+
     // ---- VK_EXT_extended_dynamic_state2 extension commands
     PFN_vkCmdSetPatchControlPointsEXT CmdSetPatchControlPointsEXT;
     PFN_vkCmdSetRasterizerDiscardEnableEXT CmdSetRasterizerDiscardEnableEXT;
@@ -927,12 +947,75 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkCmdDrawMultiEXT CmdDrawMultiEXT;
     PFN_vkCmdDrawMultiIndexedEXT CmdDrawMultiIndexedEXT;
 
+    // ---- VK_EXT_opacity_micromap extension commands
+    PFN_vkCreateMicromapEXT CreateMicromapEXT;
+    PFN_vkDestroyMicromapEXT DestroyMicromapEXT;
+    PFN_vkCmdBuildMicromapsEXT CmdBuildMicromapsEXT;
+    PFN_vkBuildMicromapsEXT BuildMicromapsEXT;
+    PFN_vkCopyMicromapEXT CopyMicromapEXT;
+    PFN_vkCopyMicromapToMemoryEXT CopyMicromapToMemoryEXT;
+    PFN_vkCopyMemoryToMicromapEXT CopyMemoryToMicromapEXT;
+    PFN_vkWriteMicromapsPropertiesEXT WriteMicromapsPropertiesEXT;
+    PFN_vkCmdCopyMicromapEXT CmdCopyMicromapEXT;
+    PFN_vkCmdCopyMicromapToMemoryEXT CmdCopyMicromapToMemoryEXT;
+    PFN_vkCmdCopyMemoryToMicromapEXT CmdCopyMemoryToMicromapEXT;
+    PFN_vkCmdWriteMicromapsPropertiesEXT CmdWriteMicromapsPropertiesEXT;
+    PFN_vkGetDeviceMicromapCompatibilityEXT GetDeviceMicromapCompatibilityEXT;
+    PFN_vkGetMicromapBuildSizesEXT GetMicromapBuildSizesEXT;
+
     // ---- VK_EXT_pageable_device_local_memory extension commands
     PFN_vkSetDeviceMemoryPriorityEXT SetDeviceMemoryPriorityEXT;
 
     // ---- VK_VALVE_descriptor_set_host_mapping extension commands
     PFN_vkGetDescriptorSetLayoutHostMappingInfoVALVE GetDescriptorSetLayoutHostMappingInfoVALVE;
     PFN_vkGetDescriptorSetHostMappingVALVE GetDescriptorSetHostMappingVALVE;
+
+    // ---- VK_EXT_extended_dynamic_state3 extension commands
+    PFN_vkCmdSetTessellationDomainOriginEXT CmdSetTessellationDomainOriginEXT;
+    PFN_vkCmdSetDepthClampEnableEXT CmdSetDepthClampEnableEXT;
+    PFN_vkCmdSetPolygonModeEXT CmdSetPolygonModeEXT;
+    PFN_vkCmdSetRasterizationSamplesEXT CmdSetRasterizationSamplesEXT;
+    PFN_vkCmdSetSampleMaskEXT CmdSetSampleMaskEXT;
+    PFN_vkCmdSetAlphaToCoverageEnableEXT CmdSetAlphaToCoverageEnableEXT;
+    PFN_vkCmdSetAlphaToOneEnableEXT CmdSetAlphaToOneEnableEXT;
+    PFN_vkCmdSetLogicOpEnableEXT CmdSetLogicOpEnableEXT;
+    PFN_vkCmdSetColorBlendEnableEXT CmdSetColorBlendEnableEXT;
+    PFN_vkCmdSetColorBlendEquationEXT CmdSetColorBlendEquationEXT;
+    PFN_vkCmdSetColorWriteMaskEXT CmdSetColorWriteMaskEXT;
+    PFN_vkCmdSetRasterizationStreamEXT CmdSetRasterizationStreamEXT;
+    PFN_vkCmdSetConservativeRasterizationModeEXT CmdSetConservativeRasterizationModeEXT;
+    PFN_vkCmdSetExtraPrimitiveOverestimationSizeEXT CmdSetExtraPrimitiveOverestimationSizeEXT;
+    PFN_vkCmdSetDepthClipEnableEXT CmdSetDepthClipEnableEXT;
+    PFN_vkCmdSetSampleLocationsEnableEXT CmdSetSampleLocationsEnableEXT;
+    PFN_vkCmdSetColorBlendAdvancedEXT CmdSetColorBlendAdvancedEXT;
+    PFN_vkCmdSetProvokingVertexModeEXT CmdSetProvokingVertexModeEXT;
+    PFN_vkCmdSetLineRasterizationModeEXT CmdSetLineRasterizationModeEXT;
+    PFN_vkCmdSetLineStippleEnableEXT CmdSetLineStippleEnableEXT;
+    PFN_vkCmdSetDepthClipNegativeOneToOneEXT CmdSetDepthClipNegativeOneToOneEXT;
+    PFN_vkCmdSetViewportWScalingEnableNV CmdSetViewportWScalingEnableNV;
+    PFN_vkCmdSetViewportSwizzleNV CmdSetViewportSwizzleNV;
+    PFN_vkCmdSetCoverageToColorEnableNV CmdSetCoverageToColorEnableNV;
+    PFN_vkCmdSetCoverageToColorLocationNV CmdSetCoverageToColorLocationNV;
+    PFN_vkCmdSetCoverageModulationModeNV CmdSetCoverageModulationModeNV;
+    PFN_vkCmdSetCoverageModulationTableEnableNV CmdSetCoverageModulationTableEnableNV;
+    PFN_vkCmdSetCoverageModulationTableNV CmdSetCoverageModulationTableNV;
+    PFN_vkCmdSetShadingRateImageEnableNV CmdSetShadingRateImageEnableNV;
+    PFN_vkCmdSetRepresentativeFragmentTestEnableNV CmdSetRepresentativeFragmentTestEnableNV;
+    PFN_vkCmdSetCoverageReductionModeNV CmdSetCoverageReductionModeNV;
+
+    // ---- VK_EXT_shader_module_identifier extension commands
+    PFN_vkGetShaderModuleIdentifierEXT GetShaderModuleIdentifierEXT;
+    PFN_vkGetShaderModuleCreateInfoIdentifierEXT GetShaderModuleCreateInfoIdentifierEXT;
+
+    // ---- VK_NV_optical_flow extension commands
+    PFN_vkCreateOpticalFlowSessionNV CreateOpticalFlowSessionNV;
+    PFN_vkDestroyOpticalFlowSessionNV DestroyOpticalFlowSessionNV;
+    PFN_vkBindOpticalFlowSessionImageNV BindOpticalFlowSessionImageNV;
+    PFN_vkCmdOpticalFlowExecuteNV CmdOpticalFlowExecuteNV;
+
+    // ---- VK_QCOM_tile_properties extension commands
+    PFN_vkGetFramebufferTilePropertiesQCOM GetFramebufferTilePropertiesQCOM;
+    PFN_vkGetDynamicRenderingTilePropertiesQCOM GetDynamicRenderingTilePropertiesQCOM;
 
     // ---- VK_KHR_acceleration_structure extension commands
     PFN_vkCreateAccelerationStructureKHR CreateAccelerationStructureKHR;
@@ -959,6 +1042,11 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkCmdTraceRaysIndirectKHR CmdTraceRaysIndirectKHR;
     PFN_vkGetRayTracingShaderGroupStackSizeKHR GetRayTracingShaderGroupStackSizeKHR;
     PFN_vkCmdSetRayTracingPipelineStackSizeKHR CmdSetRayTracingPipelineStackSizeKHR;
+
+    // ---- VK_EXT_mesh_shader extension commands
+    PFN_vkCmdDrawMeshTasksEXT CmdDrawMeshTasksEXT;
+    PFN_vkCmdDrawMeshTasksIndirectEXT CmdDrawMeshTasksIndirectEXT;
+    PFN_vkCmdDrawMeshTasksIndirectCountEXT CmdDrawMeshTasksIndirectCountEXT;
 } VkLayerDispatchTable;
 
 

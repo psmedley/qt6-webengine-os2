@@ -5,16 +5,22 @@
  * found in the LICENSE file.
  */
 
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkColorType.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkRefCnt.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkTypes.h"
 #include "include/gpu/GrDirectContext.h"
 #include "include/gpu/vk/GrVkBackendContext.h"
-#include "include/gpu/vk/GrVkExtensions.h"
-
+#include "include/gpu/vk/VulkanExtensions.h"
 #include "tools/gpu/vk/VkTestUtils.h"
 
+#include <string.h>
 #include <vulkan/vulkan_core.h>
-
+#include <functional>
 #include <memory>
 
 #define ACQUIRE_INST_VK_PROC(name)                                                           \
@@ -30,7 +36,7 @@
 int main(int argc, char** argv) {
     GrVkBackendContext backendContext;
     VkDebugReportCallbackEXT debugCallback;
-    std::unique_ptr<GrVkExtensions> extensions(new GrVkExtensions());
+    std::unique_ptr<skgpu::VulkanExtensions> extensions(new skgpu::VulkanExtensions());
     std::unique_ptr<VkPhysicalDeviceFeatures2> features(new VkPhysicalDeviceFeatures2);
 
     // First we need to create a GrVkBackendContext so that we can make a Vulkan GrDirectContext.

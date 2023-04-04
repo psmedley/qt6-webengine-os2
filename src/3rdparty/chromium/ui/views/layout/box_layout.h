@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -210,7 +210,7 @@ class VIEWS_EXPORT BoxLayout : public LayoutManager {
     bool VisibleToLayout() const;
 
    private:
-    raw_ptr<View> view_ = nullptr;
+    raw_ptr<View, DanglingUntriaged> view_ = nullptr;
     raw_ptr<const BoxLayout> layout_ = nullptr;
     gfx::Insets margins_;
   };

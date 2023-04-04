@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,7 @@ void GvrDeviceProvider::Initialize(VRDeviceProviderClient* client) {
     vr_device_ = base::WrapUnique(new GvrDevice());
   }
   if (vr_device_) {
-    client->AddRuntime(vr_device_->GetId(), vr_device_->GetVRDisplayInfo(),
-                       vr_device_->GetDeviceData(),
+    client->AddRuntime(vr_device_->GetId(), vr_device_->GetDeviceData(),
                        vr_device_->BindXRRuntime());
   }
   initialized_ = true;

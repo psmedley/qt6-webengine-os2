@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
@@ -65,7 +66,7 @@ void HTMLBodyElement::CollectStyleForPresentationAttribute(
     MutableCSSPropertyValueSet* style) {
   if (name == html_names::kBackgroundAttr) {
     AtomicString url(StripLeadingAndTrailingHTMLSpaces(value));
-    if (!url.IsEmpty()) {
+    if (!url.empty()) {
       CSSImageValue* image_value = MakeGarbageCollected<CSSImageValue>(
           url, GetDocument().CompleteURL(url),
           Referrer(GetExecutionContext()->OutgoingReferrer(),
@@ -300,7 +301,7 @@ const QualifiedName& HTMLBodyElement::SubResourceAttributeName() const {
 bool HTMLBodyElement::SupportsFocus() const {
   // This override is needed because the inherited method bails if the parent is
   // editable.  The <body> should be focusable even if <html> is editable.
-  return HasEditableStyle(*this) || HTMLElement::SupportsFocus();
+  return IsEditable(*this) || HTMLElement::SupportsFocus();
 }
 
 }  // namespace blink

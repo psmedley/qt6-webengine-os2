@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@ export enum SourceType {
   POLICY = 'policy',
   SIDELOADED = 'sideloaded',
   UNPACKED = 'unpacked',
+  INSTALLED_BY_DEFAULT = 'installed-by-default',
   UNKNOWN = 'unknown',
 }
 
@@ -93,6 +94,8 @@ export function getItemSource(item: chrome.developerPrivate.ExtensionInfo):
       return SourceType.UNKNOWN;
     case chrome.developerPrivate.Location.FROM_STORE:
       return SourceType.WEBSTORE;
+    case chrome.developerPrivate.Location.INSTALLED_BY_DEFAULT:
+      return SourceType.INSTALLED_BY_DEFAULT;
     default:
       assertNotReached(item.location);
   }
@@ -108,6 +111,8 @@ export function getItemSourceString(source: SourceType): string {
       return loadTimeData.getString('itemSourceUnpacked');
     case SourceType.WEBSTORE:
       return loadTimeData.getString('itemSourceWebstore');
+    case SourceType.INSTALLED_BY_DEFAULT:
+      return loadTimeData.getString('itemSourceInstalledByDefault');
     case SourceType.UNKNOWN:
       // Nothing to return. Calling code should use
       // chrome.developerPrivate.ExtensionInfo's |locationText| instead.
@@ -149,9 +154,30 @@ export function computeInspectableViewLabel(
 }
 
 /**
+ * Clones the array and returns a new array with background pages and service
+ * workers sorted before other views.
+ * @returns Sorted array.
+ */
+export function sortViews(views: chrome.developerPrivate.ExtensionView[]):
+    chrome.developerPrivate.ExtensionView[] {
+  function getSortValue(view: chrome.developerPrivate.ExtensionView): number {
+    switch (view.type) {
+      case chrome.developerPrivate.ViewType.EXTENSION_SERVICE_WORKER_BACKGROUND:
+        return 2;
+      case chrome.developerPrivate.ViewType.EXTENSION_BACKGROUND_PAGE:
+        return 1;
+      default:
+        return 0;
+    }
+  }
+
+  return [...views].sort((a, b) => getSortValue(b) - getSortValue(a));
+}
+
+/**
  * @return Whether the extension is in the terminated state.
  */
-function isTerminated_(state: chrome.developerPrivate.ExtensionState): boolean {
+function isTerminated(state: chrome.developerPrivate.ExtensionState): boolean {
   return state === chrome.developerPrivate.ExtensionState.TERMINATED;
 }
 
@@ -160,7 +186,7 @@ function isTerminated_(state: chrome.developerPrivate.ExtensionState): boolean {
  */
 export function getEnableControl(data: chrome.developerPrivate.ExtensionInfo):
     EnableControl {
-  if (isTerminated_(data.state)) {
+  if (isTerminated(data.state)) {
     return EnableControl.RELOAD;
   }
   if (data.disableReasons.corruptInstall && data.userMayModify) {

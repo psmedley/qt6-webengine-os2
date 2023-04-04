@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <algorithm>
 #include <limits>
 #include <string>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/ranges/algorithm.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/traced_value.h"
@@ -176,7 +177,9 @@ class RasterTaskImpl : public TileTask {
   TileResolution tile_resolution_;
   int layer_id_;
   uint64_t source_prepare_tiles_id_;
-  raw_ptr<void> tile_tracing_id_;
+  // TODO(crbug.com/1298696): views_unittests breaks with MTECheckedPtr
+  // enabled. Triage.
+  raw_ptr<void, DanglingUntriagedDegradeToNoOpWhenMTE> tile_tracing_id_;
   uint64_t new_content_id_;
   int source_frame_number_;
   std::unique_ptr<RasterBuffer> raster_buffer_;
@@ -228,10 +231,7 @@ void InsertNodeForTask(TaskGraph* graph,
                        uint16_t category,
                        uint16_t priority,
                        size_t dependencies) {
-  DCHECK(std::find_if(graph->nodes.begin(), graph->nodes.end(),
-                      [&task](const TaskGraph::Node& node) {
-                        return node.task == task;
-                      }) == graph->nodes.end());
+  DCHECK(!base::Contains(graph->nodes, task, &TaskGraph::Node::task));
   graph->nodes.emplace_back(task, category, priority, dependencies);
 }
 
@@ -273,10 +273,8 @@ void InsertNodesForRasterTask(TaskGraph* graph,
     dependencies++;
 
     // Add decode task if it doesn't already exist in graph.
-    auto decode_it = std::find_if(graph->nodes.begin(), graph->nodes.end(),
-                                  [decode_task](const TaskGraph::Node& node) {
-                                    return node.task == decode_task;
-                                  });
+    auto decode_it =
+        base::ranges::find(graph->nodes, decode_task, &TaskGraph::Node::task);
 
     // In rare circumstances, a background category task may come in before a
     // foreground category task. In these cases, upgrade any background category
@@ -368,7 +366,7 @@ class DidFinishRunningAllTilesTask : public TileTask {
 
  private:
   raw_ptr<base::SequencedTaskRunner> task_runner_;
-  raw_ptr<RasterQueryQueue> pending_raster_queries_;
+  raw_ptr<RasterQueryQueue, DanglingUntriaged> pending_raster_queries_;
   CompletionCb completion_cb_;
 };
 
@@ -459,6 +457,7 @@ void TileManager::FinishTasksAndCleanUp() {
 
   tile_task_manager_ = nullptr;
   resource_pool_ = nullptr;
+  pending_raster_queries_ = nullptr;
   more_tiles_need_prepare_check_notifier_.Cancel();
   signals_check_notifier_.Cancel();
   task_set_finished_weak_ptr_factory_.InvalidateWeakPtrs();
@@ -748,7 +747,7 @@ TileManager::PrioritizedWorkToSchedule TileManager::AssignGpuMemoryToTiles() {
       // We analyze for solid color here, to decide to continue
       // or drop the tile for scheduling and raster.
       tile->set_solid_color_analysis_performed(true);
-      SkColor color = SK_ColorTRANSPARENT;
+      SkColor4f color = SkColors::kTransparent;
       bool is_solid_color =
           prioritized_tile.raster_source()->PerformSolidColorAnalysis(
               tile->enclosing_layer_rect(), &color);
@@ -1129,10 +1128,8 @@ void TileManager::ScheduleTasks(PrioritizedWorkToSchedule work_to_schedule) {
   work_to_schedule.extra_prepaint_images.clear();
 
   for (auto& task : new_locked_image_tasks) {
-    auto decode_it = std::find_if(graph_.nodes.begin(), graph_.nodes.end(),
-                                  [&task](const TaskGraph::Node& node) {
-                                    return node.task == task.get();
-                                  });
+    auto decode_it =
+        base::ranges::find(graph_.nodes, task.get(), &TaskGraph::Node::task);
     // If this task is already in the graph, then we don't have to insert it.
     if (decode_it != graph_.nodes.end())
       continue;
@@ -1527,7 +1524,9 @@ void TileManager::IssueSignals() {
   if (signals_.activate_tile_tasks_completed &&
       signals_.activate_gpu_work_completed &&
       !signals_.did_notify_ready_to_activate) {
-    if (!client_->HasPendingTree() || IsReadyToActivate()) {
+    // If commit_to_active_tree is true(no pending tree), NotifyReadyToActivate
+    // isn't sent to client, so don't call IsReadyToActivate() to save CPU time
+    if (client_->HasPendingTree() && IsReadyToActivate()) {
       TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                    "TileManager::IssueSignals - ready to activate");
       signals_.did_notify_ready_to_activate = true;
@@ -1538,7 +1537,7 @@ void TileManager::IssueSignals() {
   // Ready to draw.
   if (signals_.draw_tile_tasks_completed && signals_.draw_gpu_work_completed &&
       !signals_.did_notify_ready_to_draw) {
-    if (IsReadyToDraw()) {
+    if (tile_manager_settings_.needs_notify_ready_to_draw && IsReadyToDraw()) {
       TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                    "TileManager::IssueSignals - ready to draw");
       signals_.did_notify_ready_to_draw = true;
@@ -1561,6 +1560,12 @@ void TileManager::IssueSignals() {
     }
   }
 
+  bool notify_ready_to_activate_pending =
+      client_->HasPendingTree() && !signals_.did_notify_ready_to_activate;
+  bool notify_ready_to_draw_pending =
+      tile_manager_settings_.needs_notify_ready_to_draw &&
+      !signals_.did_notify_ready_to_draw;
+
   // Allow decodes for rasterized tiles if all required for draw/activate tiles
   // are done. And pre-decode tiles once all tile tasks are done.
   // Note that the order is important here, since all signals could have become
@@ -1568,8 +1573,8 @@ void TileManager::IssueSignals() {
   if (signals_.did_notify_all_tile_tasks_completed) {
     checker_image_tracker_.SetMaxDecodePriorityAllowed(
         CheckerImageTracker::DecodeType::kPreDecode);
-  } else if (signals_.did_notify_ready_to_activate &&
-             signals_.did_notify_ready_to_draw) {
+  } else if (!notify_ready_to_activate_pending &&
+             !notify_ready_to_draw_pending) {
     checker_image_tracker_.SetMaxDecodePriorityAllowed(
         CheckerImageTracker::DecodeType::kRaster);
   }

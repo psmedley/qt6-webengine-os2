@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,10 @@
 #include <string>
 
 #include "base/containers/span.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
 
-namespace net {
-
-namespace der {
+namespace net::der {
 
 // An opaque class that represents a fixed buffer of data of a fixed length,
 // to be used as an input to other operations. An Input object does not own
@@ -43,12 +40,15 @@ class NET_EXPORT_PRIVATE Input {
       : data_(data), len_(len) {}
 
   // Creates an Input from a base::StringPiece.
-  explicit Input(const base::StringPiece& sp);
+  explicit Input(base::StringPiece sp);
+
+  // Creates an Input from a std::string_view
+  explicit Input(std::string_view sp);
 
   // Creates an Input from a std::string. The lifetimes are a bit subtle when
   // using this function: The constructed Input is only valid so long as |s| is
   // still alive and not mutated.
-  Input(const std::string* s);
+  explicit Input(const std::string* s);
 
   // Returns the length in bytes of an Input's data.
   constexpr size_t Length() const { return len_; }
@@ -66,6 +66,11 @@ class NET_EXPORT_PRIVATE Input {
   // StringPiece must not outlive the data that was used to construct this
   // Input.
   base::StringPiece AsStringPiece() const;
+
+  // Returns a std::string_view pointing to the same data as the Input. The
+  // resulting string_view must not outlive the data that was used to construct
+  // this Input.
+  std::string_view AsStringView() const;
 
   // Returns a base::span pointing to the same data as the Input. The resulting
   // base::span must not outlive the data that was used to construct this
@@ -85,24 +90,29 @@ class NET_EXPORT_PRIVATE Input {
 };
 
 // Return true if |lhs|'s data and |rhs|'s data are byte-wise equal.
-NET_EXPORT_PRIVATE constexpr bool operator==(const Input& lhs,
-                                             const Input& rhs) {
-  return base::ranges::equal(lhs.UnsafeData(), lhs.UnsafeData() + lhs.Length(),
-                             rhs.UnsafeData(), rhs.UnsafeData() + rhs.Length());
-}
+NET_EXPORT_PRIVATE bool operator==(const Input& lhs, const Input& rhs);
 
 // Return true if |lhs|'s data and |rhs|'s data are not byte-wise equal.
-NET_EXPORT_PRIVATE constexpr bool operator!=(const Input& lhs,
-                                             const Input& rhs) {
-  return !(lhs == rhs);
-}
+NET_EXPORT_PRIVATE bool operator!=(const Input& lhs, const Input& rhs);
 
 // Returns true if |lhs|'s data is lexicographically less than |rhs|'s data.
 NET_EXPORT_PRIVATE constexpr bool operator<(const Input& lhs,
                                             const Input& rhs) {
-  return base::ranges::lexicographical_compare(
-      lhs.UnsafeData(), lhs.UnsafeData() + lhs.Length(), rhs.UnsafeData(),
-      rhs.UnsafeData() + rhs.Length());
+  // This is `std::lexicographical_compare`, but that's not `constexpr` until
+  // C++-20.
+  auto* it1 = lhs.UnsafeData();
+  auto* it2 = rhs.UnsafeData();
+  const auto* end1 = lhs.UnsafeData() + lhs.Length();
+  const auto* end2 = rhs.UnsafeData() + rhs.Length();
+  for (; it1 != end1 && it2 != end2; ++it1, ++it2) {
+    if (*it1 < *it2) {
+      return true;
+    } else if (*it2 < *it1) {
+      return false;
+    }
+  }
+
+  return it2 != end2;
 }
 
 // This class provides ways to read data from an Input in a bounds-checked way.
@@ -149,8 +159,6 @@ class NET_EXPORT_PRIVATE ByteReader {
   size_t len_;
 };
 
-}  // namespace der
-
-}  // namespace net
+}  // namespace net::der
 
 #endif  // NET_DER_INPUT_H_

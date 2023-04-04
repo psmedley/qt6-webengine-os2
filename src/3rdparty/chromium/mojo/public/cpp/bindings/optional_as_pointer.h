@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define MOJO_PUBLIC_CPP_BINDINGS_OPTIONAL_AS_POINTER_H_
 
 #include <cstddef>
+
+#include "base/memory/raw_ptr.h"
 
 namespace mojo {
 
@@ -56,7 +58,7 @@ class OptionalAsPointer {
   template <typename U>
   friend class OptionalAsPointer;
 
-  T* value_ = nullptr;
+  raw_ptr<T> value_ = nullptr;
 };
 
 // Type-deducing helpers for constructing a `OptionalAsPointer`.

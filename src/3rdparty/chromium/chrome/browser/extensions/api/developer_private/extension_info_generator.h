@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,8 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/extensions/api/developer_private.h"
+#include "extensions/common/url_pattern.h"
+#include "extensions/common/url_pattern_set.h"
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 class SupervisedUserService;
@@ -64,6 +66,11 @@ class ExtensionInfoGenerator {
                             bool include_terminated,
                             ExtensionInfosCallback callback);
 
+  // Returns a list of URLPatterns where no pattern is completely contained by
+  // another pattern in the list.
+  static std::vector<URLPattern> GetDistinctHosts(
+      const URLPatternSet& patterns);
+
  private:
   // Creates an ExtensionInfo for the given |extension| and |state|, and
   // asynchronously adds it to the |list|.
@@ -91,7 +98,7 @@ class ExtensionInfoGenerator {
   raw_ptr<ErrorConsole> error_console_;
   raw_ptr<ImageLoader> image_loader_;
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  SupervisedUserService* supervised_user_service_;
+  raw_ptr<SupervisedUserService> supervised_user_service_;
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
   // The number of pending image loads.

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -687,7 +687,7 @@ TEST_F(TemplateURLTest, ReplaceSearchboxStats) {
       // HTTPS and non-empty gs_lcrp: replace gs_lcrp.
       {u"foo", non_empty_searchbox_stats, "https://foo/",
        "{google:baseURL}?q={searchTerms}&{google:searchboxStats}",
-       "https://foo/?q=foo&gs_lcrp=EgZjaHJvbWWwAgE=&"},
+       "https://foo/?q=foo&gs_lcrp=EgZjaHJvbWWwAgE&"},
       // HTTPS and non-empty gs_lcrp but no google:searchboxStats: no gs_lcrp.
       {u"foo", non_empty_searchbox_stats, "https://foo/",
        "{google:baseURL}?q={searchTerms}", "https://foo/?q=foo"},
@@ -702,7 +702,7 @@ TEST_F(TemplateURLTest, ReplaceSearchboxStats) {
       // gs_lcrp.
       {u"foo", non_empty_searchbox_stats, "https://foo/",
        "https://foo/?{searchTerms}&{google:searchboxStats}",
-       "https://foo/?foo&gs_lcrp=EgZjaHJvbWWwAgE=&"},
+       "https://foo/?foo&gs_lcrp=EgZjaHJvbWWwAgE&"},
       // Non-Google search provider, HTTPS and non-empty gs_lcrp but no
       // google:searchboxStats: no gs_lcrp.
       {u"foo", non_empty_searchbox_stats, "https://foo/",
@@ -725,7 +725,7 @@ TEST_F(TemplateURLTest, ReplaceSearchboxStats) {
   }
   // Expect correct histograms to have been logged.
   histogram_tester.ExpectTotalCount("Omnibox.SearchboxStats.Length", 2);
-  histogram_tester.ExpectBucketCount("Omnibox.SearchboxStats.Length", 16, 2);
+  histogram_tester.ExpectBucketCount("Omnibox.SearchboxStats.Length", 15, 2);
 }
 
 // Tests replacing searchbox stats (gs_lcrp) and assisted query stats (AQS).
@@ -751,13 +751,13 @@ TEST_F(TemplateURLTest, ReplaceSearchboxStatsAndAssistedQueryStats) {
       {u"foo", "chrome.0.0l6", non_empty_searchbox_stats, "https://foo/",
        "{google:baseURL}?q={searchTerms}&{google:searchboxStats}{google:"
        "assistedQueryStats}",
-       "https://foo/?q=foo&gs_lcrp=EgZjaHJvbWWwAgE=&aqs=chrome.0.0l6&"},
+       "https://foo/?q=foo&gs_lcrp=EgZjaHJvbWWwAgE&aqs=chrome.0.0l6&"},
       // Non-Google search provider, HTTPS and non-empty gs_lcrp and AQS:
       // replace both.
       {u"foo", "chrome.0.0l6", non_empty_searchbox_stats, "https://foo/",
        "https://foo/"
        "?{searchTerms}&{google:searchboxStats}{google:assistedQueryStats}",
-       "https://foo/?foo&gs_lcrp=EgZjaHJvbWWwAgE=&aqs=chrome.0.0l6&"},
+       "https://foo/?foo&gs_lcrp=EgZjaHJvbWWwAgE&aqs=chrome.0.0l6&"},
   };
   TemplateURLData data;
   data.input_encodings.push_back("UTF-8");
@@ -780,7 +780,7 @@ TEST_F(TemplateURLTest, ReplaceSearchboxStatsAndAssistedQueryStats) {
   histogram_tester.ExpectBucketCount("Omnibox.AssistedQueryStats.Length", 12,
                                      2);
   histogram_tester.ExpectTotalCount("Omnibox.SearchboxStats.Length", 2);
-  histogram_tester.ExpectBucketCount("Omnibox.SearchboxStats.Length", 16, 2);
+  histogram_tester.ExpectBucketCount("Omnibox.SearchboxStats.Length", 15, 2);
 }
 
 // Tests replacing cursor position.
@@ -850,17 +850,17 @@ TEST_F(TemplateURLTest, ReplaceInputType) {
 TEST_F(TemplateURLTest, ReplaceOmniboxFocusType) {
   struct TestData {
     const std::u16string search_term;
-    OmniboxFocusType focus_type;
+    metrics::OmniboxFocusType focus_type;
     const std::string url;
     const std::string expected_result;
   } test_data[] = {
-      {u"foo", OmniboxFocusType::DEFAULT,
+      {u"foo", metrics::OmniboxFocusType::INTERACTION_DEFAULT,
        "{google:baseURL}?{searchTerms}&{google:omniboxFocusType}",
        "http://www.google.com/?foo&"},
-      {u"foo", OmniboxFocusType::ON_FOCUS,
+      {u"foo", metrics::OmniboxFocusType::INTERACTION_FOCUS,
        "{google:baseURL}?{searchTerms}&{google:omniboxFocusType}",
        "http://www.google.com/?foo&oft=1&"},
-      {u"foo", OmniboxFocusType::DELETED_PERMANENT_TEXT,
+      {u"foo", metrics::OmniboxFocusType::INTERACTION_CLOBBER,
        "{google:baseURL}?{searchTerms}&{google:omniboxFocusType}",
        "http://www.google.com/?foo&oft=2&"},
   };
@@ -1857,19 +1857,13 @@ TEST_F(TemplateURLTest, ReplacePageClassification) {
   search_terms_args.page_classification = metrics::OmniboxEventProto::NTP;
   result = url.url_ref().ReplaceSearchTerms(search_terms_args,
                                             search_terms_data_);
-  EXPECT_EQ(base::FeatureList::IsEnabled(omnibox::kZeroSuggestPrefetching)
-                ? "http://www.google.com/?q=foo"
-                : "http://www.google.com/?pgcl=1&q=foo",
-            result);
+  EXPECT_EQ("http://www.google.com/?pgcl=1&q=foo", result);
 
   search_terms_args.page_classification =
       metrics::OmniboxEventProto::HOME_PAGE;
   result = url.url_ref().ReplaceSearchTerms(search_terms_args,
                                             search_terms_data_);
-  EXPECT_EQ(base::FeatureList::IsEnabled(omnibox::kZeroSuggestPrefetching)
-                ? "http://www.google.com/?q=foo"
-                : "http://www.google.com/?pgcl=3&q=foo",
-            result);
+  EXPECT_EQ("http://www.google.com/?pgcl=3&q=foo", result);
 }
 
 // Test the IsSearchResults function.
@@ -2062,13 +2056,33 @@ TEST_F(TemplateURLTest, GenerateSearchURL) {
       "http://foo/blah.blah.blah.blah.blah" }
   };
 
-  for (size_t i = 0; i < std::size(generate_url_cases); ++i) {
+  for (const auto& generate_url_case : generate_url_cases) {
     TemplateURLData data;
-    data.SetURL(generate_url_cases[i].url);
+    data.SetURL(generate_url_case.url);
     TemplateURL t_url(data);
     EXPECT_EQ(t_url.GenerateSearchURL(search_terms_data_).spec(),
-              generate_url_cases[i].expected)
-        << generate_url_cases[i].test_name << " failed.";
+              generate_url_case.expected)
+        << generate_url_case.test_name << " failed.";
+  }
+}
+
+TEST_F(TemplateURLTest, GenerateSuggestionURL) {
+  struct GenerateSuggestionURLCase {
+    const char* test_name;
+    const char* url;
+    const char* expected;
+  } generate_url_cases[] = {
+      {"invalid URL", "foo{searchTerms}", ""},
+      {"URL with no replacements", "http://foo/", "http://foo/"},
+      {"basic functionality", "http://foo/{searchTerms}", "http://foo/"}};
+
+  for (const auto& generate_url_case : generate_url_cases) {
+    TemplateURLData data;
+    data.suggestions_url = generate_url_case.url;
+    TemplateURL t_url(data);
+    EXPECT_EQ(t_url.GenerateSuggestionURL(search_terms_data_).spec(),
+              generate_url_case.expected)
+        << generate_url_case.test_name << " failed.";
   }
 }
 
@@ -2227,4 +2241,54 @@ TEST_F(TemplateURLTest, PathWildcard) {
                               search_terms_args, search_terms_data_,
                               &generated_url);
   EXPECT_EQ("https://www.google.com/search?q=foo", generated_url.spec());
+}
+
+TEST_F(TemplateURLTest, SideImageSearchParams) {
+  TemplateURLData data;
+  data.side_image_search_param = "sideimagesearch";
+  TemplateURL url(data);
+
+  // Adds query param with provided version to URL.
+  GURL result =
+      url.GenerateSideImageSearchURL(GURL("http://foo.com/?q=123"), "1");
+  EXPECT_EQ("http://foo.com/?q=123&sideimagesearch=1", result.spec());
+
+  // Does not add query param if the provided URL already has that param and
+  // version.
+  result = url.GenerateSideImageSearchURL(
+      GURL("http://foo.com/?q=123&sideimagesearch=1"), "1");
+  EXPECT_EQ("http://foo.com/?q=123&sideimagesearch=1", result.spec());
+
+  // Updates version if the version on the query param does not match.
+  result = url.GenerateSideImageSearchURL(
+      GURL("http://foo.com/?q=123&sideimagesearch=2"), "1");
+  EXPECT_EQ("http://foo.com/?q=123&sideimagesearch=1", result.spec());
+
+  // Does nothing if the URL does not have the param.
+  result = url.RemoveSideImageSearchParamFromURL(GURL("http://foo.com/?q=123"));
+  EXPECT_EQ("http://foo.com/?q=123", result.spec());
+
+  // Removes the param if the provided URL has it.
+  result = url.RemoveSideImageSearchParamFromURL(
+      GURL("http://foo.com/?q=123&sideimagesearch=1"));
+  EXPECT_EQ("http://foo.com/?q=123", result.spec());
+
+  // Removes the first instance of the query param that exist in the URL. This
+  // should not happen but just asserting for expected behavior.
+  result = url.RemoveSideImageSearchParamFromURL(
+      GURL("http://foo.com/?q=123&sideimagesearch=1&sideimagesearch=2"));
+  EXPECT_EQ("http://foo.com/?q=123&sideimagesearch=2", result.spec());
+}
+
+TEST_F(TemplateURLTest, ImageSearchBrandingLabel) {
+  TemplateURLData data;
+  data.SetShortName(u"foo");
+  TemplateURL no_image_branding_url(data);
+
+  // Without an image_search_branding_label set, should return short_name
+  EXPECT_EQ(u"foo", no_image_branding_url.image_search_branding_label());
+
+  data.image_search_branding_label = u"fooimages";
+  TemplateURL image_branding_url(data);
+  EXPECT_EQ(u"fooimages", image_branding_url.image_search_branding_label());
 }

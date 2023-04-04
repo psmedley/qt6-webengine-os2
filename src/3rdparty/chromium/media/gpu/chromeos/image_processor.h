@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -109,6 +109,15 @@ class MEDIA_GPU_EXPORT ImageProcessor {
   // the output video frames to be CPU-readable with a linear view of the data.
   bool needs_linear_output_buffers() const {
     return needs_linear_output_buffers_;
+  }
+
+  // Returns true if the image processor supports buffers allocated
+  // incoherently. The MTK MDP3 image processor has coherency issues, but the
+  // Libyuv image processor benefits greatly from incoherent allocations.
+  // Defaults to false, since only Libyuv has been shown to support this feature
+  // so far.
+  bool SupportsIncoherentBufs() const {
+    return backend_ && backend_->supports_incoherent_buffers();
   }
 
  protected:

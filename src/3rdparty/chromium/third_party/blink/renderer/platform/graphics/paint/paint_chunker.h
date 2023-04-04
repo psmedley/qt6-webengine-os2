@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,6 +92,7 @@ class PLATFORM_EXPORT PaintChunker final {
   // Otherwise it's ignored. Returns true if a new chunk is added.
   void AddSelectionToCurrentChunk(absl::optional<PaintedSelectionBound> start,
                                   absl::optional<PaintedSelectionBound> end);
+  void RecordAnySelectionWasPainted();
 
   // Returns true if a new chunk is created.
   bool EnsureChunk() {
@@ -138,6 +139,7 @@ class PLATFORM_EXPORT PaintChunker final {
 
   bool current_effectively_invisible_ = false;
 
+  // TODO(https://crbug.com/1351544): This should be SkColor4f.
   Color candidate_background_color_ = Color::kTransparent;
   float candidate_background_area_ = 0;
 };

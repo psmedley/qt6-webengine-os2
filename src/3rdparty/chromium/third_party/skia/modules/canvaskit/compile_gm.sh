@@ -48,8 +48,8 @@ rm -f $BUILD_DIR/*.a
 
 GN_GPU="skia_enable_gpu=true skia_gl_standard = \"webgl\""
 GN_GPU_FLAGS="\"-DSK_DISABLE_LEGACY_SHADERCONTEXT\","
-WASM_GPU="-lGL -DSK_SUPPORT_GPU=1 -DSK_GL \
-          -DSK_DISABLE_LEGACY_SHADERCONTEXT --pre-js $BASE_DIR/cpu.js --pre-js $BASE_DIR/gpu.js\
+WASM_GPU="-lGL -DSK_SUPPORT_GPU=1 -DSK_GL -DCK_ENABLE_WEBGL \
+          -DSK_DISABLE_LEGACY_SHADERCONTEXT --pre-js $BASE_DIR/cpu.js --pre-js $BASE_DIR/webgl.js\
           -sUSE_WEBGL2=1"
 
 GM_LIB="$BUILD_DIR/libgm_wasm.a"
@@ -168,8 +168,7 @@ if false; then
 fi
 
 # These gms do not compile or link with the WASM code. Thus, we omit them.
-GLOBIGNORE="gm/cgms.cpp:"\
-"gm/compressed_textures.cpp:"\
+GLOBIGNORE="gm/compressed_textures.cpp:"\
 "gm/fiddle.cpp:"\
 "gm/particles.cpp:"\
 "gm/video_decoder.cpp:"
@@ -181,6 +180,7 @@ GLOBIGNORE+="tests/CodecTest.cpp:"\
 "tests/EncodeTest.cpp:"\
 "tests/FontMgrAndroidParserTest.cpp:"\
 "tests/FontMgrFontConfigTest.cpp:"\
+"tests/FCITest.cpp:"\
 "tests/TypefaceMacTest.cpp:"\
 "tests/SkVMTest.cpp:"
 
@@ -195,6 +195,10 @@ GLOBIGNORE+="tests/BackendAllocationTest.cpp:"\
 
 # All the tests in these files crash.
 GLOBIGNORE+="tests/GrThreadSafeCacheTest.cpp"
+
+# These are not tests
+GLOBIGNORE+="tests/BazelNoopRunner.cpp:"\
+"tests/BazelTestRunner.cpp"
 
 # Emscripten prefers that the .a files go last in order, otherwise, it
 # may drop symbols that it incorrectly thinks aren't used. One day,

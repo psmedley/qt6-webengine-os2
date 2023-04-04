@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,11 +63,9 @@ void PageAnimator::ServiceScriptedAnimations(
       GetAllDocuments(page_->MainFrame(), kAllDocuments);
 
   for (auto& document : documents) {
-    absl::optional<ScopedFrameBlamer> frame_blamer;
     // TODO(szager): The following logic evolved piecemeal, and this conditional
     // is suspect.
     if (!document->View() || !document->View()->CanThrottleRendering()) {
-      frame_blamer.emplace(document->GetFrame());
       TRACE_EVENT0("blink,rail", "PageAnimator::serviceScriptedAnimations");
     }
     if (!document->View()) {
@@ -103,12 +101,15 @@ void PageAnimator::ReportFrameAnimations(cc::AnimationHost* animation_host) {
     animation_host->SetHasSmilAnimation(has_smil_animation_);
     animation_host->SetCurrentFrameHadRaf(current_frame_had_raf_);
     animation_host->SetNextFrameHasPendingRaf(next_frame_has_pending_raf_);
+    animation_host->SetHasSharedElementTransition(
+        has_shared_element_transition_);
   }
   has_canvas_invalidation_ = false;
   has_inline_style_mutation_ = false;
   has_smil_animation_ = false;
   current_frame_had_raf_ = false;
   // next_frame_has_pending_raf_ is reset at PostAnimate().
+  // has_shared_element_transition_ is reset when the transition ends.
 }
 
 void PageAnimator::SetSuppressFrameRequestsWorkaroundFor704763Only(
@@ -134,6 +135,11 @@ void PageAnimator::SetCurrentFrameHadRaf() {
 
 void PageAnimator::SetNextFrameHasPendingRaf() {
   next_frame_has_pending_raf_ = true;
+}
+
+void PageAnimator::SetHasSharedElementTransition(
+    bool has_shared_element_transition) {
+  has_shared_element_transition_ = has_shared_element_transition;
 }
 
 DISABLE_CFI_PERF

@@ -10,7 +10,6 @@
 
       a {
         color: var(--cr-link-color);
-        text-decoration: none;
       }
 
       cr-toolbar {
@@ -271,7 +270,7 @@
             </section>
           </template>
 
-<if expr="chromeos_ash">
+<if expr="is_chromeos">
           <div hidden="[[!localTrustRoots_]]">
             <section>
               <h2 class="cr-title-text">$i18n{localTrustRoots}</h2>
@@ -306,7 +305,7 @@
             </section>
           </template>
 </if>
-<if expr="not chromeos_ash">
+<if expr="not is_chromeos">
           <template is="dom-if"
               if="[[showBrowserReportingInfo_(browserReportingInfo_)]]">
             <section>

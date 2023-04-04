@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,16 +63,10 @@ class POLICY_EXPORT PolicyConversionsClient {
   void SetDropDefaultValues(bool enabled);
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  // Sets the updater policies.
-  void SetUpdaterPolicies(std::unique_ptr<PolicyMap> policies);
-
-  // Returns true if this client is able to return information on the updater's
-  // policies.
-  bool HasUpdaterPolicies() const;
-  base::Value GetUpdaterPolicies();
-
-  // Sets the updater policy schemas.
-  void SetUpdaterPolicySchemas(PolicyConversions::PolicyToSchemaMap schemas);
+  base::Value::Dict ConvertUpdaterPolicies(
+      PolicyMap updater_policies,
+      absl::optional<PolicyConversions::PolicyToSchemaMap>
+          updater_policy_schemas);
 #endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   // Converts the given |value| to JSON, respecting the configuration
@@ -81,27 +75,28 @@ class POLICY_EXPORT PolicyConversionsClient {
 
   // Returns policies for Chrome browser. Must only be called if
   // |HasUserPolicies()| returns true.
-  base::Value GetChromePolicies();
+  base::Value::Dict GetChromePolicies();
 
   // Returns precedence-related policies for Chrome browser. Must only be called
   // if |HasUserPolicies()| returns true.
-  base::Value GetPrecedencePolicies();
+  base::Value::Dict GetPrecedencePolicies();
 
   // Returns an array containing the ordered precedence strings.
-  base::Value GetPrecedenceOrder();
+  base::Value::List GetPrecedenceOrder();
 
   // Returns true if this client is able to return information on user
   // policies.
   virtual bool HasUserPolicies() const = 0;
 
-  // Returns policies for Chrome extensions.
-  virtual base::Value GetExtensionPolicies(PolicyDomain policy_domain) = 0;
+  // Returns policies for Chrome extensions in a list of base::Value::Dict.
+  virtual base::Value::List GetExtensionPolicies(
+      PolicyDomain policy_domain) = 0;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Returns policies for ChromeOS device.
-  virtual base::Value GetDeviceLocalAccountPolicies() = 0;
+  virtual base::Value::List GetDeviceLocalAccountPolicies() = 0;
   // Returns device specific information if this device is enterprise managed.
-  virtual base::Value GetIdentityFields() = 0;
+  virtual base::Value::Dict GetIdentityFields() = 0;
 #endif
 
   // Returns the embedder's PolicyService.
@@ -126,7 +121,7 @@ class POLICY_EXPORT PolicyConversionsClient {
   // policy namespace of |map|. |deprecated_policies| holds deprecated policies.
   // |future_policies| holds unreleased policies. A policy without an entry in
   // |known_policy_schemas| is an unknown policy.
-  base::Value GetPolicyValue(
+  base::Value::Dict GetPolicyValue(
       const std::string& policy_name,
       const PolicyMap::Entry& policy,
       const PoliciesSet& deprecated_policies,
@@ -141,7 +136,7 @@ class POLICY_EXPORT PolicyConversionsClient {
   // policy namespace of |map|. |deprecated_policies| holds deprecated policies.
   // |future_policies| holds unreleased policies. A policy in |map| but without
   // an entry |known_policy_schemas| is an unknown policy.
-  base::Value GetPolicyValues(
+  base::Value::Dict GetPolicyValues(
       const PolicyMap& map,
       PolicyErrorMap* errors,
       const PoliciesSet& deprecated_policies,
@@ -171,10 +166,6 @@ class POLICY_EXPORT PolicyConversionsClient {
 
  private:
   friend class PolicyConversionsClientTest;
-#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  std::unique_ptr<PolicyMap> updater_policies_;
-  absl::optional<PolicyConversions::PolicyToSchemaMap> updater_policy_schemas_;
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING) && BUILDFLAG(IS_WIN)
 
   bool convert_types_enabled_ = true;
   bool convert_values_enabled_ = false;

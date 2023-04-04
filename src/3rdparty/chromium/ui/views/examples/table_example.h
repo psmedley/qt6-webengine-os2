@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,23 +8,27 @@
 #include <string>
 
 #include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/table_model.h"
 #include "ui/views/controls/table/table_grouper.h"
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/examples/example_base.h"
+#include "ui/views/view_observer.h"
 
 namespace views {
+
 class Checkbox;
-class TableView;
+class View;
 
 namespace examples {
 
 class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
                                            public ui::TableModel,
                                            public TableGrouper,
-                                           public TableViewObserver {
+                                           public TableViewObserver,
+                                           public ViewObserver {
  public:
   TableExample();
 
@@ -37,14 +41,14 @@ class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
   void CreateExampleView(View* container) override;
 
   // ui::TableModel:
-  int RowCount() override;
-  std::u16string GetText(int row, int column_id) override;
-  ui::ImageModel GetIcon(int row) override;
-  std::u16string GetTooltip(int row) override;
+  size_t RowCount() override;
+  std::u16string GetText(size_t row, int column_id) override;
+  ui::ImageModel GetIcon(size_t row) override;
+  std::u16string GetTooltip(size_t row) override;
   void SetObserver(ui::TableModelObserver* observer) override;
 
   // TableGrouper:
-  void GetGroupRange(int model_index, GroupRange* range) override;
+  void GetGroupRange(size_t model_index, GroupRange* range) override;
 
   // TableViewObserver:
   void OnSelectionChanged() override;
@@ -52,7 +56,13 @@ class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
   void OnMiddleClick() override;
   void OnKeyDown(ui::KeyboardCode virtual_keycode) override;
 
+  // ViewObserver:
+  void OnViewThemeChanged(View* observed_view) override;
+  void OnViewIsDeleting(View* observed_view) override;
+
  private:
+  std::string SelectedColumnName();
+
   // The table to be tested.
   raw_ptr<TableView> table_ = nullptr;
 
@@ -63,6 +73,8 @@ class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
 
   SkBitmap icon1_;
   SkBitmap icon2_;
+
+  base::ScopedObservation<View, ViewObserver> observer_{this};
 };
 
 }  // namespace examples

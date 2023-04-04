@@ -37,6 +37,7 @@
 #include "src/traced/probes/ftrace/ftrace_config_muxer.h"
 #include "src/traced/probes/ftrace/ftrace_controller.h"
 #include "src/traced/probes/ftrace/ftrace_data_source.h"
+#include "src/traced/probes/ftrace/ftrace_print_filter.h"
 #include "src/traced/probes/ftrace/proto_translation_table.h"
 
 #include "protos/perfetto/trace/ftrace/ftrace_event.pbzero.h"
@@ -135,6 +136,14 @@ bool SetBlocking(int fd, bool is_blocking) {
   int flags = fcntl(fd, F_GETFL, 0);
   flags = (is_blocking) ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
   return fcntl(fd, F_SETFL, flags) == 0;
+}
+
+bool ZeroPaddedPageTail(const uint8_t* start, const uint8_t* end) {
+  for (auto p = start; p < end; p++) {
+    if (*p != 0)
+      return false;
+  }
+  return true;
 }
 
 void LogInvalidPage(const void* start, size_t size) {
@@ -576,11 +585,21 @@ size_t CpuReader::ParsePagePayload(const uint8_t* start_of_payload,
         // Kernel's include/linux/ring_buffer.h
         uint32_t event_size = 0;
         if (event_header.type_or_length == 0) {
-          if (!ReadAndAdvance<uint32_t>(&ptr, end, &event_size))
+          if (!ReadAndAdvance<uint32_t>(&ptr, end, &event_size)) {
             return 0;
-          // Size includes the size field itself.
-          if (event_size < 4)
+          }
+          // Size includes the size field itself. Special case for invalid
+          // tracing pages seen on select Android 4.19 kernels: the page header
+          // says there's still valid data, but the rest of the page is full of
+          // zeroes (which would not decode to a valid event). We pretend that
+          // such pages have been fully parsed. b/204564312.
+          if (PERFETTO_UNLIKELY(event_size == 0 &&
+                                event_header.time_delta == 0 &&
+                                ZeroPaddedPageTail(ptr, end))) {
+            return static_cast<size_t>(page_header->size);
+          } else if (PERFETTO_UNLIKELY(event_size < 4)) {
             return 0;
+          }
           event_size -= 4;
         } else {
           event_size = 4 * event_header.type_or_length;
@@ -604,6 +623,9 @@ size_t CpuReader::ParsePagePayload(const uint8_t* start_of_payload,
           const CompactSchedWakingFormat& sched_waking_format =
               table->compact_sched_format().sched_waking;
 
+          bool ftrace_print_filter_enabled =
+              ds_config->print_filter.has_value();
+
           // compact sched_switch
           if (compact_sched_enabled &&
               ftrace_event_id == sched_switch_format.event_id) {
@@ -622,6 +644,15 @@ size_t CpuReader::ParsePagePayload(const uint8_t* start_of_payload,
             ParseSchedWakingCompact(start, timestamp, &sched_waking_format,
                                     compact_sched_buffer, metadata);
 
+          } else if (ftrace_print_filter_enabled &&
+                     ftrace_event_id == ds_config->print_filter->event_id()) {
+            if (ds_config->print_filter->IsEventInteresting(start, next)) {
+              protos::pbzero::FtraceEvent* event = bundle->add_event();
+              event->set_timestamp(timestamp);
+              if (!ParseEvent(ftrace_event_id, start, next, table, event,
+                              metadata))
+                return 0;
+            }
           } else {
             // Common case: parse all other types of enabled events.
             protos::pbzero::FtraceEvent* event = bundle->add_event();

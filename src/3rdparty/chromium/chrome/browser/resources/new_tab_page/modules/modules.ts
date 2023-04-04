@@ -1,14 +1,14 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
 import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 
 import {CrToastElement} from 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import {assert} from 'chrome://resources/js/assert.m.js';
-import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
+import {assert} from 'chrome://resources/js/assert.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {loadTimeData} from '../i18n_setup.js';
@@ -47,6 +47,11 @@ export interface ModulesElement {
 const SHORT_CLASS_NAME: string = 'short';
 const TALL_CLASS_NAME: string = 'tall';
 
+// When a pair of short module containers are by each other, they are considered
+// siblings and wrapped in another container.
+const SHORT_MODULE_SIBLING_1: string = 'short-module-sibling-one';
+const SHORT_MODULE_SIBLING_2: string = 'short-module-sibling-two';
+
 /** Container for the NTP modules. */
 export class ModulesElement extends PolymerElement {
   static get is() {
@@ -59,15 +64,23 @@ export class ModulesElement extends PolymerElement {
 
   static get properties() {
     return {
+      disabledModules_: {
+        type: Object,
+        value: () => ({all: true, ids: []}),
+      },
+
       dismissedModules_: {
         type: Array,
         value: () => [],
       },
 
-      disabledModules_: {
-        type: Object,
-        value: () => ({all: true, ids: []}),
+      dragEnabled_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('modulesDragAndDropEnabled'),
+        reflectToAttribute: true,
       },
+
+      moduleImpressionDetected_: Boolean,
 
       modulesFreRemoved_: {
         type: Boolean,
@@ -92,17 +105,7 @@ export class ModulesElement extends PolymerElement {
         value: false,
       },
 
-      /** Data about the most recently removed module. */
-      removedModuleData_: {
-        type: Object,
-        value: null,
-      },
-
-      moduleImpressionDetected_: Boolean,
-
       modulesLoaded_: Boolean,
-
-      modulesVisibilityDetermined_: Boolean,
 
       modulesLoadedAndVisibilityDetermined_: {
         type: Boolean,
@@ -112,22 +115,23 @@ export class ModulesElement extends PolymerElement {
         observer: 'onModulesLoadedAndVisibilityDeterminedChange_',
       },
 
-      modulesShownToUser: {
-        type: Boolean,
-        notify: true,
-      },
-
-      /** @private {boolean} */
       modulesRedesignedLayoutEnabled_: {
         type: Boolean,
         value: () => loadTimeData.getBoolean('modulesRedesignedLayoutEnabled'),
         reflectToAttribute: true,
       },
 
-      dragEnabled_: {
+      modulesShownToUser: {
         type: Boolean,
-        value: () => loadTimeData.getBoolean('modulesDragAndDropEnabled'),
-        reflectToAttribute: true,
+        notify: true,
+      },
+
+      modulesVisibilityDetermined_: Boolean,
+
+      /** Data about the most recently removed module. */
+      removedModuleData_: {
+        type: Object,
+        value: null,
       },
     };
   }
@@ -138,16 +142,17 @@ export class ModulesElement extends PolymerElement {
 
   private dismissedModules_: string[];
   private disabledModules_: {all: boolean, ids: string[]};
-  private removedModuleData_: {message: string, undo: () => void}|null;
+  private dragEnabled_: boolean;
+  private moduleImpressionDetected_: boolean;
   private modulesFreRemoved_: boolean;
   private modulesFreShown: boolean;
   private modulesFreVisible_: boolean;
-  private moduleImpressionDetected_: boolean;
   private modulesLoaded_: boolean;
-  private modulesVisibilityDetermined_: boolean;
   private modulesLoadedAndVisibilityDetermined_: boolean;
+  private modulesRedesignedLayoutEnabled_: boolean;
   private modulesShownToUser: boolean;
-  private dragEnabled_: boolean;
+  private modulesVisibilityDetermined_: boolean;
+  private removedModuleData_: {message: string, undo: () => void}|null;
 
   private setDisabledModulesListenerId_: number|null = null;
   private setModulesFreVisibilityListenerId_: number|null = null;
@@ -196,7 +201,11 @@ export class ModulesElement extends PolymerElement {
       if (!moduleContainer.hidden) {
         this.modulesShownToUser = !moduleContainer.hidden;
       }
-      if (loadTimeData.getBoolean('modulesRedesignedLayoutEnabled')) {
+      if (this.modulesRedesignedLayoutEnabled_) {
+        // Remove short module sibling container class name from short modules
+        // that were in a sibling container before.
+        moduleContainer.classList.toggle(SHORT_MODULE_SIBLING_1, false);
+        moduleContainer.classList.toggle(SHORT_MODULE_SIBLING_2, false);
         // Wrap pairs of sibling short modules in a container. All other
         // modules will be placed in a container of their own.
         if ((moduleContainer.classList.contains(SHORT_CLASS_NAME) ||
@@ -208,6 +217,7 @@ export class ModulesElement extends PolymerElement {
           // hidden modules to the sibling container, so if a user reverts a
           // module from its hidden state, the module assumes its original
           // position.
+          moduleContainer.classList.toggle(SHORT_MODULE_SIBLING_2, true);
           moduleContainerParent = shortModuleSiblingsContainer;
           this.$.modules.appendChild(shortModuleSiblingsContainer);
           // If another visible short module is added, a visible tall module is
@@ -225,10 +235,12 @@ export class ModulesElement extends PolymerElement {
             !moduleContainer.hidden &&
             moduleContainer.classList.contains(SHORT_CLASS_NAME) &&
             index + 1 !== moduleContainers.length &&
-            moduleContainers[index + 1].classList.contains(SHORT_CLASS_NAME)) {
+            (moduleContainers[index + 1].classList.contains(SHORT_CLASS_NAME) ||
+             moduleContainers[index + 1].hidden)) {
           // Add current short module to a new container since the next one is
           // short as well by setting its parent to be
           // 'shortModuleSiblingsContainer'.
+          moduleContainer.classList.toggle(SHORT_MODULE_SIBLING_1, true);
           shortModuleSiblingsContainer =
               this.ownerDocument.createElement('div');
           shortModuleSiblingsContainer.classList.add(
@@ -245,7 +257,8 @@ export class ModulesElement extends PolymerElement {
     const modules = await ModuleRegistry.getInstance().initializeModules(
         loadTimeData.getInteger('modulesLoadTimeout'));
     if (modules) {
-      NewTabPageProxy.getInstance().handler.onModulesLoadedWithData();
+      NewTabPageProxy.getInstance().handler.onModulesLoadedWithData(
+          modules.map(module => module.descriptor.id));
       const moduleContainers = modules.map(module => {
         const moduleWrapper = new ModuleWrapperElement();
         moduleWrapper.module = module;
@@ -272,7 +285,7 @@ export class ModulesElement extends PolymerElement {
         });
         const moduleContainer = this.ownerDocument.createElement('div');
         moduleContainer.classList.add('module-container');
-        if (loadTimeData.getBoolean('modulesRedesignedLayoutEnabled')) {
+        if (this.modulesRedesignedLayoutEnabled_) {
           if (module.descriptor.height === ModuleHeight.SHORT) {
             moduleContainer.classList.add(SHORT_CLASS_NAME);
           }
@@ -300,7 +313,7 @@ export class ModulesElement extends PolymerElement {
     for (const moduleDescriptorId of moduleDescriptorIds) {
       moduleDescriptorIds.forEach(id => {
         if (id !== moduleDescriptorId) {
-          chrome.metricsPrivate.recordSparseHashable(
+          chrome.metricsPrivate.recordSparseValueWithPersistentHash(
               `NewTabPage.Modules.LoadedWith.${moduleDescriptorId}`, id);
         }
       });
@@ -326,8 +339,7 @@ export class ModulesElement extends PolymerElement {
     return this.modulesLoaded_ && this.modulesVisibilityDetermined_;
   }
 
-  /** @private */
-  onModulesLoadedAndVisibilityDeterminedChange_() {
+  private onModulesLoadedAndVisibilityDeterminedChange_() {
     if (this.modulesLoadedAndVisibilityDetermined_) {
       ModuleRegistry.getInstance().getDescriptors().forEach(({id}) => {
         chrome.metricsPrivate.recordBoolean(
@@ -380,18 +392,18 @@ export class ModulesElement extends PolymerElement {
           restoreCallback();
         }
         NewTabPageProxy.getInstance().handler.setModuleDisabled(id, false);
-        chrome.metricsPrivate.recordSparseHashable(
+        chrome.metricsPrivate.recordSparseValueWithPersistentHash(
             'NewTabPage.Modules.Enabled', id);
-        chrome.metricsPrivate.recordSparseHashable(
+        chrome.metricsPrivate.recordSparseValueWithPersistentHash(
             'NewTabPage.Modules.Enabled.Toast', id);
       },
     };
 
     NewTabPageProxy.getInstance().handler.setModuleDisabled(id, true);
     this.$.removeModuleToast.show();
-    chrome.metricsPrivate.recordSparseHashable(
+    chrome.metricsPrivate.recordSparseValueWithPersistentHash(
         'NewTabPage.Modules.Disabled', id);
-    chrome.metricsPrivate.recordSparseHashable(
+    chrome.metricsPrivate.recordSparseValueWithPersistentHash(
         'NewTabPage.Modules.Disabled.ModuleRequest', id);
   }
 
@@ -400,8 +412,7 @@ export class ModulesElement extends PolymerElement {
         this.disabledModules_.ids.includes(id);
   }
 
-  /** @private */
-  onUndoRemoveModuleButtonClick_() {
+  private onUndoRemoveModuleButtonClick_() {
     if (!this.removedModuleData_) {
       return;
     }
@@ -421,9 +432,8 @@ export class ModulesElement extends PolymerElement {
 
   /**
    * Hides and reveals modules depending on removed status.
-   * @private
    */
-  onRemovedModulesChange_() {
+  private onRemovedModulesChange_() {
     this.shadowRoot!.querySelectorAll('ntp-module-wrapper')
         .forEach(moduleWrapper => {
           moduleWrapper.parentElement!.hidden =
@@ -526,14 +536,20 @@ export class ModulesElement extends PolymerElement {
     };
 
     const dragEnter = (e: MouseEvent) => {
+      // Move hidden module containers to end of list to ensure user's new
+      // layout stays intact.
       const moduleContainers = [
-        ...this.shadowRoot!.querySelectorAll<HTMLElement>('.module-container')
+        ...this.shadowRoot!.querySelectorAll<HTMLElement>(
+            '.module-container:not([hidden])'),
+        ...this.shadowRoot!.querySelectorAll<HTMLElement>(
+            '.module-container[hidden]'),
       ];
       const dragIndex = moduleContainers.indexOf(dragElement.parentElement!);
       const dropIndex =
           moduleContainers.indexOf((e.target as HTMLElement).parentElement!);
 
       const dragContainer = moduleContainers[dragIndex];
+      const dropContainer = moduleContainers[dropIndex];
 
       // To animate the modules as they are reordered we use the FLIP
       // (First, Last, Invert, Play) animation approach by @paullewis.
@@ -545,8 +561,25 @@ export class ModulesElement extends PolymerElement {
         return moduleWrapper.getBoundingClientRect();
       });
 
-      moduleContainers.splice(dragIndex, 1);
-      moduleContainers.splice(dropIndex, 0, dragContainer);
+      // If a tall module is dragged to a short module sibling container, the
+      // modules in the sibling container should move together.
+      // We add or subtract 1, from the drop index, to make sure the tall module
+      // moves behind or in front of the first module in the sibling container.
+      if (dragContainer.classList.contains(TALL_CLASS_NAME) &&
+          dropContainer.classList.contains(SHORT_MODULE_SIBLING_1) &&
+          dragIndex < dropIndex) {
+        moduleContainers.splice(dragIndex, 1);
+        moduleContainers.splice(dropIndex + 1, 0, dragContainer);
+      } else if (
+          dragContainer.classList.contains(TALL_CLASS_NAME) &&
+          dropContainer.classList.contains(SHORT_MODULE_SIBLING_2) &&
+          dragIndex > dropIndex) {
+        moduleContainers.splice(dragIndex, 1);
+        moduleContainers.splice(dropIndex - 1, 0, dragContainer);
+      } else {
+        moduleContainers.splice(dragIndex, 1);
+        moduleContainers.splice(dropIndex, 0, dragContainer);
+      }
       this.appendModuleContainers_(moduleContainers);
 
       undraggedModuleWrappers.forEach((moduleWrapper, i) => {

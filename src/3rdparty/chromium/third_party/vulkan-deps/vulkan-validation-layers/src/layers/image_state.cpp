@@ -89,7 +89,8 @@ VkImageSubresourceRange NormalizeSubresourceRange(const VkImageCreateInfo &image
 }
 
 static bool IsDepthSliced(const VkImageCreateInfo &image_create_info, const VkImageViewCreateInfo &create_info) {
-    return ((image_create_info.flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT) != 0) &&
+    auto kDepthSlicedFlags = VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT | VK_IMAGE_CREATE_2D_VIEW_COMPATIBLE_BIT_EXT;
+    return ((image_create_info.flags & kDepthSlicedFlags) != 0) &&
            (create_info.viewType == VK_IMAGE_VIEW_TYPE_2D || create_info.viewType == VK_IMAGE_VIEW_TYPE_2D_ARRAY);
 }
 
@@ -196,6 +197,20 @@ static bool SparseMetaDataRequired(const IMAGE_STATE::SparseReqs &sparse_reqs) {
     }
     return result;
 }
+#ifdef VK_USE_PLATFORM_METAL_EXT
+static bool GetMetalExport(const VkImageCreateInfo *info, VkExportMetalObjectTypeFlagBitsEXT object_type_required) {
+    bool retval = false;
+    auto export_metal_object_info = LvlFindInChain<VkExportMetalObjectCreateInfoEXT>(info->pNext);
+    while (export_metal_object_info) {
+        if (export_metal_object_info->exportObjectType == object_type_required) {
+            retval = true;
+            break;
+        }
+        export_metal_object_info = LvlFindInChain<VkExportMetalObjectCreateInfoEXT>(export_metal_object_info->pNext);
+    }
+    return retval;
+}
+#endif  // VK_USE_PLATFORM_METAL_EXT
 
 IMAGE_STATE::IMAGE_STATE(const ValidationStateTracker *dev_data, VkImage img, const VkImageCreateInfo *pCreateInfo,
                          VkFormatFeatureFlags2KHR ff)
@@ -208,6 +223,7 @@ IMAGE_STATE::IMAGE_STATE(const ValidationStateTracker *dev_data, VkImage img, co
       ahb_format(GetExternalFormat(pCreateInfo)),
       full_range{MakeImageFullRange(*pCreateInfo)},
       create_from_swapchain(GetSwapchain(pCreateInfo)),
+      owned_by_swapchain(false),
       swapchain_image_index(0),
       format_features(ff),
       disjoint((pCreateInfo->flags & VK_IMAGE_CREATE_DISJOINT_BIT) != 0),
@@ -217,6 +233,10 @@ IMAGE_STATE::IMAGE_STATE(const ValidationStateTracker *dev_data, VkImage img, co
       sparse_metadata_required(SparseMetaDataRequired(sparse_requirements)),
       get_sparse_reqs_called(false),
       sparse_metadata_bound(false),
+#ifdef VK_USE_PLATFORM_METAL_EXT
+      metal_image_export(GetMetalExport(pCreateInfo, VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT)),
+      metal_io_surface_export(GetMetalExport(pCreateInfo, VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT)),
+#endif  // VK_USE_PLATFORM_METAL_EXT
       subresource_encoder(full_range),
       fragment_encoder(nullptr),
       store_device_as_workaround(dev_data->device) {}  // TODO REMOVE WHEN encoder can be const
@@ -232,6 +252,7 @@ IMAGE_STATE::IMAGE_STATE(const ValidationStateTracker *dev_data, VkImage img, co
       ahb_format(GetExternalFormat(pCreateInfo)),
       full_range{MakeImageFullRange(*pCreateInfo)},
       create_from_swapchain(swapchain),
+      owned_by_swapchain(true),
       swapchain_image_index(swapchain_index),
       format_features(ff),
       disjoint((pCreateInfo->flags & VK_IMAGE_CREATE_DISJOINT_BIT) != 0),
@@ -241,6 +262,10 @@ IMAGE_STATE::IMAGE_STATE(const ValidationStateTracker *dev_data, VkImage img, co
       sparse_metadata_required(false),
       get_sparse_reqs_called(false),
       sparse_metadata_bound(false),
+#ifdef VK_USE_PLATFORM_METAL_EXT
+      metal_image_export(GetMetalExport(pCreateInfo, VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT)),
+      metal_io_surface_export(GetMetalExport(pCreateInfo, VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT)),
+#endif  // VK_USE_PLATFORM_METAL_EXT
       subresource_encoder(full_range),
       fragment_encoder(nullptr),
       store_device_as_workaround(dev_data->device) {  // TODO REMOVE WHEN encoder can be const
@@ -303,8 +328,9 @@ bool IMAGE_STATE::IsCompatibleAliasing(IMAGE_STATE *other_image_state) const {
     }
     const auto binding = Binding();
     const auto other_binding = other_image_state->Binding();
-    if ((create_from_swapchain == VK_NULL_HANDLE) && binding && other_binding && (binding->mem_state == other_binding->mem_state) &&
-        (binding->offset == other_binding->offset) && IsCreateInfoEqual(other_image_state->createInfo)) {
+    if ((create_from_swapchain == VK_NULL_HANDLE) && binding && other_binding &&
+        (binding->memory_state == other_binding->memory_state) && (binding->memory_offset == other_binding->memory_offset) &&
+        IsCreateInfoEqual(other_image_state->createInfo)) {
         return true;
     }
     if (bind_swapchain && (bind_swapchain == other_image_state->bind_swapchain) &&
@@ -319,20 +345,20 @@ void IMAGE_STATE::SetInitialLayoutMap() {
         return;
     }
     if ((createInfo.flags & VK_IMAGE_CREATE_ALIAS_BIT) != 0) {
-        const auto *binding = Binding();
-        assert(binding);
         // Look for another aliasing image and point at its layout state.
         // ObjectBindings() is thread safe since returns by value, and once
         // the weak_ptr is successfully locked, the other image state won't
         // be freed out from under us.
-        for (auto &entry : binding->mem_state->ObjectBindings()) {
-            if (entry.first.type == kVulkanObjectTypeImage) {
-                auto base_node = entry.second.lock();
-                if (base_node) {
-                    auto other_image = static_cast<IMAGE_STATE *>(base_node.get());
-                    if (other_image != this && other_image->IsCompatibleAliasing(this)) {
-                        layout_range_map = other_image->layout_range_map;
-                        break;
+        for (auto const &memory_state : GetBoundMemoryStates()) {
+            for (auto &entry : memory_state->ObjectBindings()) {
+                if (entry.first.type == kVulkanObjectTypeImage) {
+                    auto base_node = entry.second.lock();
+                    if (base_node) {
+                        auto other_image = static_cast<IMAGE_STATE *>(base_node.get());
+                        if (other_image != this && other_image->IsCompatibleAliasing(this)) {
+                            layout_range_map = other_image->layout_range_map;
+                            break;
+                        }
                     }
                 }
             }
@@ -385,12 +411,9 @@ VkDeviceSize IMAGE_STATE::GetFakeBaseAddress() const {
     return bind_swapchain->images[swapchain_image_index].fake_base_address;
 }
 
-// Returns the effective extent of an image subresource, adjusted for mip level and array depth.
-VkExtent3D IMAGE_STATE::GetSubresourceExtent(const VkImageSubresourceLayers &subresource) const {
-    const uint32_t mip = subresource.mipLevel;
-
+VkExtent3D IMAGE_STATE::GetSubresourceExtent(VkImageAspectFlags aspect_mask, uint32_t mip_level) const {
     // Return zero extent if mip level doesn't exist
-    if (mip >= createInfo.mipLevels) {
+    if (mip_level >= createInfo.mipLevels) {
         return VkExtent3D{0, 0, 0};
     }
 
@@ -399,19 +422,19 @@ VkExtent3D IMAGE_STATE::GetSubresourceExtent(const VkImageSubresourceLayers &sub
 
     // If multi-plane, adjust per-plane extent
     if (FormatIsMultiplane(createInfo.format)) {
-        VkExtent2D divisors = FindMultiplaneExtentDivisors(createInfo.format, subresource.aspectMask);
+        VkExtent2D divisors = FindMultiplaneExtentDivisors(createInfo.format, aspect_mask);
         extent.width /= divisors.width;
         extent.height /= divisors.height;
     }
 
     if (createInfo.flags & VK_IMAGE_CREATE_CORNER_SAMPLED_BIT_NV) {
-        extent.width = (0 == extent.width ? 0 : std::max(2U, 1 + ((extent.width - 1) >> mip)));
-        extent.height = (0 == extent.height ? 0 : std::max(2U, 1 + ((extent.height - 1) >> mip)));
-        extent.depth = (0 == extent.depth ? 0 : std::max(2U, 1 + ((extent.depth - 1) >> mip)));
+        extent.width = (0 == extent.width ? 0 : std::max(2U, 1 + ((extent.width - 1) >> mip_level)));
+        extent.height = (0 == extent.height ? 0 : std::max(2U, 1 + ((extent.height - 1) >> mip_level)));
+        extent.depth = (0 == extent.depth ? 0 : std::max(2U, 1 + ((extent.depth - 1) >> mip_level)));
     } else {
-        extent.width = (0 == extent.width ? 0 : std::max(1U, extent.width >> mip));
-        extent.height = (0 == extent.height ? 0 : std::max(1U, extent.height >> mip));
-        extent.depth = (0 == extent.depth ? 0 : std::max(1U, extent.depth >> mip));
+        extent.width = (0 == extent.width ? 0 : std::max(1U, extent.width >> mip_level));
+        extent.height = (0 == extent.height ? 0 : std::max(1U, extent.height >> mip_level));
+        extent.depth = (0 == extent.depth ? 0 : std::max(1U, extent.depth >> mip_level));
     }
 
     // Image arrays have an effective z extent that isn't diminished by mip level
@@ -420,6 +443,11 @@ VkExtent3D IMAGE_STATE::GetSubresourceExtent(const VkImageSubresourceLayers &sub
     }
 
     return extent;
+}
+
+// Returns the effective extent of an image subresource, adjusted for mip level and array depth.
+VkExtent3D IMAGE_STATE::GetSubresourceExtent(const VkImageSubresourceLayers &subresource) const {
+    return GetSubresourceExtent(subresource.aspectMask, subresource.mipLevel);
 }
 
 static VkSamplerYcbcrConversion GetSamplerConversion(const VkImageViewCreateInfo *ci) {
@@ -436,6 +464,21 @@ static float GetImageViewMinLod(const VkImageViewCreateInfo* ci) {
     auto image_view_min_lod = LvlFindInChain<VkImageViewMinLodCreateInfoEXT>(ci->pNext);
     return (image_view_min_lod) ? image_view_min_lod->minLod : 0.0f;
 }
+
+#ifdef VK_USE_PLATFORM_METAL_EXT
+static bool GetMetalExport(const VkImageViewCreateInfo *info) {
+    bool retval = false;
+    auto export_metal_object_info = LvlFindInChain<VkExportMetalObjectCreateInfoEXT>(info->pNext);
+    while (export_metal_object_info) {
+        if (export_metal_object_info->exportObjectType == VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT) {
+            retval = true;
+            break;
+        }
+        export_metal_object_info = LvlFindInChain<VkExportMetalObjectCreateInfoEXT>(export_metal_object_info->pNext);
+    }
+    return retval;
+}
+#endif  // VK_USE_PLATFORM_METAL_EXT
 
 IMAGE_VIEW_STATE::IMAGE_VIEW_STATE(const std::shared_ptr<IMAGE_STATE> &im, VkImageView iv, const VkImageViewCreateInfo *ci,
                                    VkFormatFeatureFlags2KHR ff, const VkFilterCubicImageViewImageFormatPropertiesEXT &cubic_props)
@@ -455,6 +498,9 @@ IMAGE_VIEW_STATE::IMAGE_VIEW_STATE(const std::shared_ptr<IMAGE_STATE> &im, VkIma
       min_lod(GetImageViewMinLod(ci)),
       format_features(ff),
       inherited_usage(GetInheritedUsage(ci, *im)),
+#ifdef VK_USE_PLATFORM_METAL_EXT
+      metal_imageview_export(GetMetalExport(ci)),
+#endif
       image_state(im) {}
 
 void IMAGE_VIEW_STATE::Destroy() {
@@ -540,7 +586,7 @@ SWAPCHAIN_NODE::SWAPCHAIN_NODE(ValidationStateTracker *dev_data_, const VkSwapch
       image_create_info(GetImageCreateInfo(pCreateInfo)),
       dev_data(dev_data_) {}
 
-void SWAPCHAIN_NODE::PresentImage(uint32_t image_index) {
+void SWAPCHAIN_NODE::PresentImage(uint32_t image_index, uint64_t present_id) {
     if (image_index >= images.size()) return;
     assert(acquired_images > 0);
     acquired_images--;
@@ -550,6 +596,9 @@ void SWAPCHAIN_NODE::PresentImage(uint32_t image_index) {
         if (image_state) {
             image_state->layout_locked = true;
         }
+    }
+    if (present_id > max_present_id) {
+        max_present_id = present_id;
     }
 }
 

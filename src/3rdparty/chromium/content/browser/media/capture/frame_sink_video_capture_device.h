@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "build/build_config.h"
+#include "components/viz/common/gpu/context_lost_observer.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/video_capture_target.h"
 #include "components/viz/host/client_frame_sink_video_capturer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/base/video_frame.h"
+#include "media/base/video_types.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "media/capture/video/video_capture_device.h"
 #include "media/capture/video/video_frame_receiver.h"
@@ -31,10 +33,13 @@
 #include "services/device/public/mojom/wake_lock.mojom.h"
 #include "services/viz/public/cpp/compositing/video_capture_target_mojom_traits.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/compositor/compositor.h"
 
 namespace content {
 
 class MouseCursorOverlayController;
+
+class ContextProviderObserver;
 
 // A virtualized VideoCaptureDevice that captures the displayed contents of a
 // frame sink (see viz::CompositorFrameSink), such as the composited main view
@@ -94,7 +99,8 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
       media::mojom::VideoFrameInfoPtr info,
       const gfx::Rect& content_rect,
       mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
-          callbacks) final;
+          callbacks) override;
+  void OnNewCropVersion(uint32_t crop_version) final;
   void OnFrameWithEmptyRegionCapture() final;
   void OnStopped() final;
   void OnLog(const std::string& message) final;
@@ -134,6 +140,30 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
  private:
   using BufferId = decltype(media::VideoCaptureDevice::Client::Buffer::id);
 
+  void AllocateAndStartWithReceiverInternal();
+
+  // Starts observing changes to context provider.
+  void ObserveContextProvider();
+
+  // Re-creates the |capturer_| if needed. The capturer will be recreated (and
+  // re-started if the current one was running) if it is configured to use a
+  // pixel format that is different than the pixel format that we are able to
+  // use given current device capabilities (e.g. when a capturer was configured
+  // to use NV12 format but conditions changed and now we can only capture
+  // I420 format).
+  void RestartCapturerIfNeeded();
+
+  // Helper, checks if the FrameSinkVideoCapturer should be able to support
+  // capture using NV12 pixel format - this depends on device capabilities.
+  bool CanSupportNV12Format() const;
+
+  // Helper, returns desired video pixel format based on the contents of
+  // |capture_parameters_|. If the capture parameters specify
+  // PIXEL_FORMAT_UNKNOWN, it means we need to decide between I420 and NV12.
+  media::VideoPixelFormat GetDesiredVideoPixelFormat() const;
+
+  void AllocateCapturer(media::VideoPixelFormat pixel_format);
+
   // If not consuming and all preconditions are met, set up and start consuming.
   void MaybeStartConsuming();
 
@@ -150,6 +180,12 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   // Helper that requests wake lock to prevent the display from sleeping while
   // capturing is going on.
   void RequestWakeLock();
+
+  // Helper to set `gpu_capabilities_` on the appropriate thread. Can be called
+  // from any thread, will hop to the sequence on which the device was created.
+  // This indirection is needed to support cancellation of handed out callbacks.
+  void SetGpuCapabilitiesOnDevice(
+      absl::optional<gpu::Capabilities> capabilities);
 
   // Current capture target. This is cached to resolve a race where
   // OnTargetChanged() can be called before the |capturer_| is created in
@@ -169,6 +205,15 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   std::unique_ptr<media::VideoFrameReceiver> receiver_;
 
   std::unique_ptr<viz::ClientFrameSinkVideoCapturer> capturer_;
+
+  // Capabilities obtained from viz::ContextProvider.
+  absl::optional<gpu::Capabilities> gpu_capabilities_
+      GUARDED_BY_CONTEXT(sequence_checker_);
+
+  // Instance that is responsible for monitoring for context loss events on the
+  // `viz::ContextProvider`. May be null.
+  std::unique_ptr<ContextProviderObserver, BrowserThread::DeleteOnUIThread>
+      context_provider_observer_ GUARDED_BY_CONTEXT(sequence_checker_);
 
   // A vector that holds the "callbacks" mojo::Remote for each frame while the
   // frame is being processed by VideoFrameReceiver. The index corresponding to

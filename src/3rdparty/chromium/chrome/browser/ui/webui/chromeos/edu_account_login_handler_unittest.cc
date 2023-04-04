@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,10 @@
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
-#include "chrome/browser/ash/net/network_portal_detector_test_impl.h"
-#include "chromeos/dbus/shill/shill_clients.h"
-#include "chromeos/network/network_handler.h"
-#include "chromeos/network/network_handler_test_helper.h"
-#include "chromeos/network/network_state_handler.h"
+#include "chromeos/ash/components/dbus/shill/shill_clients.h"
+#include "chromeos/ash/components/network/network_handler.h"
+#include "chromeos/ash/components/network/network_handler_test_helper.h"
+#include "chromeos/ash/components/network/network_state_handler.h"
 #include "components/image_fetcher/core/mock_image_fetcher.h"
 #include "components/image_fetcher/core/request_metadata.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
@@ -26,6 +25,7 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
@@ -85,29 +85,29 @@ std::map<std::string, gfx::Image> GetFakeProfileImageMap() {
   };
 }
 
-base::ListValue GetFakeParentsWithoutImage() {
-  base::ListValue parents;
+base::Value::List GetFakeParentsWithoutImage() {
+  base::Value::List parents;
 
-  base::DictionaryValue parent1;
-  parent1.GetDict().Set("email", "homer@simpson.com");
-  parent1.GetDict().Set("displayName", "Homer Simpson");
-  parent1.GetDict().Set("obfuscatedGaiaId", kFakeParentGaiaId);
+  base::Value::Dict parent1;
+  parent1.Set("email", "homer@simpson.com");
+  parent1.Set("displayName", "Homer Simpson");
+  parent1.Set("obfuscatedGaiaId", kFakeParentGaiaId);
   parents.Append(std::move(parent1));
 
-  base::DictionaryValue parent2;
-  parent2.GetDict().Set("email", std::string());
-  parent2.GetDict().Set("displayName", "Marge Simpson");
-  parent2.GetDict().Set("obfuscatedGaiaId", kFakeParentGaiaId2);
+  base::Value::Dict parent2;
+  parent2.Set("email", std::string());
+  parent2.Set("displayName", "Marge Simpson");
+  parent2.Set("obfuscatedGaiaId", kFakeParentGaiaId2);
   parents.Append(std::move(parent2));
 
   return parents;
 }
 
-base::ListValue GetFakeParentsWithImage() {
-  base::ListValue parents = GetFakeParentsWithoutImage();
+base::Value::List GetFakeParentsWithImage() {
+  base::Value::List parents = GetFakeParentsWithoutImage();
   std::map<std::string, gfx::Image> profile_images = GetFakeProfileImageMap();
 
-  for (auto& parent : parents.GetListDeprecated()) {
+  for (auto& parent : parents) {
     const std::string* obfuscated_gaia_id =
         parent.GetDict().FindString("obfuscatedGaiaId");
     DCHECK(obfuscated_gaia_id);
@@ -129,12 +129,12 @@ base::ListValue GetFakeParentsWithImage() {
   return parents;
 }
 
-base::DictionaryValue GetFakeParent() {
-  base::DictionaryValue parent;
-  parent.GetDict().Set("email", "homer@simpson.com");
-  parent.GetDict().Set("displayName", "Homer Simpson");
-  parent.GetDict().Set("profileImageUrl", "http://profile.url/homer/image");
-  parent.GetDict().Set("obfuscatedGaiaId", kFakeParentGaiaId);
+base::Value::Dict GetFakeParent() {
+  base::Value::Dict parent;
+  parent.Set("email", "homer@simpson.com");
+  parent.Set("displayName", "Homer Simpson");
+  parent.Set("profileImageUrl", "http://profile.url/homer/image");
+  parent.Set("obfuscatedGaiaId", kFakeParentGaiaId);
   return parent;
 }
 
@@ -159,7 +159,7 @@ class MockEduAccountLoginHandler : public EduAccountLoginHandler {
               (override));
   MOCK_METHOD(void,
               FetchParentImages,
-              (base::ListValue parents,
+              (base::Value::List parents,
                (std::map<std::string, GURL> profile_image_urls)),
               (override));
 };
@@ -174,27 +174,11 @@ class EduAccountLoginHandlerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  void SetupNetwork(bool network_status_online = true) {
-    const NetworkState* default_network =
-        NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-    const std::string guid =
-        default_network ? default_network->guid() : std::string();
-
-    network_portal_detector::InitializeForTesting(&network_portal_detector_);
-    network_portal_detector_.SetDefaultNetworkForTesting(guid);
-    NetworkPortalDetector::CaptivePortalStatus status;
-    int response_code = -1;
-    if (network_status_online) {
-      status = NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
-      response_code = 204;  // No content
-    } else {
-      status = NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL;
-      response_code = 200;  // OK
-    }
-    if (!guid.empty()) {
-      network_portal_detector_.SetDetectionResultsForTesting(guid, status,
-                                                             response_code);
-    }
+  void SetupNetwork(bool online = true) {
+    std::string state =
+        online ? shill::kStateOnline : shill::kStateRedirectFound;
+    network_handler_test_helper_->ResetDevicesAndServices();
+    network_handler_test_helper_->ConfigureWiFi(state);
 
     mock_image_fetcher_ = std::make_unique<image_fetcher::MockImageFetcher>();
     handler_ = std::make_unique<MockEduAccountLoginHandler>(base::DoNothing());
@@ -203,7 +187,6 @@ class EduAccountLoginHandlerTest : public testing::Test {
 
   void TearDown() override {
     handler_.reset();
-    network_portal_detector::InitializeForTesting(nullptr);
     network_handler_test_helper_.reset();
   }
 
@@ -230,7 +213,6 @@ class EduAccountLoginHandlerTest : public testing::Test {
 
  private:
   base::test::SingleThreadTaskEnvironment task_environment_;
-  NetworkPortalDetectorTestImpl network_portal_detector_;
   std::unique_ptr<image_fetcher::MockImageFetcher> mock_image_fetcher_;
   std::unique_ptr<MockEduAccountLoginHandler> handler_;
   content::TestWebUI web_ui_;
@@ -276,7 +258,7 @@ TEST_F(EduAccountLoginHandlerTest, HandleGetParentsFailure) {
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
   VerifyJavascriptCallbackResolved(data, callback_id, false /*success*/);
 
-  ASSERT_EQ(base::ListValue(), *data.arg3());
+  ASSERT_EQ(base::Value::List(), *data.arg3());
 }
 
 TEST_F(EduAccountLoginHandlerTest, HandleParentSigninSuccess) {
@@ -332,8 +314,8 @@ TEST_F(EduAccountLoginHandlerTest, HandleParentSigninAccessTokenFailure) {
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
   VerifyJavascriptCallbackResolved(data, callback_id, false /*success*/);
 
-  base::DictionaryValue result;
-  result.GetDict().Set("isWrongPassword", false);
+  base::Value::Dict result;
+  result.Set("isWrongPassword", false);
   ASSERT_EQ(result, *data.arg3());
 }
 
@@ -366,8 +348,8 @@ TEST_F(EduAccountLoginHandlerTest, HandleParentSigninReAuthProofTokenFailure) {
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
   VerifyJavascriptCallbackResolved(data, callback_id, false);
 
-  base::DictionaryValue result;
-  result.GetDict().Set("isWrongPassword", true);
+  base::Value::Dict result;
+  result.Set("isWrongPassword", true);
   ASSERT_EQ(result, *data.arg3());
 }
 

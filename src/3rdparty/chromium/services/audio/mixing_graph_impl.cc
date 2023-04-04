@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,13 +144,9 @@ void MixingGraphImpl::AddInput(Input* input) {
   // Channel mixer input format is the same as resampler input except channel
   // layout and channel count.
   media::AudioParameters channel_mixer_input_params(
-      resampler_input_params.format(), input_params.channel_layout(),
+      resampler_input_params.format(), input_params.channel_layout_config(),
       resampler_input_params.sample_rate(),
       resampler_input_params.frames_per_buffer());
-  if (channel_mixer_input_params.channel_layout() ==
-      media::CHANNEL_LAYOUT_DISCRETE)
-    channel_mixer_input_params.set_channels_for_discrete(
-        input_params.channels());
 
   media::LoopbackAudioConverter* converter = nullptr;
 
@@ -229,13 +225,9 @@ int MixingGraphImpl::OnMoreData(base::TimeDelta delay,
                      "MixingGraphImpl::OnMoreData", "delay", delay,
                      "delay_timestamp", delay_timestamp);
 
-  // The expected playout time is |delay_timestamp| + |delay|.
-  base::TimeDelta total_delay = delay_timestamp + delay - start_time;
-  if (total_delay < base::TimeDelta())
-    total_delay = base::TimeDelta();
-
   uint32_t frames_delayed = media::AudioTimestampHelper::TimeToFrames(
-      total_delay, output_params_.sample_rate());
+      delay, output_params_.sample_rate());
+
   {
     base::AutoLock scoped_lock(lock_);
     main_converter_.ConvertWithDelay(frames_delayed, dest);
@@ -243,11 +235,11 @@ int MixingGraphImpl::OnMoreData(base::TimeDelta delay,
 
   SanitizeOutput(dest);
 
-  on_more_data_cb_.Run(*dest, total_delay);
+  on_more_data_cb_.Run(*dest, delay);
 
-  TRACE_EVENT_END2(TRACE_DISABLED_BY_DEFAULT("audio"),
-                   "MixingGraphImpl::OnMoreData", "total_delay", total_delay,
-                   "frames_delayed", frames_delayed);
+  TRACE_EVENT_END1(TRACE_DISABLED_BY_DEFAULT("audio"),
+                   "MixingGraphImpl::OnMoreData", "frames_delayed",
+                   frames_delayed);
   overtime_logger_->Log(start_time);
   return dest->frames();
 }

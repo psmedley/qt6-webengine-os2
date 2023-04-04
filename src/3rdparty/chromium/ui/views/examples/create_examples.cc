@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "ui/views/examples/colored_dialog_example.h"
 #include "ui/views/examples/colors_example.h"
 #include "ui/views/examples/combobox_example.h"
+#include "ui/views/examples/designer_example.h"
 #include "ui/views/examples/dialog_example.h"
 #include "ui/views/examples/fade_animation.h"
 #include "ui/views/examples/flex_layout_example.h"
@@ -70,6 +71,7 @@ ExampleVector CreateExamples(ExampleVector extra_examples) {
   examples.push_back(std::make_unique<ColoredDialogExample>());
   examples.push_back(std::make_unique<ColorsExample>());
   examples.push_back(std::make_unique<ComboboxExample>());
+  examples.push_back(std::make_unique<DesignerExample>());
   examples.push_back(std::make_unique<DialogExample>());
   examples.push_back(std::make_unique<FadeAnimationExample>());
   examples.push_back(std::make_unique<FlexLayoutExample>());

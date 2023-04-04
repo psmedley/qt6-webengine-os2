@@ -1,8 +1,8 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/builders.star", "builder", "cpu", "defaults", "goma", "os")
+load("//lib/builders.star", "builder", "cpu", "defaults", "goma", "os", "xcode")
 
 luci.bucket(
     name = "webrtc",
@@ -28,7 +28,7 @@ luci.bucket(
 
 defaults.bucket.set("webrtc")
 defaults.builder_group.set("chromium.webrtc")
-defaults.builderless.set(False)
+defaults.builderless.set(None)
 defaults.build_numbers.set(True)
 defaults.cpu.set(cpu.X86_64)
 defaults.executable.set("recipe:chromium")
@@ -40,6 +40,9 @@ defaults.triggered_by.set(["chromium-gitiles-trigger"])
 defaults.properties.set({
     "perf_dashboard_machine_group": "ChromiumWebRTC",
 })
+
+# TODO(crbug.com/1362440): remove this.
+defaults.omit_python2.set(False)
 
 # Builders are defined in lexicographic order by name
 
@@ -67,12 +70,13 @@ builder(
     name = "WebRTC Chromium Mac Builder",
     goma_backend = goma.backend.RBE_PROD,
     os = os.MAC_ANY,
+    xcode = xcode.x14main,
 )
 
 builder(
     name = "WebRTC Chromium Mac Tester",
-    os = os.MAC_ANY,
     triggered_by = ["WebRTC Chromium Mac Builder"],
+    xcode = xcode.x14main,
 )
 
 builder(
@@ -84,12 +88,5 @@ builder(
 
 builder(
     name = "WebRTC Chromium Win10 Tester",
-    os = os.WINDOWS_ANY,
-    triggered_by = ["WebRTC Chromium Win Builder"],
-)
-
-builder(
-    name = "WebRTC Chromium Win7 Tester",
-    os = os.WINDOWS_ANY,
     triggered_by = ["WebRTC Chromium Win Builder"],
 )

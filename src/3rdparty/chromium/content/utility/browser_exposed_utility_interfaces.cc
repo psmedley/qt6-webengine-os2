@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,8 +73,9 @@ void ExposeUtilityInterfacesToBrowser(mojo::BinderMap* binders) {
   }
 #endif  // BUILDFLAG(IS_WIN)
   if (bind_usage_reporter) {
-    binders->Add(base::BindRepeating(&CreateResourceUsageReporter),
-                 base::ThreadTaskRunnerHandle::Get());
+    binders->Add<mojom::ResourceUsageReporter>(
+        base::BindRepeating(&CreateResourceUsageReporter),
+        base::ThreadTaskRunnerHandle::Get());
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 

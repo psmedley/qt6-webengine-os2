@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ class Client {
 
   // Returns the e-mail address used to sign into Chrome, or an empty string if
   // the user is not signed in.
-  virtual std::string GetChromeSignedInEmailAddress() const = 0;
+  virtual std::string GetSignedInEmail() const = 0;
 
   // Returns the AccessTokenFetcher to use to get oauth credentials.
   virtual AccessTokenFetcher* GetAccessTokenFetcher() = 0;
@@ -79,8 +79,11 @@ class Client {
   // Returns the locale.
   virtual std::string GetLocale() const = 0;
 
-  // Returns the country code.
-  virtual std::string GetCountryCode() const = 0;
+  // Returns the latest country code.
+  virtual std::string GetLatestCountryCode() const = 0;
+
+  // Returns the permanent country code stored for this client.
+  virtual std::string GetStoredPermanentCountryCode() const = 0;
 
   // Returns details about the device.
   virtual DeviceContext GetDeviceContext() const = 0;
@@ -121,6 +124,29 @@ class Client {
   // Returns the ScriptExecutorUiDelegate if it exists, otherwise returns
   // nullptr.
   virtual ScriptExecutorUiDelegate* GetScriptExecutorUiDelegate() = 0;
+
+  // Returns whether or not this instance of Autofill Assistant must use a
+  // backend endpoint to query data.
+  virtual bool MustUseBackendData() const = 0;
+
+  // Return the annotate DOM model version, if available.
+  virtual void GetAnnotateDomModelVersion(
+      base::OnceCallback<void(absl::optional<int64_t>)> callback) const = 0;
+
+  // Checks if given XML is signed or not.
+  virtual bool IsXmlSigned(const std::string& xml_string) const = 0;
+
+  // Extracts attribute values from the |xml_string| corresponding to the
+  // |keys|.
+  virtual const std::vector<std::string> ExtractValuesFromSingleTagXml(
+      const std::string& xml_string,
+      const std::vector<std::string>& keys) const = 0;
+
+  // Return whether MSBB is enabled.
+  virtual bool GetMakeSearchesAndBrowsingBetterEnabled() const = 0;
+
+  // Return whether metrics reporting is enable.
+  virtual bool GetMetricsReportingEnabled() const = 0;
 
  protected:
   Client() = default;

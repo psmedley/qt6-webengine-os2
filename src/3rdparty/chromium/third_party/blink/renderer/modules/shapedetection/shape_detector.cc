@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
+#include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -146,9 +147,10 @@ ScriptPromise ShapeDetector::DetectShapesOnImageData(
 
   SkPixmap image_data_pixmap = image_data->GetSkPixmap();
   SkBitmap sk_bitmap;
+  // Pass 0 for rowBytes to have SkBitmap calculate minimum valid size.
   if (!sk_bitmap.tryAllocPixels(
           image_data_pixmap.info().makeColorType(kN32_SkColorType),
-          image_data_pixmap.rowBytes())) {
+          /*rowBytes=*/0)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
         "Failed to allocate pixels for current frame.");

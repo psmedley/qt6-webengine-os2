@@ -74,13 +74,13 @@
         fields_to_diff: ["padding-top", "padding-left", "padding-right",
                 "padding-bottom", "appearance", "-webkit-line-clamp",
                 "text-overflow", "shape-margin", "order", "-webkit-highlight",
-                "text-indent", "text-align-last", "TextIndentLine", "EffectiveZoom",
+                "text-indent", "text-align-last", "EffectiveZoom",
                 "word-break", "overflow-wrap", "-webkit-line-break",
-                "-webkit-text-security", "hyphens", "HyphenationLimitBefore",
-                "HyphenationLimitAfter", "-webkit-hyphenate-character",
+                "-webkit-text-security",
+                "hyphens", "hyphenate-character", "hyphenate-limit-chars",
                 "image-orientation", "-webkit-ruby-position",
                 "TextEmphasisMark", "text-emphasis-position",
-                "TextEmphasisCustomMark", "text-justify", "text-orientation",
+                "TextEmphasisCustomMark", "text-orientation",
                 "text-combine-upright", "tab-size", "text-size-adjust",
                 "list-style-image", "line-height-step",
                 "-webkit-text-stroke-width", "line-height",
@@ -228,7 +228,8 @@
                 "contain-intrinsic-height", "container-type",
                 "content-visibility", "aspect-ratio", "overflow-clip-margin",
                 "-internal-align-self-block", "orphans", "widows",
-                "scrollbar-gutter"],
+                "scrollbar-gutter", "break-after", "break-before",
+                "break-inside", "anchor-name"],
         methods_to_diff: [
           {
             method: "VerticalAlign()",
@@ -249,13 +250,14 @@
         fields_to_diff: ["-webkit-user-modify", "user-select", "image-rendering",
                 "column-rule-style", "column-rule-width", "column-rule-color",
                 "-internal-visited-column-rule-color",
-                "-webkit-user-drag", "object-fit", "object-fit", "object-position",
+                "-webkit-user-drag", "object-fit", "object-position",
                 "mix-blend-mode", "isolation", "Mask", "MaskBoxImage", "mask", "mask-type",
                 "stop-color", "stop-opacity", "flood-color", "flood-opacity",
                 "lighting-color", "shape-rendering", "clip-rule", "fill-rule",
                 "color-interpolation", "color-interpolation-filters", "paint-order",
                 "fill", "fill-opacity", "stroke", "stroke-opacity",
-                "-internal-visited-stroke", "stroke-dashoffset", "ColorSchemeForced"],
+                "-internal-visited-stroke", "stroke-dashoffset", "ColorSchemeForced",
+                "anchor-scroll"],
         methods_to_diff: [
           {
             method: "Visibility()",
@@ -270,10 +272,6 @@
             field_dependencies: ["InsideLink"]
           },
           {
-            method: "InternalVisitedBackgroundColor()",
-            field_dependencies: ["-internal-visited-background-color"]
-          },
-          {
             method: "Resize()",
             field_dependencies: ["resize"]
           },
@@ -284,6 +282,10 @@
           {
             method: "AccentColorResolved()",
             field_dependencies: ["accent-color", "color"]
+          },
+          {
+            method: "AnchorScroll()",
+            field_dependencies: ["anchor-scroll"],
           }
         ],
         predicates_to_test: [
@@ -366,20 +368,30 @@
                      "transform-box"],
     },
     {
+        // Diff of the transform property only. See
+        // |UpdatePropertySpecificDifferencesOtherTransform|.
         name: "UpdatePropertySpecificDifferencesTransform",
-        fields_to_diff: ["transform", "translate", "rotate",
+        fields_to_diff: ["transform"],
+    },
+    {
+        // Diff of transform-related properties other than the transform itself.
+        // Because HasTransform() is checked below, this will also check for
+        // changes to the existence of the transform property.
+        name: "UpdatePropertySpecificDifferencesOtherTransform",
+        fields_to_diff: ["translate", "rotate",
                     "scale", "offset-path", "offset-rotate", "transform-origin",
                      "offset-position", "offset-anchor", "offset-distance",
                      "perspective", "perspective-origin", "transform-box"],
         methods_to_diff: [
           {
             // It's possible for the old and new style transform data to be equivalent
-            // while hasTransform() differs, as it checks a number of conditions aside
+            // while HasTransform() differs, as it checks a number of conditions aside
             // from just the matrix, including but not limited to animation state.
             method: "HasTransform()",
             field_dependencies: ["transform", "offset-position",
-                    "HasCurrentTransformAnimation", "translate", "rotate",
-                    "scale"]
+                    "HasCurrentTranslateAnimation", "HasCurrentRotateAnimation",
+                    "HasCurrentScaleAnimation", "HasCurrentTransformAnimation",
+                    "translate", "rotate", "scale"]
           },
         ]
     },

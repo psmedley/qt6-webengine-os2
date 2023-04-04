@@ -28,6 +28,8 @@
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 
 namespace blink {
@@ -127,7 +129,7 @@ void AbstractPropertySetCSSStyleDeclaration::setProperty(
     return;
 
   bool important = EqualIgnoringASCIICase(priority, "important");
-  if (!important && !priority.IsEmpty())
+  if (!important && !priority.empty())
     return;
 
   const SecureContextMode mode = execution_context
@@ -181,6 +183,37 @@ AbstractPropertySetCSSStyleDeclaration::GetPropertyCSSValueInternal(
 String AbstractPropertySetCSSStyleDeclaration::GetPropertyValueInternal(
     CSSPropertyID property_id) {
   return PropertySet().GetPropertyValue(property_id);
+}
+
+String AbstractPropertySetCSSStyleDeclaration::GetPropertyValueWithHint(
+    const String& property_name,
+    unsigned index) {
+  CSSPropertyID property_id =
+      CssPropertyID(GetExecutionContext(), property_name);
+  if (!IsValidCSSPropertyID(property_id))
+    return String();
+  if (property_id == CSSPropertyID::kVariable) {
+    return PropertySet().GetPropertyValueWithHint(AtomicString(property_name),
+                                                  index);
+  }
+  return PropertySet().GetPropertyValue(property_id);
+}
+
+String AbstractPropertySetCSSStyleDeclaration::GetPropertyPriorityWithHint(
+    const String& property_name,
+    unsigned index) {
+  CSSPropertyID property_id =
+      CssPropertyID(GetExecutionContext(), property_name);
+  if (!IsValidCSSPropertyID(property_id))
+    return String();
+  bool important = false;
+  if (property_id == CSSPropertyID::kVariable) {
+    important = PropertySet().PropertyIsImportantWithHint(
+        AtomicString(property_name), index);
+  } else {
+    important = PropertySet().PropertyIsImportant(property_id);
+  }
+  return important ? "important" : "";
 }
 
 DISABLE_CFI_PERF

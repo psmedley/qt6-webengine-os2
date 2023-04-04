@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/base_export.h"
 #include "base/debug/debugging_buildflags.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(IS_POSIX)
@@ -235,9 +236,9 @@ class BASE_EXPORT ScopedStackFrameLinker {
   ~ScopedStackFrameLinker();
 
  private:
-  void* fp_;
-  void* parent_fp_;
-  void* original_parent_fp_;
+  raw_ptr<void> fp_;
+  raw_ptr<void> parent_fp_;
+  raw_ptr<void> original_parent_fp_;
 };
 
 #endif  // BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)

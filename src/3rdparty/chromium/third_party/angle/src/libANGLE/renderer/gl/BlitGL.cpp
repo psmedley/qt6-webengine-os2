@@ -25,7 +25,7 @@
 #include "libANGLE/renderer/gl/formatutilsgl.h"
 #include "libANGLE/renderer/gl/renderergl_utils.h"
 #include "libANGLE/renderer/renderer_utils.h"
-#include "platform/FeaturesGL.h"
+#include "platform/FeaturesGL_autogen.h"
 
 using angle::Vector2;
 
@@ -62,7 +62,7 @@ angle::Result CheckLinkStatus(const gl::Context *context,
     return angle::Result::Continue;
 }
 
-class ANGLE_NO_DISCARD ScopedGLState : angle::NonCopyable
+class [[nodiscard]] ScopedGLState : angle::NonCopyable
 {
   public:
     enum
@@ -292,6 +292,12 @@ angle::Result BlitGL::copyImageToLUMAWorkaroundTexture(const gl::Context *contex
     GLenum format   = gl::GetUnsizedFormat(internalFormat);
     GLenum readType = source->getImplementationColorReadType(context);
 
+    // getImplementationColorReadType aligns the type with ES client version
+    if (readType == GL_HALF_FLOAT_OES && mFunctions->standard == STANDARD_GL_DESKTOP)
+    {
+        readType = GL_HALF_FLOAT;
+    }
+
     gl::PixelUnpackState unpack;
     ANGLE_TRY(mStateManager->setPixelUnpackState(context, unpack));
     ANGLE_TRY(mStateManager->setPixelUnpackBuffer(
@@ -326,6 +332,12 @@ angle::Result BlitGL::copySubImageToLUMAWorkaroundTexture(const gl::Context *con
 
     GLenum readFormat = source->getImplementationColorReadFormat(context);
     GLenum readType   = source->getImplementationColorReadType(context);
+
+    // getImplementationColorReadType aligns the type with ES client version
+    if (readType == GL_HALF_FLOAT_OES && mFunctions->standard == STANDARD_GL_DESKTOP)
+    {
+        readType = GL_HALF_FLOAT;
+    }
 
     nativegl::CopyTexImageImageFormat copyTexImageFormat =
         nativegl::GetCopyTexImageImageFormat(mFunctions, mFeatures, readFormat, readType);
@@ -1010,13 +1022,17 @@ angle::Result BlitGL::clearRenderbuffer(const gl::Context *context,
     return angle::Result::Continue;
 }
 
-angle::Result BlitGL::clearFramebuffer(const gl::Context *context, FramebufferGL *source)
+angle::Result BlitGL::clearFramebuffer(const gl::Context *context,
+                                       bool colorClear,
+                                       bool depthClear,
+                                       bool stencilClear,
+                                       FramebufferGL *source)
 {
     // initializeResources skipped because no local state is used
 
     // Clear all attachments
     GLbitfield clearMask = 0;
-    ANGLE_TRY(SetClearState(mStateManager, true, true, true, &clearMask));
+    ANGLE_TRY(SetClearState(mStateManager, colorClear, depthClear, stencilClear, &clearMask));
 
     mStateManager->bindFramebuffer(GL_FRAMEBUFFER, source->getFramebufferID());
     ANGLE_GL_TRY(context, mFunctions->clear(clearMask));
@@ -1161,7 +1177,7 @@ angle::Result BlitGL::initializeResources(const gl::Context *context)
     {
         ANGLE_GL_TRY(context, mFunctions->genVertexArrays(1, &mVAO));
         mVAOState     = new VertexArrayStateGL(defaultVAOState->attributes.size(),
-                                           defaultVAOState->bindings.size());
+                                               defaultVAOState->bindings.size());
         mOwnsVAOState = true;
         ANGLE_TRY(setVAOState(context));
         ANGLE_TRY(initializeVAOState(context));

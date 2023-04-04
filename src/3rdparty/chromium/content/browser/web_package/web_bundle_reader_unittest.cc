@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,6 +73,8 @@ TEST_F(WebBundleReaderTest, ReadMetadata) {
       GetReader()->HasEntry(GURL("https://user:pass@test.example.org/")));
   EXPECT_TRUE(GetReader()->HasEntry(GURL("https://test.example.org/#ref")));
   EXPECT_FALSE(GetReader()->HasEntry(GURL("https://test.example.org/404")));
+  EXPECT_EQ(GetReader()->GetEntries(),
+            std::vector({GURL("https://test.example.org")}));
 }
 
 TEST_F(WebBundleReaderTest, ReadResponse) {

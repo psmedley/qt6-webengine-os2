@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 namespace assist_ranker {
 
 #if BUILDFLAG(IS_ANDROID)
-const base::Feature kContextualSearchRankerQuery{
-    "ContextualSearchRankerQuery", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kContextualSearchRankerQuery,
+             "ContextualSearchRankerQuery",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 namespace {
 
@@ -47,40 +48,7 @@ float GetContextualSearchRankerThresholdFeatureParam() {
 // the UKM generated API.
 const base::flat_set<std::string>* GetContextualSearchFeatureAllowlist() {
   static auto* kContextualSearchFeatureAllowlist =
-      new base::flat_set<std::string>({"DidOptIn",
-                                       "DurationAfterScrollMs",
-                                       "EntityImpressionsCount",
-                                       "EntityOpensCount",
-                                       "FontSize",
-                                       "IsEntity",
-                                       "IsEntityEligible",
-                                       "IsHttp",
-                                       "IsLanguageMismatch",
-                                       "IsLongWord",
-                                       "IsSecondTapOverride",
-                                       "IsShortWord",
-                                       "IsWordEdge",
-                                       "OpenCount",
-                                       "OutcomeRankerDidPredict",
-                                       "OutcomeRankerPrediction",
-                                       "OutcomeRankerPredictionScore",
-                                       "OutcomeWasCardsDataShown",
-                                       "OutcomeWasPanelOpened",
-                                       "OutcomeWasQuickActionClicked",
-                                       "OutcomeWasQuickAnswerSeen",
-                                       "PortionOfElement",
-                                       "Previous28DayCtrPercent",
-                                       "Previous28DayImpressionsCount",
-                                       "PreviousWeekCtrPercent",
-                                       "PreviousWeekImpressionsCount",
-                                       "QuickActionImpressionsCount",
-                                       "QuickActionsIgnored",
-                                       "QuickActionsTaken",
-                                       "QuickAnswerCount",
-                                       "ScreenTopDps",
-                                       "TapCount",
-                                       "TapDurationMs",
-                                       "WasScreenBottom"});
+      new base::flat_set<std::string>();
   return kContextualSearchFeatureAllowlist;
 }
 

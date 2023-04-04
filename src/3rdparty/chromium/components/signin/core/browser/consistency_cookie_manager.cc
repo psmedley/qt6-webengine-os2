@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/check.h"
 #include "base/containers/contains.h"
 #include "base/containers/cxx20_erase.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "components/signin/public/base/signin_client.h"
@@ -73,7 +74,7 @@ ConsistencyCookieManager::ConsistencyCookieManager(
       account_reconcilor_state_(account_reconcilor_->GetState()) {
   DCHECK(signin_client_);
   DCHECK(account_reconcilor_);
-  account_reconcilor_observation_.Observe(account_reconcilor_);
+  account_reconcilor_observation_.Observe(account_reconcilor_.get());
   UpdateCookieIfNeeded(/*force_creation=*/false);
 }
 
@@ -264,10 +265,10 @@ void ConsistencyCookieManager::UpdateCookieIfExists(
     return;
 
   // Compute the current value of the cookie.
-  auto it = std::find_if(cookie_list.cbegin(), cookie_list.cend(),
-                         [](const net::CookieWithAccessResult& result) {
-                           return IsConsistencyCookie(result.cookie);
-                         });
+  auto it = base::ranges::find_if(
+      cookie_list, [](const net::CookieWithAccessResult& result) {
+        return IsConsistencyCookie(result.cookie);
+      });
   absl::optional<CookieValue> current_value =
       (it == cookie_list.cend())
           ? absl::nullopt

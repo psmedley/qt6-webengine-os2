@@ -16,7 +16,11 @@
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
@@ -34,12 +38,13 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.connectToBrowser = void 0;
-const Browser_js_1 = require("./Browser.js");
-const assert_js_1 = require("./assert.js");
-const helper_js_1 = require("../common/helper.js");
-const Connection_js_1 = require("./Connection.js");
+exports._connectToCDPBrowser = void 0;
+const util_js_1 = require("./util.js");
+const ErrorLike_js_1 = require("../util/ErrorLike.js");
 const environment_js_1 = require("../environment.js");
+const assert_js_1 = require("../util/assert.js");
+const Browser_js_1 = require("./Browser.js");
+const Connection_js_1 = require("./Connection.js");
 const fetch_js_1 = require("./fetch.js");
 const getWebSocketTransportClass = async () => {
     return environment_js_1.isNode
@@ -50,13 +55,14 @@ const getWebSocketTransportClass = async () => {
 /**
  * Users should never call this directly; it's called when calling
  * `puppeteer.connect`.
+ *
  * @internal
  */
-const connectToBrowser = async (options) => {
-    const { browserWSEndpoint, browserURL, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, transport, slowMo = 0, targetFilter, } = options;
+async function _connectToCDPBrowser(options) {
+    const { browserWSEndpoint, browserURL, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, transport, slowMo = 0, targetFilter, _isPageTarget: isPageTarget, } = options;
     (0, assert_js_1.assert)(Number(!!browserWSEndpoint) + Number(!!browserURL) + Number(!!transport) ===
         1, 'Exactly one of browserWSEndpoint, browserURL or transport must be passed to puppeteer.connect');
-    let connection = null;
+    let connection;
     if (transport) {
         connection = new Connection_js_1.Connection('', transport, slowMo);
     }
@@ -71,10 +77,17 @@ const connectToBrowser = async (options) => {
         const connectionTransport = await WebSocketClass.create(connectionURL);
         connection = new Connection_js_1.Connection(connectionURL, connectionTransport, slowMo);
     }
+    const version = await connection.send('Browser.getVersion');
+    const product = version.product.toLowerCase().includes('firefox')
+        ? 'firefox'
+        : 'chrome';
     const { browserContextIds } = await connection.send('Target.getBrowserContexts');
-    return Browser_js_1.Browser.create(connection, browserContextIds, ignoreHTTPSErrors, defaultViewport, null, () => connection.send('Browser.close').catch(helper_js_1.debugError), targetFilter);
-};
-exports.connectToBrowser = connectToBrowser;
+    const browser = await Browser_js_1.CDPBrowser._create(product || 'chrome', connection, browserContextIds, ignoreHTTPSErrors, defaultViewport, undefined, () => {
+        return connection.send('Browser.close').catch(util_js_1.debugError);
+    }, targetFilter, isPageTarget);
+    return browser;
+}
+exports._connectToCDPBrowser = _connectToCDPBrowser;
 async function getWSEndpoint(browserURL) {
     const endpointURL = new URL('/json/version', browserURL);
     const fetch = await (0, fetch_js_1.getFetch)();
@@ -89,9 +102,11 @@ async function getWSEndpoint(browserURL) {
         return data.webSocketDebuggerUrl;
     }
     catch (error) {
-        error.message =
-            `Failed to fetch browser webSocket URL from ${endpointURL}: ` +
-                error.message;
+        if ((0, ErrorLike_js_1.isErrorLike)(error)) {
+            error.message =
+                `Failed to fetch browser webSocket URL from ${endpointURL}: ` +
+                    error.message;
+        }
         throw error;
     }
 }

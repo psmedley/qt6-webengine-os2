@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,6 +106,8 @@ class MockVideoCaptureControllerEventHandler
                void(const VideoCaptureControllerID&, media::VideoCaptureError));
   MOCK_METHOD1(OnStarted, void(const VideoCaptureControllerID&));
   MOCK_METHOD1(OnStartedUsingGpuDecode, void(const VideoCaptureControllerID&));
+  MOCK_METHOD2(OnNewCropVersion,
+               void(const VideoCaptureControllerID&, uint32_t));
 
   void OnError(const VideoCaptureControllerID& id,
                media::VideoCaptureError error) override {

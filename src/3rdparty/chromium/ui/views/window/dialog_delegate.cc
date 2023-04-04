@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -253,9 +253,8 @@ std::unique_ptr<NonClientFrameView> DialogDelegate::CreateDialogFrameView(
       provider->GetInsetsMetric(INSETS_DIALOG_TITLE), gfx::Insets());
 
   const BubbleBorder::Shadow kShadow = BubbleBorder::DIALOG_SHADOW;
-  std::unique_ptr<BubbleBorder> border = std::make_unique<BubbleBorder>(
-      BubbleBorder::FLOAT, kShadow, gfx::kPlaceholderColor);
-  border->set_use_theme_background_color(true);
+  std::unique_ptr<BubbleBorder> border =
+      std::make_unique<BubbleBorder>(BubbleBorder::FLOAT, kShadow);
   DialogDelegate* delegate = widget->widget_delegate()->AsDialogDelegate();
   if (delegate) {
     if (delegate->GetParams().round_corners)

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,7 +60,7 @@ class HTMLResourcePreloaderTest : public PageTestBase {
         KURL(test_case.base_url), ResourceType::kImage,
         network::mojom::ReferrerPolicy(), ResourceFetcher::kImageNotImageSet,
         nullptr /* exclusion_info */, FetchParameters::ResourceWidth(),
-        ClientHintsPreferences(), PreloadRequest::kRequestTypePreconnect);
+        PreloadRequest::kRequestTypePreconnect);
     DCHECK(preload_request);
     if (test_case.is_cors)
       preload_request->SetCrossOrigin(kCrossOriginAttributeAnonymous);

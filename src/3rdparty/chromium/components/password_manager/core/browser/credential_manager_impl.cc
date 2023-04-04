@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "components/password_manager/core/browser/credential_manager_impl.h"
@@ -163,9 +163,7 @@ void CredentialManagerImpl::Get(CredentialMediationRequirement mediation,
 }
 
 bool CredentialManagerImpl::IsZeroClickAllowed() const {
-  return password_manager_util::IsAutoSignInEnabled(
-             client_->GetPrefs(), client_->GetSyncService()) &&
-         !client_->IsIncognito();
+  return client_->IsAutoSignInEnabled() && !client_->IsIncognito();
 }
 
 PasswordFormDigest CredentialManagerImpl::GetSynthesizedFormForOrigin() const {

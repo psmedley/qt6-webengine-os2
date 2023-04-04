@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,10 +37,9 @@ class LazyLoadFrameObserver final
     kLoadedNearOrInViewport = 1,
     // The frame was determined to likely be a hidden frame (e.g. analytics or
     // communication iframes), so it was loaded immediately.
-    // Deprecated in Jan 2022.
-    kDeprecatedLoadedHidden = 2,
+    kLoadedHidden = 2,
 
-    kMaxValue = kDeprecatedLoadedHidden
+    kMaxValue = kLoadedHidden
   };
 
   // The loading pipeline for an iframe differs depending on whether the

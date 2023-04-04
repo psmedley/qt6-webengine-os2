@@ -1,10 +1,11 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
 
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "media/base/limits.h"
 #include "media/gpu/h265_decoder.h"
@@ -31,23 +32,46 @@ bool ParseBitDepth(const H265SPS& sps, uint8_t& bit_depth) {
 }
 
 bool IsValidBitDepth(uint8_t bit_depth, VideoCodecProfile profile) {
-  // Spec A.3.
   switch (profile) {
+    // Spec A.3.2
     case HEVCPROFILE_MAIN:
       return bit_depth == 8u;
+    // Spec A.3.3
     case HEVCPROFILE_MAIN10:
       return bit_depth == 8u || bit_depth == 10u;
+    // Spec A.3.4
     case HEVCPROFILE_MAIN_STILL_PICTURE:
       return bit_depth == 8u;
+    // Spec A.3.5
+    case HEVCPROFILE_REXT:
+      return bit_depth == 8u || bit_depth == 10u || bit_depth == 12u ||
+             bit_depth == 14u || bit_depth == 16u;
+    // Spec A.3.6
+    case HEVCPROFILE_HIGH_THROUGHPUT:
+      return bit_depth == 8u || bit_depth == 10u || bit_depth == 14u ||
+             bit_depth == 16u;
+    // Spec G.11.1.1
+    case HEVCPROFILE_MULTIVIEW_MAIN:
+      return bit_depth == 8u;
+    // Spec H.11.1.1
+    case HEVCPROFILE_SCALABLE_MAIN:
+      return bit_depth == 8u || bit_depth == 10u;
+    // Spec I.11.1.1
+    case HEVCPROFILE_3D_MAIN:
+      return bit_depth == 8u;
+    // Spec A.3.7
+    case HEVCPROFILE_SCREEN_EXTENDED:
+      return bit_depth == 8u || bit_depth == 10u;
+    // Spec H.11.1.2
+    case HEVCPROFILE_SCALABLE_REXT:
+      return bit_depth == 8u || bit_depth == 12u || bit_depth == 16u;
+    // Spec A.3.8
+    case HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED:
+      return bit_depth == 8u || bit_depth == 10u || bit_depth == 14u;
     default:
       DVLOG(1) << "Invalid profile specified for H265";
       return false;
   }
-}
-
-bool IsYUV420Sequence(const H265SPS& sps) {
-  // Spec 6.2
-  return sps.chroma_format_idc == 1;
 }
 }  // namespace
 
@@ -301,6 +325,23 @@ H265Decoder::DecodeResult H265Decoder::Decode() {
         if (par_res != H265Parser::kOk)
           SET_ERROR_AND_RETURN();
 
+        // For ARC CTS tests they expect us to request the buffers after only
+        // processing the SPS/PPS, we can't wait until we get the first IDR. To
+        // resolve the problem that was created by originally doing that, only
+        // do it if we don't have an active PPS set yet so it won't disturb an
+        // active stream.
+        if (curr_pps_id_ == -1) {
+          bool need_new_buffers = false;
+          if (!ProcessPPS(pps_id, &need_new_buffers)) {
+            SET_ERROR_AND_RETURN();
+          }
+
+          if (need_new_buffers) {
+            curr_nalu_.reset();
+            return kConfigChange;
+          }
+        }
+
         break;
       case H265NALU::EOS_NUT:
         first_picture_ = true;
@@ -347,6 +388,10 @@ uint8_t H265Decoder::GetBitDepth() const {
   return bit_depth_;
 }
 
+VideoChromaSampling H265Decoder::GetChromaSampling() const {
+  return chroma_sampling_;
+}
+
 size_t H265Decoder::GetRequiredNumOfPictures() const {
   constexpr size_t kPicsInPipeline = limits::kMaxVideoFrames + 1;
   return GetNumReferenceFrames() + kPicsInPipeline;
@@ -377,7 +422,14 @@ bool H265Decoder::ProcessPPS(int pps_id, bool* need_new_buffers) {
     DVLOG(2) << "New visible rect: " << new_visible_rect.ToString();
     visible_rect_ = new_visible_rect;
   }
-  if (!IsYUV420Sequence(*sps)) {
+
+  VideoChromaSampling new_chroma_sampling = sps->GetChromaSampling();
+  if (new_chroma_sampling != chroma_sampling_) {
+    base::UmaHistogramEnumeration("Media.PlatformVideoDecoding.ChromaSampling",
+                                  new_chroma_sampling);
+  }
+
+  if (!accelerator_->IsChromaSamplingSupported(new_chroma_sampling)) {
     DVLOG(1) << "Only YUV 4:2:0 is supported";
     return false;
   }
@@ -396,18 +448,23 @@ bool H265Decoder::ProcessPPS(int pps_id, bool* need_new_buffers) {
              << ", profile=" << GetProfileName(new_profile);
     return false;
   }
+
   if (pic_size_ != new_pic_size || dpb_.max_num_pics() != sps->max_dpb_size ||
-      profile_ != new_profile || bit_depth_ != new_bit_depth) {
+      profile_ != new_profile || bit_depth_ != new_bit_depth ||
+      chroma_sampling_ != new_chroma_sampling) {
     if (!Flush())
       return false;
     DVLOG(1) << "Codec profile: " << GetProfileName(new_profile)
              << ", level(x30): " << sps->profile_tier_level.general_level_idc
              << ", DPB size: " << sps->max_dpb_size
              << ", Picture size: " << new_pic_size.ToString()
-             << ", bit_depth: " << base::strict_cast<int>(new_bit_depth);
+             << ", bit_depth: " << base::strict_cast<int>(new_bit_depth)
+             << ", chroma_sampling_format: "
+             << VideoChromaSamplingToString(new_chroma_sampling);
     profile_ = new_profile;
     bit_depth_ = new_bit_depth;
     pic_size_ = new_pic_size;
+    chroma_sampling_ = new_chroma_sampling;
     dpb_.set_max_num_pics(sps->max_dpb_size);
     if (need_new_buffers)
       *need_new_buffers = true;

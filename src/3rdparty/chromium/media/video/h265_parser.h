@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -16,6 +16,7 @@
 #include "media/base/media_export.h"
 #include "media/base/ranges.h"
 #include "media/base/video_color_space.h"
+#include "media/base/video_types.h"
 #include "media/video/h264_bit_reader.h"
 #include "media/video/h264_parser.h"
 #include "media/video/h265_nalu_parser.h"
@@ -35,14 +36,17 @@ enum {
 struct MEDIA_EXPORT H265ProfileTierLevel {
   H265ProfileTierLevel();
 
-  // From Annex A.3.
   enum H265ProfileIdc {
     kProfileIdcMain = 1,
     kProfileIdcMain10 = 2,
     kProfileIdcMainStill = 3,
     kProfileIdcRangeExtensions = 4,
     kProfileIdcHighThroughput = 5,
+    kProfileIdcMultiviewMain = 6,
+    kProfileIdcScalableMain = 7,
+    kProfileIdc3dMain = 8,
     kProfileIdcScreenContentCoding = 9,
+    kProfileIdcScalableRangeExtensions = 10,
     kProfileIdcHighThroughputScreenContentCoding = 11,
   };
 
@@ -91,6 +95,7 @@ struct MEDIA_EXPORT H265StRefPicSet {
 
   // Calculated fields.
   int num_delta_pocs;
+  int rps_idx_num_delta_pocs;
 };
 
 struct MEDIA_EXPORT H265VUIParameters {
@@ -179,6 +184,22 @@ struct MEDIA_EXPORT H265SPS {
   bool strong_intra_smoothing_enabled_flag;
   H265VUIParameters vui_parameters;
 
+  // Extension extra elements.
+  bool sps_extension_present_flag;
+  bool sps_range_extension_flag;
+  bool sps_multilayer_extension_flag;
+  bool sps_3d_extension_flag;
+  bool sps_scc_extension_flag;
+  bool transform_skip_rotation_enabled_flag;
+  bool transform_skip_context_enabled_flag;
+  bool implicit_rdpcm_enabled_flag;
+  bool explicit_rdpcm_enabled_flag;
+  bool extended_precision_processing_flag;
+  bool intra_smoothing_disabled_flag;
+  bool high_precision_offsets_enabled_flag;
+  bool persistent_rice_adaptation_enabled_flag;
+  bool cabac_bypass_alignment_enabled_flag;
+
   // Calculated fields.
   int chroma_array_type;
   int sub_width_c;
@@ -199,6 +220,7 @@ struct MEDIA_EXPORT H265SPS {
   gfx::Size GetCodedSize() const;
   gfx::Rect GetVisibleRect() const;
   VideoColorSpace GetColorSpace() const;
+  VideoChromaSampling GetChromaSampling() const;
 };
 
 struct MEDIA_EXPORT H265PPS {
@@ -250,6 +272,22 @@ struct MEDIA_EXPORT H265PPS {
   bool lists_modification_present_flag;
   int log2_parallel_merge_level_minus2;
   bool slice_segment_header_extension_present_flag;
+
+  // Extension extra elements.
+  bool pps_extension_present_flag;
+  bool pps_range_extension_flag;
+  bool pps_multilayer_extension_flag;
+  bool pps_3d_extension_flag;
+  bool pps_scc_extension_flag;
+  int log2_max_transform_skip_block_size_minus2;
+  bool cross_component_prediction_enabled_flag;
+  bool chroma_qp_offset_list_enabled_flag;
+  int diff_cu_chroma_qp_offset_depth;
+  int chroma_qp_offset_list_len_minus1;
+  int cb_qp_offset_list[6];
+  int cr_qp_offset_list[6];
+  int log2_sao_offset_scale_luma;
+  int log2_sao_offset_scale_chroma;
 
   // Calculated fields.
   int qp_bd_offset_y;
@@ -364,6 +402,54 @@ struct MEDIA_EXPORT H265SliceHeader {
   }
 };
 
+struct MEDIA_EXPORT H265SEIAlphaChannelInfo {
+  bool alpha_channel_cancel_flag;
+  int alpha_channel_use_idc;
+  int alpha_channel_bit_depth_minus8;
+  int alpha_transparent_value;
+  int alpha_opaque_value;
+  bool alpha_channel_incr_flag;
+  bool alpha_channel_clip_flag;
+  bool alpha_channel_clip_type_flag;
+};
+
+struct MEDIA_EXPORT H265SEIContentLightLevelInfo {
+  uint16_t max_content_light_level;
+  uint16_t max_picture_average_light_level;
+};
+
+struct MEDIA_EXPORT H265SEIMasteringDisplayInfo {
+  enum {
+    kNumDisplayPrimaries = 3,
+    kDisplayPrimaryComponents = 2,
+  };
+
+  uint16_t display_primaries[kNumDisplayPrimaries][kDisplayPrimaryComponents];
+  uint16_t white_points[2];
+  uint32_t max_luminance;
+  uint32_t min_luminance;
+};
+
+struct MEDIA_EXPORT H265SEIMessage {
+  H265SEIMessage();
+
+  enum Type {
+    kSEIMasteringDisplayInfo = 137,
+    kSEIContentLightLevelInfo = 144,
+    kSEIAlphaChannelInfo = 165,
+  };
+
+  int type;
+  int payload_size;
+  union {
+    // Placeholder; in future more supported types will contribute to more
+    // union members here.
+    H265SEIAlphaChannelInfo alpha_channel_info;
+    H265SEIContentLightLevelInfo content_light_level_info;
+    H265SEIMasteringDisplayInfo mastering_display_info;
+  };
+};
+
 // Class to parse an Annex-B H.265 stream.
 class MEDIA_EXPORT H265Parser : public H265NaluParser {
  public:
@@ -408,6 +494,10 @@ class MEDIA_EXPORT H265Parser : public H265NaluParser {
                           H265SliceHeader* shdr,
                           H265SliceHeader* prior_shdr);
 
+  // Parse a SEI message, returning it in |*sei_msg|, provided and managed
+  // by the caller.
+  Result ParseSEI(H265SEIMessage* sei_msg);
+
   static VideoCodecProfile ProfileIDCToVideoCodecProfile(int profile_idc);
 
  private:
@@ -424,7 +514,8 @@ class MEDIA_EXPORT H265Parser : public H265NaluParser {
   Result ParseScalingListData(H265ScalingListData* scaling_list_data);
   Result ParseStRefPicSet(int st_rps_idx,
                           const H265SPS& sps,
-                          H265StRefPicSet* st_ref_pic_set);
+                          H265StRefPicSet* st_ref_pic_set,
+                          bool is_slice_hdr = false);
   Result ParseVuiParameters(const H265SPS& sps, H265VUIParameters* vui);
   Result ParseAndIgnoreHrdParameters(bool common_inf_present_flag,
                                      int max_num_sub_layers_minus1);

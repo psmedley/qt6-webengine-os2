@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/render_widget_host_observer.h"
+#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -360,7 +361,7 @@ class RenderFrameHostManagerTest
 
     // Navigate our first tab to a chrome url and then to the destination.
     NavigationSimulator::NavigateAndCommitFromBrowser(contents(), kChromeURL);
-    TestRenderFrameHost* ntp_rfh = contents()->GetMainFrame();
+    TestRenderFrameHost* ntp_rfh = contents()->GetPrimaryMainFrame();
 
     // Navigate to a cross-site URL.
     auto navigation =
@@ -399,11 +400,13 @@ class RenderFrameHostManagerTest
                             : blink::mojom::NavigationType::DIFFERENT_DOCUMENT;
     scoped_refptr<network::ResourceRequestBody> request_body;
     std::string post_content_type;
+    bool is_form_submission = false;
     if (frame_entry->method() == "POST") {
       request_body = frame_entry->GetPostData(&post_content_type);
       // Might have a LF at end.
       post_content_type = std::string(
           base::TrimWhitespaceASCII(post_content_type, base::TRIM_ALL));
+      is_form_submission = !!request_body;
     }
 
     auto& referrer = frame_entry->referrer();
@@ -420,7 +423,8 @@ class RenderFrameHostManagerTest
             controller.GetPendingEntryIndex() == -1 /* intended_as_new_entry */,
             controller.GetIndexOfEntry(entry),
             controller.GetLastCommittedEntryIndex(), controller.GetEntryCount(),
-            frame_tree_node->current_replication_state().frame_policy);
+            frame_tree_node->current_replication_state().frame_policy,
+            frame_tree_node->AncestorOrSelfHasCSPEE());
     commit_params->post_content_type = post_content_type;
 
     std::unique_ptr<NavigationRequest> navigation_request =
@@ -429,7 +433,7 @@ class RenderFrameHostManagerTest
             !entry->is_renderer_initiated(), false /* was_opener_suppressed */,
             nullptr /* initiator_frame_token */,
             ChildProcessHost::kInvalidUniqueID /* initiator_process_id */,
-            entry->extra_headers(), frame_entry, entry, request_body,
+            entry->extra_headers(), frame_entry, entry, is_form_submission,
             nullptr /* navigation_ui_data */, absl::nullopt /* impression */,
             false /* is_pdf */);
 
@@ -508,11 +512,12 @@ TEST_P(RenderFrameHostManagerTest, ChromeSchemeProcesses) {
   navigation2->Commit();
 
   // The two RFH's should be different in every way.
-  EXPECT_NE(contents()->GetMainFrame()->GetProcess(), dest_rfh2->GetProcess());
-  EXPECT_NE(contents()->GetMainFrame()->GetSiteInstance(),
+  EXPECT_NE(contents()->GetPrimaryMainFrame()->GetProcess(),
+            dest_rfh2->GetProcess());
+  EXPECT_NE(contents()->GetPrimaryMainFrame()->GetSiteInstance(),
             dest_rfh2->GetSiteInstance());
   EXPECT_FALSE(dest_rfh2->GetSiteInstance()->IsRelatedSiteInstance(
-      contents()->GetMainFrame()->GetSiteInstance()));
+      contents()->GetPrimaryMainFrame()->GetSiteInstance()));
 
   // Navigate both to a chrome://... URL, and verify that they have a separate
   // RenderProcessHost and a separate SiteInstance.
@@ -522,10 +527,10 @@ TEST_P(RenderFrameHostManagerTest, ChromeSchemeProcesses) {
   NavigationSimulator::NavigateAndCommitFromBrowser(contents2.get(),
                                                     kChromeUrl);
 
-  EXPECT_NE(contents()->GetMainFrame()->GetSiteInstance(),
-            contents2->GetMainFrame()->GetSiteInstance());
-  EXPECT_NE(contents()->GetMainFrame()->GetSiteInstance()->GetProcess(),
-            contents2->GetMainFrame()->GetSiteInstance()->GetProcess());
+  EXPECT_NE(contents()->GetPrimaryMainFrame()->GetSiteInstance(),
+            contents2->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(contents()->GetPrimaryMainFrame()->GetSiteInstance()->GetProcess(),
+            contents2->GetPrimaryMainFrame()->GetSiteInstance()->GetProcess());
 }
 
 // Ensure that the browser ignores most IPC messages that arrive from a
@@ -540,7 +545,7 @@ TEST_P(RenderFrameHostManagerTest, FilterMessagesWhileSwappedOut) {
 
   // Navigate our first tab to a chrome url and then to the destination.
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), kChromeURL);
-  TestRenderFrameHost* ntp_rfh = contents()->GetMainFrame();
+  TestRenderFrameHost* ntp_rfh = contents()->GetPrimaryMainFrame();
 
   // Send an update favicon message and make sure it works.
   {
@@ -558,7 +563,7 @@ TEST_P(RenderFrameHostManagerTest, FilterMessagesWhileSwappedOut) {
       NavigationSimulatorImpl::CreateBrowserInitiated(kDestUrl, contents());
   navigation->set_drop_unload_ack(true);
   navigation->Commit();
-  TestRenderFrameHost* dest_rfh = contents()->GetMainFrame();
+  TestRenderFrameHost* dest_rfh = contents()->GetPrimaryMainFrame();
   ASSERT_TRUE(dest_rfh);
   EXPECT_NE(ntp_rfh, dest_rfh);
 
@@ -589,7 +594,7 @@ TEST_P(RenderFrameHostManagerTest, UpdateFaviconURLWhilePendingUnload) {
 
   // Navigate our first tab to a chrome url and then to the destination.
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), kChromeURL);
-  TestRenderFrameHost* ntp_rfh = contents()->GetMainFrame();
+  TestRenderFrameHost* ntp_rfh = contents()->GetPrimaryMainFrame();
 
   // Send an update favicon message and make sure it works.
   {
@@ -607,7 +612,7 @@ TEST_P(RenderFrameHostManagerTest, UpdateFaviconURLWhilePendingUnload) {
       NavigationSimulatorImpl::CreateBrowserInitiated(kDestUrl, contents());
   navigation->set_drop_unload_ack(true);
   navigation->Commit();
-  TestRenderFrameHost* dest_rfh = contents()->GetMainFrame();
+  TestRenderFrameHost* dest_rfh = contents()->GetPrimaryMainFrame();
   EXPECT_TRUE(ntp_rfh->IsPendingDeletion());
   EXPECT_TRUE(dest_rfh->IsActive());
 
@@ -739,7 +744,7 @@ class RenderViewHostDestroyer : public WebContentsObserver {
   }
 
  private:
-  raw_ptr<RenderViewHost> render_view_host_;
+  raw_ptr<RenderViewHost, DanglingUntriaged> render_view_host_;
   std::unique_ptr<WebContents> web_contents_;
 };
 
@@ -755,7 +760,7 @@ TEST_P(RenderFrameHostManagerTest,
 
   // Navigate our first tab to a chrome url and then to the destination.
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), kChromeURL);
-  TestRenderFrameHost* ntp_rfh = contents()->GetMainFrame();
+  TestRenderFrameHost* ntp_rfh = contents()->GetPrimaryMainFrame();
 
   // Create one more tab and navigate to kUrl1.  web_contents is not
   // wrapped as scoped_ptr since it intentionally deleted by destroyer
@@ -807,7 +812,7 @@ class EnableViewSourceLocalFrame : public content::FakeLocalFrame,
 // When there is an error with the specified page, renderer exits view-source
 // mode. See WebFrameImpl::DidFail(). We check by this test that
 // EnableViewSourceMode message is sent on every navigation regardless
-// RenderView is being newly created or reused.
+// `blink::WebView` is being newly created or reused.
 TEST_P(RenderFrameHostManagerTest, AlwaysSendEnableViewSourceMode) {
   const GURL kChromeUrl(GetWebUIURL("foo"));
   const GURL kUrl("http://foo/");
@@ -861,7 +866,7 @@ TEST_P(RenderFrameHostManagerTest, AlwaysSendEnableViewSourceMode) {
   // The same RenderViewHost should be reused.
   navigation->ReadyToCommit();
   EXPECT_FALSE(contents()->GetSpeculativePrimaryMainFrame());
-  EXPECT_EQ(last_rfh, contents()->GetMainFrame());
+  EXPECT_EQ(last_rfh, contents()->GetPrimaryMainFrame());
 
   navigation->Commit();
   EXPECT_EQ(1, controller().GetLastCommittedEntryIndex());
@@ -1172,7 +1177,7 @@ TEST_P(RenderFrameHostManagerTest, NavigateAfterMissingUnloadACK) {
   EXPECT_TRUE(main_test_rfh()->IsActive());
 }
 
-// Test that we create RenderFrameProxy objects for the opener chain when
+// Test that we create `blink::RemoteFrame` objects for the opener chain when
 // navigating an opened tab cross-process.  This allows us to support certain
 // cross-process JavaScript calls (http://crbug.com/99202).
 TEST_P(RenderFrameHostManagerTest, CreateProxiesForOpeners) {
@@ -1331,7 +1336,7 @@ TEST_P(RenderFrameHostManagerTest, DisownOpenerDuringNavigation) {
 
   // Start a back navigation.
   contents()->GetController().GoBack();
-  contents()->GetMainFrame()->PrepareForCommit();
+  contents()->GetPrimaryMainFrame()->PrepareForCommit();
 
   // Disown the opener from rfh2.
   rfh2->SimulateDidChangeOpener(absl::nullopt);
@@ -1376,7 +1381,7 @@ TEST_P(RenderFrameHostManagerTest, DisownOpenerAfterNavigation) {
 
   // Commit a back navigation before the DidChangeOpener message arrives.
   contents()->GetController().GoBack();
-  contents()->GetMainFrame()->PrepareForCommit();
+  contents()->GetPrimaryMainFrame()->PrepareForCommit();
   NavigationEntry* entry1 = contents()->GetController().GetPendingEntry();
   contents()->GetSpeculativePrimaryMainFrame()->SendNavigateWithTransition(
       entry1->GetUniqueID(), false, entry1->GetURL(),
@@ -1395,7 +1400,7 @@ TEST_P(RenderFrameHostManagerTest, CleanUpProxiesOnProcessCrash) {
 
   // Navigate to an initial URL.
   contents()->NavigateAndCommit(kUrl1);
-  TestRenderFrameHost* rfh1 = contents()->GetMainFrame();
+  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
 
   // Create a new tab as an opener for the main tab.
   std::unique_ptr<TestWebContents> opener1(
@@ -1443,8 +1448,8 @@ TEST_P(RenderFrameHostManagerTest, CleanUpProxiesOnProcessCrash) {
   // Reload the initial tab. This should recreate the opener's RVH in the
   // original SiteInstanceGroup.
   contents()->GetController().Reload(ReloadType::NORMAL, true);
-  contents()->GetMainFrame()->PrepareForCommit();
-  TestRenderFrameHost* rfh2 = contents()->GetMainFrame();
+  contents()->GetPrimaryMainFrame()->PrepareForCommit();
+  TestRenderFrameHost* rfh2 = contents()->GetPrimaryMainFrame();
   EXPECT_TRUE(opener1_manager->current_frame_host()
                   ->browsing_context_state()
                   ->GetRenderFrameProxyHost(rfh2->GetSiteInstance()->group())
@@ -1455,49 +1460,81 @@ TEST_P(RenderFrameHostManagerTest, CleanUpProxiesOnProcessCrash) {
             rfh2->GetRenderViewHost()->opener_frame_token());
 }
 
-// Test that we reuse the same guest SiteInstance if we navigate across sites.
-TEST_P(RenderFrameHostManagerTest, NoSwapOnGuestNavigations) {
+// Test guest navigation behavior when navigating across sites.  With site
+// isolation for guests, we should swap guest SiteInstances, otherwise the
+// guest SiteInstance should be reused.
+TEST_P(RenderFrameHostManagerTest, GuestNavigations) {
   // Create a custom StoragePartitionConfig for the guest SiteInstance. The
   // resulting SiteInstance should become associated with this
   // StoragePartitionConfig rather than a default one.
   const StoragePartitionConfig kGuestPartitionConfig =
       StoragePartitionConfig::Create(browser_context(), "someapp",
                                      "somepartition", /*in_memory=*/false);
-  scoped_refptr<SiteInstance> instance =
+  scoped_refptr<SiteInstance> initial_instance =
       SiteInstance::CreateForGuest(browser_context(), kGuestPartitionConfig);
   std::unique_ptr<TestWebContents> web_contents(
-      TestWebContents::Create(browser_context(), instance));
+      TestWebContents::Create(browser_context(), initial_instance));
 
-  EXPECT_TRUE(instance->IsGuest());
-  EXPECT_EQ(kGuestPartitionConfig, instance->GetStoragePartitionConfig());
+  EXPECT_TRUE(initial_instance->IsGuest());
+  EXPECT_EQ(kGuestPartitionConfig,
+            initial_instance->GetStoragePartitionConfig());
 
   RenderFrameHostManager* manager = web_contents->GetRenderManagerForTesting();
+  RenderFrameHostImpl* initial_host = manager->current_frame_host();
 
-  RenderFrameHostImpl* host = nullptr;
-
-  // 1) The first navigation. --------------------------
+  // 1) First navigation. ------------------------
+  // Start the first navigation, but do not commit.
   const GURL kUrl1("http://www.google.com/");
   NavigationEntryImpl entry1(
       nullptr /* instance */, kUrl1, Referrer(), absl::nullopt,
       std::u16string() /* title */, ui::PAGE_TRANSITION_TYPED,
       false /* is_renderer_init */, nullptr /* blob_url_loader_factory */,
       false /* is_initial_entry */);
-  host = NavigateToEntry(manager, &entry1);
+  RenderFrameHostImpl* host = NavigateToEntry(manager, &entry1);
 
-  // The RenderFrameHost created in Init will be reused.
-  EXPECT_TRUE(host == manager->current_frame_host());
+  // The SiteInstance of the navigating RenderFrameHost should still be a guest
+  // SiteInstance in the same StoragePartition.
+  scoped_refptr<SiteInstanceImpl> first_instance = host->GetSiteInstance();
+  EXPECT_EQ(first_instance->GetStoragePartitionConfig(), kGuestPartitionConfig);
+  EXPECT_TRUE(first_instance->IsGuest());
+
+  // Without site isolation for guests, we should stay in the same initial
+  // RenderFrameHost and SiteInstance.  With site isolation for guests, we have
+  // to swap SiteInstances and RenderFrameHosts, since the initial SiteInstance
+  // (`instance`) has an empty site and process lock, whereas the navigation
+  // needs a SiteInstance with the site URL that corresponds to `kUrl1`.  Note
+  // that even in that case, there will be no speculative RenderFrameHost since
+  // the new RenderFrameHost will be committed right away due to the early
+  // commit optimization. This behavior may change if the early commit
+  // optimization is removed in https://crbug.com/1072817.
+  if (SiteIsolationPolicy::IsSiteIsolationForGuestsEnabled()) {
+    EXPECT_NE(first_instance, initial_instance);
+    EXPECT_NE(host, initial_host);
+    // This test may run without strict site isolation, e.g. on Android.  In
+    // that case, the navigation will end up in a default SiteInstance.
+    if (AreAllSitesIsolatedForTesting()) {
+      EXPECT_EQ("http://google.com/",
+                first_instance->GetSiteInfo().site_url().spec());
+    } else {
+      EXPECT_TRUE(first_instance->IsDefaultSiteInstance());
+    }
+  } else {
+    EXPECT_EQ(first_instance, initial_instance);
+    EXPECT_EQ(host, initial_host);
+  }
   EXPECT_FALSE(manager->speculative_frame_host());
-  EXPECT_EQ(manager->current_frame_host()->GetSiteInstance(), instance);
+  EXPECT_EQ(host, manager->current_frame_host());
 
   // Commit.
   DidNavigateFrame(manager, host);
-  // Commit to SiteInstance should be delayed until RenderFrame commit.
   EXPECT_EQ(host, manager->current_frame_host());
   ASSERT_TRUE(host);
   EXPECT_TRUE(host->GetSiteInstance()->HasSite());
 
-  // 2) Navigate to a different domain. -------------------------
-  // Guests stay in the same process on navigation.
+  // 2) Second navigation. ------------------------
+  // Navigate to a different site. If site isolation for guests is enabled, and
+  // strict site isolation is also enabled, this will swap processes.
+  // Otherwise, the guest will stay in the same process.
   const GURL kUrl2("http://www.chromium.org");
   const url::Origin kInitiatorOrigin =
       url::Origin::Create(GURL("https://initiator.example.com"));
@@ -1509,15 +1546,32 @@ TEST_P(RenderFrameHostManagerTest, NoSwapOnGuestNavigations) {
       false /* is_initial_entry */);
   host = NavigateToEntry(manager, &entry2);
 
-  // The RenderFrameHost created in Init will be reused.
-  EXPECT_EQ(host, manager->current_frame_host());
-  EXPECT_FALSE(manager->speculative_frame_host());
+  // The first RenderFrameHost will be reused only when there's no site
+  // isolation for guests (or no site isolation between the two sites).
+  if (SiteIsolationPolicy::IsSiteIsolationForGuestsEnabled() &&
+      AreAllSitesIsolatedForTesting()) {
+    EXPECT_NE(host, manager->current_frame_host());
+    EXPECT_TRUE(manager->speculative_frame_host());
+  } else {
+    EXPECT_EQ(host, manager->current_frame_host());
+    EXPECT_FALSE(manager->speculative_frame_host());
+  }
 
   // Commit.
   DidNavigateFrame(manager, host);
   EXPECT_EQ(host, manager->current_frame_host());
   ASSERT_TRUE(host);
-  EXPECT_EQ(host->GetSiteInstance(), instance);
+  EXPECT_TRUE(host->GetSiteInstance()->IsGuest());
+
+  // We should swap SiteInstances with site isolation for guests.
+  if (SiteIsolationPolicy::IsSiteIsolationForGuestsEnabled() &&
+      AreAllSitesIsolatedForTesting()) {
+    EXPECT_NE(host->GetSiteInstance(), first_instance);
+    EXPECT_EQ("http://chromium.org/",
+              host->GetSiteInstance()->GetSiteInfo().site_url().spec());
+  } else {
+    EXPECT_EQ(host->GetSiteInstance(), first_instance);
+  }
 }
 
 namespace {
@@ -1616,7 +1670,7 @@ TEST_P(RenderFrameHostManagerTest, CloseWithPendingWhileUnresponsive) {
 
   // Navigate to the first page.
   contents()->NavigateAndCommit(kUrl1);
-  TestRenderFrameHost* rfh1 = contents()->GetMainFrame();
+  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
 
   // Start to close the tab, but assume it's unresponsive.
   rfh1->render_view_host()->ClosePage();
@@ -1650,7 +1704,7 @@ TEST_P(RenderFrameHostManagerTest, DeleteFrameAfterUnloadACK) {
 
   // Navigate to the first page.
   contents()->NavigateAndCommit(kUrl1);
-  TestRenderFrameHost* rfh1 = contents()->GetMainFrame();
+  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
   RenderFrameDeletedObserver rfh_deleted_observer(rfh1);
   EXPECT_TRUE(rfh1->IsActive());
 
@@ -1672,7 +1726,7 @@ TEST_P(RenderFrameHostManagerTest, DeleteFrameAfterUnloadACK) {
   navigation->set_drop_unload_ack(true);
   navigation->Commit();
   EXPECT_FALSE(contents()->CrossProcessNavigationPending());
-  EXPECT_EQ(rfh2, contents()->GetMainFrame());
+  EXPECT_EQ(rfh2, contents()->GetPrimaryMainFrame());
   EXPECT_TRUE(contents()->GetSpeculativePrimaryMainFrame() == nullptr);
   EXPECT_TRUE(rfh2->IsActive());
   EXPECT_TRUE(rfh1->IsPendingDeletion());
@@ -1701,7 +1755,7 @@ TEST_P(RenderFrameHostManagerTest, UnloadFrameAfterUnloadACK) {
 
   // Navigate to the first page.
   contents()->NavigateAndCommit(kUrl1);
-  TestRenderFrameHost* rfh1 = contents()->GetMainFrame();
+  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
   RenderFrameDeletedObserver rfh_deleted_observer(rfh1);
   EXPECT_TRUE(rfh1->IsActive());
 
@@ -1721,7 +1775,7 @@ TEST_P(RenderFrameHostManagerTest, UnloadFrameAfterUnloadACK) {
   navigation->set_drop_unload_ack(true);
   navigation->Commit();
   EXPECT_FALSE(contents()->CrossProcessNavigationPending());
-  EXPECT_EQ(rfh2, contents()->GetMainFrame());
+  EXPECT_EQ(rfh2, contents()->GetPrimaryMainFrame());
   EXPECT_TRUE(contents()->GetSpeculativePrimaryMainFrame() == nullptr);
   EXPECT_TRUE(rfh1->IsPendingDeletion());
   EXPECT_TRUE(rfh2->IsActive());
@@ -1749,7 +1803,7 @@ TEST_P(RenderFrameHostManagerTest, CommitNewNavigationBeforeSendingUnload) {
 
   // Navigate to the first page.
   contents()->NavigateAndCommit(kUrl1);
-  TestRenderFrameHost* rfh1 = contents()->GetMainFrame();
+  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
   RenderFrameDeletedObserver rfh_deleted_observer(rfh1);
   EXPECT_TRUE(rfh1->IsActive());
 
@@ -1771,7 +1825,7 @@ TEST_P(RenderFrameHostManagerTest, CommitNewNavigationBeforeSendingUnload) {
   navigation->set_drop_unload_ack(true);
   navigation->Commit();
   EXPECT_FALSE(contents()->CrossProcessNavigationPending());
-  EXPECT_EQ(rfh2, contents()->GetMainFrame());
+  EXPECT_EQ(rfh2, contents()->GetPrimaryMainFrame());
   EXPECT_TRUE(contents()->GetSpeculativePrimaryMainFrame() == nullptr);
   EXPECT_TRUE(rfh1->IsPendingDeletion());
   EXPECT_TRUE(rfh2->IsActive());
@@ -1812,7 +1866,7 @@ TEST_P(RenderFrameHostManagerTest, CancelPendingProperlyDeletesOrSwaps) {
     RenderFrameDeletedObserver rfh_deleted_observer(pending_rfh);
 
     // Cancel the navigation by simulating a declined beforeunload dialog.
-    contents()->GetMainFrame()->SimulateBeforeUnloadCompleted(false);
+    contents()->GetPrimaryMainFrame()->SimulateBeforeUnloadCompleted(false);
     EXPECT_FALSE(contents()->CrossProcessNavigationPending());
 
     // Since the pending RFH is the only one for the new SiteInstance, it should
@@ -1834,7 +1888,7 @@ TEST_P(RenderFrameHostManagerTest, CancelPendingProperlyDeletesOrSwaps) {
         pending_rfh->GetSiteInstance()->group();
     site_instance_group->IncrementActiveFrameCount();
 
-    contents()->GetMainFrame()->SimulateBeforeUnloadCompleted(false);
+    contents()->GetPrimaryMainFrame()->SimulateBeforeUnloadCompleted(false);
     EXPECT_FALSE(contents()->CrossProcessNavigationPending());
 
     EXPECT_TRUE(rfh_deleted_observer.deleted());
@@ -1865,22 +1919,26 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
   constexpr auto kOwnerType = blink::FrameOwnerElementType::kIframe;
   // Create a page with two child frames.
   contents()->NavigateAndCommit(kUrlA);
-  contents()->GetMainFrame()->OnCreateChildFrame(
-      contents()->GetMainFrame()->GetProcess()->GetNextRoutingID(),
+  contents()->GetPrimaryMainFrame()->OnCreateChildFrame(
+      contents()->GetPrimaryMainFrame()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame_name", "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType);
-  contents()->GetMainFrame()->OnCreateChildFrame(
-      contents()->GetMainFrame()->GetProcess()->GetNextRoutingID(),
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), kOwnerType);
+  contents()->GetPrimaryMainFrame()->OnCreateChildFrame(
+      contents()->GetPrimaryMainFrame()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame_name", "uniqueName2",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), kOwnerType);
   RenderFrameHostManager* root_manager =
       contents()->GetPrimaryFrameTree().root()->render_manager();
   RenderFrameHostManager* iframe1 =
@@ -1982,11 +2040,9 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
   EXPECT_TRUE(delete_watcher1.deleted());
   EXPECT_TRUE(delete_watcher2.deleted());
 
-  EXPECT_EQ(0U, site_instance->group()->active_frame_count());
-  EXPECT_EQ(nullptr, root_manager->current_frame_host()
-                         ->browsing_context_state()
-                         ->GetRenderFrameProxyHost(site_instance->group()))
-      << "Proxies should have been cleaned up";
+  // |site_instance| should no longer have a group, which means there are no
+  // active frames left, or any proxies for its group.
+  EXPECT_FALSE(site_instance->group());
   EXPECT_TRUE(site_instance->HasOneRef())
       << "This SiteInstance should be destroyable now.";
 }
@@ -2022,35 +2078,37 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestWebContents::Create(browser_context(), contents1->GetSiteInstance()));
   contents1->NavigateAndCommit(kUrl1);
   contents2->NavigateAndCommit(kUrl1);
-  MockRenderProcessHost* rph = contents1->GetMainFrame()->GetProcess();
-  EXPECT_EQ(rph, contents2->GetMainFrame()->GetProcess());
-  EXPECT_TRUE(contents1->GetMainFrame()->GetView());
-  EXPECT_TRUE(contents2->GetMainFrame()->GetView());
+  MockRenderProcessHost* rph = contents1->GetPrimaryMainFrame()->GetProcess();
+  EXPECT_EQ(rph, contents2->GetPrimaryMainFrame()->GetProcess());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->GetView());
 
   rph->SimulateCrash();
-  EXPECT_FALSE(contents1->GetMainFrame()->IsRenderFrameLive());
-  EXPECT_FALSE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_FALSE(contents1->GetPrimaryMainFrame()->IsRenderFrameLive());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_EQ(contents1->GetSiteInstance(), contents2->GetSiteInstance());
-  EXPECT_FALSE(contents1->GetMainFrame()->GetView());
-  EXPECT_FALSE(contents2->GetMainFrame()->GetView());
+  EXPECT_FALSE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->GetView());
 
   // Reload |contents1|.
   contents1->NavigateAndCommit(kUrl1);
-  EXPECT_TRUE(contents1->GetMainFrame()->IsRenderFrameLive());
-  EXPECT_FALSE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->IsRenderFrameLive());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_EQ(contents1->GetSiteInstance(), contents2->GetSiteInstance());
-  EXPECT_TRUE(contents1->GetMainFrame()->GetView());
-  EXPECT_FALSE(contents2->GetMainFrame()->GetView());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->GetView());
 
   // |contents1| creates an out of process iframe.
-  contents1->GetMainFrame()->OnCreateChildFrame(
-      contents1->GetMainFrame()->GetProcess()->GetNextRoutingID(),
+  contents1->GetPrimaryMainFrame()->OnCreateChildFrame(
+      contents1->GetPrimaryMainFrame()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame_name", "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(),
       blink::FrameOwnerElementType::kIframe);
   RenderFrameHostManager* iframe =
       contents()->GetPrimaryFrameTree().root()->child_at(0)->render_manager();
@@ -2078,9 +2136,9 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
   // Navigate |contents2| away from the sad tab (and thus away from the
   // SiteInstance of |contents1|). This should not destroy the proxies needed by
   // |contents1| -- that was http://crbug.com/473714.
-  EXPECT_FALSE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   contents2->NavigateAndCommit(kUrl3);
-  EXPECT_TRUE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_NE(nullptr, iframe->current_frame_host()
                          ->browsing_context_state()
                          ->GetRenderFrameProxyHost(
@@ -2110,23 +2168,23 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestWebContents::Create(browser_context(), contents1->GetSiteInstance()));
   contents1->NavigateAndCommit(kUrl1);
   contents2->NavigateAndCommit(kUrl1);
-  MockRenderProcessHost* rph = contents1->GetMainFrame()->GetProcess();
-  EXPECT_EQ(rph, contents2->GetMainFrame()->GetProcess());
-  EXPECT_TRUE(contents1->GetMainFrame()->GetView());
-  EXPECT_TRUE(contents2->GetMainFrame()->GetView());
-  EXPECT_TRUE(contents1->GetMainFrame()->IsRenderFrameLive());
-  EXPECT_TRUE(contents2->GetMainFrame()->IsRenderFrameLive());
+  MockRenderProcessHost* rph = contents1->GetPrimaryMainFrame()->GetProcess();
+  EXPECT_EQ(rph, contents2->GetPrimaryMainFrame()->GetProcess());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->GetView());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_EQ(contents1->GetSiteInstance(), contents2->GetSiteInstance());
   TestRenderWidgetHostView* initial_view =
       static_cast<TestRenderWidgetHostView*>(
-          contents2->GetMainFrame()->GetView());
+          contents2->GetPrimaryMainFrame()->GetView());
 
   // Navigate `content2` to a different page. This navigation should have a
   // valid FallbackSurface for the RenderWidgetHostView to display.
   contents2->NavigateAndCommit(kUrl2);
   TestRenderWidgetHostView* post_nav_view =
       static_cast<TestRenderWidgetHostView*>(
-          contents2->GetMainFrame()->GetView());
+          contents2->GetPrimaryMainFrame()->GetView());
   // Since this is a different origin we should also be using a different
   // RenderWidgetHostView.
   EXPECT_NE(initial_view, post_nav_view);
@@ -2134,21 +2192,21 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       post_nav_view->clear_fallback_surface_for_commit_pending_called());
   EXPECT_TRUE(post_nav_view->take_fallback_content_from_called());
   post_nav_view->ClearFallbackSurfaceCalled();
-  EXPECT_TRUE(contents1->GetMainFrame()->IsRenderFrameLive());
-  EXPECT_TRUE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_NE(contents1->GetSiteInstance(), contents2->GetSiteInstance());
-  EXPECT_TRUE(contents1->GetMainFrame()->GetView());
-  EXPECT_TRUE(contents2->GetMainFrame()->GetView());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->GetView());
 
   // Crash the Renderer of the tab that navigated.
-  MockRenderProcessHost* rph2 = contents2->GetMainFrame()->GetProcess();
+  MockRenderProcessHost* rph2 = contents2->GetPrimaryMainFrame()->GetProcess();
   EXPECT_NE(rph, rph2);
   rph2->SimulateCrash();
-  EXPECT_TRUE(contents1->GetMainFrame()->IsRenderFrameLive());
-  EXPECT_FALSE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->IsRenderFrameLive());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_NE(contents1->GetSiteInstance(), contents2->GetSiteInstance());
-  EXPECT_TRUE(contents1->GetMainFrame()->GetView());
-  EXPECT_FALSE(contents2->GetMainFrame()->GetView());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_FALSE(contents2->GetPrimaryMainFrame()->GetView());
 
   // Navigate `contents2` back to previous host, which still has an active
   // Renderer. This should notify the RenderWidgetHostView that there is no
@@ -2157,7 +2215,7 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
   contents2->NavigateAndCommit(kUrl1);
   TestRenderWidgetHostView* return_nav_view =
       static_cast<TestRenderWidgetHostView*>(
-          contents2->GetMainFrame()->GetView());
+          contents2->GetPrimaryMainFrame()->GetView());
   // We should be reusing the original RenderWidgetHostView that `contents2`
   // used before the navigation to `kUrl2`
   EXPECT_EQ(initial_view, return_nav_view);
@@ -2166,13 +2224,13 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
   EXPECT_FALSE(return_nav_view->take_fallback_content_from_called());
   return_nav_view->ClearFallbackSurfaceCalled();
 
-  EXPECT_TRUE(contents1->GetMainFrame()->IsRenderFrameLive());
-  EXPECT_TRUE(contents2->GetMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->IsRenderFrameLive());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->IsRenderFrameLive());
   EXPECT_EQ(contents1->GetSiteInstance(), contents2->GetSiteInstance());
-  EXPECT_TRUE(contents1->GetMainFrame()->GetView());
-  EXPECT_TRUE(contents2->GetMainFrame()->GetView());
+  EXPECT_TRUE(contents1->GetPrimaryMainFrame()->GetView());
+  EXPECT_TRUE(contents2->GetPrimaryMainFrame()->GetView());
   // We should also be back to sharing the same RenderProcessHost.
-  MockRenderProcessHost* rph3 = contents2->GetMainFrame()->GetProcess();
+  MockRenderProcessHost* rph3 = contents2->GetPrimaryMainFrame()->GetProcess();
   EXPECT_NE(rph2, rph3);
   EXPECT_EQ(rph, rph3);
 }
@@ -2186,7 +2244,7 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
   // Make sure the initial process is live so that the pending WebUI navigation
   // does not commit immediately.  Give the page a subframe as well.
   const GURL kUrl1("http://foo.com");
-  RenderFrameHostImpl* main_rfh = contents()->GetMainFrame();
+  RenderFrameHostImpl* main_rfh = contents()->GetPrimaryMainFrame();
   NavigateAndCommit(kUrl1);
   EXPECT_TRUE(main_rfh->render_view_host()->IsRenderViewLive());
   EXPECT_TRUE(main_rfh->IsRenderFrameLive());
@@ -2195,9 +2253,11 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(),
       blink::FrameOwnerElementType::kIframe);
   RenderFrameHostManager* subframe_rfhm =
       contents()->GetPrimaryFrameTree().root()->child_at(0)->render_manager();
@@ -2248,7 +2308,7 @@ class UpdateOpenerProxyObserver : public RenderFrameProxyHost::TestObserver {
   class Remote : public content::FakeRemoteFrame {
    public:
     explicit Remote(RenderFrameProxyHost* proxy) {
-      Init(proxy->GetRemoteAssociatedInterfacesTesting());
+      Init(proxy->BindRemoteFrameReceiverForTesting());
     }
     void UpdateOpener(
         const absl::optional<blink::FrameToken>& frame_token) override {
@@ -2262,7 +2322,7 @@ class UpdateOpenerProxyObserver : public RenderFrameProxyHost::TestObserver {
     absl::optional<blink::FrameToken> frame_token_;
   };
 
-  void OnCreated(RenderFrameProxyHost* proxy_host) override {
+  void OnRemoteFrameBound(RenderFrameProxyHost* proxy_host) override {
     remote_frames_[proxy_host] = std::make_unique<Remote>(proxy_host);
   }
 
@@ -2413,19 +2473,23 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName0",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
-      kOwnerType, is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
+      is_dummy_frame_for_inner_tree);
   tree1->AddFrame(
       root1->current_frame_host(), process_id, 13,
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
-      kOwnerType, is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
+      is_dummy_frame_for_inner_tree);
 
   std::unique_ptr<TestWebContents> tab2(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2438,19 +2502,23 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName2",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
-      kOwnerType, is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
+      is_dummy_frame_for_inner_tree);
   tree2->AddFrame(
       root2->current_frame_host(), process_id, 23,
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName3",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
-      kOwnerType, is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
+      is_dummy_frame_for_inner_tree);
 
   std::unique_ptr<TestWebContents> tab3(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2468,10 +2536,12 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName4",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
-      kOwnerType, is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
+      is_dummy_frame_for_inner_tree);
 
   root1->child_at(1)->SetOpener(root1->child_at(1));
   root1->SetOpener(root2->child_at(1));
@@ -2517,7 +2587,7 @@ class PageFocusProxyObserver : public RenderFrameProxyHost::TestObserver {
   class Remote : public content::FakeRemoteFrame {
    public:
     explicit Remote(RenderFrameProxyHost* proxy) {
-      Init(proxy->GetRemoteAssociatedInterfacesTesting());
+      Init(proxy->BindRemoteFrameReceiverForTesting());
     }
     void SetPageFocus(bool is_focused) override {
       set_page_focus_ = is_focused;
@@ -2528,7 +2598,7 @@ class PageFocusProxyObserver : public RenderFrameProxyHost::TestObserver {
     bool set_page_focus_ = false;
   };
 
-  void OnCreated(RenderFrameProxyHost* proxy_host) override {
+  void OnRemoteFrameBound(RenderFrameProxyHost* proxy_host) override {
     remote_frames_[proxy_host] = std::make_unique<Remote>(proxy_host);
   }
 
@@ -2563,25 +2633,31 @@ TEST_P(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame1", "uniqueName1", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), kOwnerType);
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame2", "uniqueName2", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), kOwnerType);
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame3", "uniqueName3", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), kOwnerType);
 
   FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
   RenderFrameHostManager* child1 = root->child_at(0)->render_manager();
@@ -2690,9 +2766,11 @@ TEST_P(RenderFrameHostManagerTest,
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame1", "uniqueName1", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType);
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(), kOwnerType);
 
   FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
   RenderFrameHostManager* child = root->child_at(0)->render_manager();
@@ -3091,7 +3169,8 @@ TEST_P(RenderFrameHostManagerTest, NavigateFromDeadRendererToWebUI) {
               .GetIndexOfEntry(&entry),
           controller().GetLastCommittedEntryIndex(),
           controller().GetEntryCount(),
-          frame_tree_node->current_replication_state().frame_policy);
+          frame_tree_node->current_replication_state().frame_policy,
+          frame_tree_node->AncestorOrSelfHasCSPEE());
 
   std::unique_ptr<NavigationRequest> navigation_request =
       NavigationRequest::CreateBrowserInitiated(
@@ -3100,8 +3179,9 @@ TEST_P(RenderFrameHostManagerTest, NavigateFromDeadRendererToWebUI) {
           nullptr /* initiator_frame_token */,
           ChildProcessHost::kInvalidUniqueID /* initiator_process_id */,
           entry.extra_headers(), frame_entry, &entry,
-          nullptr /* request_body */, nullptr /* navigation_ui_data */,
-          absl::nullopt /* impression */, false /* is_pdf */);
+          false /* is_form_submission */, nullptr /* navigation_ui_data */,
+          absl::nullopt /* impression */, false /* is_pdf */
+      );
   manager->DidCreateNavigationRequest(navigation_request.get());
 
   // As the initial RenderFrame was not live, the new RenderFrameHost should be
@@ -3220,7 +3300,7 @@ class InsecureRequestPolicyProxyObserver
   class RemoteFrame : public content::FakeRemoteFrame {
    public:
     explicit RemoteFrame(RenderFrameProxyHost* render_frame_proxy_host) {
-      Init(render_frame_proxy_host->GetRemoteAssociatedInterfacesTesting());
+      Init(render_frame_proxy_host->BindRemoteFrameReceiverForTesting());
     }
 
     void EnforceInsecureRequestPolicy(
@@ -3235,7 +3315,7 @@ class InsecureRequestPolicyProxyObserver
     blink::mojom::InsecureRequestPolicy enforce_insecure_request_policy_;
   };
 
-  void OnCreated(RenderFrameProxyHost* proxy_host) override {
+  void OnRemoteFrameBound(RenderFrameProxyHost* proxy_host) override {
     remote_frames_[proxy_host] = std::make_unique<RemoteFrame>(proxy_host);
   }
 
@@ -3259,9 +3339,11 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestRenderFrameHost::CreateStubFrameRemote(),
       TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
       TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame1", "uniqueName1", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
+      blink::DocumentToken(), blink::FramePolicy(),
+      blink::mojom::FrameOwnerProperties(),
       blink::FrameOwnerElementType::kIframe);
 
   FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
@@ -3348,7 +3430,7 @@ class StartStopLoadingProxyObserver
   class Remote : public content::FakeRemoteFrame {
    public:
     explicit Remote(RenderFrameProxyHost* proxy) {
-      Init(proxy->GetRemoteAssociatedInterfacesTesting());
+      Init(proxy->BindRemoteFrameReceiverForTesting());
     }
     void DidStartLoading() override { is_loading_ = true; }
     void DidStopLoading() override { is_loading_ = false; }
@@ -3358,7 +3440,7 @@ class StartStopLoadingProxyObserver
     bool is_loading_ = false;
   };
 
-  void OnCreated(RenderFrameProxyHost* proxy_host) override {
+  void OnRemoteFrameBound(RenderFrameProxyHost* proxy_host) override {
     remote_frames_[proxy_host] = std::make_unique<Remote>(proxy_host);
   }
 
@@ -3583,13 +3665,11 @@ class AdTaggingSimulator : public WebContentsObserver {
 
   void ReadyToCommitNavigation(NavigationHandle* navigation_handle) override {
     auto it = ad_urls_.find(navigation_handle->GetURL());
-    navigation_handle->GetRenderFrameHost()->UpdateIsAdSubframe(it !=
-                                                                ad_urls_.end());
+    navigation_handle->GetRenderFrameHost()->UpdateIsAdFrame(it !=
+                                                             ad_urls_.end());
   }
 
-  void SimulateOnFrameIsAdSubframe(RenderFrameHost* rfh) {
-    rfh->UpdateIsAdSubframe(true);
-  }
+  void SimulateOnFrameIsAd(RenderFrameHost* rfh) { rfh->UpdateIsAdFrame(true); }
 
  private:
   std::set<GURL> ad_urls_;
@@ -3597,19 +3677,19 @@ class AdTaggingSimulator : public WebContentsObserver {
 
 class AdStatusInterceptingRemoteFrame : public content::FakeRemoteFrame {
  public:
-  void SetReplicatedIsAdSubframe(bool is_ad_subframe) override {
-    is_ad_subframe_ = is_ad_subframe;
+  void SetReplicatedIsAdFrame(bool is_ad_frame) override {
+    is_ad_frame_ = is_ad_frame;
   }
 
   // These methods reset state back to default when they are called.
-  bool LastAdSubframe() {
-    bool is_ad_subframe = is_ad_subframe_;
-    is_ad_subframe_ = false;
-    return is_ad_subframe;
+  bool LastAdFrame() {
+    bool is_ad_frame = is_ad_frame_;
+    is_ad_frame_ = false;
+    return is_ad_frame;
   }
 
  private:
-  bool is_ad_subframe_ = false;
+  bool is_ad_frame_ = false;
 };
 
 class RenderFrameHostManagerAdTaggingSignalTest
@@ -3624,10 +3704,10 @@ class RenderFrameHostManagerAdTaggingSignalTest
     RenderFrameProxyHost::SetObserverForTesting(nullptr);
   }
 
-  void OnCreated(RenderFrameProxyHost* proxy_host) override {
+  void OnRemoteFrameBound(RenderFrameProxyHost* proxy_host) override {
     auto fake_remote_frame =
         std::make_unique<AdStatusInterceptingRemoteFrame>();
-    fake_remote_frame->Init(proxy_host->GetRemoteAssociatedInterfacesTesting());
+    fake_remote_frame->Init(proxy_host->BindRemoteFrameReceiverForTesting());
 
     // TODO(yaoxia): when a proxy host is deleted, remove the corresponding map
     // entry.
@@ -3635,20 +3715,20 @@ class RenderFrameHostManagerAdTaggingSignalTest
 
     if (proxy_host->frame_tree_node()
             ->current_replication_state()
-            .is_ad_subframe) {
+            .is_ad_frame) {
       ad_frames_on_proxy_created_.insert(proxy_host);
     }
   }
 
   void ExpectAdSubframeSignalForFrameProxy(RenderFrameProxyHost* proxy_host,
-                                           bool expect_is_ad_subframe) {
+                                           bool expect_is_ad_frame) {
     base::RunLoop().RunUntilIdle();
 
     auto it = proxy_map_.find(proxy_host);
     EXPECT_TRUE(it != proxy_map_.end());
 
     AdStatusInterceptingRemoteFrame* remote_frame = it->second.get();
-    EXPECT_EQ(expect_is_ad_subframe, remote_frame->LastAdSubframe());
+    EXPECT_EQ(expect_is_ad_frame, remote_frame->LastAdFrame());
   }
 
   void ExpectAdStatusOnFrameProxyCreated(RenderFrameProxyHost* proxy_host) {
@@ -3700,7 +3780,7 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest,
 
   contents()->NavigateAndCommit(kUrlA);
 
-  AppendChildToFrame("name", kUrlB, web_contents()->GetMainFrame());
+  AppendChildToFrame("name", kUrlB, web_contents()->GetPrimaryMainFrame());
 
   FrameTreeNode* subframe_node =
       contents()->GetPrimaryFrameTree().root()->child_at(0);
@@ -3708,7 +3788,7 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest,
   ExpectAdStatusOnFrameProxyCreated(
       subframe_node->render_manager()->GetProxyToParent());
 
-  EXPECT_TRUE(subframe_node->current_replication_state().is_ad_subframe);
+  EXPECT_TRUE(subframe_node->current_replication_state().is_ad_frame);
 }
 
 // A page with top frame A that has subframes B and A1. A1 is an ad iframe that
@@ -3729,22 +3809,24 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest,
                    ->GetPrimaryFrameTree()
                    .root()
                    ->current_replication_state()
-                   .is_ad_subframe);
+                   .is_ad_frame);
 
-  AppendChildToFrame("subframe_b", kUrlB, web_contents()->GetMainFrame());
-  AppendChildToFrame("subframe_a1", GURL(), web_contents()->GetMainFrame());
+  AppendChildToFrame("subframe_b", kUrlB,
+                     web_contents()->GetPrimaryMainFrame());
+  AppendChildToFrame("subframe_a1", GURL(),
+                     web_contents()->GetPrimaryMainFrame());
 
   FrameTreeNode* top_frame_node_a = contents()->GetPrimaryFrameTree().root();
   FrameTreeNode* subframe_node_b = top_frame_node_a->child_at(0);
   FrameTreeNode* subframe_node_a1 = top_frame_node_a->child_at(1);
 
-  ad_tagging_simulator.SimulateOnFrameIsAdSubframe(
+  ad_tagging_simulator.SimulateOnFrameIsAd(
       subframe_node_a1->current_frame_host());
 
   RenderFrameProxyHost* proxy_a1_to_b =
       GetProxyHost(subframe_node_a1, subframe_node_b);
 
-  EXPECT_TRUE(subframe_node_a1->current_replication_state().is_ad_subframe);
+  EXPECT_TRUE(subframe_node_a1->current_replication_state().is_ad_frame);
   ExpectAdSubframeSignalForFrameProxy(proxy_a1_to_b, true);
 }
 
@@ -3770,17 +3852,19 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest,
                    ->GetPrimaryFrameTree()
                    .root()
                    ->current_replication_state()
-                   .is_ad_subframe);
+                   .is_ad_frame);
 
-  AppendChildToFrame("subframe_b", kUrlB, web_contents()->GetMainFrame());
-  AppendChildToFrame("subframe_c", kUrlC, web_contents()->GetMainFrame());
+  AppendChildToFrame("subframe_b", kUrlB,
+                     web_contents()->GetPrimaryMainFrame());
+  AppendChildToFrame("subframe_c", kUrlC,
+                     web_contents()->GetPrimaryMainFrame());
 
   FrameTreeNode* top_frame_node_a = contents()->GetPrimaryFrameTree().root();
   FrameTreeNode* subframe_node_b = top_frame_node_a->child_at(0);
   FrameTreeNode* subframe_node_c = top_frame_node_a->child_at(1);
 
-  EXPECT_FALSE(subframe_node_b->current_replication_state().is_ad_subframe);
-  EXPECT_FALSE(subframe_node_c->current_replication_state().is_ad_subframe);
+  EXPECT_FALSE(subframe_node_b->current_replication_state().is_ad_frame);
+  EXPECT_FALSE(subframe_node_c->current_replication_state().is_ad_frame);
 
   RenderFrameProxyHost* proxy_c_to_a =
       GetProxyHost(subframe_node_c, top_frame_node_a);
@@ -3798,7 +3882,7 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest,
   NavigationSimulator::NavigateAndCommitFromDocument(
       kUrlD, subframe_node_c->current_frame_host());
 
-  EXPECT_TRUE(subframe_node_c->current_replication_state().is_ad_subframe);
+  EXPECT_TRUE(subframe_node_c->current_replication_state().is_ad_frame);
 
   ExpectAdSubframeSignalForFrameProxy(proxy_c_to_a, true);
   ExpectAdSubframeSignalForFrameProxy(proxy_c_to_b, true);
@@ -3827,8 +3911,10 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest,
 
   contents()->NavigateAndCommit(kUrlA);
 
-  AppendChildToFrame("subframe_b", kUrlB, web_contents()->GetMainFrame());
-  AppendChildToFrame("subframe_c", kUrlC, web_contents()->GetMainFrame());
+  AppendChildToFrame("subframe_b", kUrlB,
+                     web_contents()->GetPrimaryMainFrame());
+  AppendChildToFrame("subframe_c", kUrlC,
+                     web_contents()->GetPrimaryMainFrame());
 
   FrameTreeNode* subframe_node_b =
       contents()->GetPrimaryFrameTree().root()->child_at(0);
@@ -3856,7 +3942,7 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest, RemoteGrandchildAdTagSignal) {
   contents()->NavigateAndCommit(kUrlA);
 
   RenderFrameHost* subframe_host =
-      RenderFrameHostTester::For(web_contents()->GetMainFrame())
+      RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
           ->AppendChild("subframe_name");
 
   auto navigation_simulator =
@@ -3877,8 +3963,8 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest, RemoteGrandchildAdTagSignal) {
 
   NavigationSimulator::NavigateAndCommitFromDocument(kUrlC, grandchild_host);
 
-  EXPECT_TRUE(subframe_node->current_replication_state().is_ad_subframe);
-  EXPECT_TRUE(grandchild_node->current_replication_state().is_ad_subframe);
+  EXPECT_TRUE(subframe_node->current_replication_state().is_ad_frame);
+  EXPECT_TRUE(grandchild_node->current_replication_state().is_ad_frame);
   ExpectAdSubframeSignalForFrameProxy(proxy_to_main_frame, true);
 }
 

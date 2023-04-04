@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,9 +144,9 @@ TEST(UrlRequestRewriteRulesValidationTest, ValidateAppendToQuery) {
 }
 
 // Tests validation is working as expected.
-TEST(UrlRequestRewriteRulesValidationTest, ValidateEmptyAction) {
+TEST(UrlRequestRewriteRulesValidationTest, ValidateNullAction) {
   // Empty action.
-  EXPECT_FALSE(ValidateRulesFromAction(mojom::UrlRequestAction::New()));
+  EXPECT_FALSE(ValidateRulesFromAction(nullptr));
 }
 
 TEST(UrlRequestRewriteRulesValidationTest, ValidateNullRules) {

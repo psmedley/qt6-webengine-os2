@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,7 @@
 #include "gpu/vulkan/buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gl/gpu_preference.h"
 
 #if BUILDFLAG(IS_WIN)
 #include <dxgi.h>
@@ -114,7 +115,15 @@ enum VideoCodecProfile {
   AV1PROFILE_PROFILE_PRO,
   DOLBYVISION_PROFILE8,
   DOLBYVISION_PROFILE9,
-  VIDEO_CODEC_PROFILE_MAX = DOLBYVISION_PROFILE9,
+  HEVCPROFILE_REXT,
+  HEVCPROFILE_HIGH_THROUGHPUT,
+  HEVCPROFILE_MULTIVIEW_MAIN,
+  HEVCPROFILE_SCALABLE_MAIN,
+  HEVCPROFILE_3D_MAIN,
+  HEVCPROFILE_SCREEN_EXTENDED,
+  HEVCPROFILE_SCALABLE_REXT,
+  HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED,
+  VIDEO_CODEC_PROFILE_MAX = HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED,
 };
 
 // Specification of a decoding profile supported by a hardware decoder.
@@ -200,6 +209,8 @@ enum class OverlaySupport {
 GPU_EXPORT const char* OverlaySupportToString(OverlaySupport support);
 
 struct GPU_EXPORT OverlayInfo {
+  OverlayInfo() = default;
+  OverlayInfo(const OverlayInfo& other) = default;
   OverlayInfo& operator=(const OverlayInfo& other) = default;
   bool operator==(const OverlayInfo& other) const {
     return direct_composition == other.direct_composition &&
@@ -236,6 +247,8 @@ struct GPU_EXPORT GPUInfo {
     ~GPUDevice() noexcept;
     GPUDevice& operator=(const GPUDevice& other);
     GPUDevice& operator=(GPUDevice&& other) noexcept;
+
+    bool IsSoftwareRenderer() const;
 
     // The DWORD (uint32_t) representing the graphics card vendor id.
     uint32_t vendor_id = 0u;
@@ -287,6 +300,9 @@ struct GPU_EXPORT GPUInfo {
     // NVIDIA CUDA compute capability, major version. 0 if undetermined. Can be
     // used to determine the hardware generation that the GPU belongs to.
     int cuda_compute_capability_major = 0;
+
+    // If this device is identified as high performance or low power GPU.
+    gl::GpuPreference gpu_preference = gl::GpuPreference::kNone;
   };
 
   GPUInfo();
@@ -303,12 +319,11 @@ struct GPU_EXPORT GPUInfo {
 
   unsigned int GpuCount() const;
 
-  // Return true if it's a multi-gpu system and there is a single integrated
-  // GPU identified.
-  bool GetIntegratedGpu(GPUDevice* output_integrated_gpu) const;
-  // Return true if it's a multi-gpu system and there is a discrete GPU.
-  // |output_discrete_gpu| is the first non-Intel GPU.
-  bool GetDiscreteGpu(GPUDevice* output_discrete_gpu) const;
+  const GPUDevice* GetGpuByPreference(gl::GpuPreference preference) const;
+
+#if BUILDFLAG(IS_WIN)
+  GPUDevice* FindGpuByLuid(DWORD low_part, LONG high_part);
+#endif  // BUILDFLAG(IS_WIN)
 
   // The amount of time taken to get from the process starting to the message
   // loop being pumped.
@@ -403,6 +418,14 @@ struct GPU_EXPORT GPUInfo {
   bool is_asan = false;
 #endif
 
+#if defined(ARCH_CPU_64_BITS)
+  uint32_t target_cpu_bits = 64;
+#elif defined(ARCH_CPU_32_BITS)
+  uint32_t target_cpu_bits = 32;
+#elif defined(ARCH_CPU_31_BITS)
+  uint32_t target_cpu_bits = 31;
+#endif
+
 #if BUILDFLAG(IS_MAC)
   // Enum describing which texture target is used for native GpuMemoryBuffers on
   // MacOS. Valid values are GL_TEXTURE_2D and GL_TEXTURE_RECTANGLE_ARB.
@@ -421,10 +444,15 @@ struct GPU_EXPORT GPUInfo {
 
   // The GPU hardware overlay info.
   OverlayInfo overlay_info;
+
+  // Are d3d shared images supported.
+  bool shared_image_d3d = false;
 #endif
   VideoDecodeAcceleratorSupportedProfiles
       video_decode_accelerator_supported_profiles;
 
+  // DO NOT use for anything but diagnostics/metrics like chrome://gpu,
+  // it's not populated at start up and can be unreliable for a while.
   VideoEncodeAcceleratorSupportedProfiles
       video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;

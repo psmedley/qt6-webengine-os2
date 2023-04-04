@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,8 @@ TEST(RenderFrameHostCSPContextTest, SanitizeDataForUseInCspViolation) {
       network::mojom::SourceLocation::New("http://a.com/login", 10u, 20u);
 
   context.SanitizeDataForUseInCspViolation(
-      /*is_redirect=*/false, network::mojom::CSPDirectiveName::FencedFrameSrc,
-      &blocked_url, source_location.get());
+      network::mojom::CSPDirectiveName::FencedFrameSrc, &blocked_url,
+      source_location.get());
 
   EXPECT_EQ(blocked_url, blocked_url.DeprecatedGetOriginAsURL());
   EXPECT_EQ(source_location->url, "http://a.com/");

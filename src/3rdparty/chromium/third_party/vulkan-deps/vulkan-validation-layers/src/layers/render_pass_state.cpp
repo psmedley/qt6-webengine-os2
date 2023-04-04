@@ -25,6 +25,9 @@
  * Author: Tobias Hector <tobias.hector@amd.com>
  * Author: Jeremy Gebben <jeremyg@lunarg.com>
  */
+
+#include <bitset>
+
 #include "render_pass_state.h"
 #include "convert_to_renderpass2.h"
 #include "image_state.h"
@@ -310,6 +313,44 @@ bool RENDER_PASS_STATE::UsesDepthStencilAttachment(uint32_t subpass_num) const {
         }
     }
     return result;
+}
+
+uint32_t RENDER_PASS_STATE::GetDynamicRenderingColorAttachmentCount() const {
+    if (use_dynamic_rendering_inherited) {
+        return inheritance_rendering_info.colorAttachmentCount;
+    } else if (use_dynamic_rendering) {
+        return dynamic_rendering_begin_rendering_info.colorAttachmentCount;
+    }
+    return 0;
+}
+
+uint32_t RENDER_PASS_STATE::GetDynamicRenderingViewMask() const {
+    if (use_dynamic_rendering_inherited) {
+        return inheritance_rendering_info.viewMask;
+    } else if (use_dynamic_rendering) {
+        return dynamic_rendering_begin_rendering_info.viewMask;
+    }
+    return 0;
+}
+
+uint32_t RENDER_PASS_STATE::GetViewMaskBits(uint32_t subpass) const {
+    if (use_dynamic_rendering_inherited) {
+        constexpr int num_bits = std::numeric_limits<decltype(inheritance_rendering_info.viewMask)>::digits;
+        std::bitset<num_bits> view_bits(inheritance_rendering_info.viewMask);
+        return static_cast<uint32_t>(view_bits.count());
+    } else if (use_dynamic_rendering) {
+        constexpr int num_bits = std::numeric_limits<decltype(dynamic_rendering_begin_rendering_info.viewMask)>::digits;
+        std::bitset<num_bits> view_bits(dynamic_rendering_begin_rendering_info.viewMask);
+        return static_cast<uint32_t>(view_bits.count());
+    } else {
+        const auto *subpass_desc = &createInfo.pSubpasses[subpass];
+        if (subpass_desc) {
+            constexpr int num_bits = std::numeric_limits<decltype(subpass_desc->viewMask)>::digits;
+            std::bitset<num_bits> view_bits(subpass_desc->viewMask);
+            return static_cast<uint32_t>(view_bits.count());
+        }
+    }
+    return 0;
 }
 
 RENDER_PASS_STATE::RENDER_PASS_STATE(VkRenderingInfo const *pRenderingInfo)

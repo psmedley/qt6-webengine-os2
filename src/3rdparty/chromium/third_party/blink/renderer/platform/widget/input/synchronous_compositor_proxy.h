@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,6 +91,9 @@ class SynchronousCompositorProxy : public blink::SynchronousInputHandler,
   void SetMemoryPolicy(uint32_t bytes_limit) final;
   void ReclaimResources(uint32_t layer_tree_frame_sink_id,
                         Vector<viz::ReturnedResource> resources) final;
+  void OnCompositorFrameTransitionDirectiveProcessed(
+      uint32_t layer_tree_frame_sink_id,
+      uint32_t sequence_id) final;
   void SetScroll(const gfx::PointF& total_scroll_offset) final;
   void BeginFrame(const viz::BeginFrameArgs& args,
                   const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&

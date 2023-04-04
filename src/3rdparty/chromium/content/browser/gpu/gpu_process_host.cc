@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,15 +35,21 @@
 #include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
 #include "content/browser/browser_child_process_host_impl.h"
+#include "content/browser/child_process_launcher.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "content/browser/gpu/gpu_disk_cache_factory.h"
 #include "content/browser/gpu/gpu_main_thread_factory.h"
 #include "content/browser/gpu/gpu_memory_buffer_manager_singleton.h"
-#include "content/browser/gpu/shader_cache_factory.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "content/browser/storage_partition_impl.h"
+#include "content/browser/worker_host/dedicated_worker_host.h"
+#include "content/browser/worker_host/dedicated_worker_service_impl.h"
 #include "content/common/child_process.mojom.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/in_process_child_thread_params.h"
+#include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -63,16 +69,17 @@
 #include "gpu/config/gpu_switches.h"
 #include "gpu/ipc/common/gpu_client_ids.h"
 #include "gpu/ipc/common/result_codes.h"
-#include "gpu/ipc/host/shader_disk_cache.h"
-#include "gpu/ipc/in_process_command_buffer.h"
+#include "gpu/ipc/host/gpu_disk_cache.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "net/base/network_isolation_key.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "sandbox/policy/sandbox_type.h"
 #include "sandbox/policy/switches.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/display_switches.h"
@@ -98,10 +105,6 @@
 #include "ui/ozone/public/gpu_platform_support_host.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/ozone_switches.h"
-#endif
-
-#if BUILDFLAG(IS_LINUX)
-#include "ui/gfx/switches.h"
 #endif
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
@@ -256,7 +259,6 @@ static const char* const kSwitchNames[] = {
     switches::kEnableLogging,
     switches::kEnableDeJelly,
     switches::kDeJellyScreenWidth,
-    switches::kDocumentTransitionSlowdownFactor,
     switches::kDoubleBufferCompositing,
     switches::kHeadless,
     switches::kLoggingLevel,
@@ -276,9 +278,6 @@ static const char* const kSwitchNames[] = {
     switches::kVModule,
     switches::kUseAdapterLuid,
     switches::kWebViewDrawFunctorUsesVulkan,
-#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
-    switches::kEnableClearHevcForTesting,
-#endif
 #if BUILDFLAG(IS_MAC)
     sandbox::policy::switches::kEnableSandboxLogging,
     sandbox::policy::switches::kDisableMetalShaderCache,
@@ -309,9 +308,9 @@ static const char* const kSwitchNames[] = {
 #endif
 #if BUILDFLAG(USE_CHROMEOS_MEDIA_ACCELERATION)
     switches::kHardwareVideoDecodeFrameRate,
+    switches::kMaxChromeOSDecoderThreads,
 #endif
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-    switches::kLacrosEnablePlatformEncryptedHevc,
     switches::kLacrosEnablePlatformHevc,
     switches::kLacrosUseChromeosProtectedMedia,
     switches::kLacrosUseChromeosProtectedAv1,
@@ -369,6 +368,11 @@ class GpuSandboxedProcessLauncherDelegate
 #if BUILDFLAG(IS_WIN)
   bool DisableDefaultPolicy() override { return true; }
 
+  std::string GetSandboxTag() override {
+    return sandbox::policy::SandboxWin::GetSandboxTagForDelegate(
+        "gpu", GetSandboxType());
+  }
+
   enum GPUAppContainerEnableState{
       AC_ENABLED = 0,
       AC_DISABLED_GL = 1,
@@ -400,15 +404,27 @@ class GpuSandboxedProcessLauncherDelegate
   // backend. Note that the GPU process is connected to the interactive
   // desktop.
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override {
+    sandbox::TargetConfig* config = policy->GetConfig();
+    if (config->IsConfigured())
+      return true;
+
     if (UseOpenGLRenderer()) {
       // Open GL path.
-      policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                            sandbox::USER_LIMITED);
-      sandbox::policy::SandboxWin::SetJobLevel(
-          cmd_line_, sandbox::JobLevel::kUnprotected, 0, policy);
+      sandbox::ResultCode result = config->SetTokenLevel(
+          sandbox::USER_RESTRICTED_SAME_ACCESS, sandbox::USER_LIMITED);
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
+
+      result = sandbox::policy::SandboxWin::SetJobLevel(
+          sandbox::mojom::Sandbox::kGpu, sandbox::JobLevel::kUnprotected, 0,
+          config);
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
     } else {
-      policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                            sandbox::USER_LIMITED);
+      sandbox::ResultCode result = config->SetTokenLevel(
+          sandbox::USER_RESTRICTED_SAME_ACCESS, sandbox::USER_LIMITED);
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
 
       // UI restrictions break when we access Windows from outside our job.
       // However, we don't want a proxy window in this process because it can
@@ -416,12 +432,14 @@ class GpuSandboxedProcessLauncherDelegate
       // turn blocks on the browser UI thread. So, instead we forgo a window
       // message pump entirely and just add job restrictions to prevent child
       // processes.
-      sandbox::policy::SandboxWin::SetJobLevel(
-          cmd_line_, sandbox::JobLevel::kLimitedUser,
+      result = sandbox::policy::SandboxWin::SetJobLevel(
+          sandbox::mojom::Sandbox::kGpu, sandbox::JobLevel::kLimitedUser,
           JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS | JOB_OBJECT_UILIMIT_DESKTOP |
               JOB_OBJECT_UILIMIT_EXITWINDOWS |
               JOB_OBJECT_UILIMIT_DISPLAYSETTINGS,
-          policy);
+          config);
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
     }
 
     // Check if we are running on the winlogon desktop and set a delayed
@@ -431,20 +449,24 @@ class GpuSandboxedProcessLauncherDelegate
     // winlogon desktop normally). So instead, let the gpu process start with
     // the normal integrity and delay the switch to low integrity until after
     // the gpu process has started and has access to the desktop.
-    if (ShouldSetDelayedIntegrity())
-      policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
-    else
-      policy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+    if (ShouldSetDelayedIntegrity()) {
+      config->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+    } else {
+      sandbox::ResultCode result =
+          config->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
+    }
 
     // Block this DLL even if it is not loaded by the browser process.
-    policy->AddDllToUnload(L"cmsetac.dll");
+    config->AddDllToUnload(L"cmsetac.dll");
 
     if (cmd_line_.HasSwitch(switches::kEnableLogging)) {
       std::wstring log_file_path = logging::GetLogFileFullPath();
       if (!log_file_path.empty()) {
-        sandbox::ResultCode result = policy->AddRule(
-            sandbox::TargetPolicy::SUBSYS_FILES,
-            sandbox::TargetPolicy::FILES_ALLOW_ANY, log_file_path.c_str());
+        sandbox::ResultCode result = config->AddRule(
+            sandbox::SubSystem::kFiles, sandbox::Semantics::kFilesAllowAny,
+            log_file_path.c_str());
         if (result != sandbox::SBOX_ALL_OK)
           return false;
       }
@@ -632,6 +654,7 @@ void GpuProcessHost::GetHasGpuProcess(base::OnceCallback<void(bool)> callback) {
 
 // static
 void GpuProcessHost::CallOnIO(
+    const base::Location& location,
     GpuProcessKind kind,
     bool force_create,
     base::OnceCallback<void(GpuProcessHost*)> callback) {
@@ -639,8 +662,8 @@ void GpuProcessHost::CallOnIO(
   DCHECK_NE(kind, GPU_PROCESS_KIND_INFO_COLLECTION);
 #endif
   GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&RunCallbackOnIO, kind, force_create,
-                                std::move(callback)));
+      location, base::BindOnce(&RunCallbackOnIO, kind, force_create,
+                               std::move(callback)));
 }
 
 void GpuProcessHost::BindInterface(
@@ -765,11 +788,6 @@ GpuProcessHost::~GpuProcessHost() {
   // for another GpuProcessHost.
   if (g_gpu_process_hosts[kind_] == this)
     g_gpu_process_hosts[kind_] = nullptr;
-
-#if BUILDFLAG(IS_ANDROID)
-  UMA_HISTOGRAM_COUNTS_100("GPU.AtExitSurfaceCount",
-                           gpu::GpuSurfaceTracker::Get()->GetSurfaceCount());
-#endif
 
   bool block_offscreen_contexts = true;
   if (!in_process_ && process_launched_) {
@@ -1047,14 +1065,59 @@ void GpuProcessHost::DidUpdateOverlayInfo(
   GpuDataManagerImpl::GetInstance()->UpdateOverlayInfo(overlay_info);
 }
 
-void GpuProcessHost::DidUpdateHDRStatus(bool hdr_enabled) {
-  GpuDataManagerImpl::GetInstance()->UpdateHDRStatus(hdr_enabled);
+void GpuProcessHost::DidUpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info) {
+  GpuDataManagerImpl::GetInstance()->UpdateDXGIInfo(std::move(dxgi_info));
 }
 #endif
 
-void GpuProcessHost::BlockDomainFrom3DAPIs(const GURL& url,
-                                           gpu::DomainGuilt guilt) {
-  GpuDataManagerImpl::GetInstance()->BlockDomainFrom3DAPIs(url, guilt);
+std::string GpuProcessHost::GetIsolationKey(
+    int32_t process_id,
+    const blink::WebGPUExecutionContextToken& token) {
+  if (token.Is<blink::DocumentToken>()) {
+    // Return an empty isolation key if the frame host is gone. This could
+    // happen if the frame is destroyed (or being destroyed) in between when we
+    // are trying to get the isolation key.
+    RenderFrameHostImpl* frame_host = RenderFrameHostImpl::FromDocumentToken(
+        process_id, token.GetAs<blink::DocumentToken>());
+    if (!frame_host) {
+      return "";
+    }
+
+    auto isolation_key =
+        frame_host->GetNetworkIsolationKey().ToCacheKeyString();
+    return isolation_key ? *isolation_key : "";
+  } else if (token.Is<blink::DedicatedWorkerToken>()) {
+    // Return an empty isolation key if the process host or the worker host is
+    // gone. This may happen if the worker is destroyed (or being destroyed) in
+    // between when we are trying to get the isolation key.
+    RenderProcessHost* render_process_host =
+        RenderProcessHost::FromID(process_id);
+    if (!render_process_host ||
+        !render_process_host->IsInitializedAndNotDead()) {
+      return "";
+    }
+    DedicatedWorkerHost* dedicated_worker_host =
+        static_cast<StoragePartitionImpl*>(
+            render_process_host->GetStoragePartition())
+            ->GetDedicatedWorkerService()
+            ->GetDedicatedWorkerHostFromToken(
+                token.GetAs<blink::DedicatedWorkerToken>());
+    if (!dedicated_worker_host) {
+      return "";
+    }
+
+    auto isolation_key =
+        dedicated_worker_host->GetNetworkIsolationKey().ToCacheKeyString();
+    return isolation_key ? *isolation_key : "";
+  }
+
+  NOTREACHED();
+  return "";
+}
+
+void GpuProcessHost::BlockDomainsFrom3DAPIs(const std::set<GURL>& urls,
+                                            gpu::DomainGuilt guilt) {
+  GpuDataManagerImpl::GetInstance()->BlockDomainsFrom3DAPIs(urls, guilt);
 }
 
 bool GpuProcessHost::GpuAccessAllowed() const {
@@ -1075,8 +1138,8 @@ void GpuProcessHost::DisableGpuCompositing() {
 #endif
 }
 
-gpu::ShaderCacheFactory* GpuProcessHost::GetShaderCacheFactory() {
-  return GetShaderCacheFactorySingleton();
+gpu::GpuDiskCacheFactory* GpuProcessHost::GetGpuDiskCacheFactory() {
+  return GetGpuDiskCacheFactorySingleton();
 }
 
 void GpuProcessHost::RecordLogMessage(int32_t severity,
@@ -1228,7 +1291,9 @@ bool GpuProcessHost::LaunchGpuProcess() {
   // Call LaunchWithoutExtraCommandLineSwitches() so the command line switches
   // will not be appended twice.
   process_->LaunchWithoutExtraCommandLineSwitches(
-      std::move(delegate), std::move(cmd_line), /*files_to_preload=*/{}, true);
+      std::move(delegate), std::move(cmd_line),
+      /*file_data=*/
+      std::make_unique<ChildProcessLauncherFileData>(), true);
   process_launched_ = true;
 
   if (kind_ == GPU_PROCESS_KIND_SANDBOXED) {

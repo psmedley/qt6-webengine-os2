@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,8 +71,7 @@ class AddressSorterWin : public AddressSorter {
           input_buffer_(
               reinterpret_cast<SOCKET_ADDRESS_LIST*>(malloc(buffer_size_))),
           output_buffer_(
-              reinterpret_cast<SOCKET_ADDRESS_LIST*>(malloc(buffer_size_))),
-          success_(false) {
+              reinterpret_cast<SOCKET_ADDRESS_LIST*>(malloc(buffer_size_))) {
       input_buffer_->iAddressCount = base::checked_cast<INT>(endpoints.size());
       SOCKADDR_STORAGE* storage = reinterpret_cast<SOCKADDR_STORAGE*>(
           input_buffer_->Address + input_buffer_->iAddressCount);
@@ -140,7 +139,7 @@ class AddressSorterWin : public AddressSorter {
     const DWORD buffer_size_;
     std::unique_ptr<SOCKET_ADDRESS_LIST, base::FreeDeleter> input_buffer_;
     std::unique_ptr<SOCKET_ADDRESS_LIST, base::FreeDeleter> output_buffer_;
-    bool success_;
+    bool success_ = false;
   };
 };
 
@@ -148,7 +147,7 @@ class AddressSorterWin : public AddressSorter {
 
 // static
 std::unique_ptr<AddressSorter> AddressSorter::CreateAddressSorter() {
-  return std::unique_ptr<AddressSorter>(new AddressSorterWin());
+  return std::make_unique<AddressSorterWin>();
 }
 
 }  // namespace net

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,9 +44,9 @@ class MockPacFileFetcher : public PacFileFetcher {
  private:
   GURL pending_request_url_;
   CompletionOnceCallback pending_request_callback_;
-  raw_ptr<std::u16string> pending_request_text_;
+  raw_ptr<std::u16string> pending_request_text_ = nullptr;
   base::OnceClosure on_fetch_complete_;
-  bool is_shutdown_;
+  bool is_shutdown_ = false;
 };
 
 }  // namespace net

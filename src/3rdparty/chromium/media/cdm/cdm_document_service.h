@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,8 +84,9 @@ class MEDIA_EXPORT CdmDocumentService {
   virtual void SetCdmClientToken(const std::vector<uint8_t>& client_token) = 0;
 
   // Reports a CDM event. This can be used for metrics reporting or fallback
-  // logic, e.g. disable the CDM in the current robustness level.
-  virtual void OnCdmEvent(CdmEvent event) = 0;
+  // logic, e.g. disable the CDM in the current robustness level. For error
+  // events, the `hresult` provides more details about the error.
+  virtual void OnCdmEvent(CdmEvent event, HRESULT hresult) = 0;
 #endif  // BUILDFLAG(IS_WIN)
 };
 

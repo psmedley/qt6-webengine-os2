@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,7 +84,8 @@ void SyncMixingGraphInput::Render(int fifo_frame_delay,
 
   base::TimeDelta delay = media::AudioTimestampHelper::FramesToTime(
       converter_render_frame_delay_ + fifo_frame_delay, params_.sample_rate());
-  source_callback_->OnMoreData(delay, base::TimeTicks::Now(), 0, audio_bus);
+  source_callback_->OnMoreData(delay, base::TimeTicks::Now(), 0, audio_bus,
+                               /*is_mixing=*/true);
 
   TRACE_EVENT_END2(TRACE_DISABLED_BY_DEFAULT("audio"),
                    "SyncMixingGraphInput::Render", "total frames delay",

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,12 +27,28 @@ void RejectWithTypeError(const String& message,
 
 }  // namespace
 
-CrosHID::CrosHID(ExecutionContext* execution_context)
-    : ExecutionContextClient(execution_context), cros_hid_(execution_context) {}
+const char CrosHID::kSupplementName[] = "CrosHID";
+
+CrosHID& CrosHID::From(ExecutionContext& execution_context) {
+  CHECK(!execution_context.IsContextDestroyed());
+  auto* supplement =
+      Supplement<ExecutionContext>::From<CrosHID>(execution_context);
+  if (!supplement) {
+    supplement = MakeGarbageCollected<CrosHID>(execution_context);
+    ProvideTo(execution_context, supplement);
+  }
+  return *supplement;
+}
+
+CrosHID::CrosHID(ExecutionContext& execution_context)
+    : Supplement(execution_context),
+      ExecutionContextClient(&execution_context),
+      cros_hid_(&execution_context) {}
 
 void CrosHID::Trace(Visitor* visitor) const {
   visitor->Trace(cros_hid_);
   visitor->Trace(device_cache_);
+  Supplement<ExecutionContext>::Trace(visitor);
   ExecutionContextClient::Trace(visitor);
   ScriptWrappable::Trace(visitor);
 }
@@ -60,7 +76,7 @@ ScriptPromise CrosHID::accessDevice(ScriptState* script_state,
   if (cros_hid) {
     Vector<mojom::blink::HidDeviceFilterPtr> mojo_filters;
     if (options->hasFilters()) {
-      mojo_filters.ReserveCapacity(options->filters().size());
+      mojo_filters.reserve(options->filters().size());
       for (const auto& filter : options->filters()) {
         absl::optional<String> error_message =
             HID::CheckDeviceFilterValidity(*filter);
@@ -74,8 +90,8 @@ ScriptPromise CrosHID::accessDevice(ScriptState* script_state,
 
       cros_hid->AccessDevices(
           std::move(mojo_filters),
-          WTF::Bind(&CrosHID::OnAccessDevicesResponse, WrapPersistent(this),
-                    WrapPersistent(resolver)));
+          WTF::BindOnce(&CrosHID::OnAccessDevicesResponse, WrapPersistent(this),
+                        WrapPersistent(resolver)));
     }
   }
 

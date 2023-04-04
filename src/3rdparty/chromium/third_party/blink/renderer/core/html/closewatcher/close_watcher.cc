@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ CloseWatcher::WatcherStack::WatcherStack(LocalDOMWindow* window)
     : receiver_(this, window), window_(window) {}
 
 void CloseWatcher::WatcherStack::Add(CloseWatcher* watcher) {
-  if (watchers_.IsEmpty()) {
+  if (watchers_.empty()) {
     auto& host = window_->GetFrame()->GetLocalFrameHostRemote();
     host.SetCloseListener(receiver_.BindNewPipeAndPassRemote(
         window_->GetTaskRunner(TaskType::kMiscPlatformAPI)));
@@ -53,7 +53,7 @@ void CloseWatcher::WatcherStack::Add(CloseWatcher* watcher) {
 
 void CloseWatcher::WatcherStack::Remove(CloseWatcher* watcher) {
   watchers_.erase(watcher);
-  if (watchers_.IsEmpty()) {
+  if (watchers_.empty()) {
     receiver_.reset();
   }
 }
@@ -65,31 +65,38 @@ void CloseWatcher::WatcherStack::Trace(Visitor* visitor) const {
 }
 
 void CloseWatcher::WatcherStack::EscapeKeyHandler(KeyboardEvent* event) {
-  if (!watchers_.IsEmpty() && !event->DefaultHandled() && event->isTrusted() &&
+  if (!watchers_.empty() && !event->DefaultHandled() && event->isTrusted() &&
       event->keyCode() == VKEY_ESCAPE) {
     Signal();
   }
 }
 
-bool CloseWatcher::WatcherStack::CheckForCreation() {
-  if (HasActiveWatcher() &&
-      !LocalFrame::ConsumeTransientUserActivation(window_->GetFrame())) {
-    return false;
+void CloseWatcher::WatcherStack::Signal() {
+  while (!watchers_.empty()) {
+    CloseWatcher* watcher = watchers_.back();
+    watcher->close();
+    if (!watcher->IsGroupedWithPrevious()) {
+      break;
+    }
   }
+}
 
-  ConsumeCloseWatcherCancelability();
-  return true;
+bool CloseWatcher::WatcherStack::HasConsumedFreeWatcher() const {
+  for (const auto& watcher : watchers_) {
+    if (!watcher->created_with_user_activation_) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // static
-CloseWatcher* CloseWatcher::Create(LocalDOMWindow* window,
-                                   CloseWatcherOptions* options) {
+CloseWatcher* CloseWatcher::Create(LocalDOMWindow* window) {
   if (!window->GetFrame())
     return nullptr;
-  WatcherStack* stack = window->closewatcher_stack();
-  if (!stack->CheckForCreation())
-    return nullptr;
-  return CreateInternal(window, *stack, options);
+
+  WatcherStack& stack = *window->closewatcher_stack();
+  return CreateInternal(window, stack, nullptr);
 }
 
 // static
@@ -105,15 +112,6 @@ CloseWatcher* CloseWatcher::Create(ScriptState* script_state,
   }
 
   WatcherStack& stack = *window->closewatcher_stack();
-
-  if (!stack.CheckForCreation()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kNotAllowedError,
-        "Creating more than one CloseWatcher at a time requires a user "
-        "activation.");
-    return nullptr;
-  }
-
   return CreateInternal(window, stack, options);
 }
 
@@ -122,6 +120,19 @@ CloseWatcher* CloseWatcher::CreateInternal(LocalDOMWindow* window,
                                            WatcherStack& stack,
                                            CloseWatcherOptions* options) {
   CloseWatcher* watcher = MakeGarbageCollected<CloseWatcher>(window);
+
+  if (LocalFrame::ConsumeTransientUserActivation(window->GetFrame())) {
+    watcher->created_with_user_activation_ = true;
+    watcher->grouped_with_previous_ = false;
+  } else if (!stack.HasConsumedFreeWatcher()) {
+    watcher->created_with_user_activation_ = false;
+    watcher->grouped_with_previous_ = false;
+  } else {
+    watcher->created_with_user_activation_ = false;
+    watcher->grouped_with_previous_ = true;
+  }
+
+  stack.ConsumeCloseWatcherCancelability();
 
   if (options && options->hasSignal()) {
     AbortSignal* signal = options->signal();

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 
 #include "base/containers/queue.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -26,10 +27,10 @@
 #include "media/gpu/media_gpu_export.h"
 #include "media/video/h264_parser.h"
 #include "media/video/h264_poc.h"
-#if BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#if BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
 #include "media/video/h265_parser.h"
 #include "media/video/h265_poc.h"
-#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#endif  // BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_bindings.h"
@@ -47,7 +48,7 @@ class VP9SuperFrameBitstreamFilter;
 MEDIA_GPU_EXPORT bool InitializeVideoToolbox();
 
 // VideoToolbox.framework implementation of the VideoDecodeAccelerator
-// interface for Mac OS X (currently limited to 10.9+).
+// interface for macOS.
 class VTVideoDecodeAccelerator : public VideoDecodeAccelerator,
                                  public base::trace_event::MemoryDumpProvider {
  public:
@@ -195,9 +196,9 @@ class VTVideoDecodeAccelerator : public VideoDecodeAccelerator,
   // |frame| is owned by |pending_frames_|.
   void DecodeTaskH264(scoped_refptr<DecoderBuffer> buffer, Frame* frame);
   void DecodeTaskVp9(scoped_refptr<DecoderBuffer> buffer, Frame* frame);
-#if BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#if BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
   void DecodeTaskHEVC(scoped_refptr<DecoderBuffer> buffer, Frame* frame);
-#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#endif  // BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
   void DecodeDone(Frame* frame);
 
   //
@@ -235,7 +236,7 @@ class VTVideoDecodeAccelerator : public VideoDecodeAccelerator,
   const gpu::GpuDriverBugWorkarounds workarounds_;
   std::unique_ptr<MediaLog> media_log_;
 
-  VideoDecodeAccelerator::Client* client_ = nullptr;
+  raw_ptr<VideoDecodeAccelerator::Client> client_ = nullptr;
   State state_ = STATE_DECODING;
 
   // Queue of pending flush tasks. This is used to drop frames when a reset
@@ -263,6 +264,9 @@ class VTVideoDecodeAccelerator : public VideoDecodeAccelerator,
 
   // Format of the assigned picture buffers.
   VideoPixelFormat picture_format_ = PIXEL_FORMAT_UNKNOWN;
+
+  // Corresponding GpuMemoryBuffer format.
+  gfx::BufferFormat buffer_format_ = gfx::BufferFormat::YUV_420_BIPLANAR;
 
   // Frames that have not yet been decoded, keyed by bitstream ID; maintains
   // ownership of Frame objects while they flow through VideoToolbox.
@@ -307,18 +311,23 @@ class VTVideoDecodeAccelerator : public VideoDecodeAccelerator,
   std::vector<uint8_t> configured_pps_;
 
   H264POC h264_poc_;
-#if BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#if BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
   H265Parser hevc_parser_;
 
   // VPSs seen in the bitstream.
   base::flat_map<int, std::vector<uint8_t>> seen_vps_;
   // VPS most recently activated by an IDR.
   std::vector<uint8_t> active_vps_;
-  // VPS the decoder is currently confgured with.
-  std::vector<uint8_t> configured_vps_;
+
+  // VPSs the decoder is currently confgured with.
+  base::flat_map<int, std::vector<uint8_t>> configured_vpss_;
+  // SPSs the decoder is currently confgured with.
+  base::flat_map<int, std::vector<uint8_t>> configured_spss_;
+  // PPSs the decoder is currently confgured with.
+  base::flat_map<int, std::vector<uint8_t>> configured_ppss_;
 
   H265POC hevc_poc_;
-#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#endif  // BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
 
   Config config_;
   VideoCodec codec_;
@@ -328,6 +337,10 @@ class VTVideoDecodeAccelerator : public VideoDecodeAccelerator,
 
   bool waiting_for_idr_ = true;
   bool missing_idr_logged_ = false;
+
+  // currently only HEVC is supported, VideoToolbox doesn't
+  // support VP9 with alpha for now.
+  bool has_alpha_ = false;
 
   // Used to accumulate the output picture count as a workaround to solve
   // the VT CRA/RASL bug

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@ class AndroidPaymentAppTest : public testing::Test,
         GURL("https://top-level-origin.com"),
         GURL("https://payment-request-origin.com"), "payment-request-id",
         std::move(description), communication,
-        web_contents->GetMainFrame()->GetGlobalId());
+        web_contents->GetPrimaryMainFrame()->GetGlobalId());
   }
 
   AndroidPaymentAppTest()

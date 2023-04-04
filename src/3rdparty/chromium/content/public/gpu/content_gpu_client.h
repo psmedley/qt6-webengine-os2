@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 namespace gpu {
 struct GpuPreferences;
 class GpuDriverBugWorkarounds;
+class Scheduler;
 class SharedImageManager;
 class SyncPointManager;
 }
@@ -44,6 +45,8 @@ class CONTENT_EXPORT ContentGpuClient {
       const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
       mojo::BinderMap* binders) {}
 
+  // Called immediately after the sandbox is initialized on the main thread.
+  virtual void PostSandboxInitialized() {}
   // Called right after the IO/compositor thread is created.
   virtual void PostIOThreadCreated(
       base::SingleThreadTaskRunner* io_task_runner) {}
@@ -54,6 +57,7 @@ class CONTENT_EXPORT ContentGpuClient {
   // internally create one.
   virtual gpu::SyncPointManager* GetSyncPointManager();
   virtual gpu::SharedImageManager* GetSharedImageManager();
+  virtual gpu::Scheduler* GetScheduler();
   virtual viz::VizCompositorThreadRunner* GetVizCompositorThreadRunner();
   // Allow an embedder to provide a share group reimplementation to connect renderer
   // GL contexts with the root compositor.

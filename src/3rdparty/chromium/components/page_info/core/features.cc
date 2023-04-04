@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,31 +7,62 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "build/build_config.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace page_info {
 
 #if BUILDFLAG(IS_ANDROID)
-const base::Feature kPageInfoHistory{"PageInfoHistory",
-                                     base::FEATURE_ENABLED_BY_DEFAULT};
-const base::Feature kPageInfoStoreInfo{"PageInfoStoreInfo",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kPageInfoDiscoverability{"PageInfoDiscoverability",
-                                             base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kPageInfoHistory,
+             "PageInfoHistory",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kPageInfoStoreInfo,
+             "PageInfoStoreInfo",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
-const base::Feature kPageInfoAboutThisSite{"PageInfoAboutThisSite",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
+extern bool IsAboutThisSiteFeatureEnabled(const std::string& locale) {
+  if (l10n_util::GetLanguage(locale) == "en") {
+    return base::FeatureList::IsEnabled(kPageInfoAboutThisSiteEn);
+  } else {
+    return base::FeatureList::IsEnabled(kPageInfoAboutThisSiteNonEn);
+  }
+}
 
-const base::FeatureParam<bool> kShowSampleContent{&kPageInfoAboutThisSite,
+BASE_FEATURE(kPageInfoAboutThisSiteEn,
+             "PageInfoAboutThisSiteEn",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kPageInfoAboutThisSiteNonEn,
+             "PageInfoAboutThisSiteNonEn",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::FeatureParam<bool> kShowSampleContent{&kPageInfoAboutThisSiteEn,
                                                   "ShowSampleContent", false};
 
-const base::Feature kAboutThisSiteBanner{"AboutThisSiteBanner",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPageInfoAboutThisSiteMoreInfo,
+             "PageInfoAboutThisSiteMoreInfo",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPageInfoAboutThisSiteDescriptionPlaceholder,
+             "PageInfoAboutThisSiteDescriptionPlaceholder",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if !BUILDFLAG(IS_ANDROID)
-const base::Feature kPageInfoHistoryDesktop{"PageInfoHistoryDesktop",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPageInfoHistoryDesktop,
+             "PageInfoHistoryDesktop",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPageInfoHideSiteSettings,
+             "PageInfoHideSiteSettings",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPageInfoCookiesSubpage,
+             "PageInfoCookiesSubpage",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPageSpecificSiteDataDialog,
+             "PageSpecificSiteDataDialog",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 #endif
 
 }  // namespace page_info

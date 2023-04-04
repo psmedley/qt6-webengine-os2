@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,20 +43,27 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
           NGBlockNode cell, const NGTableConstraintSpaceData::Cell& cell_data,
           LayoutUnit row_block_size, absl::optional<LayoutUnit> row_baseline,
           bool min_block_size_should_encompass_intrinsic_size) {
-        const LayoutUnit cell_block_size =
-            cell_data.rowspan_block_size != kIndefiniteSize
-                ? cell_data.rowspan_block_size
-                : row_block_size;
+        bool has_effective_rowspan =
+            cell_data.rowspan_block_size != kIndefiniteSize;
+        const LayoutUnit cell_block_size = has_effective_rowspan
+                                               ? cell_data.rowspan_block_size
+                                               : row_block_size;
 
-        NGConstraintSpaceBuilder builder =
-            NGTableAlgorithmUtils::CreateTableCellConstraintSpaceBuilder(
-                table_data.table_writing_direction, cell, cell_data.borders,
-                table_data.column_locations, cell_block_size,
-                container_builder_.InlineSize(), row_baseline,
-                cell_data.start_column,
-                cell_data.is_initial_block_size_indefinite,
-                table_data.is_table_block_size_specified,
-                table_data.has_collapsed_borders, NGCacheSlot::kLayout);
+        DCHECK_EQ(table_data.table_writing_direction.GetWritingMode(),
+                  ConstraintSpace().GetWritingMode());
+
+        NGConstraintSpaceBuilder builder(ConstraintSpace(),
+                                         cell.Style().GetWritingDirection(),
+                                         /* is_new_fc */ true);
+
+        NGTableAlgorithmUtils::SetupTableCellConstraintSpaceBuilder(
+            table_data.table_writing_direction, cell, cell_data.borders,
+            table_data.column_locations, cell_block_size,
+            container_builder_.InlineSize(), row_baseline,
+            cell_data.start_column, cell_data.is_initial_block_size_indefinite,
+            table_data.is_table_block_size_specified,
+            table_data.has_collapsed_borders, has_effective_rowspan,
+            NGCacheSlot::kLayout, &builder);
 
         if (ConstraintSpace().HasBlockFragmentation()) {
           SetupSpaceBuilderForFragmentation(
@@ -109,8 +116,9 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
   EBreakBetween row_break_after;
   NGRowBaselineTabulator row_baseline_tabulator;
   HeapVector<ResultWithOffset> results;
-  auto PlaceCells = [&](LayoutUnit row_block_size,
-                        absl::optional<LayoutUnit> row_baseline) {
+  auto PlaceCells =
+      [&](LayoutUnit row_block_size,
+          absl::optional<LayoutUnit> row_baseline) -> NGLayoutResult::EStatus {
     // Reset our state.
     max_cell_block_size = LayoutUnit();
     row_break_before = EBreakBetween::kAuto;
@@ -137,6 +145,17 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
           min_block_size_should_encompass_intrinsic_size);
       const NGLayoutResult* cell_result =
           cell.Layout(cell_space, cell_break_token);
+
+      if (cell_result->Status() == NGLayoutResult::kOutOfFragmentainerSpace) {
+        DCHECK(has_block_fragmentation);
+        // If the cell establishes a multicol container (and we're already
+        // inside another fragmentation context), it may have failed to produce
+        // a fragment, because there wasn't enough space. We now need to
+        // propagate the failure, to make some ancestor algorithm handle the
+        // problem. We need to break before something further up.
+        return NGLayoutResult::kOutOfFragmentainerSpace;
+      }
+      DCHECK_EQ(cell_result->Status(), NGLayoutResult::kSuccess);
 
       const LogicalOffset offset(
           table_data.column_locations[cell_data.start_column].offset -
@@ -172,6 +191,8 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
             std::max(max_cell_block_size, fragment.BlockSize());
       }
     }
+
+    return NGLayoutResult::kSuccess;
   };
 
   // Determine the baseline for the table-row if we haven't been provided a
@@ -189,7 +210,12 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
     }
   }
 
-  PlaceCells(row.block_size, row_baseline);
+  {
+    NGLayoutResult::EStatus status = PlaceCells(row.block_size, row_baseline);
+    if (status == NGLayoutResult::kOutOfFragmentainerSpace)
+      return container_builder_.Abort(status);
+    DCHECK_EQ(status, NGLayoutResult::kSuccess);
+  }
 
   LayoutUnit previous_consumed_row_block_size;
   if (IsResumingLayout(BreakToken())) {
@@ -208,8 +234,13 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
 
   if (has_block_fragmentation) {
     // If we've expanded due to fragmentation, relayout with the new block-size.
-    if (row.block_size != row_block_size)
-      PlaceCells(row_block_size, absl::nullopt);
+    if (row.block_size != row_block_size) {
+      NGLayoutResult::EStatus status =
+          PlaceCells(row_block_size, absl::nullopt);
+      if (status == NGLayoutResult::kOutOfFragmentainerSpace)
+        return container_builder_.Abort(status);
+      DCHECK_EQ(status, NGLayoutResult::kSuccess);
+    }
 
     for (auto& result : results)
       container_builder_.AddResult(*result.result, result.offset);
@@ -232,8 +263,9 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
 
   if (UNLIKELY(InvolvedInBlockFragmentation(container_builder_))) {
     NGBreakStatus status = FinishFragmentation(
-        Node(), ConstraintSpace(), BorderPadding().block_end,
-        FragmentainerSpaceAtBfcStart(ConstraintSpace()), &container_builder_);
+        Node(), ConstraintSpace(), /* trailing_border_padding */ LayoutUnit(),
+        FragmentainerSpaceLeft(ConstraintSpace()), &container_builder_);
+
     // TODO(mstensho): Deal with early-breaks.
     DCHECK_EQ(status, NGBreakStatus::kContinue);
 
@@ -244,7 +276,9 @@ const NGLayoutResult* NGTableRowLayoutAlgorithm::Layout() {
                 container_builder_.FragmentBlockSize()));
   }
 
-  container_builder_.SetBaseline(row_baseline_tabulator.ComputeBaseline(
+  // NOTE: When we support "align-content: last baseline" for tables there may
+  // be two baseline alignment contexts.
+  container_builder_.SetBaselines(row_baseline_tabulator.ComputeBaseline(
       container_builder_.FragmentBlockSize()));
 
   NGOutOfFlowLayoutPart(Node(), ConstraintSpace(), &container_builder_).Run();

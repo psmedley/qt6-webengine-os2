@@ -13,7 +13,6 @@
 #include "quiche/quic/core/quic_packets.h"
 #include "quiche/quic/core/quic_stream_frame_data_producer.h"
 #include "quiche/quic/core/quic_trace_visitor.h"
-#include "quiche/quic/platform/api/quic_containers.h"
 #include "quiche/quic/test_tools/simple_session_notifier.h"
 #include "quiche/quic/test_tools/simulator/link.h"
 #include "quiche/quic/test_tools/simulator/queue.h"
@@ -47,7 +46,6 @@ class QuicEndpoint : public QuicEndpointBase,
   void OnStreamFrame(const QuicStreamFrame& frame) override;
   void OnCryptoFrame(const QuicCryptoFrame& frame) override;
   void OnCanWrite() override;
-  bool SendProbingData() override;
   bool WillingAndAbleToWrite() const override;
   bool ShouldKeepConnectionAlive() const override;
 
@@ -76,8 +74,10 @@ class QuicEndpoint : public QuicEndpointBase,
   void SendNewConnectionId(const QuicNewConnectionIdFrame& /*frame*/) override {
   }
   void SendRetireConnectionId(uint64_t /*sequence_number*/) override {}
-  void OnServerConnectionIdIssued(
-      const QuicConnectionId& /*server_connection_id*/) override {}
+  bool MaybeReserveConnectionId(
+      const QuicConnectionId& /*server_connection_id*/) override {
+    return true;
+  }
   void OnServerConnectionIdRetired(
       const QuicConnectionId& /*server_connection_id*/) override {}
   bool AllowSelfAddressChange() const override;
@@ -107,6 +107,11 @@ class QuicEndpoint : public QuicEndpointBase,
   bool IsKnownServerAddress(
       const QuicSocketAddress& /*address*/) const override {
     return false;
+  }
+  void OnBandwidthUpdateTimeout() override {}
+  std::unique_ptr<QuicPathValidationContext> CreateContextForMultiPortPath()
+      override {
+    return nullptr;
   }
 
   // End QuicConnectionVisitorInterface implementation.

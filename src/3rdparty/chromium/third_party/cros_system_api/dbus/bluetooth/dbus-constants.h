@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium OS Authors. All rights reserved.
+// Copyright 2019 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -627,6 +627,7 @@ namespace bluetooth_debug {
 constexpr char kBluetoothDebugInterface[] = "org.chromium.Bluetooth.Debug";
 
 // Methods.
+constexpr char kSetBluetoothQualityReport[] = "SetQuality";
 constexpr char kSetLevels[] = "SetLevels";
 }  // namespace bluetooth_debug
 

@@ -8,16 +8,23 @@
 #ifndef SKSL_VARDECLARATIONS
 #define SKSL_VARDECLARATIONS
 
+#include "include/core/SkTypes.h"
 #include "include/private/SkSLProgramElement.h"
 #include "include/private/SkSLStatement.h"
 #include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLVariable.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+
 namespace SkSL {
 
-namespace dsl {
-    class DSLCore;
-}
+class Context;
+class Position;
+class Type;
+
+struct Modifiers;
 
 /**
  * A single variable declaration statement. Multiple variables declared together are expanded to
@@ -51,7 +58,7 @@ public:
     // errors if needed. This method is implicitly called during Convert(), but is also explicitly
     // called while processing interface block fields.
     static void ErrorCheck(const Context& context, Position pos, Position modifiersPosition,
-            const Modifiers& modifiers, const Type* baseType, Variable::Storage storage);
+            const Modifiers& modifiers, const Type* type, Variable::Storage storage);
 
     // Does proper error checking and type coercion; reports errors via ErrorReporter.
     static std::unique_ptr<Statement> Convert(const Context& context, std::unique_ptr<Variable> var,
@@ -103,8 +110,6 @@ private:
     std::unique_ptr<Expression> fValue;
     // if this VarDeclaration is a clone, it doesn't actually own the associated variable
     bool fIsClone;
-
-    friend class IRGenerator;
 
     using INHERITED = Statement;
 };

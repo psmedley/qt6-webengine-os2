@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,32 +32,19 @@ const int kEventExpirationMinutes = 20;
 
 }  // namespace
 
-BreadcrumbManager::BreadcrumbManager(base::TimeTicks start_time)
-    : start_time_(start_time) {}
-
-BreadcrumbManager::~BreadcrumbManager() = default;
-
-size_t BreadcrumbManager::GetEventCount() {
-  DropOldEvents();
-
-  size_t count = 0;
-  for (const EventBucket& event_bucket : base::Reversed(event_buckets_)) {
-    count += event_bucket.events.size();
-  }
-  return count;
+// static
+BreadcrumbManager& BreadcrumbManager::GetInstance() {
+  static base::NoDestructor<BreadcrumbManager> breadcrumb_manager;
+  return *breadcrumb_manager;
 }
 
-const std::list<std::string> BreadcrumbManager::GetEvents(
-    size_t event_count_limit) {
+const std::list<std::string> BreadcrumbManager::GetEvents() {
   DropOldEvents();
 
   std::list<std::string> events;
   for (const EventBucket& event_bucket : base::Reversed(event_buckets_)) {
     for (const std::string& event : base::Reversed(event_bucket.events)) {
       events.push_front(event);
-      if (event_count_limit > 0 && events.size() >= event_count_limit) {
-        return events;
-      }
     }
   }
   return events;
@@ -89,11 +76,14 @@ void BreadcrumbManager::AddEvent(const std::string& event) {
   event_buckets_.back().events.push_back(event_log);
 
   for (auto& observer : observers_) {
-    observer.EventAdded(this, event_log);
+    observer.EventAdded(event_log);
   }
 
   DropOldEvents();
 }
+
+BreadcrumbManager::BreadcrumbManager() = default;
+BreadcrumbManager::~BreadcrumbManager() = default;
 
 void BreadcrumbManager::DropOldEvents() {
   bool old_buckets_dropped = false;
@@ -124,7 +114,7 @@ void BreadcrumbManager::DropOldEvents() {
 
   if (old_buckets_dropped) {
     for (auto& observer : observers_) {
-      observer.OldEventsRemoved(this);
+      observer.OldEventsRemoved();
     }
   }
 }
@@ -141,8 +131,9 @@ void BreadcrumbManager::RemoveObserver(BreadcrumbManagerObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool BreadcrumbManager::HasObserver(BreadcrumbManagerObserver* observer) {
-  return observers_.HasObserver(observer);
+void BreadcrumbManager::ResetForTesting() {
+  start_time_ = base::TimeTicks::Now();
+  event_buckets_.clear();
 }
 
 BreadcrumbManager::EventBucket::EventBucket(int minutes_elapsed)

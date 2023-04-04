@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "third_party/skia/include/core/SkFont.h"
 #include "third_party/skia/include/core/SkFontMetrics.h"
 #include "third_party/skia/include/core/SkFontStyle.h"
@@ -23,11 +22,14 @@
 #include "ui/gfx/font.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/font_render_params.h"
-#include "ui/gfx/skia_font_delegate.h"
 #include "ui/gfx/text_utils.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "ui/gfx/system_fonts_win.h"
+#endif
+
+#if BUILDFLAG(IS_LINUX)
+#include "ui/linux/linux_ui.h"
 #endif
 
 namespace gfx {
@@ -164,14 +166,18 @@ void PlatformFontSkia::EnsuresDefaultFontIsInitialized() {
   weight = system_font.GetWeight();
 #endif  // BUILDFLAG(IS_WIN)
 
-  // On Linux, SkiaFontDelegate is used to query the native toolkit (e.g.
-  // GTK+) for the default UI font.
-  const SkiaFontDelegate* delegate = SkiaFontDelegate::instance();
-  if (delegate) {
-    delegate->GetDefaultFontDescription(&family, &size_pixels, &style, &weight,
-                                        &params);
-  } else if (default_font_description_) {
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX)
+  // On Linux, LinuxUi is used to query the native toolkit (e.g.
+  // GTK) for the default UI font.
+  if (const auto* linux_ui = ui::LinuxUi::instance()) {
+    int weight_int;
+    linux_ui->GetDefaultFontDescription(
+        &family, &size_pixels, &style, static_cast<int*>(&weight_int), &params);
+    weight = static_cast<Font::Weight>(weight_int);
+  } else
+#endif
+      if (default_font_description_) {
+#if BUILDFLAG(IS_CHROMEOS)
     // On ChromeOS, a FontList font description string is stored as a
     // translatable resource and passed in via SetDefaultFontDescription().
     FontRenderParamsQuery query;

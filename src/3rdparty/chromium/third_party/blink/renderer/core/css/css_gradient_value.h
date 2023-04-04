@@ -94,9 +94,12 @@ namespace cssvalue {
 
 class CSSGradientValue : public CSSImageGeneratorValue {
  public:
+  using ContainerSizes = CSSToLengthConversionData::ContainerSizes;
+
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
-                                const ComputedStyle&,
+                                const ComputedStyle& style,
+                                const ContainerSizes&,
                                 const gfx::SizeF&) const;
 
   void AddStop(const CSSGradientColorStop& stop) {
@@ -117,6 +120,14 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   Vector<Color> GetStopColors(const Document&, const ComputedStyle&) const;
 
   void TraceAfterDispatch(blink::Visitor*) const;
+
+  void SetColorInterpolationSpace(
+      Color::ColorInterpolationSpace color_interpolation_space,
+      Color::HueInterpolationMethod hue_interpolation_method) {
+    color_interpolation_space_ = color_interpolation_space;
+    hue_interpolation_method_ = hue_interpolation_method;
+  }
+  bool ShouldSerializeColorSpace() const;
 
   struct GradientDesc;
 
@@ -149,6 +160,10 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   CSSGradientType gradient_type_;
   bool repeating_ : 1;
   bool is_cacheable_ : 1;
+  Color::ColorInterpolationSpace color_interpolation_space_ =
+      Color::ColorInterpolationSpace::kNone;
+  Color::HueInterpolationMethod hue_interpolation_method_ =
+      Color::HueInterpolationMethod::kShorter;
 };
 
 class CSSLinearGradientValue final : public CSSGradientValue {
@@ -181,6 +196,7 @@ class CSSLinearGradientValue final : public CSSGradientValue {
                                            bool allow_visited_style) const;
 
   bool IsUsingCurrentColor() const;
+  bool IsUsingContainerRelativeUnits() const;
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
@@ -281,6 +297,7 @@ class CORE_EXPORT CSSRadialGradientValue final : public CSSGradientValue {
                                            bool allow_visited_style) const;
 
   bool IsUsingCurrentColor() const;
+  bool IsUsingContainerRelativeUnits() const;
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
@@ -329,6 +346,7 @@ class CSSConicGradientValue final : public CSSGradientValue {
                                           bool allow_visited_style) const;
 
   bool IsUsingCurrentColor() const;
+  bool IsUsingContainerRelativeUnits() const;
 
   void TraceAfterDispatch(blink::Visitor*) const;
 

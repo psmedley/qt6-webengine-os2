@@ -125,43 +125,6 @@ PaintLayerClipper::PaintLayerClipper(const PaintLayer* layer,
                                      bool usegeometry_mapper)
     : layer_(layer), use_geometry_mapper_(usegeometry_mapper) {}
 
-PhysicalRect PaintLayerClipper::LocalClipRect(
-    const PaintLayer& clipping_root_layer) const {
-  DCHECK(use_geometry_mapper_);
-  ClipRectsContext context(
-      &clipping_root_layer,
-      &clipping_root_layer.GetLayoutObject().FirstFragment());
-
-  ClipRect clip_rect;
-  CalculateBackgroundClipRectWithGeometryMapper(
-      context, layer_->GetLayoutObject().FirstFragment(), kRespectOverflowClip,
-      clip_rect);
-
-  if (clip_rect.IsInfinite())
-    return clip_rect.Rect();
-
-  PhysicalRect premapped_rect = clip_rect.Rect();
-  // The rect now needs to be transformed to the local space of this
-  // PaintLayer.
-  // TODO(chrishtr): not correct for fragmentation.
-  premapped_rect.Move(context.root_fragment->PaintOffset());
-
-  const auto& clip_root_layer_transform =
-      context.root_fragment->LocalBorderBoxProperties().Transform();
-  const auto& layer_transform = layer_->GetLayoutObject()
-                                    .FirstFragment()
-                                    .LocalBorderBoxProperties()
-                                    .Transform();
-  gfx::RectF clipped_rect_in_local_space(premapped_rect);
-  GeometryMapper::SourceToDestinationRect(
-      clip_root_layer_transform, layer_transform, clipped_rect_in_local_space);
-  // TODO(chrishtr): not correct for fragmentation.
-  clipped_rect_in_local_space.Offset(
-      -gfx::Vector2dF(layer_->GetLayoutObject().FirstFragment().PaintOffset()));
-
-  return PhysicalRect::FastAndLossyFromRectF(clipped_rect_in_local_space);
-}
-
 void PaintLayerClipper::CalculateRectsWithGeometryMapper(
     const ClipRectsContext& context,
     const FragmentData& fragment_data,
@@ -328,9 +291,11 @@ void PaintLayerClipper::CalculateBackgroundClipRectWithGeometryMapper(
       context.root_fragment->LocalBorderBoxProperties();
   if (context.ShouldRespectRootLayerClip()) {
     destination_property_tree_state.SetClip(context.root_fragment->PreClip());
+    destination_property_tree_state.SetEffect(
+        context.root_fragment->PreEffect());
   } else {
     destination_property_tree_state.SetClip(
-        context.root_fragment->PostOverflowClip());
+        context.root_fragment->ContentsClip());
   }
 
   // The background rect applies all clips *above* m_layer, but not the overflow
@@ -393,9 +358,8 @@ PhysicalRect PaintLayerClipper::LocalVisualRect(
   // overflow induced by paint, prior to applying filters. This function is
   // expected the return the final visual rect after filtering.
   if (layer_->PaintsWithFilters() &&
-      // If we use GeometryMapper to map to an ancestor layer, GeometryMapper
-      // will handle filter effects.
-      (!use_geometry_mapper_ || context.root_layer == layer_)) {
+      // GeometryMapper will handle filter effects.
+      !use_geometry_mapper_) {
     layer_bounds_with_visual_overflow =
         layer_->MapRectForFilter(layer_bounds_with_visual_overflow);
   }

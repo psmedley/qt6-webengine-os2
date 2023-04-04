@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,9 +35,12 @@ class DeviceMediaToMojoAdapterTest : public ::testing::Test {
     adapter_ = std::make_unique<DeviceMediaToMojoAdapter>(
         std::move(mock_device), base::DoNothing(),
         base::ThreadTaskRunnerHandle::Get());
-#else
+#elif BUILDFLAG(IS_WIN)
     adapter_ = std::make_unique<DeviceMediaToMojoAdapter>(
-        std::move(mock_device));
+        std::move(mock_device), nullptr);
+#else
+    adapter_ =
+        std::make_unique<DeviceMediaToMojoAdapter>(std::move(mock_device));
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   }
 

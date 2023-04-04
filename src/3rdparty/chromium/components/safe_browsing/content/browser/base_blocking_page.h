@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ class BaseBlockingPage
       const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
 
   // SecurityInterstitialPage methods:
-  void PopulateInterstitialStrings(base::Value* load_time_data) override;
+  void PopulateInterstitialStrings(base::Value::Dict& load_time_data) override;
   void OnInterstitialClosing() override {}
 
   // Called when the interstitial is going away. Intentionally do nothing in

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,11 @@
 #include "net/cookies/cookie_inclusion_status.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_partition_key_collection.h"
-#include "net/cookies/same_party_context.h"
+#include "net/first_party_sets/first_party_set_entry.h"
+#include "net/first_party_sets/same_party_context.h"
 #include "services/network/public/cpp/cookie_manager_shared_mojom_traits.h"
 #include "services/network/public/mojom/cookie_manager.mojom-forward.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "services/network/public/mojom/cookie_partition_key.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -160,16 +162,6 @@ struct StructTraits<network::mojom::CookieSameSiteContextDataView,
 };
 
 template <>
-struct EnumTraits<network::mojom::SamePartyCookieContextType,
-                  net::SamePartyContext::Type> {
-  static network::mojom::SamePartyCookieContextType ToMojom(
-      net::SamePartyContext::Type context_type);
-
-  static bool FromMojom(network::mojom::SamePartyCookieContextType context_type,
-                        net::SamePartyContext::Type* out);
-};
-
-template <>
 struct StructTraits<network::mojom::CookieOptionsDataView, net::CookieOptions> {
   static bool exclude_httponly(const net::CookieOptions& o) {
     return o.exclude_httponly();
@@ -258,6 +250,9 @@ struct StructTraits<network::mojom::CanonicalCookieDataView,
   }
   static base::Time last_access(const net::CanonicalCookie& c) {
     return c.LastAccessDate();
+  }
+  static base::Time last_update(const net::CanonicalCookie& c) {
+    return c.LastUpdateDate();
   }
   static bool secure(const net::CanonicalCookie& c) { return c.IsSecure(); }
   static bool httponly(const net::CanonicalCookie& c) { return c.IsHttpOnly(); }
@@ -357,26 +352,6 @@ struct StructTraits<network::mojom::CookieChangeInfoDataView,
   }
   static bool Read(network::mojom::CookieChangeInfoDataView info,
                    net::CookieChangeInfo* out);
-};
-
-template <>
-struct StructTraits<network::mojom::SamePartyContextDataView,
-                    net::SamePartyContext> {
-  static net::SamePartyContext::Type context_type(
-      const net::SamePartyContext& s) {
-    return s.context_type();
-  }
-  static net::SamePartyContext::Type ancestors_for_metrics_only(
-      const net::SamePartyContext& s) {
-    return s.ancestors_for_metrics_only();
-  }
-  static net::SamePartyContext::Type top_resource_for_metrics_only(
-      const net::SamePartyContext& s) {
-    return s.top_resource_for_metrics_only();
-  }
-
-  static bool Read(network::mojom::SamePartyContextDataView bundle,
-                   net::SamePartyContext* out);
 };
 
 }  // namespace mojo

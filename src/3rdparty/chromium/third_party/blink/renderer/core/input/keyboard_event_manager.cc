@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/auto_reset.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -173,7 +174,7 @@ bool KeyboardEventManager::HandleAccessKey(const WebKeyboardEvent& evt) {
       frame_->GetDocument()->GetElementByAccessKey(key.DeprecatedLower());
   if (!elem)
     return false;
-  elem->focus(FocusParams(SelectionBehaviorOnFocus::kReset,
+  elem->Focus(FocusParams(SelectionBehaviorOnFocus::kReset,
                           mojom::blink::FocusType::kAccessKey, nullptr));
   elem->AccessKeyAction(SimulatedClickCreationScope::kFromUserAgent);
   return true;
@@ -259,13 +260,21 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
     const int kDomKeysDontSend[] = {0x00200309, 0x00200310};
     const int kDomKeysNotCancellabelUnlessInEditor[] = {0x00400031, 0x00400032,
                                                         0x00400033};
-    for (int dom_key : kDomKeysDontSend) {
+    for (uint32_t dom_key : kDomKeysDontSend) {
       if (initial_key_event.dom_key == dom_key)
         send_key_event = false;
     }
 
-    for (int dom_key : kDomKeysNotCancellabelUnlessInEditor) {
-      if (initial_key_event.dom_key == dom_key && !IsEditableElement(*node))
+    for (uint32_t dom_key : kDomKeysNotCancellabelUnlessInEditor) {
+      auto* text_control = ToTextControlOrNull(node);
+      auto* element = DynamicTo<Element>(node);
+      bool is_editable =
+          IsEditable(*node) ||
+          (text_control && !text_control->IsDisabledOrReadOnly()) ||
+          (element &&
+           EqualIgnoringASCIICase(
+               element->FastGetAttribute(html_names::kRoleAttr), "textbox"));
+      if (initial_key_event.dom_key == dom_key && !is_editable)
         event_cancellable = false;
     }
   } else {
@@ -437,7 +446,8 @@ void KeyboardEventManager::DefaultArrowEventHandler(
   if (!page)
     return;
 
-  if (RuntimeEnabledFeatures::FocusgroupEnabled() &&
+  ExecutionContext* context = frame_->GetDocument()->GetExecutionContext();
+  if (RuntimeEnabledFeatures::FocusgroupEnabled(context) &&
       FocusgroupController::HandleArrowKeyboardEvent(event, frame_)) {
     event->SetDefaultHandled();
     return;

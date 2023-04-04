@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #endif
 
 namespace {
-const char kScriptName[] = "autofill_js";
+const char kScriptName[] = "autofill_controller";
 
 // The timeout for any JavaScript call in this file.
 const int64_t kJavaScriptExecutionTimeoutInSeconds = 5;
@@ -89,11 +89,10 @@ void AutofillJavaScriptFeature::FetchForms(
 
 void AutofillJavaScriptFeature::FillActiveFormField(
     web::WebFrame* frame,
-    std::unique_ptr<base::DictionaryValue> data,
+    base::Value::Dict data,
     base::OnceCallback<void(BOOL)> callback) {
-  DCHECK(data);
   std::vector<base::Value> parameters;
-  parameters.push_back(std::move(*data));
+  parameters.push_back(base::Value(std::move(data)));
   CallJavaScriptFunction(frame, "autofill.fillActiveFormField", parameters,
                          autofill::CreateBoolCallback(std::move(callback)),
                          base::Seconds(kJavaScriptExecutionTimeoutInSeconds));
@@ -101,16 +100,15 @@ void AutofillJavaScriptFeature::FillActiveFormField(
 
 void AutofillJavaScriptFeature::FillForm(
     web::WebFrame* frame,
-    std::unique_ptr<base::Value> data,
-    autofill::FieldRendererId force_fill_field_unique_id,
+    base::Value::Dict data,
+    autofill::FieldRendererId force_fill_field_id,
     base::OnceCallback<void(NSString*)> callback) {
-  DCHECK(data);
   DCHECK(!callback.is_null());
 
   std::vector<base::Value> parameters;
-  parameters.push_back(std::move(*data));
+  parameters.push_back(base::Value(std::move(data)));
   parameters.push_back(
-      base::Value(static_cast<int>(force_fill_field_unique_id.value())));
+      base::Value(static_cast<int>(force_fill_field_id.value())));
   CallJavaScriptFunction(frame, "autofill.fillForm", parameters,
                          autofill::CreateStringCallback(std::move(callback)),
                          base::Seconds(kJavaScriptExecutionTimeoutInSeconds));
@@ -132,12 +130,10 @@ void AutofillJavaScriptFeature::ClearAutofilledFieldsForForm(
                          base::Seconds(kJavaScriptExecutionTimeoutInSeconds));
 }
 
-void AutofillJavaScriptFeature::FillPredictionData(
-    web::WebFrame* frame,
-    std::unique_ptr<base::Value> data) {
-  DCHECK(data);
+void AutofillJavaScriptFeature::FillPredictionData(web::WebFrame* frame,
+                                                   base::Value::Dict data) {
   std::vector<base::Value> parameters;
-  parameters.push_back(std::move(*data));
+  parameters.push_back(base::Value(std::move(data)));
   CallJavaScriptFunction(frame, "autofill.fillPredictionData", parameters);
 }
 

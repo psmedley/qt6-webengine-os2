@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,7 @@ class ManagedUIHandler : public content::WebUIMessageHandler,
   void OnJavascriptDisallowed() override;
 
   // Handles the "observeManagedUI" message. No arguments.
-  void HandleObserveManagedUI(const base::ListValue* args);
+  void HandleObserveManagedUI(const base::Value::List& args);
 
   // Add/remove observers on the PolicyService.
   void AddObservers();

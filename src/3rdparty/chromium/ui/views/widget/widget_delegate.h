@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,14 +40,6 @@ class VIEWS_EXPORT WidgetDelegate {
   using ClientViewFactory =
       base::OnceCallback<std::unique_ptr<ClientView>(Widget*)>;
   using OverlayViewFactory = base::OnceCallback<std::unique_ptr<View>()>;
-
-  // NonClientFrameViewFactory is a RepeatingCallback because the
-  // NonClientFrameView is rebuilt on Aura platforms when WindowTreeHost
-  // properties that might affect its appearance change. Rebuilding the entire
-  // NonClientFrameView is a pretty big hammer for that but it's the one we
-  // have.
-  using NonClientFrameViewFactory =
-      base::RepeatingCallback<std::unique_ptr<NonClientFrameView>(Widget*)>;
 
   struct Params {
     Params();
@@ -211,6 +203,9 @@ class VIEWS_EXPORT WidgetDelegate {
   // state restoration.
   virtual std::string GetWindowName() const;
 
+  // Returns true if the widget should save its placement and state.
+  virtual bool ShouldSaveWindowPlacement() const;
+
   // Saves the window's bounds and "show" state. By default this uses the
   // process' local state keyed by window name (See GetWindowName above). This
   // behavior can be overridden to provide additional functionality.
@@ -368,7 +363,6 @@ class VIEWS_EXPORT WidgetDelegate {
   void RegisterDeleteDelegateCallback(base::OnceClosure callback);
 
   void SetClientViewFactory(ClientViewFactory factory);
-  void SetNonClientFrameViewFactory(NonClientFrameViewFactory factory);
   void SetOverlayViewFactory(OverlayViewFactory factory);
 
   // Called to notify the WidgetDelegate of changes to the state of its Widget.
@@ -428,7 +422,6 @@ class VIEWS_EXPORT WidgetDelegate {
   ClosureVector delete_delegate_callbacks_;
 
   ClientViewFactory client_view_factory_;
-  NonClientFrameViewFactory non_client_frame_view_factory_;
   OverlayViewFactory overlay_view_factory_;
 };
 

@@ -42,11 +42,11 @@ class CPDF_TextObject;
 class CPDF_StreamContentParser {
  public:
   CPDF_StreamContentParser(CPDF_Document* pDoc,
-                           CPDF_Dictionary* pPageResources,
-                           CPDF_Dictionary* pParentResources,
+                           RetainPtr<CPDF_Dictionary> pPageResources,
+                           RetainPtr<CPDF_Dictionary> pParentResources,
                            const CFX_Matrix* pmtContentToUser,
                            CPDF_PageObjectHolder* pObjHolder,
-                           CPDF_Dictionary* pResources,
+                           RetainPtr<CPDF_Dictionary> pResources,
                            const CFX_FloatRect& rcBBox,
                            const CPDF_AllStates* pStates,
                            std::set<const uint8_t*>* pParsedSet);
@@ -92,7 +92,7 @@ class CPDF_StreamContentParser {
   void AddObjectParam(RetainPtr<CPDF_Object> pObj);
   int GetNextParamPos();
   void ClearAllParams();
-  CPDF_Object* GetObject(uint32_t index);
+  RetainPtr<CPDF_Object> GetObject(uint32_t index);
   ByteString GetString(uint32_t index) const;
   float GetNumber(uint32_t index) const;
   // Calls GetNumber() |count| times and returns the values in reverse order.
@@ -125,7 +125,7 @@ class CPDF_StreamContentParser {
   CPDF_ImageObject* AddImage(uint32_t streamObjNum);
   CPDF_ImageObject* AddImage(const RetainPtr<CPDF_Image>& pImage);
 
-  void AddForm(CPDF_Stream* pStream);
+  void AddForm(RetainPtr<CPDF_Stream> pStream);
   void SetGraphicStates(CPDF_PageObject* pObj,
                         bool bColor,
                         bool bText,
@@ -133,8 +133,9 @@ class CPDF_StreamContentParser {
   RetainPtr<CPDF_ColorSpace> FindColorSpace(const ByteString& name);
   RetainPtr<CPDF_Pattern> FindPattern(const ByteString& name);
   RetainPtr<CPDF_ShadingPattern> FindShading(const ByteString& name);
-  CPDF_Dictionary* FindResourceHolder(const ByteString& type);
-  CPDF_Object* FindResourceObj(const ByteString& type, const ByteString& name);
+  RetainPtr<CPDF_Dictionary> FindResourceHolder(const ByteString& type);
+  RetainPtr<CPDF_Object> FindResourceObj(const ByteString& type,
+                                         const ByteString& name);
 
   // Takes ownership of |pImageObj|, returns unowned pointer to it.
   CPDF_ImageObject* AddImageObject(std::unique_ptr<CPDF_ImageObject> pImageObj);

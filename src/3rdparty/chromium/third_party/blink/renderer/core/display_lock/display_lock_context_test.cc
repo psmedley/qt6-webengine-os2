@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,12 +97,9 @@ class DisplayLockEmptyEventListener final : public NativeEventListener {
 };
 }  // namespace
 
-class DisplayLockContextTest
-    : public testing::Test,
-      private ScopedCSSContentVisibilityHiddenMatchableForTest {
+class DisplayLockContextTest : public testing::Test {
  public:
-  DisplayLockContextTest()
-      : ScopedCSSContentVisibilityHiddenMatchableForTest(true) {}
+  DisplayLockContextTest() = default;
 
   void SetUp() override { web_view_helper_.Initialize(); }
 
@@ -139,11 +136,12 @@ class DisplayLockContextTest
   }
 
   void LockElement(Element& element, bool activatable) {
-    StringBuilder value;
-    value.Append("content-visibility: hidden");
-    if (activatable)
-      value.Append("-matchable");
-    element.setAttribute(html_names::kStyleAttr, value.ToAtomicString());
+    if (activatable) {
+      element.setAttribute(html_names::kHiddenAttr, "until-found");
+    } else {
+      element.setAttribute(html_names::kStyleAttr,
+                           "content-visibility: hidden");
+    }
     UpdateAllLifecyclePhasesForTest();
   }
 
@@ -154,7 +152,7 @@ class DisplayLockContextTest
   }
 
   void UnlockImmediate(DisplayLockContext* context) {
-    context->SetRequestedState(EContentVisibility::kVisible);
+    context->SetRequestedState(EContentVisibility::kVisible, g_null_atom);
   }
 
   mojom::blink::FindOptionsPtr FindOptions(bool new_session = true) {
@@ -229,7 +227,7 @@ TEST_F(DisplayLockContextTest, LockAfterAppendStyleDirtyBits) {
   EXPECT_TRUE(element->GetComputedStyle());
   EXPECT_EQ(
       element->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()),
-      MakeRGB(255, 0, 0));
+      Color::FromRGB(255, 0, 0));
   // Manually commit the lock so that we can verify which dirty bits get
   // propagated.
   UnlockImmediate(element->GetDisplayLockContext());
@@ -259,7 +257,7 @@ TEST_F(DisplayLockContextTest, LockAfterAppendStyleDirtyBits) {
   ASSERT_TRUE(child->GetComputedStyle());
   EXPECT_EQ(
       child->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()),
-      MakeRGB(0, 0, 255));
+      Color::FromRGB(0, 0, 255));
 
   UnlockImmediate(child->GetDisplayLockContext());
   child->setAttribute(html_names::kStyleAttr, "color: blue;");
@@ -276,7 +274,7 @@ TEST_F(DisplayLockContextTest, LockAfterAppendStyleDirtyBits) {
   ASSERT_TRUE(child->GetComputedStyle());
   EXPECT_EQ(
       child->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()),
-      MakeRGB(0, 0, 255));
+      Color::FromRGB(0, 0, 255));
 }
 
 TEST_F(DisplayLockContextTest, LockedElementIsNotSearchableViaFindInPage) {
@@ -342,7 +340,7 @@ TEST_F(DisplayLockContextTest,
   // Check if we can still get the same result with the same query.
   Find(search_text, client);
   EXPECT_EQ(1, client.Count());
-  EXPECT_TRUE(container->GetDisplayLockContext()->IsLocked());
+  EXPECT_FALSE(container->GetDisplayLockContext()->IsLocked());
   EXPECT_GT(GetDocument().scrollingElement()->scrollTop(), 1000);
 }
 
@@ -569,7 +567,7 @@ TEST_F(DisplayLockContextTest, FindInPageWithChangedContent) {
   client.SetFrame(LocalMainFrame());
   Find("testing", client);
   EXPECT_EQ(3, client.Count());
-  EXPECT_TRUE(container->GetDisplayLockContext()->IsLocked());
+  EXPECT_FALSE(container->GetDisplayLockContext()->IsLocked());
 }
 
 TEST_F(DisplayLockContextTest, FindInPageWithNoMatchesWontUnlock) {
@@ -646,7 +644,7 @@ TEST_F(DisplayLockContextTest,
   EXPECT_EQ(2, client.Count());
   EXPECT_EQ(1, client.ActiveIndex());
 
-  EXPECT_TRUE(container->GetDisplayLockContext()->IsLocked());
+  EXPECT_FALSE(container->GetDisplayLockContext()->IsLocked());
   EXPECT_TRUE(activatable->GetDisplayLockContext()->IsLocked());
   EXPECT_TRUE(non_activatable->GetDisplayLockContext()->IsLocked());
   EXPECT_TRUE(nested_non_activatable->GetDisplayLockContext()->IsLocked());
@@ -682,8 +680,8 @@ TEST_F(DisplayLockContextTest,
   EXPECT_EQ(1, client.Count());
   EXPECT_EQ(1, client.ActiveIndex());
 
-  EXPECT_TRUE(container->GetDisplayLockContext()->IsLocked());
-  EXPECT_TRUE(child->GetDisplayLockContext()->IsLocked());
+  EXPECT_FALSE(container->GetDisplayLockContext()->IsLocked());
+  EXPECT_FALSE(child->GetDisplayLockContext()->IsLocked());
 }
 
 TEST_F(DisplayLockContextTest, CallUpdateStyleAndLayoutAfterChange) {
@@ -876,7 +874,7 @@ TEST_F(DisplayLockContextTest, LockedElementAndDescendantsAreNotFocusable) {
   EXPECT_FALSE(GetDocument().getElementById("textfield")->IsFocusable());
 
   // Calling explicit focus() should also not focus the element.
-  GetDocument().getElementById("textfield")->focus();
+  GetDocument().getElementById("textfield")->Focus();
   EXPECT_FALSE(GetDocument().FocusedElement());
 
   // Now commit the lock and ensure we can focus the input
@@ -899,7 +897,7 @@ TEST_F(DisplayLockContextTest, LockedElementAndDescendantsAreNotFocusable) {
   EXPECT_TRUE(GetDocument().getElementById("textfield")->IsFocusable());
 
   // Calling explicit focus() should focus the element
-  GetDocument().getElementById("textfield")->focus();
+  GetDocument().getElementById("textfield")->Focus();
   EXPECT_EQ(GetDocument().FocusedElement(),
             GetDocument().getElementById("textfield"));
 }
@@ -989,7 +987,7 @@ TEST_F(DisplayLockContextTest, DisplayLockPreventsActivation) {
 
   SetHtmlInnerHTML(R"HTML(
     <body>
-    <div id="nonviewport" style="content-visibility: hidden-matchable">
+    <div id="nonviewport" hidden=until-found>
       <div id="nonviewport-child"></div>
     </div>
     </body>
@@ -1055,7 +1053,7 @@ TEST_F(DisplayLockContextTest,
   EXPECT_FALSE(text_field->IsFocusable());
 
   // Calling explicit focus() should also not focus the element.
-  text_field->focus();
+  text_field->Focus();
   EXPECT_FALSE(GetDocument().FocusedElement());
 }
 
@@ -1331,7 +1329,7 @@ TEST_F(DisplayLockContextTest, ElementInTemplate) {
   ASSERT_TRUE(document_child->GetComputedStyle());
   EXPECT_EQ(document_child->GetComputedStyle()->VisitedDependentColor(
                 GetCSSPropertyColor()),
-            MakeRGB(255, 0, 0));
+            Color::FromRGB(255, 0, 0));
 
   auto* grandchild = GetDocument().getElementById("grandchild");
   EXPECT_FALSE(grandchild->NeedsStyleRecalc());
@@ -1339,7 +1337,7 @@ TEST_F(DisplayLockContextTest, ElementInTemplate) {
   ASSERT_TRUE(grandchild->GetComputedStyle());
   EXPECT_EQ(grandchild->GetComputedStyle()->VisitedDependentColor(
                 GetCSSPropertyColor()),
-            MakeRGB(0, 0, 255));
+            Color::FromRGB(0, 0, 255));
 }
 
 TEST_F(DisplayLockContextTest, AncestorAllowedTouchAction) {
@@ -1989,13 +1987,10 @@ TEST_F(DisplayLockContextTest, DescendantNeedsPaintPropertyUpdateBlocked) {
   EXPECT_FALSE(handler_object->DescendantNeedsPaintPropertyUpdate());
 }
 
-class DisplayLockContextRenderingTest
-    : public RenderingTest,
-      private ScopedCSSContentVisibilityHiddenMatchableForTest {
+class DisplayLockContextRenderingTest : public RenderingTest {
  public:
   DisplayLockContextRenderingTest()
-      : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()),
-        ScopedCSSContentVisibilityHiddenMatchableForTest(true) {}
+      : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()) {}
 
   void SetUp() override {
     EnableCompositing();
@@ -2010,7 +2005,7 @@ class DisplayLockContextRenderingTest
     return context->needs_compositing_dependent_flag_update_;
   }
   void LockImmediate(DisplayLockContext* context) {
-    context->SetRequestedState(EContentVisibility::kHidden);
+    context->SetRequestedState(EContentVisibility::kHidden, g_null_atom);
   }
   void RunStartOfLifecycleTasks() {
     auto start_of_lifecycle_tasks =
@@ -2858,18 +2853,14 @@ TEST_F(DisplayLockContextRenderingTest, UseCounter) {
     <style>
       .auto { content-visibility: auto; }
       .hidden { content-visibility: hidden; }
-      .matchable { content-visibility: hidden-matchable; }
     </style>
     <div id=e1></div>
     <div id=e2></div>
-    <div id=e3></div>
   )HTML");
 
   EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kContentVisibilityAuto));
   EXPECT_FALSE(
       GetDocument().IsUseCounted(WebFeature::kContentVisibilityHidden));
-  EXPECT_FALSE(GetDocument().IsUseCounted(
-      WebFeature::kContentVisibilityHiddenMatchable));
 
   GetDocument().getElementById("e1")->classList().Add("auto");
   UpdateAllLifecyclePhasesForTest();
@@ -2877,24 +2868,12 @@ TEST_F(DisplayLockContextRenderingTest, UseCounter) {
   EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kContentVisibilityAuto));
   EXPECT_FALSE(
       GetDocument().IsUseCounted(WebFeature::kContentVisibilityHidden));
-  EXPECT_FALSE(GetDocument().IsUseCounted(
-      WebFeature::kContentVisibilityHiddenMatchable));
 
   GetDocument().getElementById("e2")->classList().Add("hidden");
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kContentVisibilityAuto));
   EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kContentVisibilityHidden));
-  EXPECT_FALSE(GetDocument().IsUseCounted(
-      WebFeature::kContentVisibilityHiddenMatchable));
-
-  GetDocument().getElementById("e3")->classList().Add("matchable");
-  UpdateAllLifecyclePhasesForTest();
-
-  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kContentVisibilityAuto));
-  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kContentVisibilityHidden));
-  EXPECT_TRUE(GetDocument().IsUseCounted(
-      WebFeature::kContentVisibilityHiddenMatchable));
 }
 
 TEST_F(DisplayLockContextRenderingTest,
@@ -3216,14 +3195,11 @@ TEST_F(DisplayLockContextRenderingTest,
   EXPECT_TRUE(context->HadAnyViewportIntersectionNotifications());
 }
 
-class DisplayLockContextLegacyRenderingTest
-    : public RenderingTest,
-      private ScopedCSSContentVisibilityHiddenMatchableForTest,
-      private ScopedLayoutNGForTest {
+class DisplayLockContextLegacyRenderingTest : public RenderingTest,
+                                              private ScopedLayoutNGForTest {
  public:
   DisplayLockContextLegacyRenderingTest()
       : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()),
-        ScopedCSSContentVisibilityHiddenMatchableForTest(true),
         ScopedLayoutNGForTest(false) {}
 };
 

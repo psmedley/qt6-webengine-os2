@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,11 @@
 #define CC_METRICS_FRAME_SEQUENCE_METRICS_H_
 
 #include <bitset>
+#include <cmath>
 #include <memory>
 
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/memory/raw_ptr.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/cc_export.h"
@@ -38,6 +40,8 @@ enum class FrameSequenceTrackerType {
                 // and instead are dispatched back to the LayerTreeHostClient.
   kCanvasAnimation = 10,
   kJSAnimation = 11,
+  kSETMainThreadAnimation = 12,
+  kSETCompositorAnimation = 13,
   kMaxType
 };
 
@@ -101,6 +105,11 @@ class CC_EXPORT FrameSequenceMetrics {
         FrameInfo::SmoothEffectDrivingThread thread_type,
         int metric_index,
         const ThroughputData& data);
+
+    static void ReportCheckerboardingHistogram(
+        FrameSequenceMetrics* metrics,
+        FrameInfo::SmoothEffectDrivingThread thread_type,
+        int percent);
 
     void Merge(const ThroughputData& data) {
       frames_expected += data.frames_expected;
@@ -232,6 +241,12 @@ class CC_EXPORT FrameSequenceMetrics {
     uint32_t frames_expected = 0;
     uint32_t frames_dropped = 0;
   } v2_;
+
+  // Track state for measuring the PercentDroppedFrames v3 metrics.
+  struct {
+    uint32_t frames_expected = 0;
+    uint32_t frames_dropped = 0;
+  } v3_;
 
   ThroughputData impl_throughput_;
   ThroughputData main_throughput_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -111,6 +111,9 @@ class COMPONENT_EXPORT(VULKAN) VulkanSurface {
 
   // Swap chain pre-transform.
   gfx::OverlayTransform transform_ = gfx::OVERLAY_TRANSFORM_INVALID;
+
+  VkCompositeAlphaFlagBitsKHR composite_alpha_ =
+      VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
   std::unique_ptr<VulkanSwapChain> swap_chain_;
 

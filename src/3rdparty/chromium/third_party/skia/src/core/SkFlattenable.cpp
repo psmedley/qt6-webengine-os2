@@ -27,7 +27,7 @@ uint32_t SkNamedFactorySet::find(SkFlattenable::Factory factory) {
 }
 
 const char* SkNamedFactorySet::getNextAddedFactoryName() {
-    if (fNextAddedFactory < fNames.count()) {
+    if (fNextAddedFactory < fNames.size()) {
         return fNames[fNextAddedFactory++];
     }
     return nullptr;
@@ -81,7 +81,7 @@ void SkFlattenable::Finalize() {
 void SkFlattenable::Register(const char name[], Factory factory) {
     SkASSERT(name);
     SkASSERT(factory);
-    SkASSERT(gCount < (int)SK_ARRAY_COUNT(gEntries));
+    SkASSERT(gCount < (int)std::size(gEntries));
 
     gEntries[gCount].fName = name;
     gEntries[gCount].fFactory = factory;

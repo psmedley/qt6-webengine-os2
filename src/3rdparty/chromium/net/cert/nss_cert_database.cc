@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
@@ -65,7 +66,7 @@ class CertNotificationForwarder : public NSSCertDatabase::Observer {
   void OnCertDBChanged() override { cert_db_->NotifyObserversCertDBChanged(); }
 
  private:
-  CertDatabase* cert_db_;
+  raw_ptr<CertDatabase> cert_db_;
 };
 
 }  // namespace
@@ -90,7 +91,8 @@ NSSCertDatabase::NSSCertDatabase(crypto::ScopedPK11Slot public_slot,
                                  crypto::ScopedPK11Slot private_slot)
     : public_slot_(std::move(public_slot)),
       private_slot_(std::move(private_slot)),
-      observer_list_(new base::ObserverListThreadSafe<Observer>) {
+      observer_list_(
+          base::MakeRefCounted<base::ObserverListThreadSafe<Observer>>()) {
   CHECK(public_slot_);
 
   CertDatabase* cert_db = CertDatabase::GetInstance();
@@ -432,13 +434,7 @@ bool NSSCertDatabase::IsReadOnly(const CERTCertificate* cert) {
 }
 
 // static
-// `cfi-icall` is a clang flag to enable extra checks to prevent "Indirect call
-// of a function with wrong dynamic type". To work properly it requires the
-// called function or the function taking the address of the called function
-// to be compiled with "-fsanitize=cfi-icall" that is not true for libnss3.
-// Because of that we are getting a false positive result around using the
-// dynamically loaded `pk11_has_attribute_set` method.
-NO_SANITIZE("cfi-icall")
+DISABLE_CFI_DLSYM
 bool NSSCertDatabase::IsHardwareBacked(const CERTCertificate* cert) {
   PK11SlotInfo* slot = cert->slot;
   if (!slot)

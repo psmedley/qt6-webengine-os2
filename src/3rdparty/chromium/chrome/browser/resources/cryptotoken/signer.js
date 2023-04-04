@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -375,7 +375,7 @@ Signer.prototype.checkAppIds_ = function() {
   if (!appIds || !appIds.length) {
     var error = {
       errorCode: ErrorCodes.BAD_REQUEST,
-      errorMessage: 'missing appId'
+      errorMessage: 'missing appId',
     };
     this.notifyError_(error);
     return;
@@ -515,7 +515,7 @@ Signer.prototype.doSignWebAuthn_ = function(encodedChallenges, challengeVal) {
           tabId: this.sender_.tabId,
           frameId: this.sender_.frameId,
           origin: this.sender_.origin,
-          appId: appid
+          appId: appid,
         },
         (result) => {
           if (!result) {

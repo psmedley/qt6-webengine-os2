@@ -270,6 +270,17 @@
         #ifdef __AVX512BF16__
           #define EIGEN_VECTORIZE_AVX512BF16
         #endif
+        #ifdef __AVX512FP16__
+          #ifdef __AVX512VL__
+            #define EIGEN_VECTORIZE_AVX512FP16
+          #else
+            #if EIGEN_COMP_GNUC
+              #error Please add -mavx512vl to your compiler flags: compiling with -mavx512fp16 alone without AVX512-VL is not supported.
+            #else
+              #error Please enable AVX512-VL in your compiler flags (e.g. -mavx512vl): compiling with AVX512-FP16 alone without AVX512-VL is not supported.
+            #endif
+          #endif 
+        #endif
       #endif
     #endif
 
@@ -317,7 +328,7 @@
     extern "C" {
       // In theory we should only include immintrin.h and not the other *mmintrin.h header files directly.
       // Doing so triggers some issues with ICC. However old gcc versions seems to not have this file, thus:
-      #if EIGEN_COMP_ICC >= 1110
+      #if EIGEN_COMP_ICC >= 1110 || EIGEN_COMP_EMSCRIPTEN
         #include <immintrin.h>
       #else
         #include <mmintrin.h>

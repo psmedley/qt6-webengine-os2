@@ -1,19 +1,20 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 /** @fileoverview Element which shows toasts with optional undo button. */
 
 import '../../js/cr.m.js';
-import '../../js/event_tracker.m.js';
-import '../hidden_style_css.m.js';
+import '../../js/event_tracker.js';
+import '../cr_hidden_style.css.js';
 import './cr_toast.js';
 
-import {html, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {assert} from '../../js/assert_ts.js';
 
 import {CrToastElement} from './cr_toast.js';
+import {getTemplate} from './cr_toast_manager.html.js';
 
 let toastManagerInstance: CrToastManagerElement|null = null;
 
@@ -41,7 +42,7 @@ export class CrToastManagerElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {

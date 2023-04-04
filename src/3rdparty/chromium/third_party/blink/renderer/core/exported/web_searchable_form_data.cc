@@ -120,7 +120,7 @@ bool IsInDefaultState(const HTMLFormControlElement& form_element) {
   if (auto* input = DynamicTo<HTMLInputElement>(form_element)) {
     if (input->type() == input_type_names::kCheckbox ||
         input->type() == input_type_names::kRadio) {
-      return input->checked() ==
+      return input->Checked() ==
              input->FastHasAttribute(html_names::kCheckedAttr);
     }
   } else if (auto* select = DynamicTo<HTMLSelectElement>(form_element)) {
@@ -193,7 +193,7 @@ bool BuildSearchString(const HTMLFormElement& form,
     control->AppendToFormData(*form_data);
 
     for (const auto& entry : form_data->Entries()) {
-      if (!encoded_string->IsEmpty())
+      if (!encoded_string->empty())
         encoded_string->push_back('&');
       FormDataEncoder::EncodeStringAsFormData(*encoded_string,
                                               form_data->Encode(entry->name()),

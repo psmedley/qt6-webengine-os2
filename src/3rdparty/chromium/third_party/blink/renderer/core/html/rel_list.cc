@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,15 +35,19 @@ static HashSet<AtomicString>& SupportedTokensLink() {
                           "apple-touch-icon",
                           "apple-touch-icon-precomposed",
                           "canonical",
+                          "modulepreload",
+                          "allowed-alt-sxg",
                       }));
 
   return tokens;
 }
 
-static HashSet<AtomicString>& SupportedTokensAnchorAndArea() {
+static HashSet<AtomicString>& SupportedTokensAnchorAndAreaAndForm() {
   DEFINE_STATIC_LOCAL(HashSet<AtomicString>, tokens,
                       ({
-                          "noreferrer", "noopener",
+                          "noreferrer",
+                          "noopener",
+                          "opener",
                       }));
 
   return tokens;
@@ -53,18 +57,13 @@ bool RelList::ValidateTokenValue(const AtomicString& token_value,
                                  ExceptionState&) const {
   //  https://html.spec.whatwg.org/C/#linkTypes
   if (GetElement().HasTagName(html_names::kLinkTag)) {
-    if (SupportedTokensLink().Contains(token_value) ||
-        token_value == "modulepreload") {
-      return true;
-    }
-    if (RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
-            GetElement().GetExecutionContext()) &&
-        token_value == "allowed-alt-sxg") {
+    if (SupportedTokensLink().Contains(token_value)) {
       return true;
     }
   } else if ((GetElement().HasTagName(html_names::kATag) ||
-              GetElement().HasTagName(html_names::kAreaTag)) &&
-             SupportedTokensAnchorAndArea().Contains(token_value)) {
+              GetElement().HasTagName(html_names::kAreaTag) ||
+              GetElement().HasTagName(html_names::kFormTag)) &&
+             SupportedTokensAnchorAndAreaAndForm().Contains(token_value)) {
     return true;
   }
   return false;

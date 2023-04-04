@@ -54,7 +54,8 @@ public:
                                           GrMipmapStatus,
                                           const Desc&,
                                           sk_sp<GrGLTextureParameters>,
-                                          GrWrapCacheable, GrIOType);
+                                          GrWrapCacheable, GrIOType,
+                                          std::string_view label);
 
     void dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const override;
 
@@ -81,6 +82,8 @@ protected:
     void onRelease() override;
 
     bool onStealBackendTexture(GrBackendTexture*, SkImage::BackendTextureReleaseProc*) override;
+
+    void onSetLabel() override;
 
 private:
     sk_sp<GrGLTextureParameters> fParameters;

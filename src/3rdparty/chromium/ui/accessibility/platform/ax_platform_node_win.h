@@ -1,5 +1,4 @@
-//
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1280,9 +1279,6 @@ class AX_EXPORT __declspec(uuid("26f5641a-246d-457b-a96d-07f3fae6acf2"))
 
   bool ShouldNodeHaveFocusableState() const;
   int GetAnnotationTypeImpl() const;
-  void AugmentNameWithImageAnnotationIfApplicable(std::wstring* name) const;
-
-  bool IsPlatformDocumentWithContent() const;
 
   // Get the value attribute as a Bstr, this means something different depending
   // on the type of element being queried. (e.g. kColorWell uses kColorValue).

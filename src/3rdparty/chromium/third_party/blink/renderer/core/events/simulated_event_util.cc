@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -133,20 +133,26 @@ MouseEvent* CreateMouseOrPointerEvent(
   if (const auto* mouse_event = DynamicTo<MouseEvent>(underlying_event)) {
     synthetic_type = MouseEvent::kRealOrIndistinguishable;
   }
-  if (creation_scope == SimulatedClickCreationScope::kFromAccessibility &&
-      (event_type == event_type_names::kClick ||
-       event_type == event_type_names::kPointerdown ||
-       event_type == event_type_names::kMousedown)) {
-    // Set primary button pressed.
-    initializer->setButton(
-        static_cast<int>(WebPointerProperties::Button::kLeft));
-    initializer->setButtons(MouseEvent::WebInputEventModifiersToButtons(
-        WebInputEvent::Modifiers::kLeftButtonDown));
-  }
-  if (creation_scope == SimulatedClickCreationScope::kFromAccessibility &&
-      event_type == event_type_names::kClick) {
-    // Set number of clicks for click event.
-    initializer->setDetail(1);
+  if (creation_scope == SimulatedClickCreationScope::kFromAccessibility) {
+    if (event_type == event_type_names::kClick ||
+        event_type == event_type_names::kPointerdown ||
+        event_type == event_type_names::kMousedown) {
+      // Set primary button pressed.
+      initializer->setButton(
+          static_cast<int>(WebPointerProperties::Button::kLeft));
+      initializer->setButtons(MouseEvent::WebInputEventModifiersToButtons(
+          WebInputEvent::Modifiers::kLeftButtonDown));
+    }
+    if (event_type == event_type_names::kPointerup ||
+        event_type == event_type_names::kMouseup) {
+      // Set primary button pressed.
+      initializer->setButton(
+          static_cast<int>(WebPointerProperties::Button::kLeft));
+    }
+    if (event_type == event_type_names::kClick) {
+      // Set number of clicks for click event.
+      initializer->setDetail(1);
+    }
   }
 
   MouseEvent* created_event;
@@ -192,8 +198,7 @@ Event* SimulatedEventUtil::CreateEvent(
          event_type == event_type_names::kPointerup);
 
   EventClassType event_class_type = EventClassType::kMouse;
-  if ((RuntimeEnabledFeatures::ClickPointerEventEnabled() &&
-       event_type == event_type_names::kClick) ||
+  if (event_type == event_type_names::kClick ||
       event_type == event_type_names::kPointerdown ||
       event_type == event_type_names::kPointerup) {
     event_class_type = EventClassType::kPointer;

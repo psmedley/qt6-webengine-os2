@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/aligned_memory.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sys_byteorder.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
@@ -240,11 +241,11 @@ static scoped_refptr<VideoFrame> CreateCroppedFrame() {
   };
 
   libyuv::I420Copy(cropped_y_plane, 16, cropped_u_plane, 8, cropped_v_plane, 8,
-                   cropped_frame->data(VideoFrame::kYPlane),
+                   cropped_frame->writable_data(VideoFrame::kYPlane),
                    cropped_frame->stride(VideoFrame::kYPlane),
-                   cropped_frame->data(VideoFrame::kUPlane),
+                   cropped_frame->writable_data(VideoFrame::kUPlane),
                    cropped_frame->stride(VideoFrame::kUPlane),
-                   cropped_frame->data(VideoFrame::kVPlane),
+                   cropped_frame->writable_data(VideoFrame::kVPlane),
                    cropped_frame->stride(VideoFrame::kVPlane), 16, 16);
 
   return cropped_frame;
@@ -315,13 +316,13 @@ void PaintCanvasVideoRendererTest::Copy(scoped_refptr<VideoFrame> video_frame,
 
 TEST_F(PaintCanvasVideoRendererTest, NoFrame) {
   // Test that black gets painted over canvas.
-  target_canvas()->clear(SK_ColorRED);
+  target_canvas()->clear(SkColors::kRed);
   PaintWithoutFrame(target_canvas());
   EXPECT_EQ(SK_ColorBLACK, bitmap()->getColor(0, 0));
 }
 
 TEST_F(PaintCanvasVideoRendererTest, TransparentFrame) {
-  target_canvas()->clear(SK_ColorRED);
+  target_canvas()->clear(SkColors::kRed);
   PaintRotated(
       VideoFrame::CreateTransparentFrame(gfx::Size(kWidth, kHeight)).get(),
       target_canvas(), kNaturalRect, kNone, SkBlendMode::kSrcOver,
@@ -330,7 +331,7 @@ TEST_F(PaintCanvasVideoRendererTest, TransparentFrame) {
 }
 
 TEST_F(PaintCanvasVideoRendererTest, TransparentFrameSrcMode) {
-  target_canvas()->clear(SK_ColorRED);
+  target_canvas()->clear(SkColors::kRed);
   // SRC mode completely overwrites the buffer.
   PaintRotated(
       VideoFrame::CreateTransparentFrame(gfx::Size(kWidth, kHeight)).get(),
@@ -341,7 +342,7 @@ TEST_F(PaintCanvasVideoRendererTest, TransparentFrameSrcMode) {
 }
 
 TEST_F(PaintCanvasVideoRendererTest, TransparentFrameSrcMode1x1) {
-  target_canvas()->clear(SK_ColorRED);
+  target_canvas()->clear(SkColors::kRed);
   // SRC mode completely overwrites the buffer.
   auto frame = VideoFrame::CreateTransparentFrame(gfx::Size(1, 1));
   PaintRotated(frame.get(), target_canvas(), gfx::RectF(1, 1), kNone,
@@ -351,7 +352,7 @@ TEST_F(PaintCanvasVideoRendererTest, TransparentFrameSrcMode1x1) {
 }
 
 TEST_F(PaintCanvasVideoRendererTest, CopyTransparentFrame) {
-  target_canvas()->clear(SK_ColorRED);
+  target_canvas()->clear(SkColors::kRed);
   Copy(VideoFrame::CreateTransparentFrame(gfx::Size(kWidth, kHeight)).get(),
        target_canvas());
   EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT),
@@ -427,10 +428,11 @@ TEST_F(PaintCanvasVideoRendererTest, CroppedFrameToRGBParallel) {
                     cropped_frame()->data(1), cropped_frame()->stride(1),
                     cropped_frame()->data(2), cropped_frame()->stride(2),
                     cropped_frame()->coded_size().width(),
-                    cropped_frame()->coded_size().height(), test_frame->data(0),
-                    test_frame->stride(0), test_frame->data(1),
-                    test_frame->stride(1), test_frame->data(2),
-                    test_frame->stride(2), test_frame->coded_size().width(),
+                    cropped_frame()->coded_size().height(),
+                    test_frame->writable_data(0), test_frame->stride(0),
+                    test_frame->writable_data(1), test_frame->stride(1),
+                    test_frame->writable_data(2), test_frame->stride(2),
+                    test_frame->coded_size().width(),
                     test_frame->coded_size().height(), libyuv::kFilterNone);
 
   const gfx::Size visible_size = test_frame->visible_rect().size();
@@ -524,7 +526,7 @@ TEST_F(PaintCanvasVideoRendererTest, Video_Rotation_270) {
 TEST_F(PaintCanvasVideoRendererTest, Video_Translate) {
   SkBitmap bitmap = AllocBitmap(kWidth, kHeight);
   cc::SkiaPaintCanvas canvas(bitmap);
-  canvas.clear(SK_ColorMAGENTA);
+  canvas.clear(SkColors::kMagenta);
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
@@ -544,7 +546,7 @@ TEST_F(PaintCanvasVideoRendererTest, Video_Translate) {
 TEST_F(PaintCanvasVideoRendererTest, Video_Translate_Rotation_90) {
   SkBitmap bitmap = AllocBitmap(kWidth, kHeight);
   cc::SkiaPaintCanvas canvas(bitmap);
-  canvas.clear(SK_ColorMAGENTA);
+  canvas.clear(SkColors::kMagenta);
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
@@ -565,7 +567,7 @@ TEST_F(PaintCanvasVideoRendererTest, Video_Translate_Rotation_90) {
 TEST_F(PaintCanvasVideoRendererTest, Video_Translate_Rotation_180) {
   SkBitmap bitmap = AllocBitmap(kWidth, kHeight);
   cc::SkiaPaintCanvas canvas(bitmap);
-  canvas.clear(SK_ColorMAGENTA);
+  canvas.clear(SkColors::kMagenta);
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
@@ -586,7 +588,7 @@ TEST_F(PaintCanvasVideoRendererTest, Video_Translate_Rotation_180) {
 TEST_F(PaintCanvasVideoRendererTest, Video_Translate_Rotation_270) {
   SkBitmap bitmap = AllocBitmap(kWidth, kHeight);
   cc::SkiaPaintCanvas canvas(bitmap);
-  canvas.clear(SK_ColorMAGENTA);
+  canvas.clear(SkColors::kMagenta);
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
@@ -620,8 +622,8 @@ TEST_F(PaintCanvasVideoRendererTest, HighBitDepth) {
     for (int plane = VideoFrame::kYPlane; plane <= VideoFrame::kVPlane;
          ++plane) {
       int width = cropped_frame()->row_bytes(plane);
-      uint16_t* dst = reinterpret_cast<uint16_t*>(frame->data(plane));
-      uint8_t* src = cropped_frame()->data(plane);
+      uint16_t* dst = reinterpret_cast<uint16_t*>(frame->writable_data(plane));
+      const uint8_t* src = cropped_frame()->data(plane);
       for (int row = 0; row < cropped_frame()->rows(plane); row++) {
         for (int col = 0; col < width; col++) {
           dst[col] = src[col] << (param.bit_depth - 8);
@@ -1047,7 +1049,7 @@ class PaintCanvasVideoRendererWithGLTest : public testing::Test {
   using GetColorCallback = base::RepeatingCallback<SkColor(int, int)>;
 
   void SetUp() override {
-    gl::GLSurfaceTestSupport::InitializeOneOff();
+    display_ = gl::GLSurfaceTestSupport::InitializeOneOff();
     enable_pixels_.emplace();
     media_context_ = base::MakeRefCounted<viz::TestInProcessContextProvider>(
         viz::TestContextType::kGpuRaster, /*support_locking=*/false);
@@ -1074,7 +1076,7 @@ class PaintCanvasVideoRendererWithGLTest : public testing::Test {
     media_context_.reset();
     enable_pixels_.reset();
     viz::TestGpuServiceHolder::ResetInstance();
-    gl::GLSurfaceTestSupport::ShutdownGL();
+    gl::GLSurfaceTestSupport::ShutdownGL(display_);
   }
 
   // Uses CopyVideoFrameTexturesToGLTexture to copy |frame| into a GL texture,
@@ -1118,7 +1120,7 @@ class PaintCanvasVideoRendererWithGLTest : public testing::Test {
     SkBitmap bitmap =
         AllocBitmap(expected_size.width(), expected_size.height());
     cc::SkiaPaintCanvas canvas(bitmap);
-    canvas.clear(SK_ColorGRAY);
+    canvas.clear(SkColors::kGray);
     renderer_.Copy(frame, &canvas, media_context_.get());
 
     auto get_color = base::BindRepeating(
@@ -1237,6 +1239,7 @@ class PaintCanvasVideoRendererWithGLTest : public testing::Test {
   PaintCanvasVideoRenderer renderer_;
   scoped_refptr<VideoFrame> cropped_frame_;
   base::test::TaskEnvironment task_environment_;
+  raw_ptr<gl::GLDisplay> display_ = nullptr;
 };
 
 TEST_F(PaintCanvasVideoRendererWithGLTest, CopyVideoFrameYUVDataToGLTexture) {

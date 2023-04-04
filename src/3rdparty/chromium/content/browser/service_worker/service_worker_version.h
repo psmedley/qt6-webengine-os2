@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,7 @@
 #include "base/timer/timer.h"
 #include "components/services/storage/public/mojom/service_worker_storage_control.mojom.h"
 #include "content/browser/renderer_host/back_forward_cache_metrics.h"
+#include "content/browser/renderer_host/policy_container_host.h"
 #include "content/browser/service_worker/embedded_worker_instance.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_client_utils.h"
@@ -60,7 +61,7 @@
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_client.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_event_status.mojom.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -103,6 +104,9 @@ FORWARD_DECLARE_TEST(ServiceWorkerVersionTest, StallInStopping_DetachThenStart);
 FORWARD_DECLARE_TEST(ServiceWorkerVersionTest, StartRequestWithNullContext);
 FORWARD_DECLARE_TEST(ServiceWorkerVersionTest,
                      WorkerLifetimeWithExternalRequest);
+FORWARD_DECLARE_TEST(ServiceWorkerVersionTest, DevToolsAttachThenDetach);
+FORWARD_DECLARE_TEST(ServiceWorkerVersionTest,
+                     DefaultTimeoutRequestDoesNotAffectMaxTimeoutRequest);
 }  // namespace service_worker_version_unittest
 
 FORWARD_DECLARE_TEST(ServiceWorkerRegistryTest, ScriptResponseTime);
@@ -132,6 +136,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
   using SimpleEventCallback =
       base::OnceCallback<void(blink::mojom::ServiceWorkerEventStatus)>;
   using FetchHandlerExistence = blink::mojom::FetchHandlerExistence;
+  using FetchHandlerType = blink::mojom::ServiceWorkerFetchHandlerType;
 
   // Current version status; some of the status (e.g. INSTALLED and ACTIVATED)
   // should be persisted unlike running status.
@@ -225,10 +230,28 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // This status is set to EXISTS or DOES_NOT_EXIST when the install event has
   // been executed in a new version or when an installed version is loaded from
   // the storage. When a new version is not installed yet, it is UNKNOWN.
-  FetchHandlerExistence fetch_handler_existence() const {
-    return fetch_handler_existence_;
-  }
-  void set_fetch_handler_existence(FetchHandlerExistence existence);
+  FetchHandlerExistence fetch_handler_existence() const;
+  // Returns the fetch handler type if set.  Otherwise, kNoHandler.
+  FetchHandlerType fetch_handler_type() const;
+  void set_fetch_handler_type(FetchHandlerType fetch_handler_type);
+
+  // If the feature flag for `fetch_handler_type_` is enabled,
+  // the function returns `fetch_handler_type_`.
+  // Otherwise, kNotSkippable would be returned if `fetch_handler_type_`
+  // is not kNoHandler.  Note that kNoHandler will be returned if
+  // `fetch_handler_type_` is kNoHandler.
+  //
+  // You may wonder why we need to introduce the effective fetch handler
+  // type in addition to the existing fetch_handler_type.  That is because
+  // we cannot change the fetch_handler_type behavior for the service
+  // worker registration and the metrics.  Since the service worker
+  // registration is persistent data, I do not think it is good idea to
+  // change its contents by the flag.  For metrics, we want to compare the
+  // same fetch handler case with the different flags.  The
+  // fetch_handler_type should also need to be persistent here.
+  // Note that FCP/LCP with skippable fetch handler type is taken in this
+  // way.
+  FetchHandlerType EffectiveFetchHandlerType() const;
 
   base::TimeDelta TimeSinceNoControllees() const {
     return GetTickDuration(no_controllees_time_);
@@ -557,6 +580,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // Returns nullptr if `client_security_state()` is nullptr.
   const network::CrossOriginEmbedderPolicy* cross_origin_embedder_policy()
       const;
+  const scoped_refptr<PolicyContainerHost> policy_container_host() const {
+    return policy_container_host_;
+  }
 
   // Returns the client security state used by this service worker, if any.
   // Never returns a nullptr value after returning a non-nullptr value.
@@ -596,6 +622,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
       std::map<GURL, ServiceWorkerUpdateChecker::ComparedScriptInfo>
           compared_script_info_map,
       const GURL& updated_script_url,
+      scoped_refptr<PolicyContainerHost> policy_container_host,
       network::CrossOriginEmbedderPolicy cross_origin_embedder_policy);
   const std::map<GURL, ServiceWorkerUpdateChecker::ComparedScriptInfo>&
   compared_script_info_map() const;
@@ -637,6 +664,11 @@ class CONTENT_EXPORT ServiceWorkerVersion
     reporting_observer_receiver_ = std::move(reporting_observer_receiver);
   }
 
+  void set_policy_container_host(
+      scoped_refptr<PolicyContainerHost> policy_container_host) {
+    policy_container_host_ = std::move(policy_container_host);
+  }
+
   // Initializes the global scope of the ServiceWorker on the renderer side.
   void InitializeGlobalScope();
 
@@ -649,9 +681,13 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void ExecuteScriptForTest(const std::string& script,
                             ServiceWorkerScriptExecutionCallback callback);
 
+  blink::mojom::AncestorFrameType ancestor_frame_type() const {
+    return ancestor_frame_type_;
+  }
+
  private:
   friend class base::RefCounted<ServiceWorkerVersion>;
-  friend class EmbeddedWorkerInstanceTest;
+  friend class EmbeddedWorkerTestHelper;
   friend class ServiceWorkerPingController;
   friend class ServiceWorkerContainerHostTest;
   friend class ServiceWorkerReadFromCacheJobTest;
@@ -729,6 +765,12 @@ class CONTENT_EXPORT ServiceWorkerVersion
   FRIEND_TEST_ALL_PREFIXES(
       service_worker_version_unittest::ServiceWorkerVersionTest,
       WorkerLifetimeWithExternalRequest);
+  FRIEND_TEST_ALL_PREFIXES(
+      service_worker_version_unittest::ServiceWorkerVersionTest,
+      DefaultTimeoutRequestDoesNotAffectMaxTimeoutRequest);
+  FRIEND_TEST_ALL_PREFIXES(
+      service_worker_version_unittest::ServiceWorkerVersionTest,
+      DevToolsAttachThenDetach);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerRegistryTest, ScriptResponseTime);
 
   // Contains timeout info for InflightRequest.
@@ -783,7 +825,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void OnScriptEvaluationStart() override;
   void OnStarting() override;
   void OnStarted(blink::mojom::ServiceWorkerStartStatus status,
-                 bool has_fetch_handler) override;
+                 FetchHandlerType fetch_handler_type) override;
   void OnStopping() override;
   void OnStopped(EmbeddedWorkerStatus old_status) override;
   void OnDetached(EmbeddedWorkerStatus old_status) override;
@@ -940,7 +982,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // "classic" or "module". Unless stated otherwise, it is "classic".
   // https://w3c.github.io/ServiceWorker/#dfn-type
   const blink::mojom::ScriptType script_type_;
-  FetchHandlerExistence fetch_handler_existence_;
+  absl::optional<FetchHandlerType> fetch_handler_type_;
   // The source of truth for navigation preload state is the
   // ServiceWorkerRegistration. |navigation_preload_state_| is essentially a
   // cached value because it must be looked up quickly and a live registration
@@ -952,6 +994,13 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // exist whenever there is a live version, but `registation_status_` is needed
   // to check if the registration is already deleted or not.
   ServiceWorkerRegistration::Status registration_status_;
+
+  // A copy of ServiceWorkerRegistration::ancestor_frame_type(). Cached for the
+  // same reason as `navigation_preload_state_`: A live registration doesn't
+  // necessarily exist whenever there is a live version, but
+  // `ancestor_frame_type_` is needed to check if it was registered in fenced
+  // frame or not.
+  const blink::mojom::AncestorFrameType ancestor_frame_type_;
 
   // The client security state passed to the network URL loader factory used to
   // fetch service worker subresources.
@@ -1168,6 +1217,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // Identifier for UKM recording in the service worker thread. Stored here so
   // it can be associated with clients' source IDs.
   const ukm::SourceId ukm_source_id_;
+
+  scoped_refptr<PolicyContainerHost> policy_container_host_;
 
   base::UnguessableToken reporting_source_;
 

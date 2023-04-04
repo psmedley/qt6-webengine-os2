@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,10 +51,19 @@ interface DrmDevice {
   // Instructs the GPU to abandon a DRM device.
   RemoveGraphicsDevice(mojo_base.mojom.FilePath path);
 
+  // Asks whether or not an incoming udev change event is blocked.
+  // |event_props| is a map of a display UDEV event's property name and its
+  // value. The list of a UDEV event's properties can be seen when running
+  // $ udevadm monitor --property on a DUT.
+  ShouldDisplayEventTriggerConfiguration(map<string, string> event_props) =>
+      (bool should_trigger);
+
   // Configures (Enables/Disables) DRM displays, returns whether or not the
-  // configuration was successful.
+  // configuration was successful. Adjusts the behavior of the commit according
+  // to |modeset_flag| (see display::ModesetFlag).
   ConfigureNativeDisplays(
-      array<display.mojom.DisplayConfigurationParams> config_requests) =>
+      array<display.mojom.DisplayConfigurationParams> config_requests,
+      uint32 modeset_flag) =>
     (bool config_success);
 
   // Gets high-definition content protection (HDCP) (DRM as in

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,10 @@ enum class InstallResultCode {
   // commit.
   kAppNotInRegistrarAfterCommit = 27,
 
-  kMaxValue = kAppNotInRegistrarAfterCommit,
+  // The installation stopped due to an uninstall from sync being scheduled.
+  kHaltedBySyncUninstall = 28,
+
+  kMaxValue = kHaltedBySyncUninstall,
 };
 
 // Checks if InstallResultCode is not a failure.

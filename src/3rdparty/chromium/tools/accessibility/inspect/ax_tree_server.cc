@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,14 +50,20 @@ AXTreeServer::AXTreeServer(const AXTreeSelector& selector,
   }
 
   // Otherwise, dump the tree.
-  // Use optional filters with the default filter set.
-  formatter->SetPropertyFilters(scenario.property_filters,
+  // Use user provided filters with the default filter set.
+  std::vector<ui::AXPropertyFilter> property_filters_ext(
+      {{"AXRoleDescription", ui::AXPropertyFilter::ALLOW}});
+  property_filters_ext.insert(property_filters_ext.end(),
+                              scenario.property_filters.begin(),
+                              scenario.property_filters.end());
+
+  formatter->SetPropertyFilters(property_filters_ext,
                                 AXTreeFormatter::kFiltersDefaultSet);
 
   // Get accessibility tree as a nested dictionary.
-  base::Value dict = formatter->BuildTreeForSelector(selector);
+  base::Value::Dict dict = formatter->BuildTreeForSelector(selector);
 
-  if (dict.DictEmpty()) {
+  if (dict.empty()) {
     LOG(ERROR) << "Failed to get accessibility tree.";
     error = true;
     return;

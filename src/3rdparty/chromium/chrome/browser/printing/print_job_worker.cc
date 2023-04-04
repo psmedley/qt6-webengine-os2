@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,6 @@ std::string getApplicationLocale();
 #if BUILDFLAG(ENABLE_OOP_PRINTING)
 #include "chrome/browser/printing/print_backend_service_manager.h"
 #include "chrome/services/printing/public/mojom/print_backend_service.mojom.h"
-#include "components/device_event_log/device_event_log.h"
 #include "printing/printing_features.h"
 #endif
 
@@ -142,18 +141,11 @@ PrintJobWorker::PrintJobWorker(content::GlobalRenderFrameHostId rfh_id)
           PrintingContext::Create(printing_context_delegate_.get(),
                                   ShouldPrintingContextSkipSystemCalls())),
       thread_("Printing_Worker") {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
 PrintJobWorker::~PrintJobWorker() {
-  // The object is normally deleted by PrintJob in the UI thread, but when the
-  // user cancels printing or in the case of print preview, the worker is
-  // destroyed with the PrinterQuery, which is on the I/O thread.
-  if (print_job_) {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  } else {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  }
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   Stop();
 }
 
@@ -163,13 +155,13 @@ void PrintJobWorker::SetPrintJob(PrintJob* print_job) {
 }
 
 void PrintJobWorker::GetDefaultSettings(SettingsCallback callback) {
-  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK_EQ(page_number_, PageNumber::npos());
 
   printing_context_->set_margin_type(
       printing::mojom::MarginType::kDefaultMargins);
 
-  InvokeUseDefaultSettings(std::move(callback));
+  UseDefaultSettings(std::move(callback));
 }
 
 void PrintJobWorker::GetSettingsFromUser(uint32_t document_page_count,
@@ -177,40 +169,27 @@ void PrintJobWorker::GetSettingsFromUser(uint32_t document_page_count,
                                          mojom::MarginType margin_type,
                                          bool is_scripted,
                                          SettingsCallback callback) {
-  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(page_number_, PageNumber::npos());
 
   printing_context_->set_margin_type(margin_type);
 
-  InvokeGetSettingsWithUI(document_page_count, has_selection, is_scripted,
-                          std::move(callback));
-}
-
-void PrintJobWorker::SetSettings(base::Value::Dict new_settings,
-                                 SettingsCallback callback) {
-  DCHECK(task_runner_->RunsTasksInCurrentSequence());
-
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&PrintJobWorker::UpdatePrintSettings,
-                                base::Unretained(this), std::move(new_settings),
-                                std::move(callback)));
+  GetSettingsWithUI(document_page_count, has_selection, is_scripted,
+                    std::move(callback));
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
 void PrintJobWorker::SetSettingsFromPOD(
     std::unique_ptr<PrintSettings> new_settings,
     SettingsCallback callback) {
-  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&PrintJobWorker::UpdatePrintSettingsFromPOD,
-                                base::Unretained(this), std::move(new_settings),
-                                std::move(callback)));
+  UpdatePrintSettingsFromPOD(std::move(new_settings), std::move(callback));
 }
 #endif
 
-void PrintJobWorker::UpdatePrintSettings(base::Value::Dict new_settings,
-                                         SettingsCallback callback) {
+void PrintJobWorker::SetSettings(base::Value::Dict new_settings,
+                                 SettingsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::unique_ptr<crash_keys::ScopedPrinterInfo> crash_key;
@@ -269,23 +248,6 @@ void PrintJobWorker::GetSettingsDone(SettingsCallback callback,
   std::move(callback).Run(printing_context_->TakeAndResetSettings(), result);
 }
 
-void PrintJobWorker::InvokeUseDefaultSettings(SettingsCallback callback) {
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&PrintJobWorker::UseDefaultSettings,
-                                base::Unretained(this), std::move(callback)));
-}
-
-void PrintJobWorker::InvokeGetSettingsWithUI(uint32_t document_page_count,
-                                             bool has_selection,
-                                             bool is_scripted,
-                                             SettingsCallback callback) {
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::BindOnce(&PrintJobWorker::GetSettingsWithUI, base::Unretained(this),
-                     document_page_count, has_selection, is_scripted,
-                     std::move(callback)));
-}
-
 void PrintJobWorker::GetSettingsWithUI(uint32_t document_page_count,
                                        bool has_selection,
                                        bool is_scripted,
@@ -331,6 +293,8 @@ void PrintJobWorker::GetSettingsWithUI(uint32_t document_page_count,
 }
 
 void PrintJobWorker::UseDefaultSettings(SettingsCallback callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   mojom::ResultCode result;
   {
 #if BUILDFLAG(IS_WIN)
@@ -457,7 +421,7 @@ bool PrintJobWorker::OnNewPageHelperGdi() {
       return false;
     }
     // We have enough information to initialize `page_number_`.
-    page_number_.Init(document_->settings(), page_count);
+    page_number_.Init(document_->settings().ranges(), page_count);
   }
 
   while (true) {

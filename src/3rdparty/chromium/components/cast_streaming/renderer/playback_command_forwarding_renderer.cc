@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -253,6 +253,11 @@ void PlaybackCommandForwardingRenderer::OnError(media::PipelineStatus status) {
     remote_renderer_client_->OnError(status);
   if (upstream_renderer_client_)
     upstream_renderer_client_->OnError(status);
+}
+
+void PlaybackCommandForwardingRenderer::OnFallback(
+    media::PipelineStatus status) {
+  NOTREACHED();
 }
 
 void PlaybackCommandForwardingRenderer::OnEnded() {

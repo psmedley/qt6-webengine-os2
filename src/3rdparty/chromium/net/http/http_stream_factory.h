@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,9 +46,21 @@ class NET_EXPORT HttpStreamFactory {
   class NET_EXPORT_PRIVATE JobFactory;
 
   enum JobType {
+    // Job that will connect via HTTP/1 or HTTP/2. This may be paused for a
+    // while when ALTERNATIVE or DNS_ALPN_H3 job was created.
     MAIN,
+    // Job that will connect via HTTP/3 iff Chrome has received an Alt-Svc
+    // header from the origin.
     ALTERNATIVE,
+    // Job that will connect via HTTP/3 iff an "h3" value was found in the ALPN
+    // list of an HTTPS DNS record.
+    DNS_ALPN_H3,
+    // Job that will preconnect. This uses HTTP/3 iff Chrome has received an
+    // Alt-Svc header from the origin. Otherwise, it use HTTP/1 or HTTP/2.
     PRECONNECT,
+    // Job that will preconnect via HTTP/3 iff an "h3" value was found in the
+    // ALPN list of an HTTPS DNS record.
+    PRECONNECT_DNS_ALPN_H3,
   };
 
   explicit HttpStreamFactory(HttpNetworkSession* session);
@@ -60,7 +72,7 @@ class NET_EXPORT HttpStreamFactory {
 
   void ProcessAlternativeServices(
       HttpNetworkSession* session,
-      const net::NetworkIsolationKey& network_isolation_key,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       const HttpResponseHeaders* headers,
       const url::SchemeHostPort& http_server);
 
@@ -106,7 +118,7 @@ class NET_EXPORT HttpStreamFactory {
       const NetLogWithSource& net_log);
 
   // Requests that enough connections for |num_streams| be opened.
-  void PreconnectStreams(int num_streams, const HttpRequestInfo& info);
+  void PreconnectStreams(int num_streams, HttpRequestInfo& info);
 
   const HostMappingRules* GetHostMappingRules() const;
 

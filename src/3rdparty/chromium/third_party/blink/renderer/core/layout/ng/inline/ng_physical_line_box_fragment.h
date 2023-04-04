@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,12 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final : public NGPhysicalFragment {
   static const NGPhysicalLineBoxFragment* Create(
       NGLineBoxFragmentBuilder* builder);
 
+  static const NGPhysicalLineBoxFragment* Clone(
+      const NGPhysicalLineBoxFragment&);
+
   using PassKey = base::PassKey<NGPhysicalLineBoxFragment>;
   NGPhysicalLineBoxFragment(PassKey, NGLineBoxFragmentBuilder* builder);
+  NGPhysicalLineBoxFragment(PassKey, const NGPhysicalLineBoxFragment&);
   ~NGPhysicalLineBoxFragment();
 
   void TraceAfterDispatch(Visitor*) const;

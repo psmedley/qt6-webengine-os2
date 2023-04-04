@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,13 +99,6 @@ enum NotificationType {
   // Use RenderWidgetHostObserver::RenderWidgetHostVisibilityChanged()
   // TODO(https://crbug.com/1174771): Remove.
   NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-
-  // Notification from WebContents that we have received a response from the
-  // renderer in response to a dom automation controller action. The source is
-  // the RenderViewHost, and the details is a string with the response.
-  // DEPRECATED: Use WebContentsObserver::DomOperationResponse()
-  // TODO(https://crbug.com/1174774): Remove.
-  NOTIFICATION_DOM_OPERATION_RESPONSE,
 
   // Custom notifications used by the embedder should start from here.
   NOTIFICATION_CONTENT_END,

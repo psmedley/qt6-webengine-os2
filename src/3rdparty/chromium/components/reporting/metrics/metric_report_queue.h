@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ class MetricReportQueue {
   virtual ~MetricReportQueue();
 
   // Enqueue the metric data.
-  virtual void Enqueue(const MetricData& metric_data,
+  virtual void Enqueue(std::unique_ptr<const MetricData> metric_data,
                        ReportQueue::EnqueueCallback callback);
 
   // Initiate manual upload of records with `priority_` and restart timer if

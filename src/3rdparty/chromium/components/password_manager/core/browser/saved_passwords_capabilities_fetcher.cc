@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/containers/cxx20_erase.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/scoped_observation.h"
 #include "base/stl_util.h"
-#include "components/password_manager/core/browser/password_store_interface.h"
+#include "base/values.h"
 #include "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "url/gurl.h"
@@ -24,10 +24,11 @@ namespace password_manager {
 
 SavedPasswordsCapabilitiesFetcher::SavedPasswordsCapabilitiesFetcher(
     std::unique_ptr<CapabilitiesService> fetcher,
-    scoped_refptr<password_manager::PasswordStoreInterface> password_store)
-    : fetcher_(std::move(fetcher)), saved_passwords_presenter_(password_store) {
-  observed_saved_password_presenter_.Observe(&saved_passwords_presenter_);
-  saved_passwords_presenter_.Init();
+    std::unique_ptr<SavedPasswordsPresenter> saved_passwords_presenter)
+    : fetcher_(std::move(fetcher)),
+      saved_passwords_presenter_(std::move(saved_passwords_presenter)) {
+  observed_saved_password_presenter_.Observe(saved_passwords_presenter_.get());
+  saved_passwords_presenter_->Init();
 }
 
 SavedPasswordsCapabilitiesFetcher::~SavedPasswordsCapabilitiesFetcher() =
@@ -110,13 +111,18 @@ bool SavedPasswordsCapabilitiesFetcher::IsScriptAvailable(
 
 void SavedPasswordsCapabilitiesFetcher::OnEdited(const PasswordForm& form) {
   // OnEdited() only gets called if a the password was edited via
-  // |saved_passwords_presenter_|, so even if the password gets edited
+  // `saved_passwords_presenter_`, so even if the password gets edited
   // elsewhere, we wouldn't end up here.
   NOTREACHED();
 }
 
 void SavedPasswordsCapabilitiesFetcher::OnSavedPasswordsChanged(
     SavedPasswordsPresenter::SavedPasswordsView passwords) {
+  // If there is still a pending update from the `SavedPasswordsPresenter`,
+  // return early and perform the updates once that is in.
+  if (saved_passwords_presenter_->IsWaitingForPasswordStore())
+    return;
+
   if (is_cache_initialized_) {
     // Request an update only if the updated set of passwords origins differ
     // from the ones in cache.
@@ -242,7 +248,12 @@ void SavedPasswordsCapabilitiesFetcher::FetchCapababilitiesForSingleOriginDone(
 std::vector<url::Origin>
 SavedPasswordsCapabilitiesFetcher::GetOriginsOfStoredPasswords() const {
   std::vector<url::Origin> origins;
-  for (const auto& form : saved_passwords_presenter_.GetSavedPasswords()) {
+  for (const auto& form : saved_passwords_presenter_->GetSavedPasswords()) {
+    if (form.url.SchemeIs(url::kHttpScheme)) {
+      // Http schemes are not supported.
+      continue;
+    }
+
     url::Origin origin = url::Origin::Create(form.url);
     if (!origin.opaque()) {
       origins.push_back(origin);
@@ -273,6 +284,10 @@ SavedPasswordsCapabilitiesFetcher::GetCacheState() const {
   return need_refresh
              ? (refresh_in_process_ ? CacheState::kWaiting : CacheState::kStale)
              : CacheState::kReady;
+}
+
+bool SavedPasswordsCapabilitiesFetcher::IsCacheStale() const {
+  return GetCacheState() != CacheState::kReady;
 }
 
 SavedPasswordsCapabilitiesFetcher::CapabilitiesFetchResult::
@@ -311,6 +326,20 @@ SavedPasswordsCapabilitiesFetcher::GetDebugInformationForInternals() const {
   result.Set("cache state", cache_state);
 
   return result;
+}
+
+base::Value::List SavedPasswordsCapabilitiesFetcher::GetCacheEntries() const {
+  base::Value::List cache_entries;
+  for (const auto& [origin, _] : cache_) {
+    base::Value::Dict entry;
+    entry.Set("url", origin.Serialize());
+    // Use `IsScriptAvailable` instead of reading it from the value directly
+    // to allow overriding by `kForceEnablePasswordDomainCapabilities`.
+    entry.Set("has_script", IsScriptAvailable(origin));
+    cache_entries.Append(std::move(entry));
+  }
+
+  return cache_entries;
 }
 
 }  // namespace password_manager

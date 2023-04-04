@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,8 +41,8 @@ void DisplayICCProfiles::UpdateIfNeeded() {
   map_.clear();
 
   // Always add Apple's sRGB profile.
-  base::ScopedCFTypeRef<CFDataRef> srgb_icc(CGColorSpaceCopyICCProfile(
-      CGColorSpaceCreateWithName(kCGColorSpaceSRGB)));
+  base::ScopedCFTypeRef<CFDataRef> srgb_icc(
+      CGColorSpaceCopyICCData(CGColorSpaceCreateWithName(kCGColorSpaceSRGB)));
   map_[ColorSpace::CreateSRGB()] = srgb_icc;
 
   // Add the profiles for all active displays.
@@ -66,7 +66,7 @@ void DisplayICCProfiles::UpdateIfNeeded() {
     if (!cg_color_space)
       continue;
     base::ScopedCFTypeRef<CFDataRef> icc_data(
-        CGColorSpaceCopyICCProfile(cg_color_space));
+        CGColorSpaceCopyICCData(cg_color_space));
     if (!icc_data)
       continue;
     ICCProfile icc_profile = ICCProfile::FromData(CFDataGetBytePtr(icc_data),

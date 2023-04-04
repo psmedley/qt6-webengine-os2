@@ -38,8 +38,8 @@ import * as Workspace from '../../models/workspace/workspace.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Snippets from '../snippets/snippets.js';
 
-import type {NavigatorUISourceCodeTreeNode} from './NavigatorView.js';
-import {NavigatorView} from './NavigatorView.js';
+import {NavigatorView, type NavigatorUISourceCodeTreeNode} from './NavigatorView.js';
+import sourcesNavigatorStyles from './sourcesNavigator.css.js';
 
 const UIStrings = {
   /**
@@ -107,13 +107,19 @@ let networkNavigatorViewInstance: NetworkNavigatorView;
 
 export class NetworkNavigatorView extends NavigatorView {
   private constructor() {
-    super();
+    super(true);
     SDK.TargetManager.TargetManager.instance().addEventListener(
         SDK.TargetManager.Events.InspectedURLChanged, this.inspectedURLChanged, this);
 
     // Record the sources tool load time after the file navigator has loaded.
     Host.userMetrics.panelLoaded('sources', 'DevTools.Launch.Sources');
   }
+
+  wasShown(): void {
+    this.registerCSSFiles([sourcesNavigatorStyles]);
+    super.wasShown();
+  }
+
   static instance(opts: {
     forceNew: boolean|null,
   } = {forceNew: null}): NetworkNavigatorView {
@@ -278,7 +284,7 @@ export class OverridesNavigatorView extends NavigatorView {
     this.toolbar.appendToolbarItem(setupButton);
   }
 
-  private async setupNewWorkspace(): Promise<void> {
+  async setupNewWorkspace(): Promise<void> {
     const fileSystem =
         await Persistence.IsolatedFileSystemManager.IsolatedFileSystemManager.instance().addFileSystem('overrides');
     if (!fileSystem) {

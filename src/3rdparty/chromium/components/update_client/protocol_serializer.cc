@@ -1,9 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/update_client/protocol_serializer.h"
 
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,9 +37,7 @@ namespace {
 
 // Returns the amount of physical memory in GB, rounded to the nearest GB.
 int GetPhysicalMemoryGB() {
-  const double kOneGB = 1024 * 1024 * 1024;
-  const int64_t phys_mem = base::SysInfo::AmountOfPhysicalMemory();
-  return static_cast<int>(std::floor(0.5 + phys_mem / kOneGB));
+  return base::ClampRound(base::SysInfo::AmountOfPhysicalMemoryMB() / 1024.0f);
 }
 
 std::string GetOSVersion() {
@@ -201,6 +200,7 @@ protocol_request::App MakeProtocolApp(
     const std::string& ap,
     const std::string& brand_code,
     const std::string& lang,
+    const int install_date,
     const std::string& install_source,
     const std::string& install_location,
     const std::string& fingerprint,
@@ -221,6 +221,7 @@ protocol_request::App MakeProtocolApp(
   app.events = std::move(events);
   app.brand_code = FilterBrandCode(brand_code);
   app.lang = lang;
+  app.install_date = install_date;
   app.install_source = install_source;
   app.install_location = install_location;
   app.fingerprint = fingerprint;

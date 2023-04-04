@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/chromeos_buildflags.h"
-#include "chromeos/ui/base/window_properties.h"
 #include "components/exo/input_trace.h"
 #include "components/exo/pointer_constraint_delegate.h"
 #include "components/exo/pointer_delegate.h"
@@ -19,6 +18,8 @@
 #include "components/exo/pointer_stylus_delegate.h"
 #include "components/exo/relative_pointer_delegate.h"
 #include "components/exo/seat.h"
+#include "components/exo/security_delegate.h"
+#include "components/exo/shell_surface_base.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/exo/surface.h"
 #include "components/exo/wm_helper.h"
@@ -28,7 +29,6 @@
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/drag_drop_client.h"
-#include "ui/aura/cursor/cursor_util.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/base/cursor/cursor_factory.h"
@@ -45,21 +45,16 @@
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/cursor_util.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ash/constants/ash_features.h"
+// #include "ash/constants/ash_features.h"
 #include "ash/drag_drop/drag_drop_controller.h"
-#include "ash/public/cpp/app_types_util.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/wm/window_util.h"
 #endif
 
 namespace exo {
-
-// Controls Pointer capture in exo/wayland.
-const base::Feature kPointerCapture{"ExoPointerCapture",
-                                    base::FEATURE_ENABLED_BY_DEFAULT};
-
 namespace {
 
 // TODO(oshima): Some accessibility features, including large cursors, disable
@@ -138,6 +133,10 @@ Pointer::Pointer(PointerDelegate* delegate, Seat* seat)
 
 Pointer::~Pointer() {
   WMHelper* helper = WMHelper::GetInstance();
+  // Remove the pretarget handler in case the pointer is deleted
+  // w/o disabling pointer capture.
+  aura::Env::GetInstance()->RemovePreTargetHandler(this);
+
   helper->RemovePreTargetHandler(this);
   delegate_->OnPointerDestroying(this);
   if (focus_surface_)
@@ -264,14 +263,19 @@ bool Pointer::ConstrainPointer(PointerConstraintDelegate* delegate) {
     return false;
   }
 
-  // Pointer lock is permitted for ARC windows, and for windows configured to
-  // notify the user on lock activation. In the latter case, the
-  // kExoPointerLock feature must be enabled.
+  // Permission of Pointer lock is controlled by SecurityDelegate, created per
+  // server instance. Default implementation allows this for ARC and Lacros
+  // windows which have their own security mechanism and are considered trusted.
   aura::Window* toplevel = constrained_surface->window()->GetToplevelWindow();
+
+  SecurityDelegate* security_delegate =
+      constrained_surface->GetSecurityDelegate();
+  // |security_delegate| could be nullptr, if:
+  // - the surface hasn't been assigned a role; or
+  // - a role has been assigned, but that specific role doesn't set a security
+  //   delegate.
   bool permitted =
-      ash::IsArcWindow(toplevel) ||
-      (base::FeatureList::IsEnabled(chromeos::features::kExoPointerLock) &&
-       toplevel->GetProperty(chromeos::kUseOverviewToExitPointerLock));
+      security_delegate && security_delegate->CanLockPointer(toplevel);
   if (!permitted) {
     delegate->OnDefunct();
     return false;
@@ -363,11 +367,6 @@ bool Pointer::EnablePointerCapture(Surface* capture_surface) {
     return false;
   }
 
-  if (!base::FeatureList::IsEnabled(kPointerCapture)) {
-    LOG(WARNING) << "Unable to capture the pointer, feature is disabled.";
-    return false;
-  }
-
   aura::Window* window = capture_surface->window();
   aura::Window* active_window = WMHelper::GetInstance()->GetActiveWindow();
   if (!active_window || !active_window->Contains(window)) {
@@ -404,6 +403,7 @@ void Pointer::DisablePointerCapture() {
   gfx::Point p = location_when_pointer_capture_enabled_
                      ? *location_when_pointer_capture_enabled_
                      : root->bounds().CenterPoint();
+  expected_next_mouse_location_ = p;
   root->MoveCursorTo(p);
 
   aura::Window* window = capture_window_;
@@ -478,7 +478,7 @@ void Pointer::OnSurfaceDestroying(Surface* surface) {
 // ui::EventHandler overrides:
 
 void Pointer::OnMouseEvent(ui::MouseEvent* event) {
-  if (seat_->was_shutdown())
+  if (seat_->was_shutdown() || event->handled())
     return;
 
   // Nothing to report to a client nor have to update the pointer when capture
@@ -486,15 +486,8 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
   if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
     return;
 
-  seat_->SetLastPointerLocation(event->root_location_f());
-
-  Surface* target = GetEffectiveTargetForEvent(event);
-  gfx::PointF location_in_target = event->location_f();
-  if (target) {
-    aura::Window::ConvertPointToTarget(
-        static_cast<aura::Window*>(event->target()), target->window(),
-        &location_in_target);
-  }
+  gfx::PointF location_in_target;
+  Surface* target = GetEffectiveTargetForEvent(event, &location_in_target);
 
   // Update focus if target is different than the current pointer focus.
   if (target != focus_surface_)
@@ -541,12 +534,28 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
 #endif
 
     if (!same_location) {
-      bool needs_frame = HandleRelativePointerMotion(
-          event->time_stamp(), location_in_root, ordinal_motion);
+      bool ignore_motion = false;
+      if (expected_next_mouse_location_) {
+        const gfx::Point& expected = *expected_next_mouse_location_;
+        // Since MoveCursorTo() takes integer coordinates, the resulting move
+        // could have a conversion error of up to 2 due to fractional scale
+        // factors.
+        if (std::abs(location_in_root.x() - expected.x()) <= 2 &&
+            std::abs(location_in_root.y() - expected.y()) <= 2) {
+          // This was a synthetic move event, so do not forward it and clear the
+          // expected location.
+          expected_next_mouse_location_.reset();
+          ignore_motion = true;
+        }
+      }
+      bool needs_frame =
+          !ignore_motion &&
+          HandleRelativePointerMotion(event->time_stamp(), location_in_root,
+                                      ordinal_motion);
       if (capture_window_) {
         if (ShouldMoveToCenter())
           MoveCursorToCenterOfActiveDisplay();
-      } else if (event->type() != ui::ET_MOUSE_EXITED) {
+      } else if (event->type() != ui::ET_MOUSE_EXITED && !ignore_motion) {
         delegate_->OnPointerMotion(event->time_stamp(), location_in_target);
         needs_frame = true;
       }
@@ -735,19 +744,21 @@ void Pointer::OnDragCompleted(const ui::DropTargetEvent& event) {
 
   // DragDropController::PerformDrop() can result in the DropTargetEvent::target
   // being destroyed. Verify whether this is the case, and adapt the event.
+  // This must be tested before `GetEffectiveTargetForEvent` which may pick the
+  // capture window.
   //
   // TODO(https://crbug.com/1160925): Avoid nested RunLoop in exo
-  // DataDevice::OnPerformDrop() - remove the block below when it is fixed.
+  // DataDevice::GetDropCallback() - remove the block below when it is fixed.
   auto* event_target = static_cast<aura::Window*>(event.target());
   if (!event_target) {
     LOG(WARNING) << "EventTarget has been destroyed during the drop operation.";
     return;
   }
 
-  auto* target_window = ash::window_util::GetEventHandlerForEvent(event);
-  auto* surface = Surface::AsSurface(target_window);
-  if (surface)
-    SetFocus(surface, event.location_f(), /*button_flags=*/0);
+  gfx::PointF location_in_target;
+  auto* target = GetEffectiveTargetForEvent(&event, &location_in_target);
+  if (target)
+    SetFocus(target, location_in_target, /*button_flags=*/0);
 #endif
 }
 
@@ -802,24 +813,36 @@ void Pointer::OnWindowFocused(aura::Window* gained_focus,
 // Pointer, private:
 
 Surface* Pointer::GetEffectiveTargetForEvent(
-    const ui::LocatedEvent* event) const {
-  if (capture_window_)
-    return Surface::AsSurface(capture_window_);
+    const ui::LocatedEvent* event,
+    gfx::PointF* location_in_target) const {
+  DCHECK(location_in_target);
+  Surface* target = nullptr;
+  if (capture_window_) {
+    target = Surface::AsSurface(capture_window_);
+  } else {
+    target = GetTargetSurfaceForLocatedEvent(event);
 
-  Surface* target = GetTargetSurfaceForLocatedEvent(event);
+    if (!target || !delegate_->CanAcceptPointerEventsForSurface(target))
+      return nullptr;
+  }
 
-  if (!target)
-    return nullptr;
-
-  return delegate_->CanAcceptPointerEventsForSurface(target) ? target : nullptr;
+  if (target) {
+    *location_in_target = event->location_f();
+    aura::Window::ConvertPointToTarget(
+        static_cast<aura::Window*>(event->target()), target->window(),
+        location_in_target);
+  }
+  return target;
 }
 
 void Pointer::SetFocus(Surface* surface,
                        const gfx::PointF& location,
                        int button_flags) {
+  DCHECK(!surface || delegate_->CanAcceptPointerEventsForSurface(surface));
   // First generate a leave event if we currently have a target in focus.
   if (focus_surface_) {
     delegate_->OnPointerLeave(focus_surface_);
+    delegate_->OnPointerFrame();
     // Require SetCursor() to be called and cursor to be re-defined in
     // response to each OnPointerEnter() call.
     Surface* old_surface = focus_surface_;
@@ -830,12 +853,12 @@ void Pointer::SetFocus(Surface* surface,
   // Second generate an enter event if focus moved to a new surface.
   if (surface) {
     delegate_->OnPointerEnter(surface, location, button_flags);
+    delegate_->OnPointerFrame();
     location_ = GetLocationInRoot(surface, location);
     focus_surface_ = surface;
     if (!focus_surface_->HasSurfaceObserver(this))
       focus_surface_->AddSurfaceObserver(this);
   }
-  delegate_->OnPointerFrame();
   UpdateCursor();
 }
 
@@ -936,8 +959,8 @@ void Pointer::UpdateCursor() {
 
     // Use panel_rotation() rather than "natural" rotation, as it actually
     // relates to the hardware you're about to draw the cursor bitmap on.
-    aura::ScaleAndRotateCursorBitmapAndHotpoint(scale, display.panel_rotation(),
-                                                &bitmap, &hotspot);
+    wm::ScaleAndRotateCursorBitmapAndHotpoint(scale, display.panel_rotation(),
+                                              &bitmap, &hotspot);
 
     // TODO(reveman): Add interface for creating cursors from GpuMemoryBuffers
     // and use that here instead of the current bitmap API.
@@ -997,7 +1020,7 @@ void Pointer::MoveCursorToCenterOfActiveDisplay() {
     return;
   aura::Window* root = capture_window_->GetRootWindow();
   gfx::Point p = root->bounds().CenterPoint();
-  location_synthetic_move_ = p;
+  expected_next_mouse_location_ = p;
   root->MoveCursorTo(p);
 }
 
@@ -1007,19 +1030,6 @@ bool Pointer::HandleRelativePointerMotion(
     const absl::optional<gfx::Vector2dF>& ordinal_motion) {
   if (!relative_pointer_delegate_)
     return false;
-
-  if (location_synthetic_move_) {
-    gfx::Point synthetic = *location_synthetic_move_;
-    // Since MoveCursorTo() takes integer coordinates, the resulting move could
-    // have a conversion error of up to 2 due to fractional scale factors.
-    if (std::abs(location_in_root.x() - synthetic.x()) <= 2 &&
-        std::abs(location_in_root.y() - synthetic.y()) <= 2) {
-      // This was a synthetic move event, so do not forward it and clear the
-      // synthetic move.
-      location_synthetic_move_.reset();
-      return false;
-    }
-  }
 
   gfx::Vector2dF delta = location_in_root - location_;
   relative_pointer_delegate_->OnPointerRelativeMotion(

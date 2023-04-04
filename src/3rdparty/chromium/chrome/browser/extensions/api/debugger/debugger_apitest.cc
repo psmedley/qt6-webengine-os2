@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -36,9 +37,15 @@
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/prefs/pref_service.h"
+#include "components/security_interstitials/content/security_interstitial_controller_client.h"
+#include "components/security_interstitials/content/security_interstitial_page.h"
+#include "components/security_interstitials/content/security_interstitial_tab_helper.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
+#include "components/security_interstitials/core/metrics_helper.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/mock_navigation_handle.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/extension.h"
@@ -69,6 +76,9 @@ class DebuggerApiTest : public ExtensionApiTest {
   // to succeed.
   testing::AssertionResult RunAttachFunction(const GURL& url,
                                              const std::string& expected_error);
+  testing::AssertionResult RunAttachFunction(
+      const content::WebContents* web_contents,
+      const std::string& expected_error);
 
   const Extension* extension() const { return extension_.get(); }
   base::CommandLine* command_line() const { return command_line_; }
@@ -116,9 +126,13 @@ void DebuggerApiTest::SetUpOnMainThread() {
 testing::AssertionResult DebuggerApiTest::RunAttachFunction(
     const GURL& url, const std::string& expected_error) {
   EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  return RunAttachFunction(browser()->tab_strip_model()->GetActiveWebContents(),
+                           expected_error);
+}
 
+testing::AssertionResult DebuggerApiTest::RunAttachFunction(
+    const content::WebContents* web_contents,
+    const std::string& expected_error) {
   // Attach by tabId.
   int tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
   std::string debugee_by_tab = base::StringPrintf("{\"tabId\": %d}", tab_id);
@@ -137,13 +151,15 @@ testing::AssertionResult DebuggerApiTest::RunAttachFunction(
   const base::ListValue& targets = base::Value::AsListValue(*value);
 
   std::string debugger_target_id;
-  for (const base::Value& target_value : targets.GetListDeprecated()) {
+  for (const base::Value& target_value : targets.GetList()) {
     EXPECT_TRUE(target_value.is_dict());
     absl::optional<int> id = target_value.FindIntKey("tabId");
     if (id == tab_id) {
       const base::DictionaryValue& target_dict =
           base::Value::AsDictionaryValue(target_value);
-      EXPECT_TRUE(target_dict.GetString("id", &debugger_target_id));
+      const std::string* id_str = target_dict.GetDict().FindString("id");
+      EXPECT_TRUE(id_str);
+      debugger_target_id = *id_str;
       break;
     }
   }
@@ -227,6 +243,60 @@ IN_PROC_BROWSER_TEST_F(DebuggerApiTest,
 IN_PROC_BROWSER_TEST_F(DebuggerApiTest,
                        DebuggerNotAllowedOnFileUrlsWithoutAccess) {
   EXPECT_TRUE(RunExtensionTest("debugger_file_access")) << message_;
+}
+
+class TestInterstitialPage
+    : public security_interstitials::SecurityInterstitialPage {
+ public:
+  TestInterstitialPage(content::WebContents* web_contents,
+                       const GURL& request_url)
+      : SecurityInterstitialPage(
+            web_contents,
+            request_url,
+            std::make_unique<
+                security_interstitials::SecurityInterstitialControllerClient>(
+                web_contents,
+                CreateTestMetricsHelper(web_contents),
+                nullptr,
+                base::i18n::GetConfiguredLocale(),
+                GURL(),
+                /* settings_page_helper*/ nullptr)) {}
+
+  ~TestInterstitialPage() override = default;
+  void OnInterstitialClosing() override {}
+
+ protected:
+  void PopulateInterstitialStrings(base::Value::Dict& load_time_data) override {
+  }
+
+  std::unique_ptr<security_interstitials::MetricsHelper>
+  CreateTestMetricsHelper(content::WebContents* web_contents) {
+    security_interstitials::MetricsHelper::ReportDetails report_details;
+    report_details.metric_prefix = "test_blocking_page";
+    return std::make_unique<security_interstitials::MetricsHelper>(
+        GURL(), report_details, nullptr);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(DebuggerApiTest,
+                       DebuggerNotAllowedOnSecirutyInterstitials) {
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  std::unique_ptr<content::MockNavigationHandle> navigation_handle =
+      std::make_unique<content::MockNavigationHandle>(
+          GURL("https://google.com/"), web_contents->GetPrimaryMainFrame());
+  navigation_handle->set_has_committed(true);
+  navigation_handle->set_is_same_document(false);
+  EXPECT_TRUE(RunAttachFunction(web_contents, ""));
+
+  security_interstitials::SecurityInterstitialTabHelper::AssociateBlockingPage(
+      navigation_handle.get(),
+      std::make_unique<TestInterstitialPage>(web_contents, GURL()));
+  security_interstitials::SecurityInterstitialTabHelper::FromWebContents(
+      web_contents)
+      ->DidFinishNavigation(navigation_handle.get());
+
+  EXPECT_TRUE(RunAttachFunction(web_contents, "Cannot attach to this target."));
 }
 
 IN_PROC_BROWSER_TEST_F(DebuggerApiTest, InfoBar) {
@@ -420,19 +490,8 @@ class CrossProfileDebuggerApiTest : public DebuggerApiTest {
     DebuggerApiTest::SetUpOnMainThread();
     profile_manager_ = g_browser_process->profile_manager();
 
-    base::RunLoop run_loop;
-    profile_manager_->CreateProfileAsync(
-        profile_manager_->GenerateNextProfileDirectoryPath(),
-        base::BindRepeating(
-            [](CrossProfileDebuggerApiTest* self, base::RunLoop* run_loop,
-               Profile* profile, Profile::CreateStatus status) {
-              if (status == Profile::CREATE_STATUS_INITIALIZED) {
-                self->other_profile_ = profile;
-                run_loop->Quit();
-              }
-            },
-            this, &run_loop));
-    run_loop.Run();
+    other_profile_ = profiles::testing::CreateProfileSync(
+        profile_manager_, profile_manager_->GenerateNextProfileDirectoryPath());
     otr_profile_ = profile()->GetPrimaryOTRProfile(true);
   }
 
@@ -441,9 +500,9 @@ class CrossProfileDebuggerApiTest : public DebuggerApiTest {
     DebuggerApiTest::TearDownOnMainThread();
   }
 
-  ProfileManager* profile_manager_ = nullptr;
-  Profile* other_profile_ = nullptr;
-  Profile* otr_profile_ = nullptr;
+  raw_ptr<ProfileManager> profile_manager_ = nullptr;
+  raw_ptr<Profile> other_profile_ = nullptr;
+  raw_ptr<Profile> otr_profile_ = nullptr;
 };
 
 IN_PROC_BROWSER_TEST_F(CrossProfileDebuggerApiTest, GetTargets) {
@@ -462,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(CrossProfileDebuggerApiTest, GetTargets) {
             get_targets_function.get(), "[]", browser()));
 
     ASSERT_TRUE(value.is_list());
-    const base::Value::List targets = std::move(value.GetList());
+    const base::Value::List targets = std::move(value).TakeList();
     ASSERT_THAT(targets, testing::SizeIs(1));
     EXPECT_THAT(targets[0], base::test::DictionaryHasValue(
                                 "url", base::Value("about:blank")));
@@ -477,7 +536,7 @@ IN_PROC_BROWSER_TEST_F(CrossProfileDebuggerApiTest, GetTargets) {
             api_test_utils::RunFunctionFlags::INCLUDE_INCOGNITO));
 
     ASSERT_TRUE(value.is_list());
-    const base::Value::List targets = std::move(value.GetList());
+    const base::Value::List targets = std::move(value).TakeList();
     std::vector<std::string> urls;
     std::transform(
         targets.begin(), targets.end(), std::back_inserter(urls),
@@ -650,6 +709,17 @@ IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, AttachToPdf) {
 IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, NavigateToForbiddenUrl) {
   content::ScopedAllowRendererCrashes scoped_allow_renderer_crashes;
   ASSERT_TRUE(RunExtensionTest("debugger_navigate_to_forbidden_url"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, NavigateToUntrustedWebUIUrl) {
+  ASSERT_TRUE(RunExtensionTest("debugger_navigate_to_untrusted_webui_url"))
+      << message_;
+}
+
+// Tests that Target.createTarget to WebUI origins are blocked.
+IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, CreateTargetToUntrustedWebUI) {
+  ASSERT_TRUE(RunExtensionTest("debugger_create_target_to_untrusted_webui"))
       << message_;
 }
 

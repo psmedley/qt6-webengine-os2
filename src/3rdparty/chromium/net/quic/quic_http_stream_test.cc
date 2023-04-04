@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,7 @@
 #include "net/third_party/quiche/src/quiche/quic/platform/api/quic_flags.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/crypto_test_utils.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/mock_clock.h"
+#include "net/third_party/quiche/src/quiche/quic/test_tools/mock_connection_id_generator.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/mock_random.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/qpack/qpack_test_utils.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/quic_connection_peer.h"
@@ -87,8 +88,7 @@ using testing::_;
 using testing::AnyNumber;
 using testing::Return;
 
-namespace net {
-namespace test {
+namespace net::test {
 namespace {
 
 const char kUploadData[] = "Really nifty data!";
@@ -129,7 +129,7 @@ bool CheckHeader(const base::Value& params,
   if (!params.is_dict()) {
     return false;
   }
-  const base::Value* headers = params.FindListKey("headers");
+  const base::Value::List* headers = params.GetDict().FindList("headers");
   if (!headers) {
     return false;
   }
@@ -137,24 +137,21 @@ bool CheckHeader(const base::Value& params,
   std::string header_prefix = base::StrCat({key, ": "});
   std::string expected_header = base::StrCat({header_prefix, expected_value});
 
-  auto header_list = headers->GetListDeprecated();
-  auto header_it = header_list.begin();
   bool header_found = false;
-  while (header_it != header_list.end()) {
-    if (!header_it->is_string()) {
+  for (const auto& header_value : *headers) {
+    const std::string* header = header_value.GetIfString();
+    if (!header) {
       return false;
     }
-    const std::string& header = header_it->GetString();
-    if (base::StartsWith(header, header_prefix)) {
+    if (base::StartsWith(*header, header_prefix)) {
       if (header_found) {
         return false;
       }
-      if (header != expected_header) {
+      if (*header != expected_header) {
         return false;
       }
       header_found = true;
     }
-    ++header_it;
   }
   return header_found;
 }
@@ -166,7 +163,8 @@ class TestQuicConnection : public quic::QuicConnection {
                      IPEndPoint address,
                      QuicChromiumConnectionHelper* helper,
                      QuicChromiumAlarmFactory* alarm_factory,
-                     quic::QuicPacketWriter* writer)
+                     quic::QuicPacketWriter* writer,
+                     quic::ConnectionIdGeneratorInterface& generator)
       : quic::QuicConnection(connection_id,
                              quic::QuicSocketAddress(),
                              ToQuicSocketAddress(address),
@@ -175,7 +173,8 @@ class TestQuicConnection : public quic::QuicConnection {
                              writer,
                              true /* owns_writer */,
                              quic::Perspective::IS_CLIENT,
-                             versions) {}
+                             versions,
+                             generator) {}
 
   void SetSendAlgorithm(quic::SendAlgorithmInterface* send_algorithm) {
     quic::test::QuicConnectionPeer::SetSendAlgorithm(this, send_algorithm);
@@ -194,7 +193,7 @@ class ReadErrorUploadDataStream : public UploadDataStream {
   ReadErrorUploadDataStream& operator=(const ReadErrorUploadDataStream&) =
       delete;
 
-  ~ReadErrorUploadDataStream() override {}
+  ~ReadErrorUploadDataStream() override = default;
 
  private:
   void CompleteRead() { UploadDataStream::OnReadCompleted(ERR_FAILED); }
@@ -291,7 +290,6 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
                       kDefaultServerHostName,
                       quic::Perspective::IS_SERVER,
                       false),
-        random_generator_(0),
         printer_(version_) {
     FLAGS_quic_enable_http3_grease_randomness = false;
     quic::QuicEnableVersion(version_);
@@ -303,22 +301,20 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
         MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   }
 
-  ~QuicHttpStreamTest() {
+  ~QuicHttpStreamTest() override {
     session_->CloseSessionOnError(ERR_ABORTED, quic::QUIC_INTERNAL_ERROR,
                                   quic::ConnectionCloseBehavior::SILENT_CLOSE);
-    for (size_t i = 0; i < writes_.size(); i++) {
-      delete writes_[i].packet;
+    for (auto& write : writes_) {
+      delete write.packet;
     }
   }
 
   // Adds a packet to the list of expected writes.
   void AddWrite(std::unique_ptr<quic::QuicReceivedPacket> packet) {
-    writes_.push_back(PacketToWrite(SYNCHRONOUS, packet.release()));
+    writes_.emplace_back(SYNCHRONOUS, packet.release());
   }
 
-  void AddWrite(IoMode mode, int rv) {
-    writes_.push_back(PacketToWrite(mode, rv));
-  }
+  void AddWrite(IoMode mode, int rv) { writes_.emplace_back(mode, rv); }
 
   // Returns the packet to be written at position |pos|.
   quic::QuicReceivedPacket* GetWrite(size_t pos) { return writes_[pos].packet; }
@@ -350,10 +346,10 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
         base::make_span(mock_writes_.get(), writes_.size()));
     socket_data_->set_printer(&printer_);
 
-    std::unique_ptr<MockUDPClientSocket> socket(
-        new MockUDPClientSocket(socket_data_.get(), NetLog::Get()));
+    auto socket = std::make_unique<MockUDPClientSocket>(socket_data_.get(),
+                                                        NetLog::Get());
     socket->Connect(peer_addr_);
-    runner_ = new TestTaskRunner(&clock_);
+    runner_ = base::MakeRefCounted<TestTaskRunner>(&clock_);
     send_algorithm_ = new quic::test::MockSendAlgorithm();
     EXPECT_CALL(*send_algorithm_, InRecovery()).WillRepeatedly(Return(false));
     EXPECT_CALL(*send_algorithm_, InSlowStart()).WillRepeatedly(Return(false));
@@ -382,8 +378,9 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
     connection_ = new TestQuicConnection(
         quic::test::SupportedVersions(version_), connection_id_, peer_addr_,
         helper_.get(), alarm_factory_.get(),
-        new QuicChromiumPacketWriter(
-            socket.get(), base::ThreadTaskRunnerHandle::Get().get()));
+        new QuicChromiumPacketWriter(socket.get(),
+                                     base::ThreadTaskRunnerHandle::Get().get()),
+        connection_id_generator_);
     connection_->set_visitor(&visitor_);
     connection_->SetSendAlgorithm(send_algorithm_);
 
@@ -405,11 +402,12 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
         base::WrapUnique(static_cast<QuicServerInfo*>(nullptr)),
         QuicSessionKey(kDefaultServerHostName, kDefaultServerPort,
                        PRIVACY_MODE_DISABLED, SocketTag(),
-                       NetworkIsolationKey(), SecureDnsPolicy::kAllow),
+                       NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                       /*require_dns_https_alpn=*/false),
         /*require_confirmation=*/false,
         /*migrate_session_early_v2=*/false,
         /*migrate_session_on_network_change_v2=*/false,
-        /*default_network=*/NetworkChangeNotifier::kInvalidNetworkHandle,
+        /*default_network=*/handles::kInvalidNetworkHandle,
         quic::QuicTime::Delta::FromMilliseconds(
             kDefaultRetransmittableOnWireTimeout.InMilliseconds()),
         /*migrate_idle_session=*/false, /*allow_port_migration=*/false,
@@ -660,7 +658,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
         version_.transport_version, n);
   }
 
-  QuicFlagSaver saver_;
+  quic::test::QuicFlagSaver saver_;
 
   const quic::ParsedQuicVersion version_;
   const bool client_headers_include_h2_stream_dependency_;
@@ -704,12 +702,13 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<TestParams>,
   QuicTestPacketMaker server_maker_;
   IPEndPoint self_addr_;
   IPEndPoint peer_addr_;
-  quic::test::MockRandom random_generator_;
+  quic::test::MockRandom random_generator_{0};
   ProofVerifyDetailsChromium verify_details_;
   MockCryptoClientStreamFactory crypto_client_stream_factory_;
   std::unique_ptr<StaticSocketDataProvider> socket_data_;
   QuicPacketPrinter printer_;
   std::vector<PacketToWrite> writes_;
+  quic::test::MockConnectionIdGenerator connection_id_generator_;
   quic::test::NoopQpackStreamSenderDelegate noop_qpack_stream_sender_delegate_;
 };
 
@@ -2804,5 +2803,4 @@ TEST_P(QuicHttpStreamTest, GetAcceptChViaAlps) {
   histogram_tester.ExpectTotalCount("Net.QuicSession.AcceptChForOrigin", 1);
 }
 
-}  // namespace test
-}  // namespace net
+}  // namespace net::test

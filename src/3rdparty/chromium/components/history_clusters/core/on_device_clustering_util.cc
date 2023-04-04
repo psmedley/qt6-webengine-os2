@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,14 +76,17 @@ void MergeDuplicateVisitIntoCanonicalVisit(
       std::max(canonical_visit.annotated_visit.visit_row.visit_time,
                duplicate_visit.annotated_visit.visit_row.visit_time);
 
-  canonical_visit.duplicate_visits.push_back(std::move(duplicate_visit));
+  canonical_visit.duplicate_visits.push_back(
+      {duplicate_visit.annotated_visit.visit_row.visit_id,
+       duplicate_visit.annotated_visit.url_row.url(),
+       duplicate_visit.annotated_visit.visit_row.visit_time});
 }
 
 void SortClusters(std::vector<history::Cluster>* clusters) {
   DCHECK(clusters);
   // Within each cluster, sort visits.
   for (auto& cluster : *clusters) {
-    StableSortVisits(&cluster.visits);
+    StableSortVisits(cluster.visits);
   }
 
   // After that, sort clusters reverse-chronologically based on their highest

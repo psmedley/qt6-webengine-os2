@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,9 +80,6 @@ void DataURLLoaderFactory::CreateLoaderAndStart(
     return;
   }
 
-  client_remote->OnReceiveResponse(std::move(response),
-                                   mojo::ScopedDataPipeConsumerHandle());
-
   mojo::ScopedDataPipeProducerHandle producer;
   mojo::ScopedDataPipeConsumerHandle consumer;
   if (CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK) {
@@ -91,9 +88,10 @@ void DataURLLoaderFactory::CreateLoaderAndStart(
     return;
   }
 
-  client_remote->OnStartLoadingResponseBody(std::move(consumer));
+  client_remote->OnReceiveResponse(std::move(response), std::move(consumer),
+                                   absl::nullopt);
 
-  auto write_data = new WriteData();
+  auto write_data = std::make_unique<WriteData>();
   write_data->client = std::move(client_remote);
   write_data->data = std::move(data);
   write_data->producer =
@@ -106,7 +104,7 @@ void DataURLLoaderFactory::CreateLoaderAndStart(
       std::make_unique<mojo::StringDataSource>(
           string_piece, mojo::StringDataSource::AsyncWritingMode::
                             STRING_STAYS_VALID_UNTIL_COMPLETION),
-      base::BindOnce(OnWrite, std::unique_ptr<WriteData>(write_data)));
+      base::BindOnce(OnWrite, std::move(write_data)));
 }
 
 // static

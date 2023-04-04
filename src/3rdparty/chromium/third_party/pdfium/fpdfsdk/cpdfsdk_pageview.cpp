@@ -63,6 +63,11 @@ CPDFSDK_PageView::~CPDFSDK_PageView() {
   m_pAnnotList.reset();
 }
 
+void CPDFSDK_PageView::ClearPage(CPDF_Page* pPage) {
+  if (!IsBeingDestroyed())
+    GetFormFillEnv()->RemovePageView(pPage);
+}
+
 void CPDFSDK_PageView::PageView_OnDraw(CFX_RenderDevice* pDevice,
                                        const CFX_Matrix& mtUser2Device,
                                        CPDF_RenderOptions* pOptions,
@@ -81,7 +86,7 @@ void CPDFSDK_PageView::PageView_OnDraw(CFX_RenderDevice* pDevice,
 #endif  // PDF_ENABLE_XFA
 
   // for pdf/static xfa.
-  CPDFSDK_AnnotReverseIteration annot_iteration(this);
+  auto annot_iteration = CPDFSDK_AnnotIteration::CreateForDrawing(this);
   for (const auto& pSDKAnnot : annot_iteration) {
     pSDKAnnot->OnDraw(pDevice, mtUser2Device, pOptions->GetDrawAnnots());
   }
@@ -113,7 +118,7 @@ std::unique_ptr<CPDFSDK_Annot> CPDFSDK_PageView::NewAnnot(CPDF_Annot* annot) {
 }
 
 CPDFSDK_Annot* CPDFSDK_PageView::GetFXAnnotAtPoint(const CFX_PointF& point) {
-  CPDFSDK_AnnotForwardIteration annot_iteration(this);
+  CPDFSDK_AnnotIteration annot_iteration(this);
   for (const auto& pSDKAnnot : annot_iteration) {
     CFX_FloatRect rc = pSDKAnnot->GetViewBBox();
     if (pSDKAnnot->GetAnnotSubtype() == CPDF_Annot::Subtype::POPUP)
@@ -125,7 +130,7 @@ CPDFSDK_Annot* CPDFSDK_PageView::GetFXAnnotAtPoint(const CFX_PointF& point) {
 }
 
 CPDFSDK_Annot* CPDFSDK_PageView::GetFXWidgetAtPoint(const CFX_PointF& point) {
-  CPDFSDK_AnnotForwardIteration annot_iteration(this);
+  CPDFSDK_AnnotIteration annot_iteration(this);
   for (const auto& pSDKAnnot : annot_iteration) {
     const CPDF_Annot::Subtype sub_type = pSDKAnnot->GetAnnotSubtype();
     bool do_hit_test = sub_type == CPDF_Annot::Subtype::WIDGET;
@@ -203,7 +208,7 @@ std::vector<CPDFSDK_Annot*> CPDFSDK_PageView::GetAnnotList() const {
   return list;
 }
 
-CPDFSDK_Annot* CPDFSDK_PageView::GetAnnotByDict(CPDF_Dictionary* pDict) {
+CPDFSDK_Annot* CPDFSDK_PageView::GetAnnotByDict(const CPDF_Dictionary* pDict) {
   for (std::unique_ptr<CPDFSDK_Annot>& pAnnot : m_SDKAnnotArray) {
     CPDF_Annot* pPDFAnnot = pAnnot->GetPDFAnnot();
     if (pPDFAnnot && pPDFAnnot->GetAnnotDict() == pDict)
@@ -588,15 +593,7 @@ int CPDFSDK_PageView::GetPageIndex() const {
 }
 
 bool CPDFSDK_PageView::IsValidAnnot(const CPDF_Annot* p) const {
-  if (!p)
-    return false;
-
-  const auto& annots = m_pAnnotList->All();
-  auto it = std::find_if(annots.begin(), annots.end(),
-                         [p](const std::unique_ptr<CPDF_Annot>& annot) {
-                           return annot.get() == p;
-                         });
-  return it != annots.end();
+  return p && m_pAnnotList->Contains(p);
 }
 
 bool CPDFSDK_PageView::IsValidSDKAnnot(const CPDFSDK_Annot* p) const {
@@ -612,7 +609,6 @@ CPDFSDK_Annot* CPDFSDK_PageView::GetFocusAnnot() {
 }
 
 int CPDFSDK_PageView::GetPageIndexForStaticPDF() const {
-  const CPDF_Dictionary* pDict = GetPDFPage()->GetDict();
   CPDF_Document* pDoc = m_pFormFillEnv->GetPDFDocument();
-  return pDoc->GetPageIndex(pDict->GetObjNum());
+  return pDoc->GetPageIndex(GetPDFPage()->GetDict()->GetObjNum());
 }

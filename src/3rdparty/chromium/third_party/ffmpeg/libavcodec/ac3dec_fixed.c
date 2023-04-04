@@ -171,17 +171,17 @@ static const AVClass ac3_decoder_class = {
 
 const FFCodec ff_ac3_fixed_decoder = {
     .p.name         = "ac3_fixed",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("ATSC A/52A (AC-3)"),
+    CODEC_LONG_NAME("ATSC A/52A (AC-3)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_AC3,
     .p.priv_class   = &ac3_decoder_class,
     .priv_data_size = sizeof (AC3DecodeContext),
     .init           = ac3_decode_init,
     .close          = ac3_decode_end,
-    .decode         = ac3_decode_frame,
+    FF_CODEC_DECODE_CB(ac3_decode_frame),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

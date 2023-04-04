@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,8 +87,10 @@ class VIZ_SERVICE_EXPORT ExternalUseClient {
     void set_paint_op_buffer(const cc::PaintOpBuffer* buffer) {
       paint_op_buffer_ = buffer;
     }
-    const absl::optional<SkColor>& clear_color() const { return clear_color_; }
-    void set_clear_color(const absl::optional<SkColor>& color) {
+    const absl::optional<SkColor4f>& clear_color() const {
+      return clear_color_;
+    }
+    void set_clear_color(const absl::optional<SkColor4f>& color) {
       clear_color_ = color;
     }
 
@@ -110,7 +112,7 @@ class VIZ_SERVICE_EXPORT ExternalUseClient {
     sk_sp<SkImage> image_;
     GrBackendFormat backend_format_;
     raw_ptr<const cc::PaintOpBuffer> paint_op_buffer_ = nullptr;
-    absl::optional<SkColor> clear_color_;
+    absl::optional<SkColor4f> clear_color_;
   };
 
   // If |maybe_concurrent_reads| is true then there can be concurrent reads to

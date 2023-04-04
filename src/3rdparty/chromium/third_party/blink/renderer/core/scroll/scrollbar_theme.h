@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_THEME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_THEME_H_
 
+#include "base/check_op.h"
 #include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
@@ -258,6 +259,9 @@ class CORE_EXPORT ScrollbarTheme {
   }
   static bool MockScrollbarsEnabled() {
     return ScrollbarThemeSettings::MockScrollbarsEnabled();
+  }
+  static bool FluentScrollbarsEnabled() {
+    return ScrollbarThemeSettings::FluentScrollbarsEnabled();
   }
 
  private:

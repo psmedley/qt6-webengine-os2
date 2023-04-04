@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@ class UnsubscribeFromWebFeedTask : public offline_pages::Task {
       FeedStream* stream,
       const OperationToken& operation_token,
       const std::string& web_feed_id,
+      feedwire::webfeed::WebFeedChangeReason change_reason,
       base::OnceCallback<void(Result)> callback);
   ~UnsubscribeFromWebFeedTask() override;
   UnsubscribeFromWebFeedTask(const UnsubscribeFromWebFeedTask&) = delete;
@@ -45,6 +46,7 @@ class UnsubscribeFromWebFeedTask : public offline_pages::Task {
   OperationToken operation_token_;
   Result result_;
   std::string web_feed_name_;
+  feedwire::webfeed::WebFeedChangeReason change_reason_;
   base::OnceCallback<void(Result)> callback_;
 };
 }  // namespace feed

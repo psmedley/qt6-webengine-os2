@@ -1379,21 +1379,22 @@ static void alloc_util_frame_buffers(VP9_COMP *cpi) {
 #endif
 }
 
-static int alloc_context_buffers_ext(VP9_COMP *cpi) {
+static void alloc_context_buffers_ext(VP9_COMP *cpi) {
   VP9_COMMON *cm = &cpi->common;
   int mi_size = cm->mi_cols * cm->mi_rows;
 
-  cpi->mbmi_ext_base = vpx_calloc(mi_size, sizeof(*cpi->mbmi_ext_base));
-  if (!cpi->mbmi_ext_base) return 1;
-
-  return 0;
+  CHECK_MEM_ERROR(cm, cpi->mbmi_ext_base,
+                  vpx_calloc(mi_size, sizeof(*cpi->mbmi_ext_base)));
 }
 
 static void alloc_compressor_data(VP9_COMP *cpi) {
   VP9_COMMON *cm = &cpi->common;
   int sb_rows;
 
-  vp9_alloc_context_buffers(cm, cm->width, cm->height);
+  if (vp9_alloc_context_buffers(cm, cm->width, cm->height)) {
+    vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                       "Failed to allocate context buffers");
+  }
 
   alloc_context_buffers_ext(cpi);
 
@@ -1569,15 +1570,13 @@ void vp9_set_rc_buffer_sizes(VP9_COMP *cpi) {
 }
 
 #if CONFIG_VP9_HIGHBITDEPTH
-// TODO(angiebird): make sdx8f available for highbitdepth if needed
 #define HIGHBD_BFP(BT, SDF, SDAF, VF, SVF, SVAF, SDX4DF) \
   cpi->fn_ptr[BT].sdf = SDF;                             \
   cpi->fn_ptr[BT].sdaf = SDAF;                           \
   cpi->fn_ptr[BT].vf = VF;                               \
   cpi->fn_ptr[BT].svf = SVF;                             \
   cpi->fn_ptr[BT].svaf = SVAF;                           \
-  cpi->fn_ptr[BT].sdx4df = SDX4DF;                       \
-  cpi->fn_ptr[BT].sdx8f = NULL;
+  cpi->fn_ptr[BT].sdx4df = SDX4DF;
 
 #define MAKE_BFP_SAD_WRAPPER(fnname)                                           \
   static unsigned int fnname##_bits8(const uint8_t *src_ptr,                   \
@@ -2058,7 +2057,10 @@ void vp9_change_config(struct VP9_COMP *cpi, const VP9EncoderConfig *oxcf) {
       cpi->external_resize = 0;
     } else if (cm->mi_alloc_size == new_mi_size &&
                (cpi->oxcf.width > last_w || cpi->oxcf.height > last_h)) {
-      vp9_alloc_loop_filter(cm);
+      if (vp9_alloc_loop_filter(cm)) {
+        vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                           "Failed to allocate loop filter data");
+      }
     }
   }
 
@@ -2561,67 +2563,61 @@ VP9_COMP *vp9_create_compressor(const VP9EncoderConfig *oxcf,
   CHECK_MEM_ERROR(cm, cpi->source_diff_var, vpx_calloc(cm->MBs, sizeof(diff)));
   cpi->source_var_thresh = 0;
   cpi->frames_till_next_var_check = 0;
-#define BFP(BT, SDF, SDAF, VF, SVF, SVAF, SDX4DF, SDX8F) \
-  cpi->fn_ptr[BT].sdf = SDF;                             \
-  cpi->fn_ptr[BT].sdaf = SDAF;                           \
-  cpi->fn_ptr[BT].vf = VF;                               \
-  cpi->fn_ptr[BT].svf = SVF;                             \
-  cpi->fn_ptr[BT].svaf = SVAF;                           \
-  cpi->fn_ptr[BT].sdx4df = SDX4DF;                       \
-  cpi->fn_ptr[BT].sdx8f = SDX8F;
+#define BFP(BT, SDF, SDAF, VF, SVF, SVAF, SDX4DF) \
+  cpi->fn_ptr[BT].sdf = SDF;                      \
+  cpi->fn_ptr[BT].sdaf = SDAF;                    \
+  cpi->fn_ptr[BT].vf = VF;                        \
+  cpi->fn_ptr[BT].svf = SVF;                      \
+  cpi->fn_ptr[BT].svaf = SVAF;                    \
+  cpi->fn_ptr[BT].sdx4df = SDX4DF;
 
-  // TODO(angiebird): make sdx8f available for every block size
   BFP(BLOCK_32X16, vpx_sad32x16, vpx_sad32x16_avg, vpx_variance32x16,
       vpx_sub_pixel_variance32x16, vpx_sub_pixel_avg_variance32x16,
-      vpx_sad32x16x4d, NULL)
+      vpx_sad32x16x4d)
 
   BFP(BLOCK_16X32, vpx_sad16x32, vpx_sad16x32_avg, vpx_variance16x32,
       vpx_sub_pixel_variance16x32, vpx_sub_pixel_avg_variance16x32,
-      vpx_sad16x32x4d, NULL)
+      vpx_sad16x32x4d)
 
   BFP(BLOCK_64X32, vpx_sad64x32, vpx_sad64x32_avg, vpx_variance64x32,
       vpx_sub_pixel_variance64x32, vpx_sub_pixel_avg_variance64x32,
-      vpx_sad64x32x4d, NULL)
+      vpx_sad64x32x4d)
 
   BFP(BLOCK_32X64, vpx_sad32x64, vpx_sad32x64_avg, vpx_variance32x64,
       vpx_sub_pixel_variance32x64, vpx_sub_pixel_avg_variance32x64,
-      vpx_sad32x64x4d, NULL)
+      vpx_sad32x64x4d)
 
   BFP(BLOCK_32X32, vpx_sad32x32, vpx_sad32x32_avg, vpx_variance32x32,
       vpx_sub_pixel_variance32x32, vpx_sub_pixel_avg_variance32x32,
-      vpx_sad32x32x4d, vpx_sad32x32x8)
+      vpx_sad32x32x4d)
 
   BFP(BLOCK_64X64, vpx_sad64x64, vpx_sad64x64_avg, vpx_variance64x64,
       vpx_sub_pixel_variance64x64, vpx_sub_pixel_avg_variance64x64,
-      vpx_sad64x64x4d, NULL)
+      vpx_sad64x64x4d)
 
   BFP(BLOCK_16X16, vpx_sad16x16, vpx_sad16x16_avg, vpx_variance16x16,
       vpx_sub_pixel_variance16x16, vpx_sub_pixel_avg_variance16x16,
-      vpx_sad16x16x4d, vpx_sad16x16x8)
+      vpx_sad16x16x4d)
 
   BFP(BLOCK_16X8, vpx_sad16x8, vpx_sad16x8_avg, vpx_variance16x8,
       vpx_sub_pixel_variance16x8, vpx_sub_pixel_avg_variance16x8,
-      vpx_sad16x8x4d, vpx_sad16x8x8)
+      vpx_sad16x8x4d)
 
   BFP(BLOCK_8X16, vpx_sad8x16, vpx_sad8x16_avg, vpx_variance8x16,
       vpx_sub_pixel_variance8x16, vpx_sub_pixel_avg_variance8x16,
-      vpx_sad8x16x4d, vpx_sad8x16x8)
+      vpx_sad8x16x4d)
 
   BFP(BLOCK_8X8, vpx_sad8x8, vpx_sad8x8_avg, vpx_variance8x8,
-      vpx_sub_pixel_variance8x8, vpx_sub_pixel_avg_variance8x8, vpx_sad8x8x4d,
-      vpx_sad8x8x8)
+      vpx_sub_pixel_variance8x8, vpx_sub_pixel_avg_variance8x8, vpx_sad8x8x4d)
 
   BFP(BLOCK_8X4, vpx_sad8x4, vpx_sad8x4_avg, vpx_variance8x4,
-      vpx_sub_pixel_variance8x4, vpx_sub_pixel_avg_variance8x4, vpx_sad8x4x4d,
-      NULL)
+      vpx_sub_pixel_variance8x4, vpx_sub_pixel_avg_variance8x4, vpx_sad8x4x4d)
 
   BFP(BLOCK_4X8, vpx_sad4x8, vpx_sad4x8_avg, vpx_variance4x8,
-      vpx_sub_pixel_variance4x8, vpx_sub_pixel_avg_variance4x8, vpx_sad4x8x4d,
-      NULL)
+      vpx_sub_pixel_variance4x8, vpx_sub_pixel_avg_variance4x8, vpx_sad4x8x4d)
 
   BFP(BLOCK_4X4, vpx_sad4x4, vpx_sad4x4_avg, vpx_variance4x4,
-      vpx_sub_pixel_variance4x4, vpx_sub_pixel_avg_variance4x4, vpx_sad4x4x4d,
-      vpx_sad4x4x8)
+      vpx_sub_pixel_variance4x4, vpx_sub_pixel_avg_variance4x4, vpx_sad4x4x4d)
 
 #if CONFIG_VP9_HIGHBITDEPTH
   highbd_set_var_fns(cpi);
@@ -3691,9 +3687,9 @@ static void set_size_dependent_vars(VP9_COMP *cpi, int *q, int *bottom_index,
       case 6: l = 150; break;
     }
     if (!cpi->common.postproc_state.limits) {
-      cpi->common.postproc_state.limits =
-          vpx_calloc(cpi->un_scaled_source->y_width,
-                     sizeof(*cpi->common.postproc_state.limits));
+      CHECK_MEM_ERROR(cm, cpi->common.postproc_state.limits,
+                      vpx_calloc(cpi->un_scaled_source->y_width,
+                                 sizeof(*cpi->common.postproc_state.limits)));
     }
     vp9_denoise(&cpi->common, cpi->Source, cpi->Source, l,
                 cpi->common.postproc_state.limits);
@@ -4495,7 +4491,8 @@ static void encode_with_recode_loop(VP9_COMP *cpi, size_t *size, uint8_t *dest
       }
     }
 #endif  // CONFIG_RATE_CTRL
-    if (cpi->ext_ratectrl.ready && !ext_rc_recode) {
+    if (cpi->ext_ratectrl.ready && !ext_rc_recode &&
+        (cpi->ext_ratectrl.funcs.rc_type & VPX_RC_QP) != 0) {
       vpx_codec_err_t codec_status;
       const GF_GROUP *gf_group = &cpi->twopass.gf_group;
       vpx_rc_encodeframe_decision_t encode_frame_decision;
@@ -4504,17 +4501,27 @@ static void encode_with_recode_loop(VP9_COMP *cpi, size_t *size, uint8_t *dest
       RefCntBuffer *ref_frame_bufs[MAX_INTER_REF_FRAMES];
       const RefCntBuffer *curr_frame_buf =
           get_ref_cnt_buffer(cm, cm->new_fb_idx);
+      // index 0 of a gf group is always KEY/OVERLAY/GOLDEN.
+      // index 1 refers to the first encoding frame in a gf group.
+      // Therefore if it is ARF_UPDATE, it means this gf group uses alt ref.
+      // See function define_gf_group_structure().
+      const int use_alt_ref = gf_group->update_type[1] == ARF_UPDATE;
       get_ref_frame_bufs(cpi, ref_frame_bufs);
       codec_status = vp9_extrc_get_encodeframe_decision(
           &cpi->ext_ratectrl, curr_frame_buf->frame_index,
           cm->current_frame_coding_index, gf_group->index, update_type,
-          ref_frame_bufs, ref_frame_flags, &encode_frame_decision);
+          gf_group->gf_group_size, use_alt_ref, ref_frame_bufs, ref_frame_flags,
+          &encode_frame_decision);
       if (codec_status != VPX_CODEC_OK) {
         vpx_internal_error(&cm->error, codec_status,
                            "vp9_extrc_get_encodeframe_decision() failed");
       }
-      q = encode_frame_decision.q_index;
-      ext_rc_max_frame_size = encode_frame_decision.max_frame_size;
+      // If the external model recommends a reserved value, we use
+      // libvpx's default q.
+      if (encode_frame_decision.q_index != VPX_DEFAULT_Q) {
+        q = encode_frame_decision.q_index;
+        ext_rc_max_frame_size = encode_frame_decision.max_frame_size;
+      }
     }
 
     vp9_set_quantizer(cpi, q);
@@ -4555,7 +4562,8 @@ static void encode_with_recode_loop(VP9_COMP *cpi, size_t *size, uint8_t *dest
       if (frame_over_shoot_limit == 0) frame_over_shoot_limit = 1;
     }
 
-    if (cpi->ext_ratectrl.ready) {
+    if (cpi->ext_ratectrl.ready &&
+        (cpi->ext_ratectrl.funcs.rc_type & VPX_RC_QP) != 0) {
       last_q_attempt = q;
       // In general, for the external rate control, we take the qindex provided
       // as input and encode the frame with this qindex faithfully. However,
@@ -5597,7 +5605,7 @@ static void encode_frame_to_data_rate(
   // build the bitstream
   vp9_pack_bitstream(cpi, dest, size);
 
-  {
+  if (cpi->ext_ratectrl.ready) {
     const RefCntBuffer *coded_frame_buf =
         get_ref_cnt_buffer(cm, cm->new_fb_idx);
     vpx_codec_err_t codec_status = vp9_extrc_update_encodeframe_result(
@@ -5804,16 +5812,6 @@ static void Pass2Encode(VP9_COMP *cpi, size_t *size, uint8_t *dest,
                         unsigned int *frame_flags,
                         ENCODE_FRAME_RESULT *encode_frame_result) {
   cpi->allow_encode_breakout = ENCODE_BREAKOUT_ENABLED;
-
-  if (cpi->common.current_frame_coding_index == 0) {
-    VP9_COMMON *cm = &cpi->common;
-    const vpx_codec_err_t codec_status = vp9_extrc_send_firstpass_stats(
-        &cpi->ext_ratectrl, &cpi->twopass.first_pass_info);
-    if (codec_status != VPX_CODEC_OK) {
-      vpx_internal_error(&cm->error, codec_status,
-                         "vp9_extrc_send_firstpass_stats() failed");
-    }
-  }
 #if CONFIG_MISMATCH_DEBUG
   mismatch_move_frame_idx_w();
 #endif
@@ -6620,19 +6618,22 @@ static void get_quantize_error(MACROBLOCK *x, int plane, tran_low_t *coeff,
   int pix_num = 1 << num_pels_log2_lookup[txsize_to_bsize[tx_size]];
   const int shift = tx_size == TX_32X32 ? 0 : 2;
 
+  // skip block condition should be handled before this is called.
+  assert(!x->skip_block);
+
 #if CONFIG_VP9_HIGHBITDEPTH
   if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-    vp9_highbd_quantize_fp_32x32(coeff, pix_num, x->skip_block, p->round_fp,
-                                 p->quant_fp, qcoeff, dqcoeff, pd->dequant,
-                                 &eob, scan_order->scan, scan_order->iscan);
+    vp9_highbd_quantize_fp_32x32(coeff, pix_num, p->round_fp, p->quant_fp,
+                                 qcoeff, dqcoeff, pd->dequant, &eob,
+                                 scan_order->scan, scan_order->iscan);
   } else {
-    vp9_quantize_fp_32x32(coeff, pix_num, x->skip_block, p->round_fp,
-                          p->quant_fp, qcoeff, dqcoeff, pd->dequant, &eob,
-                          scan_order->scan, scan_order->iscan);
+    vp9_quantize_fp_32x32(coeff, pix_num, p->round_fp, p->quant_fp, qcoeff,
+                          dqcoeff, pd->dequant, &eob, scan_order->scan,
+                          scan_order->iscan);
   }
 #else
-  vp9_quantize_fp_32x32(coeff, pix_num, x->skip_block, p->round_fp, p->quant_fp,
-                        qcoeff, dqcoeff, pd->dequant, &eob, scan_order->scan,
+  vp9_quantize_fp_32x32(coeff, pix_num, p->round_fp, p->quant_fp, qcoeff,
+                        dqcoeff, pd->dequant, &eob, scan_order->scan,
                         scan_order->iscan);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
@@ -8160,9 +8161,11 @@ int vp9_set_size_literal(VP9_COMP *cpi, unsigned int width,
                          unsigned int height) {
   VP9_COMMON *cm = &cpi->common;
 #if CONFIG_VP9_HIGHBITDEPTH
-  update_initial_width(cpi, cm->use_highbitdepth, 1, 1);
+  update_initial_width(cpi, cm->use_highbitdepth, cpi->common.subsampling_x,
+                       cpi->common.subsampling_y);
 #else
-  update_initial_width(cpi, 0, 1, 1);
+  update_initial_width(cpi, 0, cpi->common.subsampling_x,
+                       cpi->common.subsampling_y);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
 #if CONFIG_VP9_TEMPORAL_DENOISING

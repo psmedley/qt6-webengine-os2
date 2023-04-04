@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -167,13 +167,13 @@ class SafeTemplateURLParser {
 
 void SafeTemplateURLParser::OnXmlParseComplete(
     data_decoder::DataDecoder::ValueOrError value_or_error) {
-  if (value_or_error.error) {
-    DLOG(ERROR) << "Failed to parse XML: " << *value_or_error.error;
+  if (!value_or_error.has_value()) {
+    DLOG(ERROR) << "Failed to parse XML: " << value_or_error.error();
     std::move(callback_).Run(nullptr);
     return;
   }
 
-  const base::Value& root = *value_or_error.value;
+  const base::Value& root = *value_or_error;
 
   // Get the namespaces used in the XML document, which will be used
   // to access nodes by tag name in GetChildElementsByTag().
@@ -232,7 +232,7 @@ void SafeTemplateURLParser::ParseURLs(
         data_decoder::GetXmlElementAttribute(*url_value, kURLTemplateAttribute);
     std::string type =
         data_decoder::GetXmlElementAttribute(*url_value, kURLTypeAttribute);
-    bool is_post = base::LowerCaseEqualsASCII(
+    bool is_post = base::EqualsCaseInsensitiveASCII(
         data_decoder::GetXmlElementAttribute(*url_value, kParamMethodAttribute),
         "post");
     bool is_html_url = (type == kHTMLType);

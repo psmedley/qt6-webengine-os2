@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,11 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill_assistant/browser/actions/action_test_utils.h"
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
-#include "components/autofill_assistant/browser/mock_website_login_manager.h"
+#include "components/autofill_assistant/browser/public/password_change/mock_website_login_manager.h"
 #include "components/autofill_assistant/browser/selector.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/user_model.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "components/autofill_assistant/browser/web/element_store.h"
 #include "components/autofill_assistant/browser/web/mock_web_controller.h"
 #include "content/public/test/browser_task_environment.h"
@@ -704,7 +705,8 @@ TEST_F(GetElementStatusActionTest, SucceedsWithPasswordManagerValue) {
       .WillOnce(WithArgs<1>([this](auto&& callback) {
         std::unique_ptr<ElementFinderResult> element =
             std::make_unique<ElementFinderResult>();
-        element->SetRenderFrameHost(web_contents_->GetMainFrame());
+        element->SetRenderFrameHostForTest(
+            web_contents_->GetPrimaryMainFrame());
         std::move(callback).Run(OkClientStatus(), std::move(element));
       }));
   EXPECT_CALL(mock_website_login_manager_, GetPasswordForLogin(_, _))

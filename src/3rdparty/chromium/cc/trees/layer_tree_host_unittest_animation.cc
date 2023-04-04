@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,6 +60,14 @@ class LayerTreeHostAnimationTest : public LayerTreeTest {
     timeline_->AttachAnimation(animation_child_.get());
   }
 
+  void DetachAnimationsFromTimeline() {
+    if (animation_)
+      timeline_->DetachAnimation(animation_.get());
+    if (animation_child_)
+      timeline_->DetachAnimation(animation_child_.get());
+    animation_host()->RemoveAnimationTimeline(timeline_.get());
+  }
+
   void GetImplTimelineAndAnimationByID(const LayerTreeHostImpl& host_impl) {
     AnimationHost* animation_host_impl = GetImplAnimationHost(&host_impl);
     timeline_impl_ = animation_host_impl->GetTimelineById(timeline_id_);
@@ -69,6 +77,14 @@ class LayerTreeHostAnimationTest : public LayerTreeTest {
     animation_child_impl_ =
         timeline_impl_->GetAnimationById(animation_child_id_);
     EXPECT_TRUE(animation_child_impl_);
+  }
+
+  void CleanupBeforeDestroy() override {
+    // This needs to happen on the main thread (so can't happen in
+    // EndTest()), and needs to happen before DestroyLayerTreeHost()
+    // (which will trigger assertions if we don't do this), so it can't
+    // happen in AfterTest().
+    DetachAnimationsFromTimeline();
   }
 
   AnimationHost* GetImplAnimationHost(
@@ -371,9 +387,9 @@ class LayerTreeHostAnimationTestAddKeyframeModelWithTimingFunction
       return;
     first_animation_frame_ = false;
 
-    scoped_refptr<const AnimationTimeline> timeline_impl =
+    scoped_refptr<AnimationTimeline> timeline_impl =
         GetImplAnimationHost(host_impl)->GetTimelineById(timeline_id_);
-    scoped_refptr<const Animation> animation_child_impl =
+    scoped_refptr<Animation> animation_child_impl =
         timeline_impl->GetAnimationById(animation_child_id_);
 
     KeyframeModel* keyframe_model =
@@ -902,15 +918,14 @@ class LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted
     scroll_layer_element_id_ = scroll_layer_->element_id();
   }
 
-  KeyframeEffect& ScrollOffsetKeyframeEffect(
+  const KeyframeEffect& ScrollOffsetKeyframeEffect(
       const LayerTreeHostImpl& host_impl,
-      scoped_refptr<FakePictureLayer> layer,
       ElementId element_id) const {
-    scoped_refptr<ElementAnimations> element_animations =
+    scoped_refptr<const ElementAnimations> element_animations =
         GetImplAnimationHost(&host_impl)
-            ->GetElementAnimationsForElementId(element_id);
+            ->GetElementAnimationsForElementIdForTesting(element_id);
     DCHECK(element_animations);
-    KeyframeEffect* keyframe_effect =
+    const KeyframeEffect* keyframe_effect =
         &*element_animations->FirstKeyframeEffectForTesting();
     DCHECK(keyframe_effect);
     return *keyframe_effect;
@@ -941,8 +956,7 @@ class LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted
       // This happens after the impl-only animation is added in
       // WillCommitCompleteOnThread.
       gfx::KeyframeModel* keyframe_model =
-          ScrollOffsetKeyframeEffect(*host_impl, scroll_layer_,
-                                     scroll_layer_element_id_)
+          ScrollOffsetKeyframeEffect(*host_impl, scroll_layer_element_id_)
               .GetKeyframeModel(TargetProperty::SCROLL_OFFSET);
       DCHECK(keyframe_model);
       const ScrollOffsetAnimationCurve* curve =
@@ -969,8 +983,7 @@ class LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted
   void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) override {
     if (host_impl->sync_tree()->source_frame_number() == 2) {
       gfx::KeyframeModel* keyframe_model =
-          ScrollOffsetKeyframeEffect(*host_impl, scroll_layer_,
-                                     scroll_layer_element_id_)
+          ScrollOffsetKeyframeEffect(*host_impl, scroll_layer_element_id_)
               .GetKeyframeModel(TargetProperty::SCROLL_OFFSET);
       DCHECK(keyframe_model);
       const ScrollOffsetAnimationCurve* curve =

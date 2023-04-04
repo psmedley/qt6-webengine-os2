@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,6 +38,13 @@ class MovePasswordToAccountStoreHelper : public FormFetcher::Consumer {
   base::OnceClosure done_callback_;
   std::unique_ptr<FormFetcher> form_fetcher_;
 };
+
+// Helper functions which moves a batch of passwords and takes care of memory
+// management.
+void MovePasswordsToAccountStore(
+    const std::vector<PasswordForm>& forms,
+    PasswordManagerClient* client,
+    metrics_util::MoveToAccountStoreTrigger trigger);
 
 }  // namespace password_manager
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "build/build_config.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_union_htmldivelement_htmliframeelement.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -31,14 +30,15 @@
 namespace blink {
 
 class CaptureHandleConfig;
+class DisplayMediaStreamOptions;
 class ExceptionState;
 class LocalFrame;
 class Navigator;
-class MediaStreamConstraints;
 class MediaTrackSupportedConstraints;
 class ScriptPromise;
 class ScriptPromiseResolver;
 class ScriptState;
+class UserMediaStreamConstraints;
 
 class MODULES_EXPORT MediaDevices final
     : public EventTargetWithInlineData,
@@ -57,28 +57,30 @@ class MODULES_EXPORT MediaDevices final
   ScriptPromise enumerateDevices(ScriptState*, ExceptionState&);
   MediaTrackSupportedConstraints* getSupportedConstraints() const;
   ScriptPromise getUserMedia(ScriptState*,
-                             const MediaStreamConstraints*,
+                             const UserMediaStreamConstraints*,
                              ExceptionState&);
   ScriptPromise SendUserMediaRequest(ScriptState*,
-                                     UserMediaRequest::MediaType,
+                                     UserMediaRequestType,
                                      const MediaStreamConstraints*,
                                      ExceptionState&);
 
   ScriptPromise getDisplayMediaSet(ScriptState*,
-                                   const MediaStreamConstraints*,
+                                   const DisplayMediaStreamOptions*,
                                    ExceptionState&);
 
   ScriptPromise getDisplayMedia(ScriptState*,
-                                const MediaStreamConstraints*,
+                                const DisplayMediaStreamOptions*,
                                 ExceptionState&);
 
   void setCaptureHandleConfig(ScriptState*,
                               const CaptureHandleConfig*,
                               ExceptionState&);
 
-  ScriptPromise produceCropId(ScriptState*,
-                              V8UnionHTMLDivElementOrHTMLIFrameElement*,
-                              ExceptionState&);
+  // Using ProduceCropTarget(), CropTarget.fromElement() can communicate
+  // with the browser process through the mojom pipe that `this` owns.
+  // TODO(crbug.com/1332628): Move most of the logic into crop_target.cc/h,
+  // leaving only communication in MediaDevices.
+  ScriptPromise ProduceCropTarget(ScriptState*, Element*, ExceptionState&);
 
   // EventTarget overrides.
   const AtomicString& InterfaceName() const override;
@@ -162,7 +164,12 @@ class MODULES_EXPORT MediaDevices final
   HeapVector<Member<Event>> scheduled_events_;
   HeapMojoRemote<mojom::blink::MediaDevicesDispatcherHost> dispatcher_host_;
   HeapMojoReceiver<mojom::blink::MediaDevicesListener, MediaDevices> receiver_;
-  HeapHashSet<Member<ScriptPromiseResolver>> requests_;
+
+  struct RequestMetadata {
+    base::TimeTicks start_time;
+  };
+  HeapHashMap<Member<ScriptPromiseResolver>, RequestMetadata>
+      enumerate_device_requests_;
 
 #if !BUILDFLAG(IS_ANDROID)
   // 1. When produceCropId() is first called for an Element, it has no crop-ID

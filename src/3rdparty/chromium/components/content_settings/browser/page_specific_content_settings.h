@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,18 +29,16 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/privacy_sandbox/canonical_topic.h"
 #include "content/public/browser/allow_service_worker_result.h"
-#include "content/public/browser/navigation_handle_user_data.h"
 #include "content/public/browser/page_user_data.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_user_data.h"
 
 namespace blink {
 class StorageKey;
 }  // namespace blink
 
 namespace content {
-class NavigationHandle;
+class WebContents;
+class WebContentsObserver;
 }
 
 namespace url {
@@ -109,10 +107,6 @@ class PageSpecificContentSettings
         content::RenderFrameHost* rfh,
         RendererContentSettingRules* rules) = 0;
 
-    virtual ContentSetting GetEmbargoSetting(
-        const GURL& request_origin,
-        ContentSettingsType permission) = 0;
-
     // Gets any additional file system types which should be used when
     // constructing a browsing_data::FileSystemHelper.
     virtual std::vector<storage::FileSystemType>
@@ -132,6 +126,12 @@ class PageSpecificContentSettings
     // and camera state on top of the microphone and camera state at the last
     // media stream request.
     virtual MicrophoneCameraState GetMicrophoneCameraState() = 0;
+
+    // If there is a document picture-in-picture window open, check if the given
+    // web contents is the opener web contents or child web contents, and return
+    // the other web contents to be synced.
+    virtual content::WebContents* MaybeGetSyncedWebContentsForPictureInPicture(
+        content::WebContents* web_contents) = 0;
 
     // Notifies the delegate a particular content settings type was allowed for
     // the first time on this page.
@@ -216,6 +216,11 @@ class PageSpecificContentSettings
       int render_frame_id,
       const GURL& url,
       bool blocked_by_policy);
+
+  // Called when content access is blocked in the renderer process.
+  static void ContentBlocked(int render_process_id,
+                             int render_frame_id,
+                             ContentSettingsType type);
 
   // Called when a specific Shared Worker was accessed.
   static void SharedWorkerAccessed(int render_process_id,
@@ -317,10 +322,6 @@ class PageSpecificContentSettings
     return blocked_local_shared_objects_;
   }
 
-  // Called to indicate whether access to the Pepper broker was allowed or
-  // blocked.
-  void SetPepperBrokerAllowed(bool allowed);
-
   void OnContentBlocked(ContentSettingsType type);
   void OnContentAllowed(ContentSettingsType type);
 
@@ -384,100 +385,12 @@ class PageSpecificContentSettings
   // Returns the topics that were accessed by this page.
   std::vector<privacy_sandbox::CanonicalTopic> GetAccessedTopics() const;
 
+  // Runs any queued updates in |updates_queued_during_prerender_|, should be
+  // called after the page activates.
+  void OnPrerenderingPageActivation();
+
  private:
   friend class content::PageUserData<PageSpecificContentSettings>;
-
-  // Keeps track of cookie and service worker access during a navigation.
-  // These types of access can happen for the current page or for a new
-  // navigation (think cookies sent in the HTTP request or service worker
-  // being run to serve a fetch request). A navigation might fail to
-  // commit in which case we have to handle it as if it had never
-  // occurred. So we cache all cookies and service worker accesses that
-  // happen during a navigation and only apply the changes if the
-  // navigation commits.
-  class InflightNavigationContentSettings
-      : public content::NavigationHandleUserData<
-            InflightNavigationContentSettings> {
-   public:
-    ~InflightNavigationContentSettings() override;
-    std::vector<content::CookieAccessDetails> cookie_accesses;
-    std::vector<std::pair<GURL, content::AllowServiceWorkerResult>>
-        service_worker_accesses;
-
-   private:
-    explicit InflightNavigationContentSettings(
-        content::NavigationHandle& navigation_handle);
-    friend class content::NavigationHandleUserData<
-        InflightNavigationContentSettings>;
-    NAVIGATION_HANDLE_USER_DATA_KEY_DECL();
-  };
-
-  // This class attaches to WebContents to listen to events and route them to
-  // appropriate PageSpecificContentSettings, store navigation related events
-  // until the navigation finishes and then transferring the
-  // navigation-associated state to the newly-created page.
-  class WebContentsHandler
-      : public content::WebContentsObserver,
-        public content::WebContentsUserData<WebContentsHandler> {
-   public:
-    explicit WebContentsHandler(content::WebContents* web_contents,
-                                std::unique_ptr<Delegate> delegate);
-    ~WebContentsHandler() override;
-    // Adds the given |SiteDataObserver|. The |observer| is notified when a
-    // locale shared object, like for example a cookie, is accessed.
-    void AddSiteDataObserver(SiteDataObserver* observer);
-
-    // Removes the given |SiteDataObserver|.
-    void RemoveSiteDataObserver(SiteDataObserver* observer);
-
-    // Notifies all registered |SiteDataObserver|s.
-    void NotifySiteDataObservers();
-
-    Delegate* delegate() { return delegate_.get(); }
-
-   private:
-    friend class content::WebContentsUserData<WebContentsHandler>;
-
-    // Applies all stored events for the given navigation to the current main
-    // document.
-    void TransferNavigationContentSettingsToCommittedDocument(
-        const InflightNavigationContentSettings& navigation_settings,
-        content::RenderFrameHost* rfh);
-
-    // content::WebContentsObserver overrides.
-    void ReadyToCommitNavigation(
-        content::NavigationHandle* navigation_handle) override;
-    void DidFinishNavigation(
-        content::NavigationHandle* navigation_handle) override;
-    void OnCookiesAccessed(
-        content::NavigationHandle* navigation,
-        const content::CookieAccessDetails& details) override;
-    void OnCookiesAccessed(
-        content::RenderFrameHost* rfh,
-        const content::CookieAccessDetails& details) override;
-    // Called when a specific Service Worker scope was accessed.
-    // If access was blocked due to the user's content settings,
-    // |blocked_by_policy_javascript| or/and |blocked_by_policy_cookie|
-    // should be true, and this function should invoke OnContentBlocked for
-    // JavaScript or/and cookies respectively.
-    void OnServiceWorkerAccessed(
-        content::NavigationHandle* navigation,
-        const GURL& scope,
-        content::AllowServiceWorkerResult allowed) override;
-    void OnServiceWorkerAccessed(
-        content::RenderFrameHost* frame,
-        const GURL& scope,
-        content::AllowServiceWorkerResult allowed) override;
-
-    std::unique_ptr<Delegate> delegate_;
-
-    raw_ptr<HostContentSettingsMap> map_;
-
-    // All currently registered |SiteDataObserver|s.
-    base::ObserverList<SiteDataObserver>::Unchecked observer_list_;
-
-    WEB_CONTENTS_USER_DATA_KEY_DECL();
-  };
 
   struct PendingUpdates {
     PendingUpdates();
@@ -487,10 +400,7 @@ class PageSpecificContentSettings
     bool site_data_accessed = false;
   };
 
-  explicit PageSpecificContentSettings(
-      content::Page& page,
-      PageSpecificContentSettings::WebContentsHandler& handler,
-      Delegate* delegate);
+  explicit PageSpecificContentSettings(content::Page& page, Delegate* delegate);
 
   // content_settings::Observer implementation.
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
@@ -502,7 +412,6 @@ class PageSpecificContentSettings
 
   bool IsPagePrerendering() const;
   bool IsEmbeddedPage() const;
-  void OnPrerenderingPageActivation();
 
   // Delays the call of the delegate method if the page is currently
   // prerendering until the page is activated; directly calls the method
@@ -540,7 +449,19 @@ class PageSpecificContentSettings
   // the page is currently prerendering or is embedded.
   void MaybeUpdateLocationBar();
 
-  WebContentsHandler& handler_;
+  content::WebContents* GetWebContents() const;
+
+  // Document picture-in-picture allows changing content settings in both the
+  // browser window and the PiP window. When the settings is changed in one
+  // place, return the settings in another place to be synced as well. We should
+  // update settings in either place at most once, so we will avoid getting into
+  // deadlock by using |is_updating_synced_pscs_|.
+  PageSpecificContentSettings* MaybeGetSyncedSettingsForPictureInPicture();
+
+  // An auto reset variable to make sure we do not get into deadlock when
+  // updating synced PageSpecificContentSettings for the document
+  // picture-in-picture case.
+  bool is_updating_synced_pscs_ = false;
 
   raw_ptr<Delegate> delegate_;
 

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,16 @@
 
 #include "base/check.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/numeric/int128.h"
 #include "third_party/blink/public/common/attribution_reporting/constants.h"
 #include "third_party/blink/public/mojom/conversions/attribution_data_host.mojom-blink.h"
 #include "third_party/blink/renderer/platform/json/json_parser.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
-#include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
-#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
@@ -29,22 +29,25 @@ namespace blink::attribution_response_parsing {
 
 namespace {
 
-mojom::blink::AttributionAggregatableKeyPtr ParseAttributionAggregatableKey(
-    const JSONObject* object) {
+bool ParseAttributionAggregationKey(const JSONValue* value,
+                                    absl::uint128* out) {
+  if (!value)
+    return false;
+
   String key_piece;
-  if (!object->GetString("key_piece", &key_piece))
-    return nullptr;
+  if (!value->AsString(&key_piece))
+    return false;
 
   // Final keys will be restricted to a maximum of 128 bits and the hex strings
   // should be limited to at most 32 digits.
   if (key_piece.length() < 3 || key_piece.length() > 34 ||
       !key_piece.StartsWith("0x", kTextCaseASCIIInsensitive)) {
-    return nullptr;
+    return false;
   }
 
   for (wtf_size_t i = 2; i < key_piece.length(); ++i) {
     if (!IsASCIIHexDigit(key_piece[i]))
-      return nullptr;
+      return false;
   }
 
   uint64_t low_bits;
@@ -55,44 +58,69 @@ mojom::blink::AttributionAggregatableKeyPtr ParseAttributionAggregatableKey(
   if (key_piece.length() <= 18) {
     low_bits = key_piece.Substring(2).HexToUInt64Strict(&ok);
     if (!ok)
-      return nullptr;
+      return false;
     high_bits = 0;
   } else {
     low_bits = key_piece.Right(16).HexToUInt64Strict(&ok);
     if (!ok)
-      return nullptr;
+      return false;
     high_bits =
         key_piece.Substring(2, key_piece.length() - 18).HexToUInt64Strict(&ok);
     if (!ok)
-      return nullptr;
+      return false;
   }
 
-  return mojom::blink::AttributionAggregatableKey::New(high_bits, low_bits);
+  *out = absl::MakeUint128(high_bits, low_bits);
+  return true;
 }
 
+mojom::blink::AttributionTriggerDedupKeyPtr ParseDedupKey(
+    const String& string) {
+  bool is_valid = false;
+  uint64_t value = string.ToUInt64Strict(&is_valid);
+  return is_valid ? mojom::blink::AttributionTriggerDedupKey::New(value)
+                  : nullptr;
+}
+
+}  // namespace
+
 bool ParseAttributionFilterData(
-    JSONValue* value,
+    const JSONValue* value,
     mojom::blink::AttributionFilterData& filter_data) {
   if (!value)
     return true;
 
-  JSONObject* object = JSONObject::Cast(value);
+  const JSONObject* object = JSONObject::Cast(value);
   if (!object)
     return false;
+
+  const int kExclusiveMaxHistogramValue = 101;
+
+  static_assert(kMaxValuesPerAttributionFilter < kExclusiveMaxHistogramValue,
+                "Bump the version for histogram Conversions.ValuesPerFilter");
+
+  static_assert(
+      kMaxAttributionFiltersPerSource < kExclusiveMaxHistogramValue,
+      "Bump the version for histogram Conversions.FiltersPerFilterData");
 
   const wtf_size_t num_filters = object->size();
   if (num_filters > kMaxAttributionFiltersPerSource)
     return false;
 
+  // The metrics are called potentially many times while parsing an attribution
+  // header, therefore using the macros to avoid the overhead of taking a lock
+  // and performing a map lookup.
+  UMA_HISTOGRAM_COUNTS_100("Conversions.FiltersPerFilterData", num_filters);
+
   for (wtf_size_t i = 0; i < num_filters; ++i) {
-    JSONObject::Entry entry = object->at(i);
+    const JSONObject::Entry entry = object->at(i);
 
     if (entry.first.CharactersSizeInBytes() >
         kMaxBytesPerAttributionFilterString) {
       return false;
     }
 
-    JSONArray* array = JSONArray::Cast(entry.second);
+    const JSONArray* array = JSONArray::Cast(entry.second);
     if (!array)
       return false;
 
@@ -100,17 +128,21 @@ bool ParseAttributionFilterData(
     if (num_values > kMaxValuesPerAttributionFilter)
       return false;
 
+    UMA_HISTOGRAM_COUNTS_100("Conversions.ValuesPerFilter", num_values);
+
     WTF::Vector<String> values;
 
     for (wtf_size_t j = 0; j < num_values; ++j) {
-      String value;
-      if (!array->at(j)->AsString(&value))
+      String value_str;
+      if (!array->at(j)->AsString(&value_str))
         return false;
 
-      if (value.CharactersSizeInBytes() > kMaxBytesPerAttributionFilterString)
+      if (value_str.CharactersSizeInBytes() >
+          kMaxBytesPerAttributionFilterString) {
         return false;
+      }
 
-      values.push_back(std::move(value));
+      values.push_back(std::move(value_str));
     }
 
     filter_data.filter_values.insert(entry.first, std::move(values));
@@ -119,47 +151,49 @@ bool ParseAttributionFilterData(
   return true;
 }
 
-}  // namespace
-
-bool ParseAttributionAggregatableSource(
-    const AtomicString& json_string,
-    mojom::blink::AttributionAggregatableSource& source) {
-  // TODO(apaseltiner): Consider applying a max stack depth to this.
-  std::unique_ptr<JSONValue> json = ParseJSON(json_string);
+bool ParseAggregationKeys(
+    const JSONValue* json,
+    WTF::HashMap<String, absl::uint128>& aggregation_keys) {
+  // Aggregation keys may be omitted.
   if (!json)
+    return true;
+
+  const int kExclusiveMaxHistogramValue = 101;
+
+  static_assert(
+      kMaxAttributionAggregationKeysPerSourceOrTrigger <
+          kExclusiveMaxHistogramValue,
+      "Bump the version for histogram Conversions.AggregatableKeysPerSource");
+
+  const auto* object = JSONObject::Cast(json);
+  if (!object)
     return false;
 
-  const auto* array = JSONArray::Cast(json.get());
-  if (!array ||
-      array->size() > kMaxAttributionAggregatableKeysPerSourceOrTrigger) {
+  const wtf_size_t num_keys = object->size();
+  if (num_keys > kMaxAttributionAggregationKeysPerSourceOrTrigger)
     return false;
-  }
 
-  const wtf_size_t num_keys = array->size();
+  base::UmaHistogramCounts100("Conversions.AggregatableKeysPerSource",
+                              num_keys);
 
-  source.keys.ReserveCapacityForSize(num_keys);
+  aggregation_keys.ReserveCapacityForSize(num_keys);
 
   for (wtf_size_t i = 0; i < num_keys; ++i) {
-    JSONValue* value = array->at(i);
+    JSONObject::Entry entry = object->at(i);
+    String key_id = entry.first;
+    JSONValue* value = entry.second;
     DCHECK(value);
 
-    const auto* object = JSONObject::Cast(value);
-    if (!object)
-      return false;
-
-    String key_id;
-    if (!object->GetString("id", &key_id) ||
-        key_id.CharactersSizeInBytes() >
-            kMaxBytesPerAttributionAggregatableKeyId) {
+    if (key_id.CharactersSizeInBytes() >
+        kMaxBytesPerAttributionAggregationKeyId) {
       return false;
     }
 
-    mojom::blink::AttributionAggregatableKeyPtr key =
-        ParseAttributionAggregatableKey(object);
-    if (!key)
+    absl::uint128 key;
+    if (!ParseAttributionAggregationKey(value, &key))
       return false;
 
-    source.keys.insert(std::move(key_id), std::move(key));
+    aggregation_keys.insert(std::move(key_id), key);
   }
 
   return true;
@@ -172,7 +206,7 @@ mojom::blink::AttributionDebugKeyPtr ParseDebugKey(const String& string) {
 }
 
 bool ParseSourceRegistrationHeader(
-    const AtomicString& json_string,
+    const String& json_string,
     mojom::blink::AttributionSourceData& source_data) {
   // TODO(apaseltiner): Consider applying a max stack depth to this.
   std::unique_ptr<JSONValue> json = ParseJSON(json_string);
@@ -184,17 +218,6 @@ bool ParseSourceRegistrationHeader(
   if (!object)
     return false;
 
-  String event_id_string;
-  if (!object->GetString("source_event_id", &event_id_string))
-    return false;
-  bool event_id_is_valid = false;
-  uint64_t event_id = event_id_string.ToUInt64Strict(&event_id_is_valid);
-
-  // For source registrations where there is no mechanism to raise an error,
-  // such as on an img element, it is more useful to log the source with
-  // default data so that a reporting origin can learn the failure mode.
-  source_data.source_event_id = event_id_is_valid ? event_id : 0;
-
   String destination_string;
   if (!object->GetString("destination", &destination_string))
     return false;
@@ -204,26 +227,32 @@ bool ParseSourceRegistrationHeader(
     return false;
   source_data.destination = std::move(destination);
 
-  // Treat invalid expiry, priority, and debug key as if they were not set.
-  String priority_string;
-  if (object->GetString("priority", &priority_string)) {
-    bool priority_is_valid = false;
-    int64_t priority = priority_string.ToInt64Strict(&priority_is_valid);
-    if (priority_is_valid)
+  // Treat invalid source_event_id, expiry, priority, and debug key as if they
+  // were not set.
+
+  if (String s; object->GetString("source_event_id", &s)) {
+    bool valid = false;
+    uint64_t source_event_id = s.ToUInt64Strict(&valid);
+    if (valid)
+      source_data.source_event_id = source_event_id;
+  }
+
+  if (String s; object->GetString("priority", &s)) {
+    bool valid = false;
+    int64_t priority = s.ToInt64Strict(&valid);
+    if (valid)
       source_data.priority = priority;
   }
 
-  String expiry_string;
-  if (object->GetString("expiry", &expiry_string)) {
-    bool expiry_is_valid = false;
-    int64_t expiry = expiry_string.ToInt64Strict(&expiry_is_valid);
-    if (expiry_is_valid)
-      source_data.expiry = base::Seconds(expiry);
+  if (String s; object->GetString("expiry", &s)) {
+    bool valid = false;
+    int64_t seconds = s.ToInt64Strict(&valid);
+    if (valid)
+      source_data.expiry = base::Seconds(seconds);
   }
 
-  String debug_key_string;
-  if (object->GetString("debug_key", &debug_key_string))
-    source_data.debug_key = ParseDebugKey(debug_key_string);
+  if (String s; object->GetString("debug_key", &s))
+    source_data.debug_key = ParseDebugKey(s);
 
   source_data.filter_data = mojom::blink::AttributionFilterData::New();
   if (!ParseAttributionFilterData(object->Get("filter_data"),
@@ -237,21 +266,23 @@ bool ParseSourceRegistrationHeader(
   if (source_data.filter_data->filter_values.Contains("source_type"))
     return false;
 
+  if (!ParseAggregationKeys(object->Get("aggregation_keys"),
+                            source_data.aggregation_keys)) {
+    return false;
+  }
+
   return true;
 }
 
 bool ParseEventTriggerData(
-    const AtomicString& json_string,
+    const JSONValue* json,
     WTF::Vector<mojom::blink::EventTriggerDataPtr>& event_trigger_data) {
-  // TODO(apaseltiner): Consider applying a max stack depth to this.
-  std::unique_ptr<JSONValue> json = ParseJSON(json_string);
-
-  // TODO(johnidel): Log a devtools issues if JSON parsing fails and on
-  // individual early exits below.
   if (!json)
-    return false;
+    return true;
 
-  JSONArray* array_value = JSONArray::Cast(json.get());
+  // TODO(apaseltiner): Log a devtools issues on individual early exits below.
+
+  const JSONArray* array_value = JSONArray::Cast(json);
   if (!array_value)
     return false;
 
@@ -271,36 +302,25 @@ bool ParseEventTriggerData(
     mojom::blink::EventTriggerDataPtr event_trigger =
         mojom::blink::EventTriggerData::New();
 
-    String trigger_data_string;
-    // A valid header must declare data for each sub-item.
-    if (!object_val->GetString("trigger_data", &trigger_data_string))
-      return false;
-    bool trigger_data_is_valid = false;
-    uint64_t trigger_data_value =
-        trigger_data_string.ToUInt64Strict(&trigger_data_is_valid);
+    // Treat invalid trigger data, priority and deduplication key as if they
+    // were not set.
 
-    // Default invalid data values to 0 so a report will get sent.
-    event_trigger->data = trigger_data_is_valid ? trigger_data_value : 0;
+    if (String s; object_val->GetString("trigger_data", &s)) {
+      bool valid = false;
+      uint64_t trigger_data = s.ToUInt64Strict(&valid);
+      if (valid)
+        event_trigger->data = trigger_data;
+    }
 
-    // Treat invalid priority and deduplication key as if they were not set.
-    String priority_string;
-    if (object_val->GetString("priority", &priority_string)) {
-      bool priority_is_valid = false;
-      int64_t priority = priority_string.ToInt64Strict(&priority_is_valid);
-      if (priority_is_valid)
+    if (String s; object_val->GetString("priority", &s)) {
+      bool valid = false;
+      int64_t priority = s.ToInt64Strict(&valid);
+      if (valid)
         event_trigger->priority = priority;
     }
 
-    // Treat invalid priority and deduplication_key as if they were not set.
-    String dedup_key_string;
-    if (object_val->GetString("deduplication_key", &dedup_key_string)) {
-      bool dedup_key_is_valid = false;
-      uint64_t dedup_key = dedup_key_string.ToUInt64Strict(&dedup_key_is_valid);
-      if (dedup_key_is_valid) {
-        event_trigger->dedup_key =
-            mojom::blink::AttributionTriggerDedupKey::New(dedup_key);
-      }
-    }
+    if (String s; object_val->GetString("deduplication_key", &s))
+      event_trigger->dedup_key = ParseDedupKey(s);
 
     event_trigger->filters = mojom::blink::AttributionFilterData::New();
     if (!ParseAttributionFilterData(object_val->Get("filters"),
@@ -320,32 +340,31 @@ bool ParseEventTriggerData(
   return true;
 }
 
-bool ParseFilters(const String& json_string,
-                  mojom::blink::AttributionFilterData& filter_data) {
-  // TODO(apaseltiner): Consider applying a max stack depth to this.
-  std::unique_ptr<JSONValue> json = ParseJSON(json_string);
-  if (!json)
-    return false;
-
-  return ParseAttributionFilterData(json.get(), filter_data);
-}
-
 bool ParseAttributionAggregatableTriggerData(
-    const AtomicString& json_string,
+    const JSONValue* json,
     WTF::Vector<mojom::blink::AttributionAggregatableTriggerDataPtr>&
         trigger_data) {
-  // TODO(apaseltiner): Consider applying a max stack depth to this.
-  std::unique_ptr<JSONValue> json = ParseJSON(json_string);
   if (!json)
-    return false;
+    return true;
 
-  const auto* array = JSONArray::Cast(json.get());
-  if (!array ||
-      array->size() > kMaxAttributionAggregatableTriggerDataPerTrigger) {
+  const int kExclusiveMaxHistogramValue = 101;
+
+  static_assert(kMaxAttributionAggregatableTriggerDataPerTrigger <
+                    kExclusiveMaxHistogramValue,
+                "Bump the version for histogram "
+                "Conversions.AggregatableTriggerDataLength");
+
+  const auto* array = JSONArray::Cast(json);
+  if (!array)
     return false;
-  }
 
   const wtf_size_t num_trigger_data = array->size();
+  if (num_trigger_data > kMaxAttributionAggregatableTriggerDataPerTrigger)
+    return false;
+
+  base::UmaHistogramCounts100("Conversions.AggregatableTriggerDataLength",
+                              num_trigger_data);
+
   trigger_data.ReserveInitialCapacity(num_trigger_data);
 
   for (wtf_size_t i = 0; i < num_trigger_data; ++i) {
@@ -358,14 +377,15 @@ bool ParseAttributionAggregatableTriggerData(
 
     auto data = mojom::blink::AttributionAggregatableTriggerData::New();
 
-    data->key = ParseAttributionAggregatableKey(object);
-    if (!data->key)
+    if (!ParseAttributionAggregationKey(object->Get("key_piece"),
+                                        &data->key_piece)) {
       return false;
+    }
 
     JSONArray* source_keys_val = object->GetArray("source_keys");
     if (!source_keys_val ||
         source_keys_val->size() >
-            kMaxAttributionAggregatableKeysPerSourceOrTrigger) {
+            kMaxAttributionAggregationKeysPerSourceOrTrigger) {
       return false;
     }
 
@@ -379,7 +399,7 @@ bool ParseAttributionAggregatableTriggerData(
       String source_key;
       if (!source_key_val->AsString(&source_key) ||
           source_key.CharactersSizeInBytes() >
-              kMaxBytesPerAttributionAggregatableKeyId) {
+              kMaxBytesPerAttributionAggregationKeyId) {
         return false;
       }
       data->source_keys.push_back(std::move(source_key));
@@ -403,16 +423,14 @@ bool ParseAttributionAggregatableTriggerData(
 }
 
 bool ParseAttributionAggregatableValues(
-    const AtomicString& json_string,
+    const JSONValue* json,
     WTF::HashMap<String, uint32_t>& values) {
-  // TODO(apaseltiner): Consider applying a max stack depth to this.
-  std::unique_ptr<JSONValue> json = ParseJSON(json_string);
   if (!json)
-    return false;
+    return true;
 
-  const auto* object = JSONObject::Cast(json.get());
+  const auto* object = JSONObject::Cast(json);
   if (!object ||
-      object->size() > kMaxAttributionAggregatableKeysPerSourceOrTrigger) {
+      object->size() > kMaxAttributionAggregationKeysPerSourceOrTrigger) {
     return false;
   }
 
@@ -426,13 +444,15 @@ bool ParseAttributionAggregatableValues(
     DCHECK(value);
 
     if (key_id.CharactersSizeInBytes() >
-        kMaxBytesPerAttributionAggregatableKeyId) {
+        kMaxBytesPerAttributionAggregationKeyId) {
       return false;
     }
 
     int key_value;
-    if (!value->AsInteger(&key_value) || key_value <= 0)
+    if (!value->AsInteger(&key_value) || key_value <= 0 ||
+        key_value > kMaxAttributionAggregatableValue) {
       return false;
+    }
 
     values.insert(std::move(key_id), key_value);
   }
@@ -440,61 +460,55 @@ bool ParseAttributionAggregatableValues(
   return true;
 }
 
-mojom::blink::AttributionTriggerDataPtr ParseAttributionTriggerData(
-    const ResourceResponse& response) {
-  auto trigger_data = mojom::blink::AttributionTriggerData::New();
+bool ParseTriggerRegistrationHeader(
+    const String& json_string,
+    mojom::blink::AttributionTriggerData& trigger_data) {
+  std::unique_ptr<JSONValue> json = ParseJSON(json_string);
+  if (!json)
+    return false;
 
-  // Verify the current url is trustworthy and capable of registering triggers.
-  scoped_refptr<const SecurityOrigin> reporting_origin =
-      SecurityOrigin::Create(response.CurrentRequestUrl());
-  if (!reporting_origin->IsPotentiallyTrustworthy())
-    return nullptr;
-  trigger_data->reporting_origin = std::move(reporting_origin);
+  const JSONObject* object = JSONObject::Cast(json.get());
+  if (!object)
+    return false;
 
   // Populate event triggers.
-  const AtomicString& event_triggers_json = response.HttpHeaderField(
-      http_names::kAttributionReportingRegisterEventTrigger);
-  if (!event_triggers_json.IsNull() &&
-      !attribution_response_parsing::ParseEventTriggerData(
-          event_triggers_json, trigger_data->event_triggers)) {
-    return nullptr;
+  if (!ParseEventTriggerData(object->Get("event_trigger_data"),
+                             trigger_data.event_triggers)) {
+    return false;
   }
 
-  trigger_data->filters = mojom::blink::AttributionFilterData::New();
+  trigger_data.filters = mojom::blink::AttributionFilterData::New();
 
-  const AtomicString& filter_json =
-      response.HttpHeaderField(http_names::kAttributionReportingFilters);
-  if (!filter_json.IsNull() && !attribution_response_parsing::ParseFilters(
-                                   filter_json, *trigger_data->filters)) {
-    return nullptr;
+  if (!ParseAttributionFilterData(object->Get("filters"),
+                                  *trigger_data.filters)) {
+    return false;
   }
 
-  trigger_data->aggregatable_trigger =
-      mojom::blink::AttributionAggregatableTrigger::New();
+  trigger_data.not_filters = mojom::blink::AttributionFilterData::New();
 
-  const AtomicString& aggregatable_trigger_json = response.HttpHeaderField(
-      http_names::kAttributionReportingRegisterAggregatableTriggerData);
-  if (!aggregatable_trigger_json.IsNull() &&
-      !attribution_response_parsing::ParseAttributionAggregatableTriggerData(
-          aggregatable_trigger_json,
-          trigger_data->aggregatable_trigger->trigger_data)) {
-    return nullptr;
+  if (!ParseAttributionFilterData(object->Get("not_filters"),
+                                  *trigger_data.not_filters)) {
+    return false;
   }
 
-  const AtomicString& aggregatable_values_json = response.HttpHeaderField(
-      http_names::kAttributionReportingRegisterAggregatableValues);
-  if (!aggregatable_values_json.IsNull() &&
-      !attribution_response_parsing::ParseAttributionAggregatableValues(
-          aggregatable_values_json,
-          trigger_data->aggregatable_trigger->values)) {
-    return nullptr;
+  if (!ParseAttributionAggregatableTriggerData(
+          object->Get("aggregatable_trigger_data"),
+          trigger_data.aggregatable_trigger_data)) {
+    return false;
   }
 
-  trigger_data->debug_key =
-      attribution_response_parsing::ParseDebugKey(response.HttpHeaderField(
-          http_names::kAttributionReportingTriggerDebugKey));
+  if (!ParseAttributionAggregatableValues(object->Get("aggregatable_values"),
+                                          trigger_data.aggregatable_values)) {
+    return false;
+  }
 
-  return trigger_data;
+  if (String s; object->GetString("debug_key", &s))
+    trigger_data.debug_key = ParseDebugKey(s);
+
+  if (String s; object->GetString("aggregatable_deduplication_key", &s))
+    trigger_data.aggregatable_dedup_key = ParseDedupKey(s);
+
+  return true;
 }
 
 }  // namespace blink::attribution_response_parsing

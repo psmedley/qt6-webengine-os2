@@ -24,12 +24,12 @@
 #include <cmath>
 
 #include "build/build_config.h"
+#include "third_party/blink/renderer/core/css/css_length_resolver.h"
 #include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_math_expression_node.h"
 #include "third_party/blink/renderer/core/css/css_math_function_value.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_resolution_units.h"
-#include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/css_value_clamping_utils.h"
 #include "third_party/blink/renderer/core/css/css_value_pool.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
@@ -59,10 +59,8 @@ float CSSPrimitiveValue::ClampToCSSLengthRange(double value) {
   // TODO(crbug.com/1133390): ClampTo function could occur the DECHECK failure
   // for NaN value. Therefore, infinity and NaN values should not be clamped
   // here.
-  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
-    value = CSSValueClampingUtils::ClampLength(value);
-  }
-  return ClampTo<float>(value, kMinValueForCssLength, kMaxValueForCssLength);
+  return ClampTo<float>(CSSValueClampingUtils::ClampLength(value),
+                        kMinValueForCssLength, kMaxValueForCssLength);
 }
 
 Length::ValueRange CSSPrimitiveValue::ConversionToLengthValueRange(
@@ -201,6 +199,19 @@ bool CSSPrimitiveValue::IsComputationallyIndependent() const {
   return To<CSSMathFunctionValue>(this)->IsComputationallyIndependent();
 }
 
+bool CSSPrimitiveValue::HasContainerRelativeUnits() const {
+  CSSPrimitiveValue::LengthTypeFlags units;
+  AccumulateLengthUnitTypes(units);
+  const CSSPrimitiveValue::LengthTypeFlags container_units(
+      (1ull << CSSPrimitiveValue::kUnitTypeContainerWidth) |
+      (1ull << CSSPrimitiveValue::kUnitTypeContainerHeight) |
+      (1ull << CSSPrimitiveValue::kUnitTypeContainerInlineSize) |
+      (1ull << CSSPrimitiveValue::kUnitTypeContainerBlockSize) |
+      (1ull << CSSPrimitiveValue::kUnitTypeContainerMin) |
+      (1ull << CSSPrimitiveValue::kUnitTypeContainerMax));
+  return (units & container_units).any();
+}
+
 CSSPrimitiveValue::CSSPrimitiveValue(ClassType class_type)
     : CSSValue(class_type) {}
 
@@ -242,19 +253,14 @@ double CSSPrimitiveValue::ComputeSeconds() const {
   double result = IsCalculated()
                       ? To<CSSMathFunctionValue>(this)->ComputeSeconds()
                       : To<CSSNumericLiteralValue>(this)->ComputeSeconds();
-  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled())
-    result = CSSValueClampingUtils::ClampTime(result);
-  return result;
+  return CSSValueClampingUtils::ClampTime(result);
 }
 
 double CSSPrimitiveValue::ComputeDegrees() const {
   double result = IsCalculated()
                       ? To<CSSMathFunctionValue>(this)->ComputeDegrees()
                       : To<CSSNumericLiteralValue>(this)->ComputeDegrees();
-  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
-    result = CSSValueClampingUtils::ClampAngle(result);
-  }
-  return result;
+  return CSSValueClampingUtils::ClampAngle(result);
 }
 
 double CSSPrimitiveValue::ComputeDotsPerPixel() const {
@@ -266,70 +272,64 @@ double CSSPrimitiveValue::ComputeDotsPerPixel() const {
 
 template <>
 int CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
-  return RoundForImpreciseConversion<int>(ComputeLengthDouble(conversion_data));
+    const CSSLengthResolver& length_resolver) const {
+  return RoundForImpreciseConversion<int>(ComputeLengthDouble(length_resolver));
 }
 
 template <>
 unsigned CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   return RoundForImpreciseConversion<unsigned>(
-      ComputeLengthDouble(conversion_data));
+      ComputeLengthDouble(length_resolver));
 }
 
 template <>
 Length CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   return Length::Fixed(
-      ClampToCSSLengthRange(ComputeLengthDouble(conversion_data)));
+      ClampToCSSLengthRange(ComputeLengthDouble(length_resolver)));
 }
 
 template <>
 int16_t CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   return RoundForImpreciseConversion<int16_t>(
-      ComputeLengthDouble(conversion_data));
+      ComputeLengthDouble(length_resolver));
 }
 
 template <>
 uint16_t CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   return RoundForImpreciseConversion<uint16_t>(
-      ComputeLengthDouble(conversion_data));
+      ComputeLengthDouble(length_resolver));
 }
 
 template <>
 uint8_t CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   return RoundForImpreciseConversion<uint8_t>(
-      ComputeLengthDouble(conversion_data));
+      ComputeLengthDouble(length_resolver));
 }
 
 template <>
 float CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
-  double value = ComputeLengthDouble(conversion_data);
-  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
-    value = CSSValueClampingUtils::ClampLength(value);
-  }
-  return ClampTo<float>(value);
+    const CSSLengthResolver& length_resolver) const {
+  return ClampTo<float>(
+      CSSValueClampingUtils::ClampLength(ComputeLengthDouble(length_resolver)));
 }
 
 template <>
 double CSSPrimitiveValue::ComputeLength(
-    const CSSToLengthConversionData& conversion_data) const {
-  double value = ComputeLengthDouble(conversion_data);
-  if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
-    return CSSValueClampingUtils::ClampLength(value);
-  }
-  return value;
+    const CSSLengthResolver& length_resolver) const {
+  return CSSValueClampingUtils::ClampLength(
+      ComputeLengthDouble(length_resolver));
 }
 
 double CSSPrimitiveValue::ComputeLengthDouble(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   if (IsCalculated())
-    return To<CSSMathFunctionValue>(this)->ComputeLengthPx(conversion_data);
-  return To<CSSNumericLiteralValue>(this)->ComputeLengthPx(conversion_data);
+    return To<CSSMathFunctionValue>(this)->ComputeLengthPx(length_resolver);
+  return To<CSSNumericLiteralValue>(this)->ComputeLengthPx(length_resolver);
 }
 
 bool CSSPrimitiveValue::AccumulateLengthArray(CSSLengthArray& length_array,
@@ -348,6 +348,53 @@ void CSSPrimitiveValue::AccumulateLengthUnitTypes(
   if (IsCalculated())
     return To<CSSMathFunctionValue>(this)->AccumulateLengthUnitTypes(types);
   To<CSSNumericLiteralValue>(this)->AccumulateLengthUnitTypes(types);
+}
+
+bool CSSPrimitiveValue::HasStaticViewportUnits(
+    const LengthTypeFlags& length_type_flags) {
+  return length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportWidth) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeViewportBlockSize) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportMax) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportWidth) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportBlockSize) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeSmallViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeSmallViewportMax) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportWidth) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportBlockSize) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeLargeViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeLargeViewportMax);
+}
+
+bool CSSPrimitiveValue::HasDynamicViewportUnits(
+    const LengthTypeFlags& length_type_flags) {
+  return length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportWidth) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportBlockSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeDynamicViewportMax);
 }
 
 double CSSPrimitiveValue::ConversionToCanonicalUnitsScaleFactor(
@@ -409,21 +456,18 @@ double CSSPrimitiveValue::ConversionToCanonicalUnitsScaleFactor(
 }
 
 Length CSSPrimitiveValue::ConvertToLength(
-    const CSSToLengthConversionData& conversion_data) const {
+    const CSSLengthResolver& length_resolver) const {
   if (IsLength())
-    return ComputeLength<Length>(conversion_data);
+    return ComputeLength<Length>(length_resolver);
   if (IsPercentage()) {
     if (IsNumericLiteralValue() ||
         !To<CSSMathFunctionValue>(this)->AllowsNegativePercentageReference()) {
-      double value = GetDoubleValueWithoutClamping();
-      if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
-        value = CSSValueClampingUtils::ClampLength(value);
-      }
-      return Length::Percent(value);
+      return Length::Percent(
+          CSSValueClampingUtils::ClampLength(GetDoubleValueWithoutClamping()));
     }
   }
   DCHECK(IsCalculated());
-  return To<CSSMathFunctionValue>(this)->ConvertToLength(conversion_data);
+  return To<CSSMathFunctionValue>(this)->ConvertToLength(length_resolver);
 }
 
 double CSSPrimitiveValue::GetDoubleValue() const {
@@ -490,6 +534,12 @@ bool CSSPrimitiveValue::UnitTypeToLengthUnitType(UnitType unit_type,
       return true;
     case CSSPrimitiveValue::UnitType::kChs:
       length_type = kUnitTypeZeroCharacterWidth;
+      return true;
+    case CSSPrimitiveValue::UnitType::kIcs:
+      length_type = kUnitTypeIdeographicFullWidth;
+      return true;
+    case CSSPrimitiveValue::UnitType::kLhs:
+      length_type = kUnitTypeLineHeight;
       return true;
     case CSSPrimitiveValue::UnitType::kPercentage:
       length_type = kUnitTypePercentage;
@@ -602,6 +652,10 @@ CSSPrimitiveValue::UnitType CSSPrimitiveValue::LengthUnitTypeToUnitType(
       return CSSPrimitiveValue::UnitType::kRems;
     case kUnitTypeZeroCharacterWidth:
       return CSSPrimitiveValue::UnitType::kChs;
+    case kUnitTypeIdeographicFullWidth:
+      return CSSPrimitiveValue::UnitType::kIcs;
+    case kUnitTypeLineHeight:
+      return CSSPrimitiveValue::UnitType::kLhs;
     case kUnitTypePercentage:
       return CSSPrimitiveValue::UnitType::kPercentage;
     case kUnitTypeViewportWidth:
@@ -688,6 +742,10 @@ const char* CSSPrimitiveValue::UnitTypeToString(UnitType type) {
       return "rem";
     case UnitType::kChs:
       return "ch";
+    case UnitType::kIcs:
+      return "ic";
+    case UnitType::kLhs:
+      return "lh";
     case UnitType::kPixels:
       return "px";
     case UnitType::kCentimeters:

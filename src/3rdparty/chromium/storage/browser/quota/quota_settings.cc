@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ int64_t MyRandomizeByPercent(int64_t value, int percent) {
 }
 
 QuotaSettings CalculateIncognitoDynamicSettings(
-    int64_t physical_memory_amount) {
+    uint64_t physical_memory_amount) {
   // The incognito pool size is a fraction of the amount of system memory.
   double incognito_pool_size_ratio =
       kIncognitoQuotaRatioLowerBound +

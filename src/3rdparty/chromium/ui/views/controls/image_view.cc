@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/check_op.h"
 #include "base/i18n/rtl.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/paint/paint_flags.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
@@ -85,8 +86,13 @@ gfx::Size ImageView::GetImageSize() const {
 }
 
 void ImageView::OnPaint(gfx::Canvas* canvas) {
-  View::OnPaint(canvas);
+  // This inlines View::OnPaint in order to OnPaintBorder() after OnPaintImage
+  // so the border can paint over content (for rounded corners that overlap
+  // content).
+  TRACE_EVENT1("views", "ImageView::OnPaint", "class", GetClassName());
+  OnPaintBackground(canvas);
   OnPaintImage(canvas);
+  OnPaintBorder(canvas);
 }
 
 void ImageView::OnThemeChanged() {

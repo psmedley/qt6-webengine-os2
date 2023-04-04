@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/service/display/display.h"
 
 #include <stddef.h>
+
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -13,6 +14,7 @@
 #include "base/debug/dump_without_crashing.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
@@ -24,6 +26,7 @@
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "components/viz/common/quads/aggregated_render_pass_draw_quad.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/quads/draw_quad.h"
 #include "components/viz/common/quads/shared_quad_state.h"
@@ -34,12 +37,10 @@
 #include "components/viz/service/display/delegated_ink_point_renderer_base.h"
 #include "components/viz/service/display/direct_renderer.h"
 #include "components/viz/service/display/display_client.h"
-#include "components/viz/service/display/display_resource_provider_gl.h"
 #include "components/viz/service/display/display_resource_provider_null.h"
 #include "components/viz/service/display/display_resource_provider_skia.h"
 #include "components/viz/service/display/display_resource_provider_software.h"
 #include "components/viz/service/display/display_scheduler.h"
-#include "components/viz/service/display/gl_renderer.h"
 #include "components/viz/service/display/null_renderer.h"
 #include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/display/renderer_utils.h"
@@ -49,9 +50,7 @@
 #include "components/viz/service/display/surface_aggregator.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
-#include "gpu/command_buffer/client/context_support.h"
-#include "gpu/command_buffer/client/gles2_interface.h"
-#include "gpu/ipc/scheduler_sequence.h"
+#include "gpu/command_buffer/service/scheduler_sequence.h"
 #include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_latency_info.pbzero.h"
@@ -70,20 +69,11 @@ namespace viz {
 
 namespace {
 
-enum class TypeOfVideoInFrame {
-  kNoVideo = 0,
-  kVideo = 1,
-
-  // This should be the last entry/largest value above.
-  kMaxValue = kVideo,
-};
-
 const DrawQuad::Material kNonSplittableMaterials[] = {
     // Exclude debug quads from quad splitting
     DrawQuad::Material::kDebugBorder,
     // Exclude possible overlay candidates from quad splitting
     // See OverlayCandidate::FromDrawQuad
-    DrawQuad::Material::kStreamVideoContent,
     DrawQuad::Material::kTextureContent,
     DrawQuad::Material::kVideoHole,
     // See DCLayerOverlayProcessor::ProcessRenderPass
@@ -108,9 +98,6 @@ int64_t GetStartingTraceId() {
 gfx::PresentationFeedback SanitizePresentationFeedback(
     const gfx::PresentationFeedback& feedback,
     base::TimeTicks draw_time) {
-  // Temporary to investigate large presentation times.
-  // https://crbug.com/894440
-  DCHECK(!draw_time.is_null());
   if (feedback.timestamp.is_null())
     return feedback;
 
@@ -130,25 +117,9 @@ gfx::PresentationFeedback SanitizePresentationFeedback(
                           gfx::PresentationFeedback::kVSync)) != 0)
           ? kAllowedDeltaFromFuture
           : base::TimeDelta();
-  if (feedback.timestamp > now + allowed_delta_from_future) {
-    const auto diff = feedback.timestamp - now;
-    UMA_HISTOGRAM_MEDIUM_TIMES(
-        "Graphics.PresentationTimestamp.InvalidFromFuture", diff);
+  if ((feedback.timestamp > now + allowed_delta_from_future) ||
+      (feedback.timestamp < draw_time)) {
     return gfx::PresentationFeedback::Failure();
-  }
-
-  if (feedback.timestamp < draw_time) {
-    const auto diff = draw_time - feedback.timestamp;
-    UMA_HISTOGRAM_MEDIUM_TIMES(
-        "Graphics.PresentationTimestamp.InvalidBeforeSwap", diff);
-    return gfx::PresentationFeedback::Failure();
-  }
-
-  const auto difference = feedback.timestamp - draw_time;
-  if (difference.InMinutes() > 3) {
-    UMA_HISTOGRAM_CUSTOM_TIMES(
-        "Graphics.PresentationTimestamp.LargePresentationDelta", difference,
-        base::Minutes(3), base::Hours(1), 50);
   }
   return feedback;
 }
@@ -243,9 +214,9 @@ bool ReduceComplexity(const cc::Region& region,
 
   reduced_region->clear();
   for (gfx::Rect r : region) {
-    auto it =
-        std::find_if(reduced_region->begin(), reduced_region->end(),
-                     [&r](const gfx::Rect& a) { return a.SharesEdgeWith(r); });
+    auto it = base::ranges::find_if(*reduced_region, [&r](const gfx::Rect& a) {
+      return a.SharesEdgeWith(r);
+    });
     if (it != reduced_region->end()) {
       it->Union(r);
       continue;
@@ -360,15 +331,6 @@ Display::~Display() {
   if (resource_provider_) {
     resource_provider_->SetAllowAccessToGPUThread(true);
   }
-#if BUILDFLAG(IS_ANDROID)
-  // In certain cases, drivers hang when tearing down the display. Finishing
-  // before teardown appears to address this. As we're during display teardown,
-  // an additional finish should have minimal impact.
-  // TODO(ericrk): Add a more robust workaround. crbug.com/899705
-  if (auto* context = output_surface_->context_provider()) {
-    context->ContextGL()->Finish();
-  }
-#endif
 
   if (no_pending_swaps_callback_)
     std::move(no_pending_swaps_callback_).Run();
@@ -383,8 +345,6 @@ Display::~Display() {
 
   // Only do this if Initialize() happened.
   if (client_) {
-    if (auto* context = output_surface_->context_provider())
-      context->RemoveObserver(this);
     if (skia_output_surface_)
       skia_output_surface_->RemoveContextLostObserver(this);
   }
@@ -430,9 +390,6 @@ void Display::Initialize(DisplayClient* client,
   // This depends on assumptions that Display::Initialize will happen on the
   // same callstack as the ContextProvider being created/initialized or else
   // it could miss a callback before setting this.
-  if (auto* context = output_surface_->context_provider())
-    context->AddObserver(this);
-
   if (skia_output_surface_)
     skia_output_surface_->AddContextLostObserver(this);
 }
@@ -512,8 +469,7 @@ void Display::DisableSwapUntilResize(
       scheduler_->ForceImmediateSwapIfPossible();
 
     if (no_pending_swaps_callback && pending_swaps_ > 0 &&
-        (output_surface_->context_provider() ||
-         output_surface_->AsSkiaOutputSurface())) {
+        output_surface_->AsSkiaOutputSurface()) {
       no_pending_swaps_callback_ = std::move(no_pending_swaps_callback);
     }
 
@@ -565,14 +521,6 @@ void Display::InitializeRenderer(bool enable_shared_images) {
         &settings_, debug_settings_, output_surface_.get(),
         resource_provider.get(), overlay_processor_.get(),
         skia_output_surface_);
-    resource_provider_ = std::move(resource_provider);
-  } else if (output_surface_->context_provider()) {
-    auto resource_provider = std::make_unique<DisplayResourceProviderGL>(
-        output_surface_->context_provider(), enable_shared_images);
-    renderer_ = std::make_unique<GLRenderer>(
-        &settings_, debug_settings_, output_surface_.get(),
-        resource_provider.get(), overlay_processor_.get(),
-        current_task_runner_);
     resource_provider_ = std::move(resource_provider);
   } else if (output_surface_->capabilities().skips_draw) {
     auto resource_provider = std::make_unique<DisplayResourceProviderNull>();
@@ -654,8 +602,7 @@ void DebugDrawFrame(const AggregatedFrame& frame) {
 
   for (auto* quad : root_render_pass.quad_list) {
     auto& transform = quad->shared_quad_state->quad_to_target_transform;
-    auto display_rect = gfx::RectF(quad->rect);
-    transform.TransformRect(&display_rect);
+    auto display_rect = transform.MapRect(gfx::RectF(quad->rect));
     DBG_DRAW_TEXT_OPT("frame.root.material", DBG_OPT_GREEN,
                       display_rect.origin(),
                       base::NumberToString(static_cast<int>(quad->material)));
@@ -709,10 +656,7 @@ bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
   if (params.max_pending_swaps >= 0 && skia_output_surface_ &&
       skia_output_surface_->capabilities()
           .supports_dynamic_frame_buffer_allocation) {
-    if (skia_output_surface_->EnsureMinNumberOfBuffers(
-            params.max_pending_swaps + 1)) {
-      renderer_->ReallocatedFrameBuffers();
-    }
+    renderer_->EnsureMinNumberOfBuffers(params.max_pending_swaps + 1);
   }
 
   gfx::OverlayTransform current_display_transform = gfx::OVERLAY_TRANSFORM_NONE;
@@ -772,14 +716,6 @@ bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
     }
   }
   DebugDrawFrame(frame);
-
-  // Records whether the aggregated frame contains video or not.
-  // TODO(vikassoni) : Extend this capability to record whether a video frame is
-  // inline or fullscreen.
-  UMA_HISTOGRAM_ENUMERATION("Compositing.SurfaceAggregator.FrameContainsVideo",
-                            frame.may_contain_video
-                                ? TypeOfVideoInFrame::kVideo
-                                : TypeOfVideoInFrame::kNoVideo);
 
   if (frame.delegated_ink_metadata) {
     TRACE_EVENT_INSTANT1(
@@ -893,27 +829,12 @@ bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
     }
 
     draw_timer.emplace();
-    renderer_->DecideRenderPassAllocationsForFrame(frame.render_pass_list);
     overlay_processor_->SetFrameSequenceNumber(frame_sequence_number_);
     overlay_processor_->SetIsVideoCaptureEnabled(frame.video_capture_enabled);
+    overlay_processor_->SetIsPageFullscreen(frame.page_fullscreen_mode);
     renderer_->DrawFrame(&frame.render_pass_list, device_scale_factor_,
                          current_surface_size, display_color_spaces_,
                          std::move(frame.surface_damage_rect_list_));
-    switch (output_surface_->type()) {
-      case OutputSurface::Type::kSoftware:
-        UMA_HISTOGRAM_COUNTS_1M(
-            "Compositing.DirectRenderer.Software.DrawFrameUs",
-            draw_timer->Elapsed().InMicroseconds());
-        break;
-      case OutputSurface::Type::kOpenGL:
-        UMA_HISTOGRAM_COUNTS_1M("Compositing.DirectRenderer.GL.DrawFrameUs",
-                                draw_timer->Elapsed().InMicroseconds());
-        break;
-      case OutputSurface::Type::kVulkan:
-        UMA_HISTOGRAM_COUNTS_1M("Compositing.DirectRenderer.VK.DrawFrameUs",
-                                draw_timer->Elapsed().InMicroseconds());
-        break;
-    }
   } else {
     TRACE_EVENT_INSTANT0("viz", "Draw skipped.", TRACE_EVENT_SCOPE_THREAD);
   }
@@ -924,8 +845,8 @@ bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
         pending_presentation_group_timings_.emplace_back();
 
     base::flat_set<base::PlatformThreadId> thread_ids;
-    for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
-      surface = surface_manager_->GetSurfaceForId(id_entry.first);
+    for (const auto& surface_id : aggregator_->previous_contained_surfaces()) {
+      surface = surface_manager_->GetSurfaceForId(surface_id);
       if (surface) {
         base::flat_set<base::PlatformThreadId> surface_thread_ids =
             surface->GetThreadIds();
@@ -935,8 +856,8 @@ bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
     presentation_group_timing.OnDraw(params.frame_time, draw_timer->Begin(),
                                      std::move(thread_ids));
 
-    for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
-      surface = surface_manager_->GetSurfaceForId(id_entry.first);
+    for (const auto& surface_id : aggregator_->previous_contained_surfaces()) {
+      surface = surface_manager_->GetSurfaceForId(surface_id);
       if (surface) {
         std::unique_ptr<Surface::PresentationHelper> helper =
             surface->TakePresentationHelperForPresentNotification();
@@ -1036,6 +957,11 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
       "viz,benchmark", "Graphics.Pipeline.DrawAndSwap", last_swap_ack_trace_id_,
       "WaitForPresentation", timings.swap_end);
 
+  if (overlay_processor_)
+    overlay_processor_->OverlayPresentationComplete();
+  if (renderer_)
+    renderer_->SwapBuffersComplete(std::move(release_fence));
+
   DCHECK_GT(pending_swaps_, 0);
   pending_swaps_--;
   if (scheduler_) {
@@ -1044,11 +970,6 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
 
   if (no_pending_swaps_callback_ && pending_swaps_ == 0)
     std::move(no_pending_swaps_callback_).Run();
-
-  if (overlay_processor_)
-    overlay_processor_->OverlayPresentationComplete();
-  if (renderer_)
-    renderer_->SwapBuffersComplete(std::move(release_fence));
 
   // It's possible to receive multiple calls to DidReceiveSwapBuffersAck()
   // before DidReceivePresentationFeedback(). Ensure that we're not setting
@@ -1115,12 +1036,6 @@ void Display::DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
     // These two values can be equal in unit tests.
     DCHECK_GE(draw_start_to_swap_end, schedule_draw_to_gpu_start);
   }
-}
-
-void Display::DidReceiveTextureInUseResponses(
-    const gpu::TextureInUseResponses& responses) {
-  if (renderer_)
-    renderer_->DidReceiveTextureInUseResponses(responses);
 }
 
 void Display::DidReceiveCALayerParams(

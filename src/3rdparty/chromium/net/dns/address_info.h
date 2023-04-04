@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 #include <string>
 #include <tuple>
 
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "net/base/address_family.h"
 #include "net/base/net_export.h"
-#include "net/base/network_change_notifier.h"
+#include "net/base/network_handle.h"
 #include "net/base/sys_addrinfo.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -45,7 +46,7 @@ class NET_EXPORT_PRIVATE AddressInfo {
 
    private:
     // Owned by AddressInfo.
-    const addrinfo* ai_;
+    raw_ptr<const addrinfo> ai_;
   };
 
   // Constructors
@@ -55,14 +56,13 @@ class NET_EXPORT_PRIVATE AddressInfo {
   // null, the system's getaddrinfo will be invoked. (A non-null `getter` is
   // primarily for tests).
   // `network` is an optional parameter, when specified (!=
-  // kInvalidNetworkHandle) the lookup will be performed specifically for
-  // `network` (currently only supported on Android platforms).
+  // handles::kInvalidNetworkHandle) the lookup will be performed specifically
+  // for `network` (currently only supported on Android platforms).
   static AddressInfoAndResult Get(
       const std::string& host,
       const addrinfo& hints,
       std::unique_ptr<AddrInfoGetter> getter = nullptr,
-      NetworkChangeNotifier::NetworkHandle network =
-          NetworkChangeNotifier::kInvalidNetworkHandle);
+      handles::NetworkHandle network = handles::kInvalidNetworkHandle);
 
   AddressInfo(const AddressInfo&) = delete;
   AddressInfo& operator=(const AddressInfo&) = delete;
@@ -106,7 +106,7 @@ class NET_EXPORT_PRIVATE AddrInfoGetter {
       const std::string& host,
       const addrinfo* hints,
       int* out_os_error,
-      NetworkChangeNotifier::NetworkHandle network);
+      handles::NetworkHandle network);
 };
 
 }  // namespace net

@@ -67,6 +67,7 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/text_autosizer.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
@@ -81,22 +82,18 @@ void TextFinder::FindMatch::Trace(Visitor* visitor) const {
 
 static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
   const Node& first_node = *range->FirstNode();
-  bool needs_style_and_layout = false;
   bool needs_layout_shift_allowance = false;
 
   // If the target text is in a content-visibility:auto subtree, then activate
   // it so we can scroll to it.
   if (DisplayLockUtilities::ActivateFindInPageMatchRangeIfNeeded(
           EphemeralRangeInFlatTree(range))) {
-    needs_style_and_layout = true;
     needs_layout_shift_allowance = true;
   }
 
   // If the active match is hidden inside a <details> element, then we should
   // expand it so find-in-page can scroll to it.
-  if (RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled() &&
-      HTMLDetailsElement::ExpandDetailsAncestors(first_node)) {
-    needs_style_and_layout = true;
+  if (HTMLDetailsElement::ExpandDetailsAncestors(first_node)) {
     needs_layout_shift_allowance = true;
     UseCounter::Count(first_node.GetDocument(),
                       WebFeature::kAutoExpandedDetailsForFindInPage);
@@ -107,7 +104,6 @@ static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
   if (RuntimeEnabledFeatures::BeforeMatchEventEnabled(
           first_node.GetExecutionContext()) &&
       DisplayLockUtilities::RevealHiddenUntilFoundAncestors(first_node)) {
-    needs_style_and_layout = true;
     needs_layout_shift_allowance = true;
     UseCounter::Count(first_node.GetDocument(),
                       WebFeature::kBeforematchRevealedHiddenMatchable);
@@ -139,7 +135,6 @@ static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
       DCHECK(frame_element);
       bool frame_needs_style_and_layout = false;
       frame_needs_style_and_layout |=
-          RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled() &&
           HTMLDetailsElement::ExpandDetailsAncestors(*frame_element);
       frame_needs_style_and_layout |=
           RuntimeEnabledFeatures::BeforeMatchEventEnabled(
@@ -148,21 +143,12 @@ static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
       if (frame_needs_style_and_layout) {
         frame_element->GetDocument().UpdateStyleAndLayoutForNode(
             frame_element, DocumentUpdateReason::kFindInPage);
-        needs_style_and_layout = true;
         needs_layout_shift_allowance = true;
       }
     } else {
       // TODO(crbug.com/1250847): Implement an IPC signal to expand in parent
       // RemoteFrames.
     }
-  }
-
-  if (needs_style_and_layout) {
-    // If we changed dom or style in order to reveal the target element, then we
-    // have to update style and layout before scrolling The modified attributes
-    // may also affect style and have fired mutation events.
-    first_node.GetDocument().UpdateStyleAndLayoutForNode(
-        &first_node, DocumentUpdateReason::kFindInPage);
   }
 }
 
@@ -181,8 +167,8 @@ static void ScrollToVisible(Range* match) {
   mojom::blink::ScrollBehavior scroll_behavior =
       smooth_find_enabled ? mojom::blink::ScrollBehavior::kSmooth
                           : mojom::blink::ScrollBehavior::kAuto;
-  first_node.GetLayoutObject()->ScrollRectToVisible(
-      PhysicalRect(match->BoundingBox()),
+  scroll_into_view_util::ScrollRectToVisible(
+      *first_node.GetLayoutObject(), PhysicalRect(match->BoundingBox()),
       ScrollAlignment::CreateScrollIntoViewParams(
           ScrollAlignment::CenterIfNeeded(), ScrollAlignment::CenterIfNeeded(),
           mojom::blink::ScrollType::kUser,
@@ -316,8 +302,9 @@ bool TextFinder::FindInternal(int identifier,
   if (options.run_synchronously_for_testing) {
     Scroll(std::move(scroll_context));
   } else {
-    scroll_task_.Reset(WTF::Bind(&TextFinder::Scroll, WrapWeakPersistent(this),
-                                 std::move(scroll_context)));
+    scroll_task_.Reset(WTF::BindOnce(&TextFinder::Scroll,
+                                     WrapWeakPersistent(this),
+                                     std::move(scroll_context)));
     GetFrame()->GetDocument()->EnqueueAnimationFrameTask(
         scroll_task_.callback());
   }
@@ -664,7 +651,7 @@ void TextFinder::ResetMatchCount() {
 }
 
 void TextFinder::ClearFindMatchesCache() {
-  if (!find_matches_cache_.IsEmpty())
+  if (!find_matches_cache_.empty())
     ++find_match_markers_version_;
 
   find_matches_cache_.clear();
@@ -674,7 +661,7 @@ void TextFinder::ClearFindMatchesCache() {
 void TextFinder::InvalidateFindMatchRects() {
   // Increase version number is required to trigger FindMatchRects update when
   // next find.
-  if (!find_matches_cache_.IsEmpty())
+  if (!find_matches_cache_.empty())
     ++find_match_markers_version_;
 
   // For subframes, we need to recalculate the FindMatchRects when the
@@ -708,7 +695,7 @@ void TextFinder::UpdateFindMatchRects() {
   // Remove any invalid matches from the cache.
   if (dead_matches) {
     HeapVector<FindMatch> filtered_matches;
-    filtered_matches.ReserveCapacity(find_matches_cache_.size() - dead_matches);
+    filtered_matches.reserve(find_matches_cache_.size() - dead_matches);
 
     for (const FindMatch& match : find_matches_cache_) {
       if (!match.rect_.IsEmpty())
@@ -721,6 +708,7 @@ void TextFinder::UpdateFindMatchRects() {
   find_match_rects_are_valid_ = true;
 }
 
+#if BUILDFLAG(IS_ANDROID)
 gfx::RectF TextFinder::ActiveFindMatchRect() {
   if (!current_active_match_frame_ || !active_match_)
     return gfx::RectF();
@@ -732,7 +720,7 @@ Vector<gfx::RectF> TextFinder::FindMatchRects() {
   UpdateFindMatchRects();
 
   Vector<gfx::RectF> match_rects;
-  match_rects.ReserveCapacity(match_rects.size() + find_matches_cache_.size());
+  match_rects.reserve(match_rects.size() + find_matches_cache_.size());
   for (const FindMatch& match : find_matches_cache_) {
     DCHECK(!match.rect_.IsEmpty());
     match_rects.push_back(match.rect_);
@@ -808,7 +796,8 @@ int TextFinder::SelectFindMatch(unsigned index, gfx::Rect* selection_rect) {
   if (!active_match_bounding_box.IsEmpty()) {
     if (active_match_->FirstNode() &&
         active_match_->FirstNode()->GetLayoutObject()) {
-      active_match_->FirstNode()->GetLayoutObject()->ScrollRectToVisible(
+      scroll_into_view_util::ScrollRectToVisible(
+          *active_match_->FirstNode()->GetLayoutObject(),
           PhysicalRect(active_match_bounding_box),
           ScrollAlignment::CreateScrollIntoViewParams(
               ScrollAlignment::CenterIfNeeded(),
@@ -839,6 +828,7 @@ int TextFinder::SelectFindMatch(unsigned index, gfx::Rect* selection_rect) {
 
   return active_match_index_ + 1;
 }
+#endif  // BUILDFLAG(IS_ANDROID)
 
 TextFinder::TextFinder(WebLocalFrameImpl& owner_frame)
     : owner_frame_(&owner_frame),
@@ -914,6 +904,12 @@ void TextFinder::Scroll(std::unique_ptr<AsyncScrollContext> context) {
   if (!context->range->collapsed() && context->range->IsConnected()) {
     AutoExpandSearchableHiddenElementsUpFrameTree(context->range);
   }
+
+  // AutoExpandSearchableHiddenElementsUpFrameTree, as well as any other
+  // animation frame tasks which ran before this one, may have dirtied
+  // style/layout which needs to be up to date in order to scroll.
+  GetFrame()->GetDocument()->UpdateStyleAndLayoutForRange(
+      context->range, DocumentUpdateReason::kFindInPage);
 
   // During the async step or AutoExpandSearchableHiddenElementsUpFrameTree, the
   // match may have been removed from the dom, gotten DisplayLocked, etc.

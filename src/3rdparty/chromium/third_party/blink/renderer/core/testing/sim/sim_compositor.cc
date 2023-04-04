@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,11 +25,8 @@ SimCompositor::SimCompositor() {
 
 SimCompositor::~SimCompositor() = default;
 
-void SimCompositor::SetWebView(
-    WebViewImpl& web_view,
-    frame_test_helpers::TestWebViewClient& view_client) {
+void SimCompositor::SetWebView(WebViewImpl& web_view) {
   web_view_ = &web_view;
-  test_web_view_client_ = &view_client;
 }
 
 SimCanvas::Commands SimCompositor::BeginFrame(double time_delta_in_seconds,

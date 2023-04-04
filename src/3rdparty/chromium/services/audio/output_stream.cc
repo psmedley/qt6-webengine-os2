@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "third_party/abseil-cpp/absl/utility/utility.h"
 
 namespace audio {
 
@@ -40,7 +41,6 @@ OutputStream::OutputStream(
         observer,
     mojo::PendingRemote<media::mojom::AudioLog> log,
     media::AudioManager* audio_manager,
-    OutputStreamActivityMonitor* activity_monitor,
     const std::string& output_device_id,
     const media::AudioParameters& params,
     LoopbackCoordinator* coordinator,
@@ -59,7 +59,6 @@ OutputStream::OutputStream(
               &foreign_socket_),
       controller_(audio_manager,
                   this,
-                  activity_monitor,
                   params,
                   output_device_id,
                   &reader_,
@@ -183,7 +182,7 @@ void OutputStream::CreateAudioPipe(CreatedCallback created_callback) {
   }
 
   std::move(created_callback)
-      .Run({base::in_place, std::move(shared_memory_region),
+      .Run({absl::in_place, std::move(shared_memory_region),
             std::move(socket_handle)});
 }
 

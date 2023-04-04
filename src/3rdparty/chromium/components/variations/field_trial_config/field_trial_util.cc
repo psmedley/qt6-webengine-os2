@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,14 +16,13 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "components/variations/client_filterable_state.h"
 #include "components/variations/field_trial_config/fieldtrial_testing_config.h"
 #include "components/variations/variations_seed_processor.h"
-#include "net/base/escape.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "ui/base/device_form_factor.h"
 
 namespace variations {
 namespace {
@@ -189,7 +188,7 @@ std::string EscapeValue(const std::string& value) {
   // This needs to be the inverse of UnescapeValue in
   // base/metrics/field_trial_params.
   std::string net_escaped_str =
-      net::EscapeQueryParamValue(value, true /* use_plus */);
+      base::EscapeQueryParamValue(value, true /* use_plus */);
 
   // net doesn't escape '.' and '*' but base::UnescapeValue() covers those
   // cases.

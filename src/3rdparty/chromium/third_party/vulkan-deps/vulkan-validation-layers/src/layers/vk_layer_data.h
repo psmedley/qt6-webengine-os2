@@ -23,6 +23,8 @@
 #ifndef LAYER_DATA_H
 #define LAYER_DATA_H
 
+#include <cmath>
+
 #include <cassert>
 #include <limits>
 #include <memory>
@@ -56,12 +58,17 @@ template <typename Key, typename T>
 using map_entry = robin_hood::pair<Key, T>;
 
 // robin_hood-compatible insert_iterator (std:: uses the wrong insert method)
+// NOTE: std::iterator was deprecated in C++17, and newer versions of libstdc++ appear to mark this as such.
 template <typename T>
-class insert_iterator : public std::iterator<std::output_iterator_tag, void, void, void, void> {
-  public:
-    typedef typename T::value_type value_type;
-    typedef typename T::iterator iterator;
-    insert_iterator(T &t, iterator i) : container(&t), iter(i) {}
+struct insert_iterator {
+    using iterator_category = std::output_iterator_tag;
+    using value_type = typename T::value_type;
+    using iterator = typename T::iterator;
+    using difference_type = void;
+    using pointer = void;
+    using reference = T &;
+
+    insert_iterator(reference t, iterator i) : container(&t), iter(i) {}
 
     insert_iterator &operator=(const value_type &value) {
         auto result = container->insert(value);
@@ -85,7 +92,7 @@ class insert_iterator : public std::iterator<std::output_iterator_tag, void, voi
 
   private:
     T *container;
-    typename T::iterator iter;
+    iterator iter;
 };
 #else
 template <typename T>
@@ -136,7 +143,7 @@ class small_vector {
     static const size_type kMaxCapacity = std::numeric_limits<size_type>::max();
     static_assert(N <= kMaxCapacity, "size must be less than size_type::max");
 
-    small_vector() : size_(0), capacity_(N) {}
+    small_vector() : size_(0), capacity_(N) { DebugUpdateWorkingStore(); }
 
     small_vector(const small_vector &other) : size_(0), capacity_(N) {
         reserve(other.size_);
@@ -154,6 +161,7 @@ class small_vector {
             large_store_ = std::move(other.large_store_);
             capacity_ = other.capacity_;
             other.capacity_ = kSmallCapacity;
+            other.DebugUpdateWorkingStore();
         } else {
             auto dest = GetWorkingStore();
             for (auto &value : other) {
@@ -164,7 +172,19 @@ class small_vector {
         }
         size_ = other.size_;
         other.size_ = 0;
+        DebugUpdateWorkingStore();
     }
+
+    small_vector(size_type size, const value_type& value = value_type()) : size_(0), capacity_(N) {
+        reserve(size);
+        auto dest = GetWorkingStore();
+        for (size_type i = 0; i < size; i++) {
+            new (dest) value_type(value);
+            ++dest;
+        }
+        size_ = size;
+    }
+
 
     ~small_vector() { clear(); }
 
@@ -214,8 +234,10 @@ class small_vector {
                 large_store_ = std::move(other.large_store_);
                 capacity_ = other.capacity_;
                 size_ = other.size_;
+                DebugUpdateWorkingStore();
 
                 other.capacity_ = kSmallCapacity;
+                other.DebugUpdateWorkingStore();
             } else {
                 // Other is using the small_store
                 auto source = other.begin();
@@ -302,14 +324,15 @@ class small_vector {
         if (new_cap > capacity_) {
             assert(capacity_ >= kSmallCapacity);
             auto new_store = std::unique_ptr<BackingStore[]>(new BackingStore[new_cap]);
-            auto new_values = reinterpret_cast<pointer>(new_store.get());
             auto working_store = GetWorkingStore();
             for (size_type i = 0; i < size_; i++) {
-                new (new_values + i) value_type(std::move(working_store[i]));
+                new (new_store[i].data) value_type(std::move(working_store[i]));
                 working_store[i].~value_type();
             }
             large_store_ = std::move(new_store);
+            capacity_ = new_cap;
         }
+        DebugUpdateWorkingStore();
         // No shrink here.
     }
 
@@ -333,26 +356,38 @@ class small_vector {
   protected:
     inline const_pointer GetWorkingStore() const {
         const BackingStore *store = large_store_ ? large_store_.get() : small_store_;
-        return reinterpret_cast<const_pointer>(store);
+        return &store->object;
     }
     inline pointer GetWorkingStore() {
         BackingStore *store = large_store_ ? large_store_.get() : small_store_;
-        return reinterpret_cast<pointer>(store);
+        return &store->object;
     }
 
     void ClearAndReset() {
         clear();
         large_store_.reset();
         capacity_ = kSmallCapacity;
+        DebugUpdateWorkingStore();
     }
 
-    struct alignas(alignof(value_type)) BackingStore {
+    union BackingStore {
+        BackingStore() {}
+        ~BackingStore() {}
+
         uint8_t data[sizeof(value_type)];
+        value_type object;
     };
     size_type size_;
     size_type capacity_;
     BackingStore small_store_[N];
     std::unique_ptr<BackingStore[]> large_store_;
+
+#ifdef NDEBUG
+    void DebugUpdateWorkingStore() {}
+#else
+    void DebugUpdateWorkingStore() { _dbg_working_store = GetWorkingStore(); }
+    value_type *_dbg_working_store;
+#endif
 };
 
 // This is a wrapper around unordered_map that optimizes for the common case
@@ -746,13 +781,15 @@ class optional {
     optional(optional &&other) : init_(false) { *this = std::move(other); }
 
     ~optional() { DeInit(); }
+    void reset() { DeInit(); }
 
     template <typename... Args>
-    T &emplace(const Args &...args) {
+    T &emplace(Args &&...args) {
         init_ = true;
-        new (&store_.backing) T(args...);
+        new (&store_.backing) T(std::forward<Args>(args)...);
         return store_.obj;
     }
+
     T *operator&() {
         if (init_) return &store_.obj;
         return nullptr;
@@ -863,5 +900,137 @@ class span {
     pointer data_ = {};
     size_t count_ = 0;
 };
+
+//
+// Allow type inference that using the constructor doesn't allow in C++11
+template <typename T>
+span<T> make_span(T *begin, size_t count) {
+    return span<T>(begin, count);
+}
+template <typename T>
+span<T> make_span(T *begin, T *end) {
+    return make_span<T>(begin, end);
+}
+
+template <typename BaseType>
+using base_type =
+    typename std::remove_reference<typename std::remove_const<typename std::remove_pointer<BaseType>::type>::type>::type;
+
+// Helper for thread local Validate -> Record phase data
+// Define T unique to each entrypoint which will persist data
+// Use only in with singleton (leaf) validation objects
+// State machine transition state changes of payload relative to TlsGuard object lifecycle:
+//  State INIT: bool(payload_) 
+//  State RESET: NOT bool(payload_) 
+//    * PreCallValidate* phase
+//        * Initialized with skip (in PreCallValidate*)
+//            * RESET -> INIT
+//        * Destruct with skip == true
+//           * INIT -> RESET
+//    * PreCallRecord* phase (optional IF PostCallRecord present)
+//        * Initialized w/o skip (set "persist_" IFF PostCallRecord present)
+//           * Must be in state INIT
+//        * Destruct with NOT persist_
+//           * INIT -> RESET
+//    * PreCallRecord* phase (optional IF PreCallRecord present)
+//        * Initialized w/o skip ("persist_" *must be false)
+//           * Must be in state INIT
+//        * Destruct
+//           * INIT -> RESET
+
+struct TlsGuardPersist {};
+template <typename T>
+class TlsGuard {
+  public:
+    // For use on inital references -- Validate phase
+    template <typename... Args>
+    TlsGuard(bool *skip, Args &&...args) : skip_(skip), persist_(false) {
+        // Record phase calls are required to clean up payload
+        assert(!payload_);
+        payload_.emplace(std::forward<Args>(args)...);
+    }
+    // For use on non-terminal persistent references (PreRecord phase IFF PostRecord is also present.
+    TlsGuard(const TlsGuardPersist &) : skip_(nullptr), persist_(true) { assert(payload_); }
+    // For use on terminal persistent references
+    // Validate phase calls are required to setup payload
+    // PreCallRecord calls are required to preserve (persist_) payload, if PostCallRecord calls will use
+    TlsGuard() : skip_(nullptr), persist_(false) { assert(payload_); }
+    ~TlsGuard() {
+        assert(payload_);
+        if (!persist_ && (!skip_ || *skip_)) payload_.reset();
+    }
+
+    T &operator*() & {
+        assert(payload_);
+        return *payload_;
+    }
+    const T &operator*() const & {
+        assert(payload_);
+        return *payload_;
+    }
+    T &&operator*() && {
+        assert(payload_);
+        return std::move(*payload_);
+    }
+    T *operator->() { return &(*payload_); }
+
+  private:
+    thread_local static optional<T> payload_;
+    bool *skip_;
+    bool persist_;
+};
+
+template <typename T>
+thread_local optional<T> TlsGuard<T>::payload_;
+
+// Only use this if you aren't planning to use what you would have gotten from a find.
+template <typename Container, typename Key = typename Container::key_type>
+bool Contains(const Container &container, const Key &key) {
+    return container.find(key) != container.cend();
+}
+
+// EraseIf is not implemented as std::erase(std::remove_if(...), ...) for two reasons:
+//   1) Robin Hood containers don't support two-argument erase functions
+//   2) STL remove_if requires the predicate to be const w.r.t the value-type, and std::erase_if doesn't AFAICT
+template <typename Container, typename Predicate>
+typename Container::size_type EraseIf(Container &c, Predicate &&p) {
+    const auto before_size = c.size();
+    auto pos = c.begin();
+    while (pos != c.end()) {
+        if (p(*pos)) {
+            pos = c.erase(pos);
+        } else {
+            ++pos;
+        }
+    }
+    return before_size - c.size();
+}
+
+template <typename T>
+constexpr T MaxTypeValue(T) {
+    return std::numeric_limits<T>::max();
+}
+
+template <typename T>
+constexpr T MaxTypeValue() {
+    return std::numeric_limits<T>::max();
+}
+
+template <typename T>
+constexpr T MinTypeValue(T) {
+    return std::numeric_limits<T>::min();
+}
+
+template <typename T>
+constexpr T MinTypeValue() {
+    return std::numeric_limits<T>::min();
+}
+
+template <typename T>
+T GetQuotientCeil(T numerator, T denominator) {
+    denominator = std::max(denominator, T{1});
+    return static_cast<T>(std::ceil(static_cast<double>(numerator) / static_cast<double>(denominator)));
+}
+
 }  // namespace layer_data
 #endif  // LAYER_DATA_H

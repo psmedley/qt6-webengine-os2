@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,7 @@ void WebMessageReplyProxyImpl::PostMessage(
   auto message = std::make_unique<WebMessage>();
   base::android::ConvertJavaStringToUTF16(env, message_contents,
                                           &(message->message));
-  reply_proxy_->PostMessage(std::move(message));
+  reply_proxy_->PostWebMessage(std::move(message));
 }
 
 bool WebMessageReplyProxyImpl::IsActive(JNIEnv* env) {

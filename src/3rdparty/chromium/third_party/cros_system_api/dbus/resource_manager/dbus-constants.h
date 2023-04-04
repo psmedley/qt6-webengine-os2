@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium OS Authors. All rights reserved.
+// Copyright 2021 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,6 +45,7 @@ const char kGetAvailableMemoryKBMethod[] = "GetAvailableMemoryKB";
 const char kGetForegroundAvailableMemoryKBMethod[] =
     "GetForegroundAvailableMemoryKB";
 const char kGetMemoryMarginsKBMethod[] = "GetMemoryMarginsKB";
+const char kGetComponentMemoryMarginsKBMethod[] = "GetComponentMemoryMarginsKB";
 const char kGetGameModeMethod[] = "GetGameMode";
 const char kSetGameModeMethod[] = "SetGameMode";
 const char kSetGameModeWithTimeoutMethod[] = "SetGameModeWithTimeout";

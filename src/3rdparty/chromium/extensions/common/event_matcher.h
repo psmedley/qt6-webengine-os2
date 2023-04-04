@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ class EventMatcher {
   bool MatchNonURLCriteria(const mojom::EventFilteringInfo& event_info) const;
 
   int GetURLFilterCount() const;
-  bool GetURLFilter(int i, const base::DictionaryValue** url_filter_out);
+  const base::Value::Dict* GetURLFilter(int i);
 
   int GetWindowTypeCount() const;
   bool GetWindowType(int i, std::string* window_type_out) const;

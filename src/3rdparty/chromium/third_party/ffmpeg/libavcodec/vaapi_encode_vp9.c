@@ -184,6 +184,17 @@ static int vaapi_encode_vp9_init_picture_params(AVCodecContext *avctx,
     return 0;
 }
 
+static av_cold int vaapi_encode_vp9_get_encoder_caps(AVCodecContext *avctx)
+{
+    VAAPIEncodeContext *ctx = avctx->priv_data;
+
+    // Surfaces must be aligned to 64x64 superblock boundaries.
+    ctx->surface_width  = FFALIGN(avctx->width,  64);
+    ctx->surface_height = FFALIGN(avctx->height, 64);
+
+    return 0;
+}
+
 static av_cold int vaapi_encode_vp9_configure(AVCodecContext *avctx)
 {
     VAAPIEncodeContext     *ctx = avctx->priv_data;
@@ -217,7 +228,9 @@ static av_cold int vaapi_encode_vp9_configure(AVCodecContext *avctx)
 
 static const VAAPIEncodeProfile vaapi_encode_vp9_profiles[] = {
     { FF_PROFILE_VP9_0,  8, 3, 1, 1, VAProfileVP9Profile0 },
+    { FF_PROFILE_VP9_1,  8, 3, 0, 0, VAProfileVP9Profile1 },
     { FF_PROFILE_VP9_2, 10, 3, 1, 1, VAProfileVP9Profile2 },
+    { FF_PROFILE_VP9_3, 10, 3, 0, 0, VAProfileVP9Profile3 },
     { FF_PROFILE_UNKNOWN }
 };
 
@@ -231,6 +244,7 @@ static const VAAPIEncodeType vaapi_encode_type_vp9 = {
 
     .picture_priv_data_size = sizeof(VAAPIEncodeVP9Picture),
 
+    .get_encoder_caps      = &vaapi_encode_vp9_get_encoder_caps,
     .configure             = &vaapi_encode_vp9_configure,
 
     .sequence_params_size  = sizeof(VAEncSequenceParameterBufferVP9),
@@ -250,10 +264,6 @@ static av_cold int vaapi_encode_vp9_init(AVCodecContext *avctx)
     // but there isn't any reason to do so - the one usable driver (i965)
     // can write its own headers and there is no metadata to include.
     ctx->desired_packed_headers = 0;
-
-    // Surfaces must be aligned to superblock boundaries.
-    ctx->surface_width  = FFALIGN(avctx->width,  64);
-    ctx->surface_height = FFALIGN(avctx->height, 64);
 
     return ff_vaapi_encode_init(avctx);
 }
@@ -289,17 +299,18 @@ static const AVClass vaapi_encode_vp9_class = {
 
 const FFCodec ff_vp9_vaapi_encoder = {
     .p.name         = "vp9_vaapi",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("VP9 (VAAPI)"),
+    CODEC_LONG_NAME("VP9 (VAAPI)"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VP9,
     .priv_data_size = sizeof(VAAPIEncodeVP9Context),
     .init           = &vaapi_encode_vp9_init,
-    .receive_packet = &ff_vaapi_encode_receive_packet,
+    FF_CODEC_RECEIVE_PACKET_CB(&ff_vaapi_encode_receive_packet),
     .close          = &ff_vaapi_encode_close,
     .p.priv_class   = &vaapi_encode_vp9_class,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |
                       AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP,
     .defaults       = vaapi_encode_vp9_defaults,
     .p.pix_fmts = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_VAAPI,

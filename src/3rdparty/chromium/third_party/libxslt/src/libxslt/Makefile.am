@@ -1,6 +1,6 @@
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libxslt
 
-AM_CFLAGS = $(LIBXML_CFLAGS)
+AM_CFLAGS = $(LIBXML_CFLAGS) $(LIBXSLT_CFLAGS)
 
 lib_LTLIBRARIES = libxslt.la
 
@@ -59,7 +59,7 @@ else
 LIBXSLT_VERSION_SCRIPT =
 endif
 
-libxslt_la_LIBADD = $(LIBXML_LIBS) $(EXTRA_LIBS) $(M_LIBS)
+libxslt_la_LIBADD = $(LIBXML_LIBS) $(EXTRA_LIBS) $(LIBM)
 libxslt_la_LDFLAGS =					\
 		$(LIBXSLT_VERSION_SCRIPT)		\
 		-version-info $(LIBXSLT_VERSION_INFO)

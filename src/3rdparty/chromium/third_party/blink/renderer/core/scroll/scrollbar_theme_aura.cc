@@ -34,14 +34,15 @@
 #include "build/chromeos_buildflags.h"
 #include "cc/input/scrollbar.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_theme_engine.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar_theme_fluent.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme_overlay.h"
 #include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
+#include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
 #include "ui/gfx/geometry/point_conversions.h"
 
@@ -141,6 +142,9 @@ ScrollbarTheme& ScrollbarTheme::NativeTheme() {
   if (OverlayScrollbarsEnabled())
     return ScrollbarThemeOverlay::GetInstance();
 
+  if (FluentScrollbarsEnabled())
+    return ScrollbarThemeFluent::GetInstance();
+
   DEFINE_STATIC_LOCAL(ScrollbarThemeAura, theme, ());
   return theme;
 }
@@ -169,8 +173,9 @@ int ScrollbarThemeAura::ScrollbarThickness(float scale_from_dip,
   }
 
   // Horiz and Vert scrollbars are the same thickness.
-  gfx::Size scrollbar_size = Platform::Current()->ThemeEngine()->GetSize(
-      WebThemeEngine::kPartScrollbarVerticalTrack);
+  gfx::Size scrollbar_size =
+      WebThemeEngineHelper::GetNativeThemeEngine()->GetSize(
+          WebThemeEngine::kPartScrollbarVerticalTrack);
 
   return scrollbar_size.width() * Proportion(scrollbar_width) * scale_from_dip;
 }
@@ -217,12 +222,10 @@ gfx::Rect ScrollbarThemeAura::TrackRect(const Scrollbar& scrollbar) {
 int ScrollbarThemeAura::MinimumThumbLength(const Scrollbar& scrollbar) {
   int scrollbar_thickness =
       (scrollbar.Orientation() == kVerticalScrollbar)
-          ? Platform::Current()
-                ->ThemeEngine()
+          ? WebThemeEngineHelper::GetNativeThemeEngine()
                 ->GetSize(WebThemeEngine::kPartScrollbarVerticalThumb)
                 .height()
-          : Platform::Current()
-                ->ThemeEngine()
+          : WebThemeEngineHelper::GetNativeThemeEngine()
                 ->GetSize(WebThemeEngine::kPartScrollbarHorizontalThumb)
                 .width();
 
@@ -250,7 +253,7 @@ void ScrollbarThemeAura::PaintTrack(GraphicsContext& context,
   extra_params.scrollbar_track.track_width = align_rect.width();
   extra_params.scrollbar_track.track_height = align_rect.height();
 
-  Platform::Current()->ThemeEngine()->Paint(
+  WebThemeEngineHelper::GetNativeThemeEngine()->Paint(
       context.Canvas(),
       scrollbar.Orientation() == kHorizontalScrollbar
           ? WebThemeEngine::kPartScrollbarHorizontalTrack
@@ -271,9 +274,9 @@ void ScrollbarThemeAura::PaintButton(GraphicsContext& gc,
   extra_params.scrollbar_button.zoom = scrollbar.EffectiveZoom();
   extra_params.scrollbar_button.right_to_left =
       scrollbar.ContainerIsRightToLeft();
-  Platform::Current()->ThemeEngine()->Paint(gc.Canvas(), params.part,
-                                            params.state, rect, &extra_params,
-                                            scrollbar.UsedColorScheme());
+  WebThemeEngineHelper::GetNativeThemeEngine()->Paint(
+      gc.Canvas(), params.part, params.state, rect, &extra_params,
+      scrollbar.UsedColorScheme());
 }
 
 void ScrollbarThemeAura::PaintThumb(GraphicsContext& gc,
@@ -294,7 +297,7 @@ void ScrollbarThemeAura::PaintThumb(GraphicsContext& gc,
   else
     state = WebThemeEngine::kStateNormal;
 
-  Platform::Current()->ThemeEngine()->Paint(
+  WebThemeEngineHelper::GetNativeThemeEngine()->Paint(
       canvas,
       scrollbar.Orientation() == kHorizontalScrollbar
           ? WebThemeEngine::kPartScrollbarHorizontalThumb
@@ -371,7 +374,7 @@ bool ScrollbarThemeAura::ShouldSnapBackToDragOrigin(
 
 bool ScrollbarThemeAura::HasScrollbarButtons(
     ScrollbarOrientation orientation) const {
-  WebThemeEngine* theme_engine = Platform::Current()->ThemeEngine();
+  WebThemeEngine* theme_engine = WebThemeEngineHelper::GetNativeThemeEngine();
   if (orientation == kVerticalScrollbar) {
     return !theme_engine->GetSize(WebThemeEngine::kPartScrollbarDownArrow)
                 .IsEmpty();
@@ -380,7 +383,7 @@ bool ScrollbarThemeAura::HasScrollbarButtons(
               .IsEmpty();
 }
 
-gfx::Size ScrollbarThemeAura::ButtonSize(const Scrollbar& scrollbar) {
+gfx::Size ScrollbarThemeAura::ButtonSize(const Scrollbar& scrollbar) const {
   if (!HasScrollbarButtons(scrollbar.Orientation()))
     return gfx::Size(0, 0);
 

@@ -40,7 +40,7 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "gsm.h"
 
 typedef struct LibGSMDecodeContext {
@@ -82,12 +82,11 @@ static av_cold int libgsm_decode_close(AVCodecContext *avctx) {
     return 0;
 }
 
-static int libgsm_decode_frame(AVCodecContext *avctx, void *data,
+static int libgsm_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                                int *got_frame_ptr, AVPacket *avpkt)
 {
     int i, ret;
     LibGSMDecodeContext *s = avctx->priv_data;
-    AVFrame *frame         = data;
     uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     int16_t *samples;
@@ -128,30 +127,32 @@ static void libgsm_flush(AVCodecContext *avctx) {
 #if CONFIG_LIBGSM_DECODER
 const FFCodec ff_libgsm_decoder = {
     .p.name         = "libgsm",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("libgsm GSM"),
+    CODEC_LONG_NAME("libgsm GSM"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_GSM,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
     .p.wrapper_name = "libgsm",
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
     .priv_data_size = sizeof(LibGSMDecodeContext),
     .init           = libgsm_decode_init,
     .close          = libgsm_decode_close,
-    .decode         = libgsm_decode_frame,
+    FF_CODEC_DECODE_CB(libgsm_decode_frame),
     .flush          = libgsm_flush,
 };
 #endif
 #if CONFIG_LIBGSM_MS_DECODER
 const FFCodec ff_libgsm_ms_decoder = {
     .p.name         = "libgsm_ms",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("libgsm GSM Microsoft variant"),
+    CODEC_LONG_NAME("libgsm GSM Microsoft variant"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_GSM_MS,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
     .p.wrapper_name = "libgsm",
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
     .priv_data_size = sizeof(LibGSMDecodeContext),
     .init           = libgsm_decode_init,
     .close          = libgsm_decode_close,
-    .decode         = libgsm_decode_frame,
+    FF_CODEC_DECODE_CB(libgsm_decode_frame),
     .flush          = libgsm_flush,
 };
 #endif

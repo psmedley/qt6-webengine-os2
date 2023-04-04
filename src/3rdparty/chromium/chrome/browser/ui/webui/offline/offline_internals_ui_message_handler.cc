@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,9 +92,9 @@ void OfflineInternalsUIMessageHandler::HandleDeleteSelectedPages(
   std::string callback_id = args[0].GetString();
 
   std::vector<int64_t> offline_ids;
-  base::Value::ConstListView offline_ids_from_arg = args[1].GetListDeprecated();
-  for (size_t i = 0; i < offline_ids_from_arg.size(); i++) {
-    std::string value = offline_ids_from_arg[i].GetString();
+  const base::Value::List& offline_ids_from_arg = args[1].GetList();
+  for (const auto& arg : offline_ids_from_arg) {
+    std::string value = arg.GetString();
     int64_t int_value;
     base::StringToInt64(value, &int_value);
     offline_ids.push_back(int_value);
@@ -115,9 +115,9 @@ void OfflineInternalsUIMessageHandler::HandleDeleteSelectedRequests(
   std::string callback_id = args[0].GetString();
 
   std::vector<int64_t> offline_ids;
-  base::Value::ConstListView offline_ids_from_arg = args[1].GetListDeprecated();
-  for (size_t i = 0; i < offline_ids_from_arg.size(); i++) {
-    std::string value = offline_ids_from_arg[i].GetString();
+  const base::Value::List& offline_ids_from_arg = args[1].GetList();
+  for (const auto& arg : offline_ids_from_arg) {
+    std::string value = arg.GetString();
     int64_t int_value;
     base::StringToInt64(value, &int_value);
     offline_ids.push_back(int_value);
@@ -151,22 +151,20 @@ void OfflineInternalsUIMessageHandler::HandleDeletedRequestsCallback(
 void OfflineInternalsUIMessageHandler::HandleStoredPagesCallback(
     std::string callback_id,
     const offline_pages::MultipleOfflinePageItemResult& pages) {
-  std::vector<base::Value> results;
+  base::Value::List results;
   for (const auto& page : pages) {
-    base::Value offline_page(base::Value::Type::DICTIONARY);
-    offline_page.SetStringKey("onlineUrl", page.url.spec());
-    offline_page.SetStringKey("namespace", page.client_id.name_space);
-    offline_page.SetDoubleKey("size", page.file_size);
-    offline_page.SetStringKey("id", std::to_string(page.offline_id));
-    offline_page.SetStringKey("filePath", page.file_path.MaybeAsASCII());
-    offline_page.SetDoubleKey("creationTime", page.creation_time.ToJsTime());
-    offline_page.SetDoubleKey("lastAccessTime",
-                              page.last_access_time.ToJsTime());
-    offline_page.SetIntKey("accessCount", page.access_count);
-    offline_page.SetStringKey("originalUrl",
-                              page.original_url_if_different.spec());
-    offline_page.SetStringKey("requestOrigin", page.request_origin);
-    results.push_back(std::move(offline_page));
+    base::Value::Dict offline_page;
+    offline_page.Set("onlineUrl", page.url.spec());
+    offline_page.Set("namespace", page.client_id.name_space);
+    offline_page.Set("size", static_cast<int>(page.file_size));
+    offline_page.Set("id", std::to_string(page.offline_id));
+    offline_page.Set("filePath", page.file_path.MaybeAsASCII());
+    offline_page.Set("creationTime", page.creation_time.ToJsTime());
+    offline_page.Set("lastAccessTime", page.last_access_time.ToJsTime());
+    offline_page.Set("accessCount", page.access_count);
+    offline_page.Set("originalUrl", page.original_url_if_different.spec());
+    offline_page.Set("requestOrigin", page.request_origin);
+    results.Append(std::move(offline_page));
   }
   // Sort by creation order.
   std::sort(results.begin(), results.end(), [](const auto& a, const auto& b) {
@@ -174,29 +172,24 @@ void OfflineInternalsUIMessageHandler::HandleStoredPagesCallback(
            b.FindKey({"creationTime"})->GetDouble();
   });
 
-  ResolveJavascriptCallback(base::Value(callback_id),
-                            base::Value(std::move(results)));
+  ResolveJavascriptCallback(base::Value(callback_id), results);
 }
 
 void OfflineInternalsUIMessageHandler::HandleRequestQueueCallback(
     std::string callback_id,
     std::vector<std::unique_ptr<offline_pages::SavePageRequest>> requests) {
-  base::ListValue save_page_requests;
+  base::Value::List save_page_requests;
   for (const auto& request : requests) {
-    auto save_page_request = std::make_unique<base::DictionaryValue>();
-    save_page_request->SetStringKey("onlineUrl", request->url().spec());
-    save_page_request->SetDoubleKey("creationTime",
-                                    request->creation_time().ToJsTime());
-    save_page_request->SetStringKey("status", GetStringFromSavePageStatus());
-    save_page_request->SetStringKey("namespace",
-                                    request->client_id().name_space);
-    save_page_request->SetDoubleKey("lastAttemptTime",
-                                    request->last_attempt_time().ToJsTime());
-    save_page_request->SetStringKey("id",
-                                    std::to_string(request->request_id()));
-    save_page_request->SetStringKey("originalUrl",
-                                    request->original_url().spec());
-    save_page_request->SetStringKey("requestOrigin", request->request_origin());
+    base::Value::Dict save_page_request;
+    save_page_request.Set("onlineUrl", request->url().spec());
+    save_page_request.Set("creationTime", request->creation_time().ToJsTime());
+    save_page_request.Set("status", GetStringFromSavePageStatus());
+    save_page_request.Set("namespace", request->client_id().name_space);
+    save_page_request.Set("lastAttemptTime",
+                          request->last_attempt_time().ToJsTime());
+    save_page_request.Set("id", base::NumberToString(request->request_id()));
+    save_page_request.Set("originalUrl", request->original_url().spec());
+    save_page_request.Set("requestOrigin", request->request_origin());
     save_page_requests.Append(std::move(save_page_request));
   }
   ResolveJavascriptCallback(base::Value(callback_id), save_page_requests);
@@ -212,7 +205,7 @@ void OfflineInternalsUIMessageHandler::HandleGetRequestQueue(
         &OfflineInternalsUIMessageHandler::HandleRequestQueueCallback,
         weak_ptr_factory_.GetWeakPtr(), callback_id));
   } else {
-    base::ListValue results;
+    base::Value::List results;
     ResolveJavascriptCallback(base::Value(callback_id), results);
   }
 }
@@ -227,7 +220,7 @@ void OfflineInternalsUIMessageHandler::HandleGetStoredPages(
         &OfflineInternalsUIMessageHandler::HandleStoredPagesCallback,
         weak_ptr_factory_.GetWeakPtr(), callback_id));
   } else {
-    base::ListValue results;
+    base::Value::List results;
     ResolveJavascriptCallback(base::Value(callback_id), results);
   }
 }
@@ -455,20 +448,20 @@ void OfflineInternalsUIMessageHandler::HandleGetLoggingState(
   AllowJavascript();
   const base::Value& callback_id = args[0];
 
-  base::DictionaryValue result;
-  result.SetBoolKey("modelIsLogging",
-                    offline_page_model_
-                        ? offline_page_model_->GetLogger()->GetIsLogging()
-                        : false);
-  result.SetBoolKey("queueIsLogging",
-                    request_coordinator_
-                        ? request_coordinator_->GetLogger()->GetIsLogging()
-                        : false);
+  base::Value::Dict result;
+  result.Set("modelIsLogging",
+             offline_page_model_
+                 ? offline_page_model_->GetLogger()->GetIsLogging()
+                 : false);
+  result.Set("queueIsLogging",
+             request_coordinator_
+                 ? request_coordinator_->GetLogger()->GetIsLogging()
+                 : false);
   bool prefetch_logging = false;
   if (prefetch_service_) {
     prefetch_logging = prefetch_service_->GetLogger()->GetIsLogging();
   }
-  result.SetBoolKey("prefetchIsLogging", prefetch_logging);
+  result.Set("prefetchIsLogging", prefetch_logging);
   ResolveJavascriptCallback(callback_id, result);
 }
 
@@ -486,7 +479,7 @@ void OfflineInternalsUIMessageHandler::HandleGetEventLogs(
     prefetch_service_->GetLogger()->GetLogs(&logs);
   std::sort(logs.begin(), logs.end());
 
-  base::ListValue result;
+  base::Value::List result;
   for (const std::string& log : logs) {
     result.Append(log);
   }

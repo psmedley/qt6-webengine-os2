@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/time/time.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -71,7 +72,7 @@ class BitmapCursor : public PlatformCursor {
 
   // Platform cursor data.  Having this non-nullptr means that this cursor
   // is supplied by the platform.
-  void* const platform_data_ = nullptr;
+  const raw_ptr<void> platform_data_ = nullptr;
 
   float cursor_image_scale_factor_ = 1.f;
 };

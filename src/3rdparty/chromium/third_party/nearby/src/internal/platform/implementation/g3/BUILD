@@ -45,6 +45,7 @@ cc_library(
         "@com_google_glog//:glog",
         "@com_google_nisaba//nisaba/port:thread_pool",
     ],
+    alwayslink = 1,
 )
 
 cc_library(
@@ -55,6 +56,8 @@ cc_library(
         "ble_v2.cc",
         "bluetooth_adapter.cc",
         "bluetooth_classic.cc",
+        "credential_storage_impl.cc",
+        "wifi_hotspot.cc",
         "wifi_lan.cc",
     ],
     hdrs = [
@@ -62,6 +65,8 @@ cc_library(
         "ble_v2.h",
         "bluetooth_adapter.h",
         "bluetooth_classic.h",
+        "credential_storage_impl.h",
+        "wifi_hotspot.h",
         "wifi_lan.h",
     ],
     defines = ["NO_WEBRTC"],
@@ -72,8 +77,10 @@ cc_library(
         "//internal/platform:cancellation_flag",
         "//internal/platform:logging",
         "//internal/platform:test_util",
+        "//internal/platform:uuid",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation/shared:count_down_latch",
+        "//internal/proto:credential_cc_proto",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -109,14 +116,17 @@ cc_library(
     visibility = [
         "//connections:__subpackages__",
         "//internal/analytics:__subpackages__",
+        "//internal/crypto:__subpackages__",
         "//internal/platform:__subpackages__",
         "//internal/proto/analytics:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
+        "//presence:__subpackages__",
     ],
     deps = [
         ":comm",
         ":crypto",  # build_cleaner: keep
         ":types",
+        "//file/base:path",
         "//internal/platform:test_util",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",

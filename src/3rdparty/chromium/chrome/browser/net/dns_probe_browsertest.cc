@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -409,7 +409,8 @@ class DnsProbeCurrentSecureConfigFailingProbesTest
     // Mark as not enterprise managed to prevent the secure DNS mode from
     // being downgraded to off.
     base::win::ScopedDomainStateForTesting scoped_domain(false);
-    EXPECT_FALSE(base::IsMachineExternallyManaged());
+    // TODO(crbug.com/1339062): What is the correct function to use here?
+    EXPECT_FALSE(base::win::IsEnrolledToDomain());
 #endif
 
     // Set the mocked policy provider to act as if no policies are in use by

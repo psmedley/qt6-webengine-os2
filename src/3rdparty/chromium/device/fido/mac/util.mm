@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,23 +43,26 @@ namespace {
 
 // Returns the signature counter to use in the authenticatorData.
 std::array<uint8_t, 4> MakeSignatureCounter(
-    CredentialMetadata::Version version) {
+    CredentialMetadata::SignCounter counter_type) {
   // For current credentials, the counter is fixed at 0.
-  if (version >= CredentialMetadata::Version::kV2) {
-    return {0, 0, 0, 0};
+  switch (counter_type) {
+    case CredentialMetadata::SignCounter::kTimestamp: {
+      // Legacy credentials use a timestamp-based counter. RPs expect a non-zero
+      // counter to be increasing with each assertion, so we can't fix the
+      // counter at 0 for old credentials. Because of the conversion to a 32-bit
+      // unsigned integer, the counter will overflow in the year 2108.
+      uint32_t sign_counter =
+          static_cast<uint32_t>(base::Time::Now().ToDoubleT());
+      return std::array<uint8_t, 4>{
+          static_cast<uint8_t>((sign_counter >> 24) & 0xff),
+          static_cast<uint8_t>((sign_counter >> 16) & 0xff),
+          static_cast<uint8_t>((sign_counter >> 8) & 0xff),
+          static_cast<uint8_t>(sign_counter & 0xff),
+      };
+    }
+    case CredentialMetadata::SignCounter::kZero:
+      return {0, 0, 0, 0};
   }
-
-  // Legacy credentials use a timestamp-based counter. RPs expect a non-zero
-  // counter to be increasing with each assertion, so we can't fix the counter
-  // at 0 for old credentials. Because of the conversion to a 32-bit unsigned
-  // integer, the counter will overflow in the year 2108.
-  uint32_t sign_counter = static_cast<uint32_t>(base::Time::Now().ToDoubleT());
-  return std::array<uint8_t, 4>{
-      static_cast<uint8_t>((sign_counter >> 24) & 0xff),
-      static_cast<uint8_t>((sign_counter >> 16) & 0xff),
-      static_cast<uint8_t>((sign_counter >> 8) & 0xff),
-      static_cast<uint8_t>(sign_counter & 0xff),
-  };
 }
 
 }  // namespace
@@ -85,7 +88,7 @@ absl::optional<AttestedCredentialData> MakeAttestedCredentialData(
 }
 
 AuthenticatorData MakeAuthenticatorData(
-    CredentialMetadata::Version version,
+    CredentialMetadata::SignCounter counter_type,
     const std::string& rp_id,
     absl::optional<AttestedCredentialData> attested_credential_data) {
   const uint8_t flags =
@@ -95,14 +98,14 @@ AuthenticatorData MakeAuthenticatorData(
            ? static_cast<uint8_t>(AuthenticatorData::Flag::kAttestation)
            : 0);
   return AuthenticatorData(fido_parsing_utils::CreateSHA256Hash(rp_id), flags,
-                           MakeSignatureCounter(version),
+                           MakeSignatureCounter(counter_type),
                            std::move(attested_credential_data));
 }
 
 absl::optional<std::vector<uint8_t>> GenerateSignature(
     const AuthenticatorData& authenticator_data,
     base::span<const uint8_t, kClientDataHashLength> client_data_hash,
-    SecKeyRef private_key) API_AVAILABLE(macosx(10.12.2)) {
+    SecKeyRef private_key) {
   const std::vector<uint8_t> serialized_authenticator_data =
       authenticator_data.SerializeToByteArray();
   size_t capacity =
@@ -130,8 +133,7 @@ absl::optional<std::vector<uint8_t>> GenerateSignature(
 // SecKeyRefToECPublicKey converts a SecKeyRef for a public key into an
 // equivalent |PublicKey| instance. It returns |nullptr| if the key cannot
 // be converted.
-std::unique_ptr<PublicKey> SecKeyRefToECPublicKey(SecKeyRef public_key_ref)
-    API_AVAILABLE(macosx(10.12.2)) {
+std::unique_ptr<PublicKey> SecKeyRefToECPublicKey(SecKeyRef public_key_ref) {
   CHECK(public_key_ref);
   ScopedCFTypeRef<CFErrorRef> err;
   ScopedCFTypeRef<CFDataRef> data_ref(
@@ -153,22 +155,9 @@ std::unique_ptr<PublicKey> SecKeyRefToECPublicKey(SecKeyRef public_key_ref)
 }
 
 CodeSigningState ProcessIsSigned() {
-  // SecTaskCopySigningIdentifier is not decorated with availability attributes
-  // in the header, but it was only introduced in 10.12. For prior versions,
-  // `nullopt` is returned to indicate that the signing status of the process
-  // is unknown.
-  //
-  // `@available` cannot be negated, so the code is a little awkward around
-  // that.
-
-  base::ScopedCFTypeRef<SecTaskRef> task;
-  if (@available(macOS 10.12, *)) {
-    task.reset(SecTaskCreateFromSelf(nullptr));
-    if (!task) {
-      return CodeSigningState::kNotSigned;
-    }
-  } else {
-    return CodeSigningState::kUnknown;
+  base::ScopedCFTypeRef<SecTaskRef> task(SecTaskCreateFromSelf(nullptr));
+  if (!task) {
+    return CodeSigningState::kNotSigned;
   }
 
   base::ScopedCFTypeRef<CFStringRef> sign_id(

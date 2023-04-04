@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,6 +69,7 @@ class Keyboard : public ui::EventHandler,
   void OnSurfaceFocused(Surface* gained_focus,
                         Surface* lost_focus,
                         bool has_focused_surface) override;
+  void OnKeyboardModifierUpdated() override;
 
   // Overridden from ash::KeyboardControllerObserver:
   void OnKeyboardEnableFlagsChanged(

@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ constexpr auto kExtraGPUJobTimeForTesting = base::Milliseconds(500);
 // out by the OS scheduler. The task on windows is simiulated by reading
 // TimeTicks instead of Sleep().
 void SimpleTask(base::TimeDelta duration, base::TimeDelta extra_time) {
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   auto start_timetick = base::TimeTicks::Now();
   do {
   } while ((base::TimeTicks::Now() - start_timetick) < duration);
@@ -146,7 +146,7 @@ void GpuWatchdogTest::SetUp() {
       // model_ver_str = "MacBookProXX,X", model_ver_str = "XX,X"
       std::string model_ver_str = model_str.substr(model_version_pos);
       int major_model_ver = std::atoi(model_ver_str.c_str());
-      // For version < 14,1
+      // For model version < 14,1
       if (major_model_ver < 14) {
         timeout_type = kSlow;
       }
@@ -267,6 +267,26 @@ TEST_F(GpuWatchdogTest, GpuInitializationHang) {
   // Gpu hangs. OnInitComplete() is not called
   bool result = watchdog_thread_->IsGpuHangDetectedForTesting();
   EXPECT_TRUE(result);
+  // retry on failure.
+}
+
+// GPU Hang In Initialization.
+TEST_F(GpuWatchdogTest, GpuInitializationHangWithReportOnly) {
+  auto allowed_time =
+      timeout_ * (kInitFactor + 1) + full_thread_time_on_windows_;
+
+  watchdog_thread_->EnableReportOnlyMode();
+
+  // GPU init takes longer than timeout.
+  SimpleTask(allowed_time, /*extra_time=*/extra_gpu_job_time_);
+
+  // Gpu hangs. OnInitComplete() is not called
+  bool result = watchdog_thread_->IsGpuHangDetectedWithoutKillForTesting();
+  bool non_result = watchdog_thread_->IsGpuHangDetectedForTesting();
+  EXPECT_TRUE(result);
+  EXPECT_FALSE(non_result);
+
+  watchdog_thread_->DisableReportOnlyMode();
   // retry on failure.
 }
 

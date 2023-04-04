@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_future.h"
 #include "build/build_config.h"
 #include "components/services/storage/public/cpp/buckets/bucket_locator.h"
 #include "content/browser/file_system_access/file_system_access_write_lock_manager.h"
@@ -149,6 +150,7 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, IsSafePathComponent) {
       "My Computer.{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
       "a\\a",
       "a.lnk",
+      "a.url",
       "a/a",
       "C:\\",
       "C:/",
@@ -204,8 +206,8 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, GetEntries) {
   constexpr const char* kSafeNames[] = {"a", "a.txt", "My Computer", "lnk.txt",
                                         "a.local"};
   constexpr const char* kUnsafeNames[] = {
-      "con",  "con.zip", "NUL",   "a.",
-      "a\"a", "a . .",   "a.lnk", "My Computer.{a}",
+      "con",   "con.zip",         "NUL",   "a.", "a\"a", "a . .",
+      "a.lnk", "My Computer.{a}", "a.url",
   };
   for (const char* name : kSafeNames) {
     ASSERT_TRUE(base::WriteFile(dir_.GetPath().AppendASCII(name), "data"))
@@ -247,37 +249,28 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, GetEntries) {
 TEST_F(FileSystemAccessDirectoryHandleImplTest, GetFile_NoReadAccess) {
   ASSERT_TRUE(base::WriteFile(dir_.GetPath().AppendASCII("filename"), "data"));
 
-  base::RunLoop loop;
-  denied_handle_->GetFile(
-      "filename", /*create=*/false,
-      base::BindLambdaForTesting(
-          [](blink::mojom::FileSystemAccessErrorPtr result,
-             mojo::PendingRemote<blink::mojom::FileSystemAccessFileHandle>
-                 file_handle) {
-            EXPECT_EQ(result->status,
-                      blink::mojom::FileSystemAccessStatus::kPermissionDenied);
-            EXPECT_FALSE(file_handle.is_valid());
-          })
-          .Then(loop.QuitClosure()));
-  loop.Run();
+  base::test::TestFuture<
+      blink::mojom::FileSystemAccessErrorPtr,
+      mojo::PendingRemote<blink::mojom::FileSystemAccessFileHandle>>
+      future;
+  denied_handle_->GetFile("filename", /*create=*/false, future.GetCallback());
+  EXPECT_EQ(future.Get<0>()->status,
+            blink::mojom::FileSystemAccessStatus::kPermissionDenied);
+  EXPECT_FALSE(future.Get<1>().is_valid());
 }
 
 TEST_F(FileSystemAccessDirectoryHandleImplTest, GetDirectory_NoReadAccess) {
   ASSERT_TRUE(base::CreateDirectory(dir_.GetPath().AppendASCII("dirname")));
 
-  base::RunLoop loop;
-  denied_handle_->GetDirectory(
-      "GetDirectory_NoReadAccess", /*create=*/false,
-      base::BindLambdaForTesting(
-          [](blink::mojom::FileSystemAccessErrorPtr result,
-             mojo::PendingRemote<blink::mojom::FileSystemAccessDirectoryHandle>
-                 dir_handle) {
-            EXPECT_EQ(result->status,
-                      blink::mojom::FileSystemAccessStatus::kPermissionDenied);
-            EXPECT_FALSE(dir_handle.is_valid());
-          })
-          .Then(loop.QuitClosure()));
-  loop.Run();
+  base::test::TestFuture<
+      blink::mojom::FileSystemAccessErrorPtr,
+      mojo::PendingRemote<blink::mojom::FileSystemAccessDirectoryHandle>>
+      future;
+  denied_handle_->GetDirectory("GetDirectory_NoReadAccess", /*create=*/false,
+                               future.GetCallback());
+  EXPECT_EQ(future.Get<0>()->status,
+            blink::mojom::FileSystemAccessStatus::kPermissionDenied);
+  EXPECT_FALSE(future.Get<1>().is_valid());
 }
 
 TEST_F(FileSystemAccessDirectoryHandleImplTest, GetEntries_NoReadAccess) {
@@ -306,16 +299,12 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, Remove_NoWriteAccess) {
 
   auto handle = GetHandleWithPermissions(dir, /*read=*/true, /*write=*/false);
 
-  base::RunLoop loop;
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr> future;
   handle->Remove(
-      /*recurse=*/false,
-      base::BindLambdaForTesting([&dir](blink::mojom::FileSystemAccessErrorPtr
-                                            result) {
-        EXPECT_EQ(result->status,
-                  blink::mojom::FileSystemAccessStatus::kPermissionDenied);
-        EXPECT_TRUE(base::DirectoryExists(dir));
-      }).Then(loop.QuitClosure()));
-  loop.Run();
+      /*recurse=*/false, future.GetCallback());
+  EXPECT_EQ(future.Get()->status,
+            blink::mojom::FileSystemAccessStatus::kPermissionDenied);
+  EXPECT_TRUE(base::DirectoryExists(dir));
 }
 
 TEST_F(FileSystemAccessDirectoryHandleImplTest, Remove_HasWriteAccess) {
@@ -324,15 +313,11 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, Remove_HasWriteAccess) {
 
   auto handle = GetHandleWithPermissions(dir, /*read=*/true, /*write=*/true);
 
-  base::RunLoop loop;
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr> future;
   handle->Remove(
-      /*recurse=*/false,
-      base::BindLambdaForTesting([&dir](blink::mojom::FileSystemAccessErrorPtr
-                                            result) {
-        EXPECT_EQ(result->status, blink::mojom::FileSystemAccessStatus::kOk);
-        EXPECT_FALSE(base::DirectoryExists(dir));
-      }).Then(loop.QuitClosure()));
-  loop.Run();
+      /*recurse=*/false, future.GetCallback());
+  EXPECT_EQ(future.Get()->status, blink::mojom::FileSystemAccessStatus::kOk);
+  EXPECT_FALSE(base::DirectoryExists(dir));
 }
 
 TEST_F(FileSystemAccessDirectoryHandleImplTest, RemoveEntry) {
@@ -351,21 +336,14 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, RemoveEntry) {
     EXPECT_EQ(handle->GetChildURL(base_name, &file_url)->file_error,
               base::File::Error::FILE_OK);
 
-    base::RunLoop loop;
-    handle->RemoveEntry(
-        base_name,
-        /*recurse=*/false,
-        base::BindLambdaForTesting([&](blink::mojom::FileSystemAccessErrorPtr
-                                           result) {
-          EXPECT_EQ(result->status, blink::mojom::FileSystemAccessStatus::kOk);
-          EXPECT_FALSE(base::PathExists(file));
-          // The write lock acquired during the operation should be released by
-          // the time the callback runs.
-          auto write_lock =
-              manager_->TakeWriteLock(file_url, WriteLockType::kExclusive);
-          EXPECT_TRUE(write_lock.has_value());
-        }).Then(loop.QuitClosure()));
-    loop.Run();
+    base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr> future;
+    handle->RemoveEntry(base_name,
+                        /*recurse=*/false, future.GetCallback());
+    EXPECT_EQ(future.Get()->status, blink::mojom::FileSystemAccessStatus::kOk);
+    EXPECT_FALSE(base::PathExists(file));
+    // The write lock acquired during the operation should be released by
+    // the time the callback runs.
+    EXPECT_TRUE(manager_->TakeWriteLock(file_url, WriteLockType::kExclusive));
   }
 
   // Acquire an exclusive lock on a file before removing to similate when the
@@ -377,20 +355,15 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, RemoveEntry) {
               base::File::Error::FILE_OK);
     auto write_lock =
         manager_->TakeWriteLock(file_url, WriteLockType::kExclusive);
-    EXPECT_TRUE(write_lock.has_value());
+    EXPECT_TRUE(write_lock);
 
-    base::RunLoop loop;
+    base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr> future;
     handle->RemoveEntry(base_name,
-                        /*recurse=*/false,
-                        base::BindLambdaForTesting(
-                            [&](blink::mojom::FileSystemAccessErrorPtr result) {
-                              EXPECT_EQ(result->status,
-                                        blink::mojom::FileSystemAccessStatus::
-                                            kNoModificationAllowedError);
-                              EXPECT_TRUE(base::PathExists(file));
-                            })
-                            .Then(loop.QuitClosure()));
-    loop.Run();
+                        /*recurse=*/false, future.GetCallback());
+    EXPECT_EQ(
+        future.Get()->status,
+        blink::mojom::FileSystemAccessStatus::kNoModificationAllowedError);
+    EXPECT_TRUE(base::PathExists(file));
   }
 
   // Acquire a shared lock on a file before removing to simulate when the file
@@ -401,19 +374,14 @@ TEST_F(FileSystemAccessDirectoryHandleImplTest, RemoveEntry) {
     EXPECT_EQ(handle->GetChildURL(base_name, &file_url)->file_error,
               base::File::Error::FILE_OK);
     auto write_lock = manager_->TakeWriteLock(file_url, WriteLockType::kShared);
-    EXPECT_TRUE(write_lock.has_value());
-    EXPECT_TRUE(write_lock.value()->type() == WriteLockType::kShared);
+    ASSERT_TRUE(write_lock);
+    EXPECT_TRUE(write_lock->type() == WriteLockType::kShared);
 
-    base::RunLoop loop;
-    handle->RemoveEntry(
-        base_name,
-        /*recurse=*/false,
-        base::BindLambdaForTesting([&](blink::mojom::FileSystemAccessErrorPtr
-                                           result) {
-          EXPECT_EQ(result->status, blink::mojom::FileSystemAccessStatus::kOk);
-          EXPECT_FALSE(base::PathExists(file));
-        }).Then(loop.QuitClosure()));
-    loop.Run();
+    base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr> future;
+    handle->RemoveEntry(base_name,
+                        /*recurse=*/false, future.GetCallback());
+    EXPECT_EQ(future.Get()->status, blink::mojom::FileSystemAccessStatus::kOk);
+    EXPECT_FALSE(base::PathExists(file));
   }
 }
 

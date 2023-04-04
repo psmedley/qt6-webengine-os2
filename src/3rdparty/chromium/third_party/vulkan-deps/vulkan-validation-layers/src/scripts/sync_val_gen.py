@@ -77,8 +77,10 @@ def ParseAccessMasks(valid_usage_path, all_stages):
     expand_access_bits = {
         'VK_ACCESS_2_SHADING_RATE_IMAGE_READ_BIT_NV': ['VK_ACCESS_2_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR'],
         'VK_ACCESS_2_SHADER_WRITE_BIT': ['VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT'],
-        'VK_ACCESS_2_SHADER_READ_BIT': ['VK_ACCESS_2_UNIFORM_READ_BIT', 'VK_ACCESS_2_SHADER_SAMPLED_READ_BIT',
-                                            'VK_ACCESS_2_SHADER_STORAGE_READ_BIT'],
+        'VK_ACCESS_2_SHADER_READ_BIT': ['VK_ACCESS_2_UNIFORM_READ_BIT',
+                                        'VK_ACCESS_2_SHADER_SAMPLED_READ_BIT',
+                                        'VK_ACCESS_2_SHADER_STORAGE_READ_BIT',
+                                        'VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR'],
     }
     for extension_combo, vuid_list in vuid_dict['validation']['VkMemoryBarrier2'].items():
         for vuid in vuid_list:
@@ -172,7 +174,7 @@ def CreateStageAccessTable(stage_order, access_stage_table):
 
     return stage_access_table
 
-# Snipped from chapters/synchronization.txt -- tag v1.2.185
+# Snipped from chapters/synchronization.adoc -- tag v1.3.230
 # manual fixups:
 # - add back TOP_OF_PIPE and BOTTOM_OF_PIPE stages to everything
 # - sync2-ify stage names
@@ -212,8 +214,8 @@ ordering of the stages matching the order specified here:
 
   * ename:VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
   * ename:VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT
-  * ename:VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_NV
-  * ename:VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_NV
+  * ename:VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT
+  * ename:VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT
   * ename:VK_PIPELINE_STAGE_2_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR
   * ename:VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
   * ename:VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
@@ -259,6 +261,8 @@ unordered_stages =  [
   'VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR',
   'VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR',
   'VK_PIPELINE_STAGE_2_SUBPASS_SHADING_BIT_HUAWEI',
+  'VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV',
+  'VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT',
 ]
 
 pipeline_name_labels = {
@@ -439,8 +443,8 @@ VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT
 VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT
 VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT
 VK_PIPELINE_STAGE_2_FRAGMENT_DENSITY_PROCESS_BIT_EXT
-VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_NV
-VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_NV
+VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT
+VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT
 VK_PIPELINE_STAGE_2_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR
 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
@@ -458,6 +462,8 @@ VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
 VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR
 VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR
 VK_PIPELINE_STAGE_2_SUBPASS_SHADING_BIT_HUAWEI
+VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV
+VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT
 VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT
 VK_PIPELINE_STAGE_2_HOST_BIT
 '''
@@ -488,7 +494,7 @@ def InBitOrder(tag, enum_elem):
     return in_bit_order
 
 
-# Snipped from chapters/synchronization.txt -- tag v1.2.185
+# Snipped from chapters/synchronization.adoc -- tag v1.3.230
 # manual fixups:
 # - sync2-ify stage names
 # - remove ifdefs
@@ -525,12 +531,14 @@ snippet_pipeline_stages_supported = '''
 |ename:VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT           | ename:VK_QUEUE_GRAPHICS_BIT
 |ename:VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_NV            | ename:VK_QUEUE_GRAPHICS_BIT or ename:VK_QUEUE_COMPUTE_BIT
 |ename:VK_PIPELINE_STAGE_2_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR            | ename:VK_QUEUE_GRAPHICS_BIT
-|ename:VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_NV                   | ename:VK_QUEUE_GRAPHICS_BIT
-|ename:VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_NV                   | ename:VK_QUEUE_GRAPHICS_BIT
+|ename:VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT                   | ename:VK_QUEUE_GRAPHICS_BIT
+|ename:VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT                   | ename:VK_QUEUE_GRAPHICS_BIT
 |ename:VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | ename:VK_QUEUE_COMPUTE_BIT
 |ename:VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR           | ename:VK_QUEUE_COMPUTE_BIT
 |ename:VK_PIPELINE_STAGE_2_FRAGMENT_DENSITY_PROCESS_BIT_EXT     | ename:VK_QUEUE_GRAPHICS_BIT
 |ename:VK_PIPELINE_STAGE_2_SUBPASS_SHADING_BIT_HUAWEI         | ename:VK_QUEUE_GRAPHICS_BIT
+|ename:VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV                | ename:VK_QUEUE_OPTICAL_FLOW_BIT_NV
+|ename:VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT             | ename:VK_QUEUE_COMPUTE_BIT
 |ename:VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR                 | ename:VK_QUEUE_VIDEO_DECODE_BIT_KHR
 |ename:VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR                 | ename:VK_QUEUE_VIDEO_ENCODE_BIT_KHR
 |====
@@ -877,8 +885,8 @@ def ShaderStageAndSyncStageAccessMap(config):
         output.append(ShaderStageToSyncStageAccess('MISS_BIT_KHR', 'RAY_TRACING_SHADER'))
         output.append(ShaderStageToSyncStageAccess('INTERSECTION_BIT_KHR', 'RAY_TRACING_SHADER'))
         output.append(ShaderStageToSyncStageAccess('CALLABLE_BIT_KHR', 'RAY_TRACING_SHADER'))
-        output.append(ShaderStageToSyncStageAccess('TASK_BIT_NV', 'TASK_SHADER_NV'))
-        output.append(ShaderStageToSyncStageAccess('MESH_BIT_NV', 'MESH_SHADER_NV'))
+        output.append(ShaderStageToSyncStageAccess('TASK_BIT_EXT', 'TASK_SHADER_EXT'))
+        output.append(ShaderStageToSyncStageAccess('MESH_BIT_EXT', 'MESH_SHADER_EXT'))
         output.append('};\n')
     return output
 

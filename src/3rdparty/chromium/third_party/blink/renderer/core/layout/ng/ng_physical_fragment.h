@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/layout/geometry/physical_size.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_anchor_query.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_break_token.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_ink_overflow.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_link.h"
@@ -86,8 +87,7 @@ class CORE_EXPORT NGPhysicalFragment
                      NGFragmentType type,
                      unsigned sub_type);
 
-  NGPhysicalFragment(const NGPhysicalFragment& other,
-                     bool recalculate_layout_overflow);
+  NGPhysicalFragment(const NGPhysicalFragment& other);
 
   ~NGPhysicalFragment();
 
@@ -115,7 +115,12 @@ class CORE_EXPORT NGPhysicalFragment
     return IsBox() && BoxType() == NGBoxType::kColumnBox;
   }
   bool IsPageBox() const { return IsBox() && BoxType() == NGBoxType::kPageBox; }
-  bool IsFragmentainerBox() const { return IsColumnBox() || IsPageBox(); }
+  static bool IsFragmentainerBoxType(NGBoxType type) {
+    return type == NGBoxType::kColumnBox || type == NGBoxType::kPageBox;
+  }
+  bool IsFragmentainerBox() const {
+    return IsBox() && IsFragmentainerBoxType(BoxType());
+  }
   bool IsColumnSpanAll() const {
     if (const auto* box = DynamicTo<LayoutBox>(GetLayoutObject()))
       return box->IsColumnSpanAll();
@@ -142,6 +147,11 @@ class CORE_EXPORT NGPhysicalFragment
   }
   bool IsFloatingOrOutOfFlowPositioned() const {
     return IsFloating() || IsOutOfFlowPositioned();
+  }
+  bool IsPositioned() const {
+    if (const LayoutObject* layout_object = GetLayoutObject())
+      return layout_object->IsPositioned();
+    return false;
   }
   // Return true if this is the legend child of a fieldset that gets special
   // treatment (i.e. placed over the block-start border).
@@ -170,6 +180,9 @@ class CORE_EXPORT NGPhysicalFragment
   bool IsBlockFlow() const;
   bool IsAnonymousBlock() const {
     return IsCSSBox() && layout_object_->IsAnonymousBlock();
+  }
+  bool IsFrameSet() const {
+    return IsCSSBox() && layout_object_->IsLayoutNGFrameSet();
   }
   bool IsListMarker() const {
     return IsCSSBox() && layout_object_->IsLayoutNGOutsideListMarker();
@@ -216,6 +229,13 @@ class CORE_EXPORT NGPhysicalFragment
   // an optional fieldset contents wrapper fragment (which holds everything
   // inside the fieldset except the rendered legend).
   bool IsFieldsetContainer() const { return is_fieldset_container_; }
+
+  // Return true if this is the layout root fragment for pagination
+  // (aka. printing).
+  bool IsPaginatedRoot() const {
+    return layout_object_->IsLayoutView() && IsCSSBox() &&
+           GetDocument().Printing();
+  }
 
   // Returns whether the fragment is legacy layout root.
   bool IsLegacyLayoutRoot() const { return is_legacy_layout_root_; }
@@ -287,17 +307,16 @@ class CORE_EXPORT NGPhysicalFragment
     return IsCSSBox() ? layout_object_->NonPseudoNode() : nullptr;
   }
 
-  bool IsInSelfHitTestingPhase(HitTestAction action) const {
+  bool IsInSelfHitTestingPhase(HitTestPhase phase) const {
     if (IsFragmentainerBox())
       return false;
     if (const auto* box = DynamicTo<LayoutBox>(GetLayoutObject()))
-      return box->IsInSelfHitTestingPhase(action);
+      return box->IsInSelfHitTestingPhase(phase);
     if (IsInlineBox())
-      return action == kHitTestForeground;
+      return phase == HitTestPhase::kForeground;
     // Assuming this is some sort of container, e.g. a fragmentainer (they don't
     // have a LayoutObject associated).
-    return action == kHitTestBlockBackground ||
-           action == kHitTestChildBlockBackground;
+    return phase == HitTestPhase::kSelfBlockBackground;
   }
 
   // Whether there is a PaintLayer associated with the fragment.
@@ -374,18 +393,7 @@ class CORE_EXPORT NGPhysicalFragment
 
   // Return true if this fragment is monolithic, as far as block fragmentation
   // is concerned.
-  bool IsMonolithic() const {
-    // Line boxes are monolithic, except for line boxes that are just there to
-    // contain a block inside an inline, in which case the anonymous block child
-    // wrapper inside the line is breakable.
-    if (IsLineBox())
-      return !IsBlockInInline();
-    const LayoutObject* layout_object = GetLayoutObject();
-    if (!layout_object || !IsBox() || !layout_object->IsBox())
-      return false;
-    return To<LayoutBox>(layout_object)->GetNGPaginationBreakability() ==
-           LayoutBox::kForbidBreaks;
-  }
+  bool IsMonolithic() const;
 
   // GetLayoutObject should only be used when necessary for compatibility
   // with LegacyLayout.
@@ -509,8 +517,7 @@ class CORE_EXPORT NGPhysicalFragment
     PostLayoutChildLinkList(wtf_size_t count, const NGLink* buffer)
         : count_(count), buffer_(buffer) {}
 
-    class ConstIterator
-        : public std::iterator<std::input_iterator_tag, NGLink> {
+    class ConstIterator {
       STACK_ALLOCATED();
 
      public:
@@ -532,6 +539,11 @@ class CORE_EXPORT NGPhysicalFragment
         ++current_;
         SkipInvalidAndSetPostLayout();
         return *this;
+      }
+      ConstIterator operator++(int) {
+        ConstIterator copy = *this;
+        ++*this;
+        return copy;
       }
       bool operator==(const ConstIterator& other) const {
         return current_ == other.current_;
@@ -600,8 +612,10 @@ class CORE_EXPORT NGPhysicalFragment
 
   struct OutOfFlowData : public GarbageCollected<OutOfFlowData> {
    public:
+    virtual ~OutOfFlowData() = default;
     virtual void Trace(Visitor* visitor) const;
     HeapVector<NGPhysicalOutOfFlowPositionedNode> oof_positioned_descendants;
+    NGPhysicalAnchorQuery anchor_query;
   };
 
   // Returns true if some child is OOF in the fragment tree. This happens if
@@ -619,15 +633,19 @@ class CORE_EXPORT NGPhysicalFragment
   }
 
   bool HasOutOfFlowPositionedDescendants() const {
-    return oof_data_ && !oof_data_->oof_positioned_descendants.IsEmpty();
+    return oof_data_ && !oof_data_->oof_positioned_descendants.empty();
   }
 
   base::span<NGPhysicalOutOfFlowPositionedNode> OutOfFlowPositionedDescendants()
-      const {
-    if (!HasOutOfFlowPositionedDescendants())
-      return base::span<NGPhysicalOutOfFlowPositionedNode>();
-    return {oof_data_->oof_positioned_descendants.data(),
-            oof_data_->oof_positioned_descendants.size()};
+      const;
+
+  bool HasAnchorQuery() const {
+    return oof_data_ && !oof_data_->anchor_query.IsEmpty();
+  }
+  const NGPhysicalAnchorQuery* AnchorQuery() const {
+    if (!HasAnchorQuery())
+      return nullptr;
+    return &oof_data_->anchor_query;
   }
 
   NGFragmentedOutOfFlowData* FragmentedOutOfFlowData() const;
@@ -683,7 +701,7 @@ class CORE_EXPORT NGPhysicalFragment
   OutOfFlowData* CloneOutOfFlowData() const;
 
   Member<LayoutObject> layout_object_;
-  const PhysicalSize size_;
+  PhysicalSize size_;
 
   unsigned has_floating_descendants_for_paint_ : 1;
   unsigned has_adjoining_object_descendants_ : 1;
@@ -712,8 +730,9 @@ class CORE_EXPORT NGPhysicalFragment
   unsigned is_legacy_layout_root_ : 1;
   unsigned is_painted_atomically_ : 1;
   unsigned has_collapsed_borders_ : 1;
-  unsigned has_baseline_ : 1;
+  unsigned has_first_baseline_ : 1;
   unsigned has_last_baseline_ : 1;
+  unsigned use_last_baseline_for_inline_baseline_ : 1;
   const unsigned has_fragmented_out_of_flow_data_ : 1;
   const unsigned has_out_of_flow_fragment_child_ : 1;
   const unsigned has_out_of_flow_in_fragmentainer_subtree_ : 1;
@@ -722,7 +741,7 @@ class CORE_EXPORT NGPhysicalFragment
   unsigned base_direction_ : 1;  // TextDirection
 
   Member<const NGBreakToken> break_token_;
-  const Member<OutOfFlowData> oof_data_;
+  Member<OutOfFlowData> oof_data_;
 };
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const NGPhysicalFragment*);
@@ -749,6 +768,7 @@ CORE_EXPORT void ShowFragmentTree(
 
 // Output the fragment tree(s) from the entire document to the log.
 // See DumpFragmentTree(const LayoutObject& ...).
+CORE_EXPORT void ShowEntireFragmentTree(const blink::LayoutObject& target);
 CORE_EXPORT void ShowEntireFragmentTree(
     const blink::NGPhysicalFragment* target);
 #endif  // DCHECK_IS_ON()

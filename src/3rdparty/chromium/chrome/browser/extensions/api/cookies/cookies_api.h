@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/common/extensions/api/cookies.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
@@ -79,7 +80,7 @@ class CookiesEventRouter : public BrowserListObserver {
   void DispatchEvent(content::BrowserContext* context,
                      events::HistogramValue histogram_value,
                      const std::string& event_name,
-                     std::unique_ptr<base::ListValue> event_args,
+                     base::Value::List event_args,
                      const GURL& cookie_domain);
 
   raw_ptr<Profile> profile_;
@@ -113,6 +114,9 @@ class CookiesGetFunction : public ExtensionFunction {
       const net::CookieAccessResultList& cookie_list,
       const net::CookieAccessResultList& excluded_cookies);
 
+  // Notify the extension telemetry service when API is called.
+  void NotifyExtensionTelemetry();
+
   GURL url_;
   mojo::Remote<network::mojom::CookieManager> store_browser_cookie_manager_;
   std::unique_ptr<api::cookies::Get::Params> parsed_args_;
@@ -138,6 +142,9 @@ class CookiesGetAllFunction : public ExtensionFunction {
   void GetCookieListCallback(
       const net::CookieAccessResultList& cookie_list,
       const net::CookieAccessResultList& excluded_cookies);
+
+  // Notify the extension telemetry service when API is called.
+  void NotifyExtensionTelemetry();
 
   GURL url_;
   mojo::Remote<network::mojom::CookieManager> store_browser_cookie_manager_;

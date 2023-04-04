@@ -28,9 +28,9 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "fft.h"
 #include "get_bits.h"
-#include "internal.h"
 
 #include "on2avcdata.h"
 
@@ -839,10 +839,9 @@ static int on2avc_decode_subframe(On2AVCContext *c, const uint8_t *buf,
     return 0;
 }
 
-static int on2avc_decode_frame(AVCodecContext * avctx, void *data,
+static int on2avc_decode_frame(AVCodecContext * avctx, AVFrame *frame,
                                int *got_frame_ptr, AVPacket *avpkt)
 {
-    AVFrame *frame     = data;
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     On2AVCContext *c   = avctx->priv_data;
@@ -1007,15 +1006,15 @@ static av_cold int on2avc_decode_close(AVCodecContext *avctx)
 
 const FFCodec ff_on2avc_decoder = {
     .p.name         = "on2avc",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("On2 Audio for Video Codec"),
+    CODEC_LONG_NAME("On2 Audio for Video Codec"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_ON2AVC,
     .priv_data_size = sizeof(On2AVCContext),
     .init           = on2avc_decode_init,
-    .decode         = on2avc_decode_frame,
+    FF_CODEC_DECODE_CB(on2avc_decode_frame),
     .close          = on2avc_decode_close,
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
 };

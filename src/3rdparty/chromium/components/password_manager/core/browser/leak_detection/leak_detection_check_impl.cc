@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -211,10 +211,8 @@ void LeakDetectionCheckImpl::Start(const GURL& url,
   }
   payload_helper_->PreparePayload(
       base::UTF16ToUTF8(username_), base::UTF16ToUTF8(password_),
-      TimeCallback(
-          base::BindOnce(&LeakDetectionCheckImpl::OnRequestDataReady,
-                         weak_ptr_factory_.GetWeakPtr()),
-          "PasswordManager.LeakDetection.PrepareSingleLeakRequestTime"));
+      base::BindOnce(&LeakDetectionCheckImpl::OnRequestDataReady,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void LeakDetectionCheckImpl::OnAccessTokenRequestCompleted(

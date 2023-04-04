@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,8 +33,7 @@ class GeolocationPermissionContext : public PermissionContextBase {
     // Allows the delegate to override the context's DecidePermission() logic.
     // If this returns true, the base context's DecidePermission() will not be
     // called.
-    virtual bool DecidePermission(content::WebContents* web_contents,
-                                  const PermissionRequestID& id,
+    virtual bool DecidePermission(const PermissionRequestID& id,
                                   const GURL& requesting_origin,
                                   bool user_gesture,
                                   BrowserPermissionCallback* callback,
@@ -62,8 +61,7 @@ class GeolocationPermissionContext : public PermissionContextBase {
 
   ~GeolocationPermissionContext() override;
 
-  void DecidePermission(content::WebContents* web_contents,
-                        const PermissionRequestID& id,
+  void DecidePermission(const PermissionRequestID& id,
                         const GURL& requesting_origin,
                         const GURL& embedding_origin,
                         bool user_gesture,
@@ -81,7 +79,6 @@ class GeolocationPermissionContext : public PermissionContextBase {
   void UpdateTabContext(const PermissionRequestID& id,
                         const GURL& requesting_frame,
                         bool allowed) override;
-  bool IsRestrictedToSecureOrigins() const override;
 
   device::mojom::GeolocationControl* GetGeolocationControl();
 

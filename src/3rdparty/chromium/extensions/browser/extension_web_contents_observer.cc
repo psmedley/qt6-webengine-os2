@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/content_script_tracker.h"
@@ -85,15 +84,13 @@ void ExtensionWebContentsObserver::Initialize() {
 
   extension_frame_host_ = CreateExtensionFrameHost(web_contents());
 
-  web_contents()->ForEachRenderFrameHost(base::BindRepeating(
-      [](ExtensionWebContentsObserver* observer,
-         content::RenderFrameHost* render_frame_host) {
+  web_contents()->ForEachRenderFrameHost(
+      [this](content::RenderFrameHost* render_frame_host) {
         // We only initialize the frame if the renderer counterpart is live;
         // otherwise we wait for the RenderFrameCreated notification.
         if (render_frame_host->IsRenderFrameLive())
-          observer->InitializeRenderFrame(render_frame_host);
-      },
-      this));
+          InitializeRenderFrame(render_frame_host);
+      });
 
 #if !defined(TOOLKIT_QT)
   // It would be ideal if SessionTabHelper was created before this object,
@@ -210,12 +207,26 @@ void ExtensionWebContentsObserver::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
   ContentScriptTracker::ReadyToCommitNavigation(PassKey(), navigation_handle);
 
+  // We don't force autoplay to allow while prerendering.
+  if (navigation_handle->GetRenderFrameHost()->GetLifecycleState() ==
+          content::RenderFrameHost::LifecycleState::kPrerendering &&
+      !navigation_handle->IsPrerenderedPageActivation()) {
+    return;
+  }
+
   const ExtensionRegistry* const registry =
       ExtensionRegistry::Get(browser_context_);
 
+  content::RenderFrameHost* parent_or_outerdoc =
+      navigation_handle->GetParentFrameOrOuterDocument();
+
 #ifndef TOOLKIT_QT
+  content::RenderFrameHost* outermost_main_rfh =
+      parent_or_outerdoc ? parent_or_outerdoc->GetOutermostMainFrame()
+                         : navigation_handle->GetRenderFrameHost();
+
   const Extension* const extension =
-      GetExtensionFromFrame(web_contents()->GetMainFrame(), false);
+      GetExtensionFromFrame(outermost_main_rfh, false);
   KioskDelegate* const kiosk_delegate =
       ExtensionsBrowserClient::Get()->GetKioskDelegate();
   DCHECK(kiosk_delegate);
@@ -228,9 +239,10 @@ void ExtensionWebContentsObserver::ReadyToCommitNavigation(
   // If the top most frame is an extension, packaged app, hosted app, etc. then
   // the main frame and all iframes should be able to autoplay without
   // restriction. <webview> should still have autoplay blocked though.
-  GURL url = navigation_handle->IsInMainFrame()
-                 ? navigation_handle->GetURL()
-                 : navigation_handle->GetWebContents()->GetLastCommittedURL();
+  GURL url =
+      parent_or_outerdoc
+          ? parent_or_outerdoc->GetOutermostMainFrame()->GetLastCommittedURL()
+          : navigation_handle->GetURL();
   if (is_kiosk || registry->enabled_extensions().GetExtensionOrAppByURL(url)) {
     mojo::AssociatedRemote<blink::mojom::AutoplayConfigurationClient> client;
     navigation_handle->GetRenderFrameHost()
@@ -262,6 +274,8 @@ void ExtensionWebContentsObserver::DidFinishNavigation(
     pm->RegisterRenderFrameHost(web_contents(), render_frame_host,
                                 frame_extension);
   }
+
+  ContentScriptTracker::DidFinishNavigation(PassKey(), navigation_handle);
 }
 
 void ExtensionWebContentsObserver::MediaPictureInPictureChanged(
@@ -312,21 +326,11 @@ void ExtensionWebContentsObserver::PepperInstanceDeleted() {
   }
 }
 
-std::string ExtensionWebContentsObserver::GetExtensionIdFromFrame(
-    content::RenderFrameHost* render_frame_host) const {
-  DCHECK(initialized_);
-  const GURL& site = render_frame_host->GetSiteInstance()->GetSiteURL();
-  if (!site.SchemeIs(kExtensionScheme))
-    return std::string();
-
-  return site.host();
-}
-
 const Extension* ExtensionWebContentsObserver::GetExtensionFromFrame(
     content::RenderFrameHost* render_frame_host,
     bool verify_url) const {
   DCHECK(initialized_);
-  std::string extension_id = GetExtensionIdFromFrame(render_frame_host);
+  std::string extension_id = util::GetExtensionIdFromFrame(render_frame_host);
   if (extension_id.empty())
     return nullptr;
 
@@ -372,14 +376,12 @@ mojom::LocalFrame* ExtensionWebContentsObserver::GetLocalFrame(
 }
 
 void ExtensionWebContentsObserver::OnWindowIdChanged(const SessionID& id) {
-  web_contents()->ForEachRenderFrameHost(base::BindRepeating(
-      [](int32_t window_id, ExtensionWebContentsObserver* observer,
-         content::RenderFrameHost* rfh) {
-        auto* local_frame = observer->GetLocalFrame(rfh);
+  web_contents()->ForEachRenderFrameHost(
+      [&id, this](content::RenderFrameHost* rfh) {
+        auto* local_frame = GetLocalFrame(rfh);
         if (local_frame)
-          local_frame->UpdateBrowserWindowId(window_id);
-      },
-      id.id(), base::Unretained(this)));
+          local_frame->UpdateBrowserWindowId(id.id());
+      });
 }
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/offscreen_font_selector.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -31,7 +32,6 @@
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_global_scope.h"
-#include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/no_alloc_direct_call_host.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_dispatcher.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
@@ -63,7 +63,7 @@ OffscreenCanvas::OffscreenCanvas(ExecutionContext* context,
       // If this OffscreenCanvas is being created in the context of a
       // cross-origin iframe, it should prefer to use the low-power GPU.
       LocalFrame* frame = window->GetFrame();
-      if (!(frame && frame->IsCrossOriginToMainFrame())) {
+      if (!(frame && frame->IsCrossOriginToOutermostMainFrame())) {
         AllowHighPerformancePowerPreference();
       }
     } else if (context->IsDedicatedWorkerGlobalScope()) {
@@ -94,7 +94,7 @@ OffscreenCanvas::~OffscreenCanvas() {
       -memory_usage_);
 }
 
-void OffscreenCanvas::Commit(scoped_refptr<CanvasResource> canvas_resource,
+void OffscreenCanvas::Commit(scoped_refptr<CanvasResource>&& canvas_resource,
                              const SkIRect& damage_rect) {
   if (!HasPlaceholderCanvas() || !canvas_resource)
     return;
@@ -177,7 +177,7 @@ void OffscreenCanvas::SetSize(const gfx::Size& size) {
   if (frame_dispatcher_)
     frame_dispatcher_->Reshape(size_);
   if (context_) {
-    if (context_->IsWebGL()) {
+    if (context_->IsWebGL() || IsWebGPU()) {
       context_->Reshape(size_.width(), size_.height());
     } else if (context_->IsRenderingContext2D()) {
       context_->Reset();
@@ -383,11 +383,24 @@ CanvasResourceDispatcher* OffscreenCanvas::GetOrCreateResourceDispatcher() {
   // If we don't have a valid placeholder_canvas_id_, then this is a standalone
   // OffscreenCanvas, and it should not have a placeholder.
   if (!frame_dispatcher_) {
+    scoped_refptr<base::SingleThreadTaskRunner>
+        agent_group_scheduler_compositor_task_runner;
+    if (auto* top_execution_context = GetTopExecutionContext()) {
+      agent_group_scheduler_compositor_task_runner =
+          top_execution_context->GetAgentGroupSchedulerCompositorTaskRunner();
+
+      // AgentGroupSchedulerCompositorTaskRunner will be null for
+      // SharedWorkers, but for windows and other workers it should be non-null.
+      DCHECK(top_execution_context->IsSharedWorkerGlobalScope() ||
+             agent_group_scheduler_compositor_task_runner);
+    }
+
     // The frame dispatcher connects the current thread of OffscreenCanvas
     // (either main or worker) to the browser process and remains unchanged
     // throughout the lifetime of this OffscreenCanvas.
     frame_dispatcher_ = std::make_unique<CanvasResourceDispatcher>(
-        this, client_id_, sink_id_, placeholder_canvas_id_, size_);
+        this, std::move(agent_group_scheduler_compositor_task_runner),
+        client_id_, sink_id_, placeholder_canvas_id_, size_);
 
     if (HasPlaceholderCanvas())
       frame_dispatcher_->SetPlaceholderCanvasDispatcher(placeholder_canvas_id_);
@@ -413,7 +426,7 @@ CanvasResourceProvider* OffscreenCanvas::GetOrCreateResourceProvider() {
       (IsRenderingContext2D() &&
        RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled());
 
-  uint32_t shared_image_usage_flags = gpu::SHARED_IMAGE_USAGE_DISPLAY;
+  uint32_t shared_image_usage_flags = gpu::SHARED_IMAGE_USAGE_DISPLAY_READ;
   if (composited_mode && HasPlaceholderCanvas())
     shared_image_usage_flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
 
@@ -511,7 +524,7 @@ bool OffscreenCanvas::PushFrameIfNeeded() {
   return false;
 }
 
-bool OffscreenCanvas::PushFrame(scoped_refptr<CanvasResource> canvas_resource,
+bool OffscreenCanvas::PushFrame(scoped_refptr<CanvasResource>&& canvas_resource,
                                 const SkIRect& damage_rect) {
   TRACE_EVENT0("blink", "OffscreenCanvas::PushFrame");
   DCHECK(needs_push_frame_);
@@ -541,8 +554,18 @@ UkmParameters OffscreenCanvas::GetUkmParameters() {
 }
 
 void OffscreenCanvas::NotifyGpuContextLost() {
-  if (context_)
+  if (context_ && !context_->isContextLost()) {
+    // This code path is used only by 2D canvas, because NotifyGpuContextLost
+    // is called by Canvas2DLayerBridge rather than the rendering context
+    DCHECK(context_->IsRenderingContext2D());
     context_->LoseContext(CanvasRenderingContext::kRealLostContext);
+  }
+  if (frame_dispatcher_) {
+    // We'll need to recreate a new frame dispatcher once the context is
+    // restored in order to reestablish the compositor frame sink mojo
+    // channel.
+    frame_dispatcher_ = nullptr;
+  }
 }
 
 FontSelector* OffscreenCanvas::GetFontSelector() {
@@ -576,7 +599,7 @@ void OffscreenCanvas::UpdateMemoryUsage() {
     NoAllocDirectCallHost* nadc_host =
         context_ ? context_->AsNoAllocDirectCallHost() : nullptr;
     if (nadc_host) {
-      nadc_host->PostDeferrableAction(WTF::Bind(
+      nadc_host->PostDeferrableAction(WTF::BindOnce(
           [](intptr_t delta_bytes) {
             v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
                 delta_bytes);

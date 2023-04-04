@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ std::unique_ptr<omnibox::SuggestResult> GetOmniboxDefaultSuggestion(
   ExtensionPrefs* prefs = ExtensionPrefs::Get(profile);
 
   std::unique_ptr<omnibox::SuggestResult> suggestion;
-  const base::DictionaryValue* dict = NULL;
+  const base::DictionaryValue* dict = nullptr;
   if (prefs && prefs->ReadPrefAsDictionary(extension_id,
                                            kOmniboxDefaultSuggestion,
                                            &dict)) {
@@ -72,12 +72,13 @@ bool SetOmniboxDefaultSuggestion(
   if (!prefs)
     return false;
 
-  std::unique_ptr<base::DictionaryValue> dict = suggestion.ToValue();
+  base::Value::Dict dict = suggestion.ToValue();
   // Add the content field so that the dictionary can be used to populate an
   // omnibox::SuggestResult.
-  dict->SetKey(kSuggestionContent, base::Value(base::Value::Type::STRING));
-  prefs->UpdateExtensionPref(extension_id, kOmniboxDefaultSuggestion,
-                             std::move(dict));
+  dict.Set(kSuggestionContent, base::Value(base::Value::Type::STRING));
+  prefs->UpdateExtensionPref(
+      extension_id, kOmniboxDefaultSuggestion,
+      base::Value::ToUniquePtrValue(base::Value(std::move(dict))));
 
   return true;
 }
@@ -96,7 +97,7 @@ void ExtensionOmniboxEventRouter::OnInputStarted(
     Profile* profile, const std::string& extension_id) {
   auto event = std::make_unique<Event>(events::OMNIBOX_ON_INPUT_STARTED,
                                        omnibox::OnInputStarted::kEventName,
-                                       std::vector<base::Value>(), profile);
+                                       base::Value::List(), profile);
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, std::move(event));
 }
@@ -110,13 +111,13 @@ bool ExtensionOmniboxEventRouter::OnInputChanged(
           extension_id, omnibox::OnInputChanged::kEventName))
     return false;
 
-  auto args(std::make_unique<base::ListValue>());
-  args->Append(input);
-  args->Append(suggest_id);
+  base::Value::List args;
+  args.Append(input);
+  args.Append(suggest_id);
 
-  auto event = std::make_unique<Event>(
-      events::OMNIBOX_ON_INPUT_CHANGED, omnibox::OnInputChanged::kEventName,
-      std::move(*args).TakeListDeprecated(), profile);
+  auto event = std::make_unique<Event>(events::OMNIBOX_ON_INPUT_CHANGED,
+                                       omnibox::OnInputChanged::kEventName,
+                                       std::move(args), profile);
   event_router->DispatchEventToExtension(extension_id, std::move(event));
   return true;
 }
@@ -137,18 +138,18 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
   extensions::TabHelper::FromWebContents(web_contents)->
       active_tab_permission_granter()->GrantIfRequested(extension);
 
-  auto args(std::make_unique<base::ListValue>());
-  args->Append(input);
+  base::Value::List args;
+  args.Append(input);
   if (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB)
-    args->Append(kForegroundTabDisposition);
+    args.Append(kForegroundTabDisposition);
   else if (disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB)
-    args->Append(kBackgroundTabDisposition);
+    args.Append(kBackgroundTabDisposition);
   else
-    args->Append(kCurrentTabDisposition);
+    args.Append(kCurrentTabDisposition);
 
-  auto event = std::make_unique<Event>(
-      events::OMNIBOX_ON_INPUT_ENTERED, omnibox::OnInputEntered::kEventName,
-      std::move(*args).TakeListDeprecated(), profile);
+  auto event = std::make_unique<Event>(events::OMNIBOX_ON_INPUT_ENTERED,
+                                       omnibox::OnInputEntered::kEventName,
+                                       std::move(args), profile);
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, std::move(event));
 
@@ -160,7 +161,7 @@ void ExtensionOmniboxEventRouter::OnInputCancelled(
     Profile* profile, const std::string& extension_id) {
   auto event = std::make_unique<Event>(events::OMNIBOX_ON_INPUT_CANCELLED,
                                        omnibox::OnInputCancelled::kEventName,
-                                       std::vector<base::Value>(), profile);
+                                       base::Value::List(), profile);
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, std::move(event));
 }
@@ -169,13 +170,12 @@ void ExtensionOmniboxEventRouter::OnDeleteSuggestion(
     Profile* profile,
     const std::string& extension_id,
     const std::string& suggestion_text) {
-  auto args(std::make_unique<base::ListValue>());
-  args->Append(suggestion_text);
+  base::Value::List args;
+  args.Append(suggestion_text);
 
-  auto event =
-      std::make_unique<Event>(events::OMNIBOX_ON_DELETE_SUGGESTION,
-                              omnibox::OnDeleteSuggestion::kEventName,
-                              std::move(*args).TakeListDeprecated(), profile);
+  auto event = std::make_unique<Event>(events::OMNIBOX_ON_DELETE_SUGGESTION,
+                                       omnibox::OnDeleteSuggestion::kEventName,
+                                       std::move(args), profile);
 
   EventRouter::Get(profile)->DispatchEventToExtension(extension_id,
                                                       std::move(event));
@@ -278,7 +278,7 @@ ExtensionFunction::ResponseAction OmniboxSendSuggestionsFunction::Run() {
   params_ = SendSuggestions::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params_);
 
-  if (is_from_service_worker()) {
+  if (is_from_service_worker() && !params_->suggest_results.empty()) {
     std::vector<base::StringPiece> inputs;
     inputs.reserve(params_->suggest_results.size());
     for (const auto& suggestion : params_->suggest_results)
@@ -325,8 +325,7 @@ void OmniboxSendSuggestionsFunction::OnParsedDescriptionsAndStyles(
     params_->suggest_results[i].description =
         base::UTF16ToUTF8(result.descriptions_and_styles[i].description);
     params_->suggest_results[i].description_styles =
-        std::make_unique<std::vector<api::omnibox::MatchClassification>>(
-            std::move(result.descriptions_and_styles[i].styles));
+        std::move(result.descriptions_and_styles[i].styles);
   }
 
   NotifySuggestionsReady();
@@ -370,8 +369,7 @@ void OmniboxSetDefaultSuggestionFunction::OnParsedDescriptionAndStyles(
 
   omnibox::DefaultSuggestResult default_suggestion;
   default_suggestion.description = base::UTF16ToUTF8(single_result.description);
-  default_suggestion.description_styles =
-      std::make_unique<std::vector<api::omnibox::MatchClassification>>();
+  default_suggestion.description_styles.emplace();
   default_suggestion.description_styles->swap(single_result.styles);
   SetDefaultSuggestion(default_suggestion);
   Respond(NoArguments());

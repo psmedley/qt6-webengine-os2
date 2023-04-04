@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,7 @@ class NET_EXPORT_PRIVATE DnsResponseResultExtractor {
   static HostCache::Entry CreateEmptyResult(DnsQueryType query_type);
 
  private:
-  const raw_ptr<const DnsResponse> response_;
+  const raw_ptr<const DnsResponse, DanglingUntriaged> response_;
 };
 
 }  // namespace net

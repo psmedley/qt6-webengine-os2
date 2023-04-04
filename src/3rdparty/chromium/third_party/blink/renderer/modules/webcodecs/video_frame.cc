@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,8 @@
 #include "media/base/video_frame_pool.h"
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
@@ -37,6 +38,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_frame_copy_to_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_frame_init.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_pixel_format.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_state_observer.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_image_source.h"
@@ -53,6 +55,7 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
+#include "third_party/blink/renderer/platform/graphics/skia/sk_image_info_hash.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/video_frame_image_util.h"
@@ -61,12 +64,10 @@
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "v8/include/v8.h"
 
 namespace blink {
-
-const base::Feature kRemoveWebCodecsSpecViolations{
-    "RemoveWebCodecsSpecViolations", base::FEATURE_ENABLED_BY_DEFAULT};
 
 namespace {
 
@@ -108,8 +109,36 @@ media::VideoPixelFormat ToOpaqueMediaPixelFormat(media::VideoPixelFormat fmt) {
   }
 }
 
+absl::optional<V8VideoPixelFormat> ToV8VideoPixelFormat(
+    media::VideoPixelFormat fmt) {
+  switch (fmt) {
+    case media::PIXEL_FORMAT_I420:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI420);
+    case media::PIXEL_FORMAT_I420A:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI420A);
+    case media::PIXEL_FORMAT_I422:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI422);
+    case media::PIXEL_FORMAT_I444:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI444);
+    case media::PIXEL_FORMAT_NV12:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kNV12);
+    case media::PIXEL_FORMAT_ABGR:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kRGBA);
+    case media::PIXEL_FORMAT_XBGR:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kRGBX);
+    case media::PIXEL_FORMAT_ARGB:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kBGRA);
+    case media::PIXEL_FORMAT_XRGB:
+      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kBGRX);
+    default:
+      NOTREACHED();
+      return absl::nullopt;
+  }
+}
+
 class CachedVideoFramePool : public GarbageCollected<CachedVideoFramePool>,
-                             public Supplement<ExecutionContext> {
+                             public Supplement<ExecutionContext>,
+                             public ExecutionContextLifecycleStateObserver {
  public:
   static const char kSupplementName[];
 
@@ -125,8 +154,10 @@ class CachedVideoFramePool : public GarbageCollected<CachedVideoFramePool>,
 
   explicit CachedVideoFramePool(ExecutionContext& context)
       : Supplement<ExecutionContext>(context),
-        task_runner_(Thread::Current()->GetTaskRunner()) {}
-  virtual ~CachedVideoFramePool() = default;
+        ExecutionContextLifecycleStateObserver(&context) {
+    UpdateStateIfNeeded();
+  }
+  ~CachedVideoFramePool() override = default;
 
   // Disallow copy and assign.
   CachedVideoFramePool& operator=(const CachedVideoFramePool&) = delete;
@@ -147,7 +178,18 @@ class CachedVideoFramePool : public GarbageCollected<CachedVideoFramePool>,
 
   void Trace(Visitor* visitor) const override {
     Supplement<ExecutionContext>::Trace(visitor);
+    ExecutionContextLifecycleStateObserver::Trace(visitor);
   }
+
+  void ContextLifecycleStateChanged(
+      mojom::blink::FrameLifecycleState state) override {
+    if (state == mojom::blink::FrameLifecycleState::kRunning)
+      return;
+    // Reset `frame_pool_` because the task runner for purging will get paused.
+    frame_pool_.reset();
+  }
+
+  void ContextDestroyed() override { frame_pool_.reset(); }
 
  private:
   static const base::TimeDelta kIdleTimeout;
@@ -155,9 +197,10 @@ class CachedVideoFramePool : public GarbageCollected<CachedVideoFramePool>,
   void PostMonitoringTask() {
     DCHECK(!task_handle_.IsActive());
     task_handle_ = PostDelayedCancellableTask(
-        *task_runner_, FROM_HERE,
-        WTF::Bind(&CachedVideoFramePool::PurgeIdleFramePool,
-                  WrapWeakPersistent(this)),
+        *GetSupplementable()->GetTaskRunner(TaskType::kInternalMedia),
+        FROM_HERE,
+        WTF::BindOnce(&CachedVideoFramePool::PurgeIdleFramePool,
+                      WrapWeakPersistent(this)),
         kIdleTimeout);
   }
 
@@ -177,7 +220,6 @@ class CachedVideoFramePool : public GarbageCollected<CachedVideoFramePool>,
     PostMonitoringTask();
   }
 
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
   std::unique_ptr<media::VideoFramePool> frame_pool_;
   base::TimeTicks last_frame_creation_;
   TaskHandle task_handle_;
@@ -189,7 +231,8 @@ const base::TimeDelta CachedVideoFramePool::kIdleTimeout = base::Seconds(10);
 
 class CanvasResourceProviderCache
     : public GarbageCollected<CanvasResourceProviderCache>,
-      public Supplement<ExecutionContext> {
+      public Supplement<ExecutionContext>,
+      public ExecutionContextLifecycleStateObserver {
  public:
   static const char kSupplementName[];
 
@@ -206,41 +249,54 @@ class CanvasResourceProviderCache
 
   explicit CanvasResourceProviderCache(ExecutionContext& context)
       : Supplement<ExecutionContext>(context),
-        task_runner_(Thread::Current()->GetTaskRunner()) {}
-  virtual ~CanvasResourceProviderCache() = default;
+        ExecutionContextLifecycleStateObserver(&context) {
+    UpdateStateIfNeeded();
+  }
+  ~CanvasResourceProviderCache() override = default;
 
   // Disallow copy and assign.
   CanvasResourceProviderCache& operator=(const CanvasResourceProviderCache&) =
       delete;
   CanvasResourceProviderCache(const CanvasResourceProviderCache&) = delete;
 
-  CanvasResourceProvider* CreateProvider(gfx::Size size) {
-    if (size_to_provider_.IsEmpty())
+  CanvasResourceProvider* CreateProvider(const SkImageInfo& info) {
+    if (info_to_provider_.empty())
       PostMonitoringTask();
 
     last_access_time_ = base::TimeTicks::Now();
 
-    gfx::SizeF key(size);
-    auto iter = size_to_provider_.find(key);
-    if (iter != size_to_provider_.end()) {
+    auto iter = info_to_provider_.find(info);
+    if (iter != info_to_provider_.end()) {
       auto* result = iter->value.get();
       if (result && result->IsValid())
         return result;
     }
 
-    if (size_to_provider_.size() >= kMaxSize)
-      size_to_provider_.clear();
+    if (info_to_provider_.size() >= kMaxSize)
+      info_to_provider_.clear();
 
     auto provider = CreateResourceProviderForVideoFrame(
-        size, GetRasterContextProvider().get());
+        info, GetRasterContextProvider().get());
     auto* result = provider.get();
-    size_to_provider_.Set(key, std::move(provider));
+    info_to_provider_.Set(info, std::move(provider));
     return result;
   }
 
   void Trace(Visitor* visitor) const override {
     Supplement<ExecutionContext>::Trace(visitor);
+    ExecutionContextLifecycleStateObserver::Trace(visitor);
   }
+
+  void ContextLifecycleStateChanged(
+      mojom::blink::FrameLifecycleState state) override {
+    if (state == mojom::blink::FrameLifecycleState::kRunning)
+      return;
+    // Reset `info_to_provider_` because the task runner for purging will get
+    // paused.
+    info_to_provider_.clear();
+  }
+
+  void ContextDestroyed() override { info_to_provider_.clear(); }
 
  private:
   static constexpr int kMaxSize = 50;
@@ -249,23 +305,23 @@ class CanvasResourceProviderCache
   void PostMonitoringTask() {
     DCHECK(!task_handle_.IsActive());
     task_handle_ = PostDelayedCancellableTask(
-        *task_runner_, FROM_HERE,
-        WTF::Bind(&CanvasResourceProviderCache::PurgeIdleFramePool,
-                  WrapWeakPersistent(this)),
+        *GetSupplementable()->GetTaskRunner(TaskType::kInternalMedia),
+        FROM_HERE,
+        WTF::BindOnce(&CanvasResourceProviderCache::PurgeIdleFramePool,
+                      WrapWeakPersistent(this)),
         kIdleTimeout);
   }
 
   void PurgeIdleFramePool() {
     if (base::TimeTicks::Now() - last_access_time_ > kIdleTimeout) {
-      size_to_provider_.clear();
+      info_to_provider_.clear();
       return;
     }
     PostMonitoringTask();
   }
 
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  HashMap<gfx::SizeF, std::unique_ptr<CanvasResourceProvider>>
-      size_to_provider_;
+  HashMap<SkImageInfo, std::unique_ptr<CanvasResourceProvider>>
+      info_to_provider_;
   base::TimeTicks last_access_time_;
   TaskHandle task_handle_;
 };
@@ -286,6 +342,13 @@ absl::optional<media::VideoPixelFormat> CopyToFormat(
   const size_t num_planes =
       mappable ? frame.layout().num_planes() : frame.NumTextures();
 
+  // The |frame|.BitDepth() restriction is to avoid treating a P016LE frame as a
+  // low-bit depth frame.
+  if (!mappable && frame.RequiresExternalSampler() && frame.BitDepth() == 8u) {
+    DCHECK_EQ(frame.NumTextures(), 1u);
+    return media::PIXEL_FORMAT_XRGB;
+  }
+
   switch (frame.format()) {
     case media::PIXEL_FORMAT_I420:
     case media::PIXEL_FORMAT_I420A:
@@ -295,12 +358,7 @@ absl::optional<media::VideoPixelFormat> CopyToFormat(
     case media::PIXEL_FORMAT_ABGR:
     case media::PIXEL_FORMAT_XRGB:
     case media::PIXEL_FORMAT_ARGB:
-      break;
     case media::PIXEL_FORMAT_NV12:
-      // Single-texture NV12 is sampled as RGBA even though the underlying
-      // graphics buffer is NV12.
-      if (!mappable && num_planes == 1)
-        return media::PIXEL_FORMAT_XRGB;
       break;
     default:
       return absl::nullopt;
@@ -335,7 +393,7 @@ void CopyMappablePlanes(const media::VideoFrame& src_frame,
   }
 }
 
-bool CopyTexturablePlanes(const media::VideoFrame& src_frame,
+bool CopyTexturablePlanes(media::VideoFrame& src_frame,
                           const gfx::Rect& src_rect,
                           const VideoFrameLayout& dest_layout,
                           base::span<uint8_t> dest_buffer) {
@@ -386,6 +444,8 @@ bool ParseCopyToOptions(const media::VideoFrame& frame,
         "Operation is not supported when format is null.");
     return false;
   }
+  absl::optional<V8VideoPixelFormat> v8_format =
+      ToV8VideoPixelFormat(*copy_to_format);
 
   gfx::Rect src_rect = frame.visible_rect();
   if (options->hasRect()) {
@@ -394,7 +454,7 @@ bool ParseCopyToOptions(const media::VideoFrame& frame,
     if (exception_state.HadException())
       return false;
   }
-  if (!ValidateCropAlignment(*copy_to_format, src_rect,
+  if (!ValidateCropAlignment(*copy_to_format, (*v8_format).AsCStr(), src_rect,
                              options->hasRect() ? "rect" : "visibleRect",
                              exception_state)) {
     return false;
@@ -430,7 +490,7 @@ VideoFrame::VideoFrame(scoped_refptr<media::VideoFrame> frame,
 
   external_allocated_memory_ =
       media::VideoFrame::AllocationSize(frame->format(), frame->coded_size());
-  v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
+  context->GetIsolate()->AdjustAmountOfExternalAllocatedMemory(
       external_allocated_memory_);
 }
 
@@ -451,8 +511,7 @@ VideoFrame::VideoFrame(scoped_refptr<VideoFrameHandle> handle)
 }
 
 VideoFrame::~VideoFrame() {
-  v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
-      -external_allocated_memory_);
+  ResetExternalMemory();
 }
 
 // static
@@ -460,7 +519,6 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
                                const V8CanvasImageSource* source,
                                const VideoFrameInit* init,
                                ExceptionState& exception_state) {
-  ExecutionContext* execution_context = ExecutionContext::From(script_state);
   auto* image_source = ToCanvasImageSource(source, exception_state);
   if (!image_source) {
     // ToCanvasImageSource() will throw a source appropriate exception.
@@ -484,7 +542,7 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
         break;
       case V8CanvasImageSource::ContentType::kHTMLVideoElement:
         if (auto* wmp = source->GetAsHTMLVideoElement()->GetWebMediaPlayer())
-          source_frame = wmp->GetCurrentFrame();
+          source_frame = wmp->GetCurrentFrameThenUpdate();
         break;
       default:
         NOTREACHED();
@@ -548,15 +606,9 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
         V8CanvasImageSource::ContentType::kVideoFrame) {
       auto local_handle =
           source->GetAsVideoFrame()->handle()->CloneForInternalUse();
-      if (!local_handle) {
-        // It's possible for another realm (Worker) to destroy our handle if
-        // this frame was transferred via BroadcastChannel to multiple realms.
-        exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                          "Source VideoFrame was closed");
-        return nullptr;
-      }
-
-      if (local_handle->sk_image() && !force_opaque &&
+      // Note: It's possible for another realm (Worker) to destroy our handle if
+      // this frame was transferred via BroadcastChannel to multiple realms.
+      if (local_handle && local_handle->sk_image() && !force_opaque &&
           !init->hasVisibleRect() && !init->hasDisplayWidth() &&
           !init->hasDisplayHeight()) {
         sk_image = local_handle->sk_image();
@@ -584,13 +636,8 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
   const auto timestamp = base::Microseconds(
       (init && init->hasTimestamp()) ? init->timestamp() : 0);
   if (!init || !init->hasTimestamp()) {
-    Deprecation::CountDeprecation(
-        execution_context, WebFeature::kWebCodecsVideoFrameDefaultTimestamp);
-
-    if (base::FeatureList::IsEnabled(kRemoveWebCodecsSpecViolations)) {
-      exception_state.ThrowTypeError("VideoFrameInit must provide timestamp");
-      return nullptr;
-    }
+    exception_state.ThrowTypeError("VideoFrameInit must provide timestamp");
+    return nullptr;
   }
 
   const auto paint_image = image->PaintImageForCurrentFrame();
@@ -692,6 +739,13 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
     // Above format determination unfortunately uses a bit of internal knowledge
     // from CreateFromSkImage(). Make sure they stay in sync.
     DCHECK(!frame || frame->format() == format);
+
+    // If |sk_image| isn't rendered identically to |frame|, don't pass it along
+    // when creating the blink::VideoFrame below.
+    if (force_opaque || parsed_init.visible_rect != default_visible_rect ||
+        parsed_init.display_size != default_display_size) {
+      sk_image.reset();
+    }
   }
 
   if (!frame) {
@@ -833,7 +887,8 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
     const int row_bytes = crop.width() / sample_size.width() * sample_bytes;
     const int rows = crop.height() / sample_size.height();
     libyuv::CopyPlane(buffer.data() + src_layout.Offset(i),
-                      static_cast<int>(src_layout.Stride(i)), frame->data(i),
+                      static_cast<int>(src_layout.Stride(i)),
+                      frame->writable_data(i),
                       static_cast<int>(frame->stride(i)), row_bytes, rows);
   }
 
@@ -850,29 +905,7 @@ absl::optional<V8VideoPixelFormat> VideoFrame::format() const {
   if (!copy_to_format)
     return absl::nullopt;
 
-  switch (*copy_to_format) {
-    case media::PIXEL_FORMAT_I420:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI420);
-    case media::PIXEL_FORMAT_I420A:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI420A);
-    case media::PIXEL_FORMAT_I422:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI422);
-    case media::PIXEL_FORMAT_I444:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kI444);
-    case media::PIXEL_FORMAT_NV12:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kNV12);
-    case media::PIXEL_FORMAT_ABGR:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kRGBA);
-    case media::PIXEL_FORMAT_XBGR:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kRGBX);
-    case media::PIXEL_FORMAT_ARGB:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kBGRA);
-    case media::PIXEL_FORMAT_XRGB:
-      return V8VideoPixelFormat(V8VideoPixelFormat::Enum::kBGRX);
-    default:
-      NOTREACHED();
-      return absl::nullopt;
-  }
+  return ToV8VideoPixelFormat(*copy_to_format);
 }
 
 uint32_t VideoFrame::codedWidth() const {
@@ -1058,6 +1091,7 @@ ScriptPromise VideoFrame::copyTo(ScriptState* script_state,
 
 void VideoFrame::close() {
   handle_->Invalidate();
+  ResetExternalMemory();
 }
 
 VideoFrame* VideoFrame::clone(ExceptionState& exception_state) {
@@ -1097,10 +1131,17 @@ scoped_refptr<Image> VideoFrame::GetSourceImageForCanvas(
   auto* execution_context =
       ExecutionContext::From(v8::Isolate::GetCurrent()->GetCurrentContext());
   auto& provider_cache = CanvasResourceProviderCache::From(*execution_context);
-  auto* resource_provider =
-      provider_cache.CreateProvider(local_handle->frame()->natural_size());
 
-  const auto dest_rect = gfx::Rect(local_handle->frame()->natural_size());
+  // TODO(https://crbug.com/1341235): The choice of color type, alpha type, and
+  // color space is inappropriate in many circumstances.
+  const auto& resource_provider_size = local_handle->frame()->natural_size();
+  const auto resource_provider_info =
+      SkImageInfo::Make(gfx::SizeToSkISize(resource_provider_size),
+                        kN32_SkColorType, kPremul_SkAlphaType, nullptr);
+  auto* resource_provider =
+      provider_cache.CreateProvider(resource_provider_info);
+
+  const auto dest_rect = gfx::Rect(resource_provider_size);
   auto image = CreateImageFromVideoFrame(local_handle->frame(),
                                          /*allow_zero_copy_images=*/true,
                                          resource_provider,
@@ -1160,6 +1201,14 @@ bool VideoFrame::IsAccelerated() const {
   return false;
 }
 
+void VideoFrame::ResetExternalMemory() {
+  if (external_allocated_memory_) {
+    v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
+        -external_allocated_memory_);
+    external_allocated_memory_ = 0;
+  }
+}
+
 gfx::Size VideoFrame::BitmapSourceSize() const {
   auto local_frame = handle_->frame();
   if (!local_frame)
@@ -1198,14 +1247,21 @@ ScriptPromise VideoFrame::CreateImageBitmap(ScriptState* script_state,
   auto* execution_context =
       ExecutionContext::From(v8::Isolate::GetCurrent()->GetCurrentContext());
   auto& provider_cache = CanvasResourceProviderCache::From(*execution_context);
+
+  // TODO(https://crbug.com/1341235): The choice of color type, alpha type, and
+  // color space is inappropriate in many circumstances.
+  const auto& resource_provider_size = local_handle->frame()->natural_size();
+  const auto resource_provider_info =
+      SkImageInfo::Make(gfx::SizeToSkISize(resource_provider_size),
+                        kN32_SkColorType, kPremul_SkAlphaType, nullptr);
   auto* resource_provider =
-      provider_cache.CreateProvider(local_handle->frame()->natural_size());
+      provider_cache.CreateProvider(resource_provider_info);
 
   // We disable zero copy images since the ImageBitmap spec says created bitmaps
   // are copies. Many other paths can avoid doing this w/o issue, but hardware
   // decoders may have a limited number of outputs, so not making a copy becomes
   // an observable issues to clients.
-  const auto dest_rect = gfx::Rect(local_handle->frame()->natural_size());
+  const auto dest_rect = gfx::Rect(resource_provider_size);
   auto image = CreateImageFromVideoFrame(local_handle->frame(),
                                          /*allow_zero_copy_images=*/false,
                                          resource_provider,

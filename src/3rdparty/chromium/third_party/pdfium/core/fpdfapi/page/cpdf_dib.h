@@ -7,11 +7,13 @@
 #ifndef CORE_FPDFAPI_PAGE_CPDF_DIB_H_
 #define CORE_FPDFAPI_PAGE_CPDF_DIB_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_colorspace.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/dib/cfx_dibbase.h"
@@ -63,7 +65,7 @@ class CPDF_DIB final : public CFX_DIBBase {
   RetainPtr<CPDF_DIB> DetachMask();
 
  private:
-  CPDF_DIB(CPDF_Document* pDoc, const CPDF_Stream* pStream);
+  CPDF_DIB(CPDF_Document* pDoc, RetainPtr<const CPDF_Stream> pStream);
   ~CPDF_DIB() override;
 
   struct JpxSMaskInlineData {
@@ -72,7 +74,7 @@ class CPDF_DIB final : public CFX_DIBBase {
 
     int width;
     int height;
-    std::vector<uint8_t, FxAllocAllocator<uint8_t>> data;
+    DataVector<uint8_t> data;
   };
 
   bool LoadInternal(const CPDF_Dictionary* pFormResources,
@@ -84,7 +86,7 @@ class CPDF_DIB final : public CFX_DIBBase {
   LoadState ContinueLoadMaskDIB(PauseIndicatorIface* pPause);
   bool LoadColorInfo(const CPDF_Dictionary* pFormResources,
                      const CPDF_Dictionary* pPageResources);
-  bool GetDecodeAndMaskArray(bool* bDefaultDecode, bool* bColorKey);
+  bool GetDecodeAndMaskArray();
   RetainPtr<CFX_DIBitmap> LoadJpxBitmap();
   void LoadPalette();
   LoadState CreateDecoder();
@@ -95,7 +97,7 @@ class CPDF_DIB final : public CFX_DIBBase {
   bool TranslateScanline24bppDefaultDecode(
       pdfium::span<uint8_t> dest_scan,
       pdfium::span<const uint8_t> src_scan) const;
-  void ValidateDictParam(const ByteString& filter);
+  bool ValidateDictParam(const ByteString& filter);
   bool TransMask() const;
   void SetMaskProperties();
 
@@ -122,8 +124,8 @@ class CPDF_DIB final : public CFX_DIBBase {
   bool m_bHasMask = false;
   bool m_bStdCS = false;
   std::vector<DIB_COMP_DATA> m_CompData;
-  mutable std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_LineBuf;
-  mutable std::vector<uint8_t, FxAllocAllocator<uint8_t>> m_MaskBuf;
+  mutable DataVector<uint8_t> m_LineBuf;
+  mutable DataVector<uint8_t> m_MaskBuf;
   RetainPtr<CFX_DIBitmap> m_pCachedBitmap;
   // Note: Must not create a cycle between CPDF_DIB instances.
   RetainPtr<CPDF_DIB> m_pMask;

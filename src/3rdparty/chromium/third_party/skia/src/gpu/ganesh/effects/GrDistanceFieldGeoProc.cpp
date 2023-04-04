@@ -127,7 +127,7 @@ private:
             // We use st coordinates to ensure we're mapping 1:1 from texel space to pixel space.
 
             // this gives us a smooth step across approximately one fragment
-            if (args.fShaderCaps->avoidDfDxForGradientsWhenPossible()) {
+            if (args.fShaderCaps->fAvoidDfDxForGradientsWhenPossible) {
                 fragBuilder->codeAppendf(
                         "afwidth = abs(" SK_DistanceFieldAAFactor "*half(dFdy(%s.y)));", st.fsIn());
             } else {
@@ -141,7 +141,7 @@ private:
             // We use the y gradient because there is a bug in the Mali 400 in the x direction.
 
             // this gives us a smooth step across approximately one fragment
-            if (args.fShaderCaps->avoidDfDxForGradientsWhenPossible()) {
+            if (args.fShaderCaps->fAvoidDfDxForGradientsWhenPossible) {
                 fragBuilder->codeAppendf("half st_grad_len = length(half2(dFdy(%s)));", st.fsIn());
             } else {
                 fragBuilder->codeAppendf("half st_grad_len = length(half2(dFdx(%s)));", st.fsIn());
@@ -228,7 +228,7 @@ GrDistanceFieldA8TextGeoProc::GrDistanceFieldA8TextGeoProc(const GrShaderCaps& c
     }
     fInColor = {"inColor", kUByte4_norm_GrVertexAttribType, SkSLType::kHalf4 };
     fInTextureCoords = {"inTextureCoords", kUShort2_GrVertexAttribType,
-                        caps.integerSupport() ? SkSLType::kUShort2 : SkSLType::kFloat2};
+                        caps.fIntegerSupport ? SkSLType::kUShort2 : SkSLType::kFloat2};
     this->setVertexAttributesWithImplicitOffsets(&fInPosition, 3);
 
     if (numViews) {
@@ -321,9 +321,9 @@ public:
                  const GrGeometryProcessor& geomProc) override {
         const GrDistanceFieldPathGeoProc& dfpgp = geomProc.cast<GrDistanceFieldPathGeoProc>();
 
-        // We always set the matrix uniform; it's either used to transform from local to device
-        // for the output position, or from device to local for the local coord variable.
-        SetTransform(pdman, shaderCaps, fMatrixUniform, dfpgp.fMatrix, &fMatrix);
+        // We always set the matrix uniform. It's used to transform from from device to local
+        // for the local coord variable.
+        SetTransform(pdman, shaderCaps, fLocalMatrixUniform, dfpgp.fLocalMatrix, &fLocalMatrix);
 
         const SkISize& atlasDimensions = dfpgp.fAtlasDimensions;
         SkASSERT(SkIsPow2(atlasDimensions.fWidth) && SkIsPow2(atlasDimensions.fHeight));
@@ -370,27 +370,15 @@ private:
         varyingHandler->addPassThroughAttribute(dfPathEffect.fInColor.asShaderVar(),
                                                 args.fOutputColor);
 
-        if (dfPathEffect.fMatrix.hasPerspective()) {
-            // Setup position (output position is transformed, local coords are pass through)
-            WriteOutputPosition(vertBuilder,
-                                uniformHandler,
-                                *args.fShaderCaps,
-                                gpArgs,
-                                dfPathEffect.fInPosition.name(),
-                                dfPathEffect.fMatrix,
-                                &fMatrixUniform);
-            gpArgs->fLocalCoordVar = dfPathEffect.fInPosition.asShaderVar();
-        } else {
-            // Setup position (output position is pass through, local coords are transformed)
-            WriteOutputPosition(vertBuilder, gpArgs, dfPathEffect.fInPosition.name());
-            WriteLocalCoord(vertBuilder,
-                            uniformHandler,
-                            *args.fShaderCaps,
-                            gpArgs,
-                            dfPathEffect.fInPosition.asShaderVar(),
-                            dfPathEffect.fMatrix,
-                            &fMatrixUniform);
-        }
+        // Setup position (output position is pass through, local coords are transformed)
+        gpArgs->fPositionVar = dfPathEffect.fInPosition.asShaderVar();
+        WriteLocalCoord(vertBuilder,
+                        uniformHandler,
+                        *args.fShaderCaps,
+                        gpArgs,
+                        gpArgs->fPositionVar,
+                        dfPathEffect.fLocalMatrix,
+                        &fLocalMatrixUniform);
 
         // Use highp to work around aliasing issues
         fragBuilder->codeAppendf("float2 uv = %s;", uv.fsIn());
@@ -412,7 +400,7 @@ private:
             // We use st coordinates to ensure we're mapping 1:1 from texel space to pixel space.
 
             // this gives us a smooth step across approximately one fragment
-            if (args.fShaderCaps->avoidDfDxForGradientsWhenPossible()) {
+            if (args.fShaderCaps->fAvoidDfDxForGradientsWhenPossible) {
                 fragBuilder->codeAppendf(
                         "afwidth = abs(" SK_DistanceFieldAAFactor "*half(dFdy(%s.y)));", st.fsIn());
             } else {
@@ -425,7 +413,7 @@ private:
             // to ensure we're mapping 1:1 from texel space to pixel space.
 
             // this gives us a smooth step across approximately one fragment
-            if (args.fShaderCaps->avoidDfDxForGradientsWhenPossible()) {
+            if (args.fShaderCaps->fAvoidDfDxForGradientsWhenPossible) {
                 fragBuilder->codeAppendf("half st_grad_len = half(length(dFdy(%s)));", st.fsIn());
             } else {
                 fragBuilder->codeAppendf("half st_grad_len = half(length(dFdx(%s)));", st.fsIn());
@@ -467,8 +455,8 @@ private:
         fragBuilder->codeAppendf("half4 %s = half4(val);", args.fOutputCoverage);
     }
 
-    SkMatrix      fMatrix;        // view matrix if perspective, local matrix otherwise
-    UniformHandle fMatrixUniform;
+    SkMatrix      fLocalMatrix;
+    UniformHandle fLocalMatrixUniform;
 
     SkISize       fAtlasDimensions;
     UniformHandle fAtlasDimensionsInvUniform;
@@ -479,22 +467,21 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 
 GrDistanceFieldPathGeoProc::GrDistanceFieldPathGeoProc(const GrShaderCaps& caps,
-                                                       const SkMatrix& matrix,
-                                                       bool wideColor,
                                                        const GrSurfaceProxyView* views,
                                                        int numViews,
                                                        GrSamplerState params,
+                                                       const SkMatrix& localMatrix,
                                                        uint32_t flags)
         : INHERITED(kGrDistanceFieldPathGeoProc_ClassID)
-        , fMatrix(matrix)
-        , fFlags(flags & kNonLCD_DistanceFieldEffectMask) {
+        , fLocalMatrix(localMatrix)
+        , fFlags(flags & kPath_DistanceFieldEffectMask) {
     SkASSERT(numViews <= kMaxTextures);
-    SkASSERT(!(flags & ~kNonLCD_DistanceFieldEffectMask));
+    SkASSERT(!(flags & ~kPath_DistanceFieldEffectMask));
 
-    fInPosition = {"inPosition", kFloat2_GrVertexAttribType, SkSLType::kFloat2};
-    fInColor = MakeColorAttribute("inColor", wideColor);
+    fInPosition = {"inPosition", kFloat3_GrVertexAttribType, SkSLType::kFloat3};
+    fInColor = MakeColorAttribute("inColor", SkToBool(flags & kWideColor_DistanceFieldEffectFlag));
     fInTextureCoords = {"inTextureCoords", kUShort2_GrVertexAttribType,
-                        caps.integerSupport() ? SkSLType::kUShort2 : SkSLType::kFloat2};
+                        caps.fIntegerSupport ? SkSLType::kUShort2 : SkSLType::kFloat2};
     this->setVertexAttributesWithImplicitOffsets(&fInPosition, 3);
 
     if (numViews) {
@@ -535,8 +522,8 @@ void GrDistanceFieldPathGeoProc::addNewViews(const GrSurfaceProxyView* views,
 void GrDistanceFieldPathGeoProc::addToKey(const GrShaderCaps& caps,
                                           skgpu::KeyBuilder* b) const {
     uint32_t key = fFlags;
-    key |= ProgramImpl::ComputeMatrixKey(caps, fMatrix) << 16;
-    key |= fMatrix.hasPerspective() << (16 + ProgramImpl::kMatrixKeyBits);
+    key |= ProgramImpl::ComputeMatrixKey(caps, fLocalMatrix) << 16;
+    key |= fLocalMatrix.hasPerspective() << (16 + ProgramImpl::kMatrixKeyBits);
     b->add32(key);
     b->add32(this->numTextureSamplers());
 }
@@ -565,13 +552,12 @@ GrGeometryProcessor* GrDistanceFieldPathGeoProc::TestCreate(GrProcessorTestData*
     if (flags & kSimilarity_DistanceFieldEffectFlag) {
         flags |= d->fRandom->nextBool() ? kScaleOnly_DistanceFieldEffectFlag : 0;
     }
+    flags |= d->fRandom->nextBool() ? kWideColor_DistanceFieldEffectFlag : 0;
     SkMatrix localMatrix = GrTest::TestMatrix(d->fRandom);
-    bool wideColor = d->fRandom->nextBool();
     return GrDistanceFieldPathGeoProc::Make(d->allocator(), *d->caps()->shaderCaps(),
-                                            localMatrix,
-                                            wideColor,
                                             &view, 1,
                                             samplerState,
+                                            localMatrix,
                                             flags);
 }
 #endif
@@ -668,7 +654,7 @@ private:
         fragBuilder->codeAppendf("float2 uv = %s;\n", uv.fsIn());
 
         if (isUniformScale) {
-            if (args.fShaderCaps->avoidDfDxForGradientsWhenPossible()) {
+            if (args.fShaderCaps->fAvoidDfDxForGradientsWhenPossible) {
                 fragBuilder->codeAppendf("half st_grad_len = half(abs(dFdy(%s.y)));", st.fsIn());
             } else {
                 fragBuilder->codeAppendf("half st_grad_len = half(abs(dFdx(%s.x)));", st.fsIn());
@@ -678,7 +664,7 @@ private:
         } else if (isSimilarity) {
             // For a similarity matrix with rotation, the gradient will not be aligned
             // with the texel coordinate axes, so we need to calculate it.
-            if (args.fShaderCaps->avoidDfDxForGradientsWhenPossible()) {
+            if (args.fShaderCaps->fAvoidDfDxForGradientsWhenPossible) {
                 // We use dFdy instead and rotate -90 degrees to get the gradient in the x
                 // direction.
                 fragBuilder->codeAppendf("half2 st_grad = half2(dFdy(%s));", st.fsIn());
@@ -807,7 +793,7 @@ GrDistanceFieldLCDTextGeoProc::GrDistanceFieldLCDTextGeoProc(const GrShaderCaps&
     }
     fInColor = {"inColor", kUByte4_norm_GrVertexAttribType, SkSLType::kHalf4};
     fInTextureCoords = {"inTextureCoords", kUShort2_GrVertexAttribType,
-                        caps.integerSupport() ? SkSLType::kUShort2 : SkSLType::kFloat2};
+                        caps.fIntegerSupport ? SkSLType::kUShort2 : SkSLType::kFloat2};
     this->setVertexAttributesWithImplicitOffsets(&fInPosition, 3);
 
     if (numViews) {

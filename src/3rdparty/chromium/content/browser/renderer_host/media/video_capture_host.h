@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,6 +103,8 @@ class CONTENT_EXPORT VideoCaptureHost
                              GetDeviceFormatsInUseCallback callback) override;
   void OnFrameDropped(const base::UnguessableToken& device_id,
                       media::VideoCaptureFrameDropReason reason) override;
+  void OnNewCropVersion(const base::UnguessableToken& device_id,
+                        uint32_t crop_version) override;
   void OnLog(const base::UnguessableToken& device_id,
              const std::string& message) override;
 

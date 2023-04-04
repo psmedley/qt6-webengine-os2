@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
@@ -44,6 +45,7 @@
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/fenced_frame_test_util.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
+#include "content/public/test/prerender_test_util.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/switches.h"
@@ -224,6 +226,10 @@ class WebNavigationApiTest : public ExtensionApiTest {
     // with deferred commits.
     command_line->AppendSwitch(blink::switches::kAllowPreCommitInput);
   }
+
+  content::WebContents* GetWebContents() {
+    return browser()->tab_strip_model()->GetActiveWebContents();
+  }
 };
 
 class WebNavigationApiBackForwardCacheTest : public WebNavigationApiTest {
@@ -262,12 +268,41 @@ class WebNavigationApiTestWithContextType
   }
 };
 
+class WebNavigationApiPrerenderTestWithContextType
+    : public WebNavigationApiTest,
+      public testing::WithParamInterface<ContextType> {
+ public:
+  WebNavigationApiPrerenderTestWithContextType()
+      : WebNavigationApiTest(GetParam()) {}
+  ~WebNavigationApiPrerenderTestWithContextType() override = default;
+  WebNavigationApiPrerenderTestWithContextType(
+      const WebNavigationApiPrerenderTestWithContextType&) = delete;
+  WebNavigationApiPrerenderTestWithContextType& operator=(
+      const WebNavigationApiPrerenderTestWithContextType&) = delete;
+
+ private:
+  content::test::ScopedPrerenderFeatureList prerender_feature_list_;
+};
+
 IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, Api) {
   ASSERT_TRUE(RunExtensionTest("webnavigation/api")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, GetFrame) {
+// TODO(crbug.com/1352957): Flakily timing out.
+IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, DISABLED_GetFrame) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("webnavigation/getFrame")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(WebNavigationApiPrerenderTestWithContextType, GetFrame) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunExtensionTest("webnavigation/getFrame")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(WebNavigationApiPrerenderTestWithContextType,
+                       Prerendering) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunExtensionTest("webnavigation/prerendering")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, GetFrameIncognito) {
@@ -289,6 +324,12 @@ INSTANTIATE_TEST_SUITE_P(PersistentBackground,
                          testing::Values(ContextType::kPersistentBackground));
 INSTANTIATE_TEST_SUITE_P(ServiceWorker,
                          WebNavigationApiTestWithContextType,
+                         testing::Values(ContextType::kServiceWorker));
+INSTANTIATE_TEST_SUITE_P(PersistentBackground,
+                         WebNavigationApiPrerenderTestWithContextType,
+                         testing::Values(ContextType::kPersistentBackground));
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         WebNavigationApiPrerenderTestWithContextType,
                          testing::Values(ContextType::kServiceWorker));
 
 IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, ClientRedirect) {
@@ -335,7 +376,7 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType,
   ASSERT_TRUE(RunExtensionTest("webnavigation/serverRedirectSingleProcess"))
       << message_;
 
-  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* tab = GetWebContents();
   EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
@@ -359,14 +400,9 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, ForwardBack) {
   ASSERT_TRUE(RunTest("webnavigation/forwardBack")) << message_;
 }
 
-// TODO(crbug.com/1313923): Flaky on Mac10.14
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_ForwardBack DISABLED_ForwardBack
-#else
-#define MAYBE_ForwardBack ForwardBack
-#endif
+// TODO(crbug.com/1313923): Flaky on several platforms.
 IN_PROC_BROWSER_TEST_F(WebNavigationApiBackForwardCacheTest,
-                       MAYBE_ForwardBack) {
+                       DISABLED_ForwardBack) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("webnavigation/backForwardCache")) << message_;
 }
@@ -412,7 +448,7 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, UserAction) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionTest("webnavigation/userAction")) << message_;
 
-  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* tab = GetWebContents();
   EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
@@ -448,7 +484,7 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, RequestOpenTab) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionTest("webnavigation/requestOpenTab")) << message_;
 
-  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* tab = GetWebContents();
   EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
@@ -468,11 +504,15 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, RequestOpenTab) {
   mouse_event.button = blink::WebMouseEvent::Button::kMiddle;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
-  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
-      mouse_event);
+  tab->GetPrimaryMainFrame()
+      ->GetRenderViewHost()
+      ->GetWidget()
+      ->ForwardMouseEvent(mouse_event);
   mouse_event.SetType(blink::WebInputEvent::Type::kMouseUp);
-  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
-      mouse_event);
+  tab->GetPrimaryMainFrame()
+      ->GetRenderViewHost()
+      ->GetWidget()
+      ->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -483,7 +523,7 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, TargetBlank) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionTest("webnavigation/targetBlank")) << message_;
 
-  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* tab = GetWebContents();
   EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
@@ -503,11 +543,15 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, TargetBlank) {
   mouse_event.button = blink::WebMouseEvent::Button::kLeft;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
-  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
-      mouse_event);
+  tab->GetPrimaryMainFrame()
+      ->GetRenderViewHost()
+      ->GetWidget()
+      ->ForwardMouseEvent(mouse_event);
   mouse_event.SetType(blink::WebInputEvent::Type::kMouseUp);
-  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
-      mouse_event);
+  tab->GetPrimaryMainFrame()
+      ->GetRenderViewHost()
+      ->GetWidget()
+      ->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -538,11 +582,15 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType,
   mouse_event.button = blink::WebMouseEvent::Button::kLeft;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
-  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
-      mouse_event);
+  tab->GetPrimaryMainFrame()
+      ->GetRenderViewHost()
+      ->GetWidget()
+      ->ForwardMouseEvent(mouse_event);
   mouse_event.SetType(blink::WebInputEvent::Type::kMouseUp);
-  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
-      mouse_event);
+  tab->GetPrimaryMainFrame()
+      ->GetRenderViewHost()
+      ->GetWidget()
+      ->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -630,7 +678,7 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, Crash) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionTest("webnavigation/crash")) << message_;
 
-  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* tab = GetWebContents();
   EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
@@ -652,8 +700,8 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiTestWithContextType, Crash) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-#if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)
-// https://crbug.com/1223055
+#if BUILDFLAG(IS_MAC)
+// TODO(https://crbug.com/1223055): Re-enable this test.
 #define MAYBE_Xslt DISABLED_Xslt
 #else
 #define MAYBE_Xslt Xslt
@@ -718,7 +766,7 @@ IN_PROC_BROWSER_TEST_P(WebNavigationApiFencedFrameTest, MappedURL) {
   EXPECT_TRUE(content::ExecJs(rfh, kScript));
 
   ExtensionTestMessageListener background_page_read("ready",
-                                                    /*will_reply=*/true);
+                                                    ReplyBehavior::kWillReply);
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("webnavigation")
                         .AppendASCII("fencedFramesMappedURL"));

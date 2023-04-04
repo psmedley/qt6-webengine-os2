@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,7 @@ class ContentGpuClient;
 class ContentRendererClient;
 class ContentUtilityClient;
 struct CdmInfo;
-struct PepperPluginInfo;
+struct ContentPluginInfo;
 
 // Setter and getter for the client. The client should be set early, before any
 // content code is called.
@@ -101,9 +101,8 @@ class CONTENT_EXPORT ContentClient {
   // Sets the data on the current gpu.
   virtual void SetGpuInfo(const gpu::GPUInfo& gpu_info) {}
 
-  // Gives the embedder a chance to register its own pepper plugins.
-  virtual void AddPepperPlugins(
-      std::vector<content::PepperPluginInfo>* plugins) {}
+  // Gives the embedder a chance to register its own plugins.
+  virtual void AddPlugins(std::vector<content::ContentPluginInfo>* plugins) {}
 
   // Gives the embedder a chance to register the Content Decryption Modules
   // (CDM) it supports, as well as the CDM host file paths to verify CDM host.
@@ -143,6 +142,11 @@ class CONTENT_EXPORT ContentClient {
     std::vector<std::string> empty_document_schemes;
     // Registers a URL scheme as extension scheme.
     std::vector<std::string> extension_schemes;
+    // Registers a URL scheme with a predefined default custom handler.
+    // This pair of strings must be normalized protocol handler parameters as
+    // described in the Custom Handler specification.
+    // https://html.spec.whatwg.org/multipage/system-state.html#normalize-protocol-handler-parameters
+    std::vector<std::pair<std::string, std::string>> predefined_handler_schemes;
 #if BUILDFLAG(IS_ANDROID) || defined(TOOLKIT_QT)
     // Normally, non-standard schemes canonicalize to opaque origins. However,
     // Android WebView requires non-standard schemes to still be preserved.

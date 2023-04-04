@@ -7,8 +7,6 @@
 
 #include "src/gpu/ganesh/GrBlurUtils.h"
 
-#if SK_GPU_V1
-
 #include "include/core/SkBitmap.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkPaint.h"
@@ -29,9 +27,9 @@
 #include "src/gpu/ganesh/GrThreadSafeCache.h"
 #include "src/gpu/ganesh/GrUtil.h"
 #include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 
 static bool clip_bounds_quick_reject(const SkIRect& clipBounds, const SkIRect& rect) {
     return clipBounds.isEmpty() || rect.isEmpty() || !SkIRect::Intersects(clipBounds, rect);
@@ -578,7 +576,8 @@ void GrBlurUtils::drawShapeWithMaskFilter(GrRecordingContext* rContext,
     }
 
     GrPaint grPaint;
-    if (!SkPaintToGrPaint(rContext, sdc->colorInfo(), paint, matrixProvider, &grPaint)) {
+    if (!SkPaintToGrPaint(rContext, sdc->colorInfo(), paint, matrixProvider, sdc->surfaceProps(),
+                          &grPaint)) {
         return;
     }
 
@@ -592,24 +591,3 @@ void GrBlurUtils::drawShapeWithMaskFilter(GrRecordingContext* rContext,
                        GrStyledShape(shape));
     }
 }
-
-#else // SK_GPU_V1
-
-void GrBlurUtils::drawShapeWithMaskFilter(GrRecordingContext*,
-                                          skgpu::v1::SurfaceDrawContext*,
-                                          const GrClip*,
-                                          const GrStyledShape&,
-                                          GrPaint&&,
-                                          const SkMatrix& viewMatrix,
-                                          const SkMaskFilter*) {
-}
-
-void GrBlurUtils::drawShapeWithMaskFilter(GrRecordingContext*,
-                                          skgpu::v1::SurfaceDrawContext*,
-                                          const GrClip*,
-                                          const SkPaint&,
-                                          const SkMatrixProvider&,
-                                          const GrStyledShape&) {
-}
-
-#endif // SK_GPU_V1

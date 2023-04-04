@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,9 @@ class MEDIA_EXPORT RendererClient {
  public:
   // Executed if any error was encountered after Renderer initialization.
   virtual void OnError(PipelineStatus status) = 0;
+
+  // Executed if there is a non-fatal fallback that should be reported
+  virtual void OnFallback(PipelineStatus status) = 0;
 
   // Executed when rendering has reached the end of stream.
   virtual void OnEnded() = 0;

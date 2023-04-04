@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,16 @@
 class GURL;
 
 namespace blink {
+
+enum class URLSyntaxErrorCode {
+  // The URL syntax is valid.
+  kNoError,
+  // The URL does not contain "%s".
+  kMissingToken,
+  // The URL parsing fails, according to the HTML specification:
+  // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#parse-a-url
+  kInvalidUrl,
+};
 
 // This function returns whether the specified scheme is valid as a protocol
 // handler parameter, as described in steps 1. and 2. of the HTML specification:
@@ -29,6 +39,17 @@ bool BLINK_COMMON_EXPORT
 IsValidCustomHandlerScheme(const base::StringPiece scheme,
                            ProtocolHandlerSecurityLevel security_level,
                            bool* has_custom_scheme_prefix = nullptr);
+
+// This function returns whether the specified url has a valid URL syntax as a
+// protocol handler parameter, as described in steps 3., 4. and 5. of the HTML
+// specification:
+// https://html.spec.whatwg.org/multipage/system-state.html#normalize-protocol-handler-parameters
+//
+// The returned error code would be useful to determine the error message, but
+// the spec states that it should throw a SyntaxError DOMException.
+URLSyntaxErrorCode BLINK_COMMON_EXPORT
+IsValidCustomHandlerURLSyntax(const GURL& full_url,
+                              const base::StringPiece& user_url);
 
 // This function returns whether the specified URL is allowed as a protocol
 // handler parameter, as described in steps 6 and 7 (except same origin) of the

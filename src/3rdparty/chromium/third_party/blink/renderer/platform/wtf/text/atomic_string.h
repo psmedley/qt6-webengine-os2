@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_table_deleted_value_type.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/integer_to_string_conversion.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -43,15 +44,6 @@ struct AtomicStringHash;
 // instances can share their string storage if the strings are
 // identical. Comparing two AtomicString instances is much faster than comparing
 // two String instances because we just check string storage identity.
-//
-// AtomicString instances are not thread-safe. An AtomicString instance created
-// in a thread must be used only in the creator thread.  If multiple threads
-// access a single AtomicString instance, we have race condition of a reference
-// count in StringImpl, and would hit a runtime CHECK in
-// AtomicStringTable::remove().
-//
-// Exception: g_null_atom and g_empty_atom, are shared in multiple threads, and
-// are never stored in AtomicStringTable.
 class WTF_EXPORT AtomicString {
   USING_FAST_MALLOC(AtomicString);
 
@@ -74,7 +66,10 @@ class WTF_EXPORT AtomicString {
   AtomicString(const char* chars)
       : AtomicString(reinterpret_cast<const LChar*>(chars)) {}
   AtomicString(const LChar* chars, unsigned length);
-  AtomicString(const UChar* chars, unsigned length);
+  AtomicString(
+      const UChar* chars,
+      unsigned length,
+      AtomicStringUCharEncoding encoding = AtomicStringUCharEncoding::kUnknown);
   AtomicString(const UChar* chars);
 
   // Constructing an AtomicString from a String / StringImpl can be expensive if
@@ -193,7 +188,7 @@ class WTF_EXPORT AtomicString {
   static AtomicString Number(double, unsigned precision = 6);
 
   bool IsNull() const { return string_.IsNull(); }
-  bool IsEmpty() const { return string_.IsEmpty(); }
+  bool empty() const { return string_.empty(); }
 
 #ifdef __OBJC__
   AtomicString(NSString* s) : string_(Add((CFStringRef)s)) {}

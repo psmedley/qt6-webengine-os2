@@ -122,19 +122,10 @@ void DevToolsHost::Trace(Visitor* visitor) const {
 void DevToolsHost::EvaluateScript(const String& expression) {
   if (ScriptForbiddenScope::IsScriptForbidden())
     return;
-  ScriptState* script_state = ToScriptStateForMainWorld(frontend_frame_);
-  if (!script_state)
-    return;
-  ScriptState::Scope scope(script_state);
-  v8::MicrotasksScope microtasks(script_state->GetIsolate(),
-                                 v8::MicrotasksScope::kRunMicrotasks);
-  // `kDoNotSanitize` is used for internal scripts for keeping the existing
-  // behavior.
-  V8ScriptRunner::CompileAndRunInternalScript(
-      script_state->GetIsolate(), script_state,
-      *ClassicScript::CreateUnspecifiedScript(
-          expression, ScriptSourceLocationType::kInternal,
-          SanitizeScriptErrors::kDoNotSanitize));
+  DCHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+  ClassicScript::CreateUnspecifiedScript(expression,
+                                         ScriptSourceLocationType::kInternal)
+      ->RunScriptOnScriptState(ToScriptStateForMainWorld(frontend_frame_));
 }
 
 void DevToolsHost::DisconnectClient() {
@@ -178,7 +169,7 @@ void DevToolsHost::sendMessageToEmbedder(const String& message) {
                 : "Message to embedder couldn't be JSON-deserialized");
       return;
     }
-    client_->SendMessageToEmbedder(std::move(value->GetDict()));
+    client_->SendMessageToEmbedder(std::move(*value).TakeDict());
   }
 }
 

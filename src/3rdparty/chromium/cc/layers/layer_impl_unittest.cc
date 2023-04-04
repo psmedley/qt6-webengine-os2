@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,7 +102,7 @@ TEST_F(LayerImplTest, VerifyPendingLayerChangesAreTrackedProperly) {
   gfx::Point arbitrary_point = gfx::Point(333, 444);
 
   gfx::Rect arbitrary_rect = gfx::Rect(arbitrary_point, arbitrary_size);
-  SkColor arbitrary_color = SkColorSetRGB(10, 20, 30);
+  SkColor4f arbitrary_color{0.1f, 0.2f, 0.3f, 1.0f};
   gfx::Transform arbitrary_transform;
   arbitrary_transform.Scale3d(0.1f, 0.2f, 0.3f);
   FilterOperations arbitrary_filters;
@@ -166,7 +166,7 @@ TEST_F(LayerImplTest, VerifyNeedsUpdateDrawProperties) {
   gfx::PointF arbitrary_scroll_offset(
       gfx::PointAtOffsetFromOrigin(arbitrary_vector2d));
   gfx::Size large_size = gfx::Size(1000, 1000);
-  SkColor arbitrary_color = SkColorSetRGB(10, 20, 30);
+  SkColor4f arbitrary_color{0.1f, 0.2f, 0.3f, 1.0f};
   gfx::Transform arbitrary_transform;
   arbitrary_transform.Scale3d(0.1f, 0.2f, 0.3f);
   FilterOperations arbitrary_filters;
@@ -286,10 +286,11 @@ TEST_F(LayerImplTest, PerspectiveTransformHasReasonableScale) {
   }
   // Test case from crbug.com/766021.
   {
-    gfx::Transform transform(-0.9397f, -0.7019f, 0.2796f, 2383.4521f,   // row 1
-                             -0.0038f, 0.0785f, 1.0613f, 1876.4553f,    // row 2
-                             -0.0835f, 0.9081f, -0.4105f, -2208.3035f,  // row 3
-                             0.0001f, -0.0008f, 0.0003f, 2.8435f);      // row 4
+    auto transform = gfx::Transform::RowMajor(
+        -0.9397f, -0.7019f, 0.2796f, 2383.4521f,   // row 1
+        -0.0038f, 0.0785f, 1.0613f, 1876.4553f,    // row 2
+        -0.0835f, 0.9081f, -0.4105f, -2208.3035f,  // row 3
+        0.0001f, -0.0008f, 0.0003f, 2.8435f);      // row 4
     layer->draw_properties().screen_space_transform = transform;
 
     ASSERT_TRUE(layer->ScreenSpaceTransform().HasPerspective());
@@ -417,7 +418,8 @@ TEST_F(LayerImplScrollTest, ApplySentScrollsNoListener) {
                    scroll_tree(layer())->GetScrollOffsetBaseForTesting(
                        layer()->element_id()));
 
-  scroll_tree(layer())->ApplySentScrollDeltasFromAbortedCommit();
+  scroll_tree(layer())->ApplySentScrollDeltasFromAbortedCommit(
+      /* next_bmf */ false, /* main_frame_applied_deltas */ true);
 
   EXPECT_POINTF_EQ(scroll_offset + scroll_delta, CurrentScrollOffset(layer()));
   EXPECT_VECTOR2DF_EQ(scroll_delta - sent_scroll_delta, ScrollDelta(layer()));

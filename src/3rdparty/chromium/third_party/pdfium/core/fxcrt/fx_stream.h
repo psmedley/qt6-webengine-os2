@@ -13,11 +13,15 @@
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_types.h"
 #include "core/fxcrt/retain_ptr.h"
+#include "third_party/base/span.h"
 
 class IFX_WriteStream {
  public:
+  // When `size` is 0, treat it as a no-op and return true. That is also the
+  // only time when `pData` can be null.
   virtual bool WriteBlock(const void* pData, size_t size) = 0;
 
+  bool WriteSpan(pdfium::span<const uint8_t> data);
   bool WriteString(ByteStringView str);
   bool WriteByte(uint8_t byte);
   bool WriteDWord(uint32_t i);
@@ -62,9 +66,9 @@ class IFX_SeekableReadStream : virtual public Retainable,
   virtual FX_FILESIZE GetPosition();
   virtual size_t ReadBlock(void* buffer, size_t size);
 
-  virtual bool ReadBlockAtOffset(void* buffer,
-                                 FX_FILESIZE offset,
-                                 size_t size) WARN_UNUSED_RESULT = 0;
+  [[nodiscard]] virtual bool ReadBlockAtOffset(void* buffer,
+                                               FX_FILESIZE offset,
+                                               size_t size) = 0;
 };
 
 class IFX_SeekableStream : public IFX_SeekableReadStream,

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,8 @@
 #include "base/base64url.h"
 #include "base/strings/string_piece.h"
 #include "base/values.h"
-#include "components/cbor/reader.h"
-#include "device/fido/attestation_object.h"
-#include "device/fido/authenticator_data.h"
 #include "device/fido/authenticator_selection_criteria.h"
+#include "device/fido/cable/cable_discovery_data.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_transport_protocol.h"
 #include "device/fido/fido_types.h"
@@ -19,9 +17,10 @@
 #include "device/fido/public_key_credential_rp_entity.h"
 #include "device/fido/public_key_credential_user_entity.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/webauthn/authenticator.mojom.h"
 #include "url/gurl.h"
 
-namespace extensions {
+namespace extensions::webauthn_proxy {
 
 namespace {
 
@@ -93,67 +92,65 @@ std::vector<uint8_t> ToByteVector(const std::string& in) {
 }
 
 base::Value ToValue(const device::PublicKeyCredentialRpEntity& relying_party) {
-  base::Value value(base::Value::Type::DICTIONARY);
-  value.SetStringKey("id", relying_party.id);
-  if (relying_party.name) {
-    value.SetKey("name", base::Value(*relying_party.name));
-  }
-  if (relying_party.icon_url) {
-    value.SetKey("icon_url", base::Value(relying_party.icon_url->spec()));
-  }
-  return value;
+  base::Value::Dict value;
+  value.Set("id", relying_party.id);
+  // `PublicKeyCredentialEntity.name` is required in the IDL but optional on the
+  // mojo struct.
+  value.Set("name", relying_party.name.value_or(""));
+  return base::Value(std::move(value));
 }
 
 base::Value ToValue(const device::PublicKeyCredentialUserEntity& user) {
-  base::Value value(base::Value::Type::DICTIONARY);
-  value.SetStringKey("id", Base64UrlEncode(user.id));
-  if (user.name) {
-    value.SetKey("name", base::Value(*user.name));
-  }
-  if (user.icon_url) {
-    value.SetKey("icon_url", base::Value(user.icon_url->spec()));
-  }
+  base::Value::Dict value;
+  value.Set("id", Base64UrlEncode(user.id));
+  // `PublicKeyCredentialEntity.name` is required in the IDL but optional on the
+  // mojo struct.
+  value.Set("name", user.name.value_or(""));
   if (user.display_name) {
-    value.SetKey("display_name", base::Value(*user.display_name));
+    value.Set("displayName", *user.display_name);
   }
-  return value;
+  return base::Value(std::move(value));
 }
 
 base::Value ToValue(
     const device::PublicKeyCredentialParams::CredentialInfo& params) {
-  base::Value value(base::Value::Type::DICTIONARY);
+  base::Value::Dict value;
   switch (params.type) {
     case device::CredentialType::kPublicKey:
-      value.SetKey("type", base::Value(device::kPublicKey));
+      value.Set("type", device::kPublicKey);
   }
-  value.SetIntKey("algorithm", params.algorithm);
-  return value;
+  value.Set("alg", params.algorithm);
+  return base::Value(std::move(value));
 }
 
 base::Value ToValue(const device::PublicKeyCredentialDescriptor& descriptor) {
-  base::Value value(base::Value::Type::DICTIONARY);
+  base::Value::Dict value;
   switch (descriptor.credential_type) {
     case device::CredentialType::kPublicKey:
-      value.SetKey("type", base::Value(device::kPublicKey));
+      value.Set("type", device::kPublicKey);
   }
-  value.SetStringKey("id", Base64UrlEncode(descriptor.id));
-  std::vector<base::Value> transports;
+  value.Set("id", Base64UrlEncode(descriptor.id));
+  base::Value::List transports;
   for (const device::FidoTransportProtocol& transport : descriptor.transports) {
-    transports.emplace_back(base::Value(ToString(transport)));
+    transports.Append(ToString(transport));
   }
-  value.SetKey("transports", base::Value(std::move(transports)));
-  return value;
+  if (!transports.empty()) {
+    value.Set("transports", std::move(transports));
+  }
+  return base::Value(std::move(value));
 }
 
 base::Value ToValue(
     const device::AuthenticatorAttachment& authenticator_attachment) {
   switch (authenticator_attachment) {
-    case device::AuthenticatorAttachment::kAny:
-      return base::Value();
     case device::AuthenticatorAttachment::kCrossPlatform:
       return base::Value("cross-platform");
     case device::AuthenticatorAttachment::kPlatform:
       return base::Value("platform");
+    case device::AuthenticatorAttachment::kAny:
+      // Any maps to the key being omitted, not a null value.
+      NOTREACHED();
+      return base::Value("invalid");
   }
 }
 
@@ -183,14 +180,17 @@ base::Value ToValue(
 
 base::Value ToValue(
     const device::AuthenticatorSelectionCriteria& authenticator_selection) {
-  base::Value value(base::Value::Type::DICTIONARY);
+  base::Value::Dict value;
   absl::optional<std::string> attachment;
-  value.SetKey("authenticatorAttachment",
-               ToValue(authenticator_selection.authenticator_attachment));
-  value.SetKey("residentKey", ToValue(authenticator_selection.resident_key));
-  value.SetKey("userVerification",
-               ToValue(authenticator_selection.user_verification_requirement));
-  return value;
+  if (authenticator_selection.authenticator_attachment !=
+      device::AuthenticatorAttachment::kAny) {
+    value.Set("authenticatorAttachment",
+              ToValue(authenticator_selection.authenticator_attachment));
+  }
+  value.Set("residentKey", ToValue(authenticator_selection.resident_key));
+  value.Set("userVerification",
+            ToValue(authenticator_selection.user_verification_requirement));
+  return base::Value(std::move(value));
 }
 
 base::Value ToValue(const device::AttestationConveyancePreference&
@@ -207,6 +207,68 @@ base::Value ToValue(const device::AttestationConveyancePreference&
         kEnterpriseIfRPListedOnAuthenticator:
       return base::Value("enterprise");
   }
+}
+
+base::Value ToValue(const blink::mojom::RemoteDesktopClientOverride&
+                        remote_desktop_client_override) {
+  base::Value::Dict value;
+  value.Set("origin", remote_desktop_client_override.origin.Serialize());
+  value.Set("sameOriginWithAncestors",
+            remote_desktop_client_override.same_origin_with_ancestors);
+  return base::Value(std::move(value));
+}
+
+base::Value ToValue(const blink::mojom::ProtectionPolicy policy) {
+  switch (policy) {
+    case blink::mojom::ProtectionPolicy::UNSPECIFIED:
+      NOTREACHED();
+      return base::Value("invalid");
+    case blink::mojom::ProtectionPolicy::NONE:
+      return base::Value("userVerificationOptional");
+    case blink::mojom::ProtectionPolicy::UV_OR_CRED_ID_REQUIRED:
+      return base::Value("userVerificationOptionalWithCredentialIDList");
+    case blink::mojom::ProtectionPolicy::UV_REQUIRED:
+      return base::Value("userVerificationRequired");
+  }
+}
+
+base::Value ToValue(const device::LargeBlobSupport large_blob) {
+  switch (large_blob) {
+    case device::LargeBlobSupport::kNotRequested:
+      NOTREACHED();
+      return base::Value("invalid");
+    case device::LargeBlobSupport::kRequired:
+      return base::Value("required");
+    case device::LargeBlobSupport::kPreferred:
+      return base::Value("preferred");
+  }
+}
+
+base::Value ToValue(const device::CableDiscoveryData& cable_authentication) {
+  base::Value::Dict value;
+  switch (cable_authentication.version) {
+    case device::CableDiscoveryData::Version::INVALID:
+      NOTREACHED();
+      break;
+    case device::CableDiscoveryData::Version::V1:
+      value.Set("version", 1);
+      value.Set("clientEid",
+                Base64UrlEncode(cable_authentication.v1->client_eid));
+      value.Set("authenticatorEid",
+                Base64UrlEncode(cable_authentication.v1->authenticator_eid));
+      value.Set("sessionPreKey",
+                Base64UrlEncode(cable_authentication.v1->session_pre_key));
+      break;
+    case device::CableDiscoveryData::Version::V2:
+      value.Set("version", 2);
+      value.Set("clientEid",
+                Base64UrlEncode(cable_authentication.v2->experiments));
+      value.Set("authenticatorEid", "");
+      value.Set("sessionPreKey",
+                Base64UrlEncode(cable_authentication.v2->server_link_data));
+      break;
+  }
+  return base::Value(std::move(value));
 }
 
 absl::optional<device::FidoTransportProtocol> FidoTransportProtocolFromValue(
@@ -231,7 +293,7 @@ NullableAuthenticatorAttachmentFromValue(const base::Value& value) {
   if (attachment_name == "platform") {
     return device::AuthenticatorAttachment::kPlatform;
   } else if (attachment_name == "cross-platform") {
-    return device::AuthenticatorAttachment::kPlatform;
+    return device::AuthenticatorAttachment::kCrossPlatform;
   }
   return absl::nullopt;
 }
@@ -240,64 +302,147 @@ NullableAuthenticatorAttachmentFromValue(const base::Value& value) {
 
 base::Value ToValue(
     const blink::mojom::PublicKeyCredentialCreationOptionsPtr& options) {
-  base::Value value(base::Value::Type::DICTIONARY);
-  value.SetKey("rp", ToValue(options->relying_party));
-  value.SetKey("user", ToValue(options->user));
-  value.SetStringKey("challenge", Base64UrlEncode(options->challenge));
-  std::vector<base::Value> public_key_parameters;
+  base::Value::Dict value;
+  value.Set("rp", ToValue(options->relying_party));
+  value.Set("user", ToValue(options->user));
+  value.Set("challenge", Base64UrlEncode(options->challenge));
+  base::Value::List public_key_parameters;
   for (const device::PublicKeyCredentialParams::CredentialInfo& params :
        options->public_key_parameters) {
-    public_key_parameters.push_back(ToValue(params));
+    public_key_parameters.Append(ToValue(params));
   }
-  value.SetKey("pubKeyCredParams",
-               base::Value(std::move(public_key_parameters)));
-  std::vector<base::Value> exclude_credentials;
+  value.Set("pubKeyCredParams", std::move(public_key_parameters));
+  base::Value::List exclude_credentials;
   for (const device::PublicKeyCredentialDescriptor& descriptor :
        options->exclude_credentials) {
-    exclude_credentials.push_back(ToValue(descriptor));
+    exclude_credentials.Append(ToValue(descriptor));
   }
-  value.SetKey("excludeCredentials",
-               base::Value(std::move(exclude_credentials)));
+  value.Set("excludeCredentials", std::move(exclude_credentials));
   if (options->authenticator_selection) {
-    value.SetKey("authenticatorSelection",
-                 ToValue(*options->authenticator_selection));
+    value.Set("authenticatorSelection",
+              ToValue(*options->authenticator_selection));
   }
-  value.SetKey("attestation", ToValue(options->attestation));
+  value.Set("attestation", ToValue(options->attestation));
 
-  // TODO(https://crbug.com/1231802): Serialize extensions.
+  base::Value::Dict& extensions =
+      value.Set("extensions", base::Value::Dict())->GetDict();
 
-  return value;
+  if (options->hmac_create_secret) {
+    extensions.Set("hmacCreateSecret", true);
+  }
+
+  if (options->protection_policy !=
+      blink::mojom::ProtectionPolicy::UNSPECIFIED) {
+    extensions.Set("credentialProtectionPolicy",
+                   ToValue(options->protection_policy));
+    extensions.Set("enforceCredentialProtectionPolicy",
+                   options->enforce_protection_policy);
+  }
+
+  if (options->appid_exclude) {
+    extensions.Set("appIdExclude", *options->appid_exclude);
+  }
+
+  if (options->cred_props) {
+    extensions.Set("credProps", true);
+  }
+
+  if (options->large_blob_enable != device::LargeBlobSupport::kNotRequested) {
+    base::Value::Dict large_blob_value;
+    large_blob_value.Set("support", ToValue(options->large_blob_enable));
+    extensions.Set("largeBlob", std::move(large_blob_value));
+  }
+
+  DCHECK(!options->is_payment_credential_creation);
+
+  if (options->cred_blob) {
+    extensions.Set("credBlob", Base64UrlEncode(*options->cred_blob));
+  }
+
+  if (options->google_legacy_app_id_support) {
+    extensions.Set("googleLegacyAppidSupport", true);
+  }
+
+  if (options->min_pin_length_requested) {
+    extensions.Set("minPinLength", true);
+  }
+
+  if (options->remote_desktop_client_override) {
+    extensions.Set("remoteDesktopClientOverride",
+                   ToValue(*options->remote_desktop_client_override));
+  }
+
+  DCHECK(!options->prf_enable);
+
+  return base::Value(std::move(value));
 }
 
 base::Value ToValue(
     const blink::mojom::PublicKeyCredentialRequestOptionsPtr& options) {
-  base::Value value(base::Value::Type::DICTIONARY);
-  value.SetStringKey("challenge", Base64UrlEncode(options->challenge));
-  value.SetStringKey("rpId", options->relying_party_id);
+  base::Value::Dict value;
+  value.Set("challenge", Base64UrlEncode(options->challenge));
+  value.Set("rpId", options->relying_party_id);
 
-  std::vector<base::Value> allow_credentials;
+  base::Value::List allow_credentials;
   for (const device::PublicKeyCredentialDescriptor& descriptor :
        options->allow_credentials) {
-    allow_credentials.push_back(ToValue(descriptor));
+    allow_credentials.Append(ToValue(descriptor));
   }
-  value.SetKey("allowCredentials", base::Value(std::move(allow_credentials)));
+  value.Set("allowCredentials", std::move(allow_credentials));
 
-  value.SetKey("userVerification", ToValue(options->user_verification));
+  value.Set("userVerification", ToValue(options->user_verification));
 
-  // TODO(https://crbug.com/1231802): Serialize extensions.
+  base::Value::Dict& extensions =
+      value.Set("extensions", base::Value::Dict())->GetDict();
 
-  return value;
+  if (options->appid) {
+    extensions.Set("appid", *options->appid);
+  }
+
+  base::Value::List cable_authentication_data;
+  for (const device::CableDiscoveryData& cable :
+       options->cable_authentication_data) {
+    cable_authentication_data.Append(ToValue(cable));
+  }
+  if (!cable_authentication_data.empty()) {
+    extensions.Set("cableAuthentication", std::move(cable_authentication_data));
+  }
+
+  if (options->get_cred_blob) {
+    extensions.Set("getCredBlob", true);
+  }
+
+  if (options->large_blob_read || options->large_blob_write) {
+    base::Value::Dict large_blob_value;
+    if (options->large_blob_read) {
+      large_blob_value.Set("read", true);
+    }
+    if (options->large_blob_write) {
+      large_blob_value.Set("write",
+                           Base64UrlEncode(*options->large_blob_write));
+    }
+    extensions.Set("largeBlob", std::move(large_blob_value));
+  }
+
+  if (options->remote_desktop_client_override) {
+    extensions.Set("remoteDesktopClientOverride",
+                   ToValue(*options->remote_desktop_client_override));
+  }
+
+  DCHECK(!options->prf);
+
+  return base::Value(std::move(value));
 }
 
-blink::mojom::MakeCredentialAuthenticatorResponsePtr
+std::pair<blink::mojom::MakeCredentialAuthenticatorResponsePtr, std::string>
 MakeCredentialResponseFromValue(const base::Value& value) {
   if (!value.is_dict()) {
-    return nullptr;
+    return {nullptr, "value is not a dict"};
   }
 
   const std::string* type = value.FindStringKey("type");
   if (!type || *type != device::kPublicKey) {
-    return nullptr;
+    return {nullptr, "invalid type"};
   }
 
   auto response = blink::mojom::MakeCredentialAuthenticatorResponse::New();
@@ -305,85 +450,134 @@ MakeCredentialResponseFromValue(const base::Value& value) {
 
   const std::string* id = value.FindStringKey("id");
   if (!id) {
-    return nullptr;
+    return {nullptr, "invalid id"};
   }
   response->info->id = *id;
   absl::optional<std::string> raw_id = Base64UrlDecodeStringKey(value, "rawId");
   if (!raw_id) {
-    return nullptr;
+    return {nullptr, "invalid rawId"};
   }
   response->info->raw_id = ToByteVector(*raw_id);
 
   const base::Value* authenticator_attachment_value =
       value.FindKey("authenticatorAttachment");
   if (!authenticator_attachment_value) {
-    return nullptr;
+    return {nullptr, "invalid authenticatorAttachment"};
   }
   absl::optional<device::AuthenticatorAttachment> authenticator_attachment =
       NullableAuthenticatorAttachmentFromValue(*authenticator_attachment_value);
   if (!authenticator_attachment) {
-    return nullptr;
+    return {nullptr, "invalid authenticatorAttachment"};
   }
   response->authenticator_attachment = *authenticator_attachment;
 
-  const base::Value* response_dict = value.FindDictKey("response");
-  if (!response_dict) {
-    return nullptr;
+  const base::Value* attestation_response = value.FindDictKey("response");
+  if (!attestation_response) {
+    return {nullptr, "invalid response"};
   }
 
+  absl::optional<std::string> authenticator_data =
+      Base64UrlDecodeStringKey(*attestation_response, "authenticatorData");
+  if (!authenticator_data) {
+    return {nullptr, "invalid authenticatorData"};
+  }
+  response->info->authenticator_data = ToByteVector(*authenticator_data);
+
+  absl::optional<std::string> attestation_object =
+      Base64UrlDecodeStringKey(*attestation_response, "attestationObject");
+  if (!attestation_object) {
+    return {nullptr, "invalid attestationObject"};
+  }
+  response->attestation_object = ToByteVector(*attestation_object);
+
   absl::optional<std::string> client_data_json =
-      Base64UrlDecodeStringKey(*response_dict, "clientDataJSON");
+      Base64UrlDecodeStringKey(*attestation_response, "clientDataJSON");
   if (!client_data_json) {
-    return nullptr;
+    return {nullptr, "invalid clientDataJSON"};
   }
   response->info->client_data_json = ToByteVector(*client_data_json);
 
-  absl::optional<std::string> attestation_object_bytes =
-      Base64UrlDecodeStringKey(*response_dict, "attestationObject");
-  if (!attestation_object_bytes) {
-    return nullptr;
+  // publicKey is required but nullable.
+  auto [ok, opt_public_key] =
+      Base64UrlDecodeNullableStringKey(*attestation_response, "publicKey");
+  if (!ok) {
+    return {nullptr, "invalid publicKey"};
   }
-  absl::optional<cbor::Value> attestation_object_cbor = cbor::Reader::Read(
-      base::as_bytes(base::make_span(*attestation_object_bytes)));
-  if (!attestation_object_cbor) {
-    return nullptr;
+  if (opt_public_key) {
+    response->public_key_der = ToByteVector(*opt_public_key);
   }
-  absl::optional<device::AttestationObject> attestation_object =
-      device::AttestationObject::Parse(*attestation_object_cbor);
-  if (!attestation_object) {
-    return nullptr;
-  }
-  response->attestation_object = ToByteVector(*attestation_object_bytes);
-  response->info->authenticator_data =
-      attestation_object->authenticator_data().SerializeToByteArray();
 
-  const base::Value* transports = response_dict->FindListKey("transports");
-  if (!transports) {
-    return nullptr;
+  absl::optional<int> public_key_algorithm =
+      attestation_response->FindIntKey("publicKeyAlgorithm");
+  if (!public_key_algorithm) {
+    return {nullptr, "invalid publicKeyAlgorithm"};
   }
-  for (const base::Value& transport_name : transports->GetListDeprecated()) {
+  response->public_key_algo = *public_key_algorithm;
+
+  const base::Value* transports =
+      attestation_response->FindListKey("transports");
+  if (!transports) {
+    return {nullptr, "invalid transports"};
+  }
+  for (const base::Value& transport_name : transports->GetList()) {
     absl::optional<device::FidoTransportProtocol> transport =
         FidoTransportProtocolFromValue(transport_name);
     if (!transport) {
-      return nullptr;
+      return {nullptr, "invalid transports"};
     }
     response->transports.push_back(*transport);
   }
 
-  // TODO(https://crbug.com/1231802): Parse getClientExtensionResults().
+  const base::Value* client_extension_results =
+      value.FindDictKey("clientExtensionResults");
+  if (!client_extension_results) {
+    return {nullptr, "invalid clientExtensionResults"};
+  }
+  absl::optional<bool> cred_blob =
+      client_extension_results->FindBoolKey("credBlob");
+  if (cred_blob) {
+    response->echo_cred_blob = true;
+    response->cred_blob = *cred_blob;
+  }
+  const base::Value* cred_props =
+      client_extension_results->FindDictKey("credProps");
+  if (cred_props) {
+    response->echo_cred_props = true;
+    absl::optional<bool> rk = cred_props->FindBoolKey("rk");
+    if (rk) {
+      response->has_cred_props_rk = true;
+      response->cred_props_rk = *rk;
+    }
+  }
+  const absl::optional<bool> hmac_create_secret =
+      client_extension_results->FindBoolKey("hmacCreateSecret");
+  if (hmac_create_secret) {
+    response->echo_hmac_create_secret = true;
+    response->hmac_create_secret = *hmac_create_secret;
+  }
+  const base::Value* large_blob =
+      client_extension_results->FindDictKey("largeBlob");
+  if (large_blob) {
+    response->echo_large_blob = true;
+    const absl::optional<bool> supported = large_blob->FindBoolKey("supported");
+    if (!supported) {
+      return {nullptr, "invalid largeBlob extension"};
+    }
+    response->supports_large_blob = *supported;
+  }
 
-  return response;
+  return {std::move(response), ""};
 }
 
-blink::mojom::GetAssertionAuthenticatorResponsePtr
+std::pair<blink::mojom::GetAssertionAuthenticatorResponsePtr, std::string>
 GetAssertionResponseFromValue(const base::Value& value) {
   if (!value.is_dict()) {
-    return nullptr;
+    return {nullptr, "value is not a dict"};
   }
 
   const std::string* type = value.FindStringKey("type");
   if (!type || *type != device::kPublicKey) {
-    return nullptr;
+    return {nullptr, "invalid type"};
   }
 
   auto response = blink::mojom::GetAssertionAuthenticatorResponse::New();
@@ -391,63 +585,102 @@ GetAssertionResponseFromValue(const base::Value& value) {
 
   const std::string* id = value.FindStringKey("id");
   if (!id) {
-    return nullptr;
+    return {nullptr, "invalid id"};
   }
   response->info->id = *id;
   absl::optional<std::string> raw_id = Base64UrlDecodeStringKey(value, "rawId");
   if (!raw_id) {
-    return nullptr;
+    return {nullptr, "invalid rawId"};
   }
   response->info->raw_id = ToByteVector(*raw_id);
 
   const base::Value* authenticator_attachment_value =
       value.FindKey("authenticatorAttachment");
   if (!authenticator_attachment_value) {
-    return nullptr;
+    return {nullptr, "invalid authenticatorAttachment"};
   }
   absl::optional<device::AuthenticatorAttachment> authenticator_attachment =
       NullableAuthenticatorAttachmentFromValue(*authenticator_attachment_value);
   if (!authenticator_attachment) {
-    return nullptr;
+    return {nullptr, "invalid authenticatorAttachment"};
   }
   response->authenticator_attachment = *authenticator_attachment;
 
-  const base::Value* response_dict = value.FindDictKey("response");
-  if (!response_dict) {
-    return nullptr;
+  const base::Value* assertion_response = value.FindDictKey("response");
+  if (!assertion_response) {
+    return {nullptr, "invalid response"};
   }
 
   absl::optional<std::string> client_data_json =
-      Base64UrlDecodeStringKey(*response_dict, "clientDataJSON");
+      Base64UrlDecodeStringKey(*assertion_response, "clientDataJSON");
   if (!client_data_json) {
-    return nullptr;
+    return {nullptr, "invalid clientDataJSON"};
   }
   response->info->client_data_json = ToByteVector(*client_data_json);
 
   absl::optional<std::string> authenticator_data =
-      Base64UrlDecodeStringKey(*response_dict, "authenticatorData");
+      Base64UrlDecodeStringKey(*assertion_response, "authenticatorData");
   if (!authenticator_data) {
-    return nullptr;
+    return {nullptr, "invalid authenticatorData"};
   }
   response->info->authenticator_data = ToByteVector(*authenticator_data);
 
   absl::optional<std::string> signature =
-      Base64UrlDecodeStringKey(*response_dict, "signature");
+      Base64UrlDecodeStringKey(*assertion_response, "signature");
   if (!signature) {
-    return nullptr;
+    return {nullptr, "invalid signature"};
   }
   response->signature = ToByteVector(*signature);
 
   // userHandle is non-optional but nullable.
   auto [ok, opt_user_handle] =
-      Base64UrlDecodeNullableStringKey(*response_dict, "userHandle");
+      Base64UrlDecodeNullableStringKey(*assertion_response, "userHandle");
   if (!ok) {
-    return nullptr;
+    return {nullptr, "invalid userHandle"};
   }
   if (opt_user_handle) {
     response->user_handle = ToByteVector(*opt_user_handle);
   }
-  return response;
+
+  const base::Value* client_extension_results =
+      value.FindDictKey("clientExtensionResults");
+  if (!client_extension_results) {
+    return {nullptr, "invalid clientExtensionResults"};
+  }
+  const absl::optional<bool> app_id =
+      client_extension_results->FindBoolKey("appid");
+  if (app_id) {
+    response->echo_appid_extension = true;
+    response->appid_extension = *app_id;
+  }
+  if (client_extension_results->FindKey("getCredBlob")) {
+    absl::optional<std::string> cred_blob =
+        Base64UrlDecodeStringKey(*client_extension_results, "getCredBlob");
+    if (!cred_blob) {
+      return {nullptr, "invalid credBlob extension"};
+    }
+    response->get_cred_blob = ToByteVector(*cred_blob);
+  }
+  const base::Value* large_blob =
+      client_extension_results->FindDictKey("largeBlob");
+  if (large_blob) {
+    response->echo_large_blob = true;
+    if (large_blob->FindStringKey("blob")) {
+      absl::optional<std::string> blob =
+          Base64UrlDecodeStringKey(*large_blob, "blob");
+      if (!blob) {
+        return {nullptr, "invalid largeBlob extension"};
+      }
+      response->large_blob = ToByteVector(*blob);
+    }
+    const absl::optional<bool> written = large_blob->FindBoolKey("written");
+    if (written) {
+      response->echo_large_blob_written = true;
+      response->large_blob_written = *written;
+    }
+  }
+
+  return {std::move(response), ""};
 }
 
-}  // namespace extensions
+}  // namespace extensions::webauthn_proxy

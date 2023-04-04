@@ -151,6 +151,17 @@ int MM21ToI420(const uint8_t* src_y,
                int width,
                int height);
 
+// Convert MM21 to YUY2
+LIBYUV_API
+int MM21ToYUY2(const uint8_t* src_y,
+               int src_stride_y,
+               const uint8_t* src_uv,
+               int src_stride_uv,
+               uint8_t* dst_yuy2,
+               int dst_stride_yuy2,
+               int width,
+               int height);
+
 // Convert I422 to NV21.
 LIBYUV_API
 int I422ToNV21(const uint8_t* src_y,
@@ -224,6 +235,23 @@ int I010Copy(const uint16_t* src_y,
 #define H010ToH420 I010ToI420
 LIBYUV_API
 int I010ToI420(const uint16_t* src_y,
+               int src_stride_y,
+               const uint16_t* src_u,
+               int src_stride_u,
+               const uint16_t* src_v,
+               int src_stride_v,
+               uint8_t* dst_y,
+               int dst_stride_y,
+               uint8_t* dst_u,
+               int dst_stride_u,
+               uint8_t* dst_v,
+               int dst_stride_v,
+               int width,
+               int height);
+
+#define H210ToH420 I210ToI420
+LIBYUV_API
+int I210ToI420(const uint16_t* src_y,
                int src_stride_y,
                const uint16_t* src_u,
                int src_stride_u,

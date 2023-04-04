@@ -36,6 +36,7 @@
 
 #include "base/auto_reset.h"
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
@@ -68,7 +69,8 @@ class TestingPlatformSupport : public Platform {
   std::string GetDataResourceString(int resource_id) override;
   ThreadSafeBrowserInterfaceBrokerProxy* GetBrowserInterfaceBroker() override;
   bool IsThreadedAnimationEnabled() override;
-  cc::TaskGraphRunner* GetTaskGraphRunner() override;
+  std::unique_ptr<blink::WebV8ValueConverter> CreateWebV8ValueConverter()
+      override;
 
   virtual void RunUntilIdle();
   void SetThreadedAnimationEnabled(bool enabled);

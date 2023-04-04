@@ -1,17 +1,20 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'chrome://resources/cr_elements/cr_tabs/cr_tabs.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import 'chrome://resources/polymer/v3_0/iron-pages/iron-pages.js';
 import './reading_list/app.js'; /* <reading-list-app> */
 import '../strings.m.js';
 import './bookmarks/bookmarks_list.js';
+import './bookmarks/power_bookmark_row.js';
 import './read_anything/app.js'; /* <read-anything-app> */
 
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {getTemplate} from './app.html.js';
 import {ReadingListApiProxy, ReadingListApiProxyImpl} from './reading_list/reading_list_api_proxy.js';
 
 // Key for localStorage object that refers to the last active tab's ID.
@@ -23,7 +26,7 @@ export class SidePanelAppElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -59,7 +62,10 @@ export class SidePanelAppElement extends PolymerElement {
   override connectedCallback() {
     super.connectedCallback();
     const lastActiveTab = window.localStorage[LOCAL_STORAGE_TAB_ID_KEY];
-    if (loadTimeData.getBoolean('hasUnseenReadingListEntries')) {
+    if (loadTimeData.getBoolean('shouldShowBookmark')) {
+      window.localStorage[LOCAL_STORAGE_TAB_ID_KEY] = 'bookmarks';
+      this.selectedTab_ = Object.keys(this.tabs_).indexOf('bookmarks');
+    } else if (loadTimeData.getBoolean('hasUnseenReadingListEntries')) {
       window.localStorage[LOCAL_STORAGE_TAB_ID_KEY] = 'readingList';
     } else if (lastActiveTab) {
       this.selectedTab_ = Object.keys(this.tabs_).indexOf(lastActiveTab) || 0;

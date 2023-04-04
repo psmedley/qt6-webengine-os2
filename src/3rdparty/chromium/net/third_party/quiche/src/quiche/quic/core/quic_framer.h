@@ -425,9 +425,9 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
       QuicConnectionIdLength source_connection_id_length, bool includes_version,
       bool includes_diversification_nonce,
       QuicPacketNumberLength packet_number_length,
-      QuicVariableLengthIntegerLength retry_token_length_length,
+      quiche::QuicheVariableLengthIntegerLength retry_token_length_length,
       uint64_t retry_token_length,
-      QuicVariableLengthIntegerLength length_length);
+      quiche::QuicheVariableLengthIntegerLength length_length);
 
   // Parses the unencrypted fields in a QUIC header using |reader| as input,
   // stores the result in the other parameters.
@@ -440,7 +440,7 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
       QuicConnectionId* destination_connection_id,
       QuicConnectionId* source_connection_id,
       QuicLongHeaderType* long_packet_type,
-      QuicVariableLengthIntegerLength* retry_token_length_length,
+      quiche::QuicheVariableLengthIntegerLength* retry_token_length_length,
       absl::string_view* retry_token, std::string* detailed_error);
 
   // Parses the unencrypted fields in |packet| and stores them in the other
@@ -475,6 +475,13 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   static std::unique_ptr<QuicEncryptedPacket> BuildIetfStatelessResetPacket(
       QuicConnectionId connection_id, size_t received_packet_length,
       StatelessResetToken stateless_reset_token);
+
+  // Returns a new IETF stateless reset packet with random bytes generated from
+  // |random|->InsecureRandBytes(). NOTE: the first two bits of the random bytes
+  // will be modified to 01b to make it look like a short header packet.
+  static std::unique_ptr<QuicEncryptedPacket> BuildIetfStatelessResetPacket(
+      QuicConnectionId connection_id, size_t received_packet_length,
+      StatelessResetToken stateless_reset_token, QuicRandom* random);
 
   // Returns a new version negotiation packet.
   static std::unique_ptr<QuicEncryptedPacket> BuildVersionNegotiationPacket(
@@ -1164,6 +1171,9 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
 
   // Indicates whether received RETRY packets should be dropped.
   bool drop_incoming_retry_packets_ = false;
+
+  const bool add_process_packet_context_ =
+      GetQuicReloadableFlag(quic_add_process_packet_context);
 
   // The length in bytes of the last packet number written to an IETF-framed
   // packet.

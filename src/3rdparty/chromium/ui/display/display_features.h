@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,21 +13,23 @@ namespace display {
 namespace features {
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-DISPLAY_EXPORT extern const base::Feature kUseHDRTransferFunction;
+DISPLAY_EXPORT BASE_DECLARE_FEATURE(kRoundedDisplay);
+
+DISPLAY_EXPORT bool IsRoundedDisplayEnabled();
+
+DISPLAY_EXPORT BASE_DECLARE_FEATURE(kUseHDRTransferFunction);
 #endif
 
-DISPLAY_EXPORT extern const base::Feature kListAllDisplayModes;
+DISPLAY_EXPORT BASE_DECLARE_FEATURE(kListAllDisplayModes);
 
 DISPLAY_EXPORT bool IsListAllDisplayModesEnabled();
 
-DISPLAY_EXPORT extern const base::Feature kEnableHardwareMirrorMode;
+DISPLAY_EXPORT BASE_DECLARE_FEATURE(kEnableHardwareMirrorMode);
 
 DISPLAY_EXPORT bool IsHardwareMirrorModeEnabled();
 
-#if BUILDFLAG(IS_MAC)
-// If enabled, vsync of 120 is forced to 60.
-DISPLAY_EXPORT extern const base::Feature kForce60Hz;
-#endif
+DISPLAY_EXPORT BASE_DECLARE_FEATURE(kRequireHdcpKeyProvisioning);
+DISPLAY_EXPORT bool IsHdcpKeyProvisioningRequired();
 
 }  // namespace features
 }  // namespace display

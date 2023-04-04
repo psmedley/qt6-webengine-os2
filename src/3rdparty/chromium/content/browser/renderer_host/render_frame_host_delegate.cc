@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
 #include "third_party/blink/public/mojom/frame/text_autosizer_page_info.mojom.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -43,7 +44,7 @@ void RenderFrameHostDelegate::RequestMediaAccessPermission(
     MediaResponseCallback callback) {
   LOG(ERROR) << "RenderFrameHostDelegate::RequestMediaAccessPermission: "
              << "Not supported.";
-  std::move(callback).Run(blink::MediaStreamDevices(),
+  std::move(callback).Run(blink::mojom::StreamDevicesSet(),
                           blink::mojom::MediaStreamRequestResult::NOT_SUPPORTED,
                           std::unique_ptr<MediaStreamUI>());
 }
@@ -97,8 +98,7 @@ bool RenderFrameHostDelegate::IsInnerWebContentsForGuest() {
   return false;
 }
 
-RenderFrameHostImpl*
-RenderFrameHostDelegate::GetFocusedFrameIncludingInnerWebContents() {
+RenderFrameHostImpl* RenderFrameHostDelegate::GetFocusedFrame() {
   return nullptr;
 }
 

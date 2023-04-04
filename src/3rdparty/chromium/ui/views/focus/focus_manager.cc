@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/focus/focus_manager.h"
 
-#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -13,6 +12,7 @@
 #include "base/containers/cxx20_erase.h"
 #include "base/i18n/rtl.h"
 #include "base/observer_list.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -92,16 +92,15 @@ bool FocusManager::OnKeyEvent(const ui::KeyEvent& event) {
       base::EraseIf(views, [this](View* v) {
         return v != focused_view_ && !v->IsAccessibilityFocusable();
       });
-      View::Views::const_iterator i(
-          std::find(views.begin(), views.end(), focused_view_));
+      View::Views::const_iterator i = base::ranges::find(views, focused_view_);
       DCHECK(i != views.end());
-      size_t index = i - views.begin();
+      auto index = static_cast<size_t>(i - views.begin());
       if (next && index == views.size() - 1)
         index = 0;
       else if (!next && index == 0)
         index = views.size() - 1;
       else
-        index += next ? 1 : -1;
+        index = next ? (index + 1) : (index - 1);
       SetFocusedViewWithReason(views[index],
                                FocusChangeReason::kFocusTraversal);
       return false;
@@ -169,57 +168,51 @@ bool FocusManager::RotatePaneFocus(Direction direction,
 
   // Count the number of panes and set the default index if no pane
   // is initially focused.
-  if (panes.empty())
+  const size_t count = panes.size();
+  if (!count)
     return false;
-  int count = static_cast<int>(panes.size());
 
   // Initialize |index| to an appropriate starting index if nothing is
   // focused initially.
-  int index = direction == Direction::kBackward ? 0 : count - 1;
+  size_t index = (direction == Direction::kBackward) ? 0 : (count - 1);
 
   // Check to see if a pane already has focus and update the index accordingly.
   const views::View* focused_view = GetFocusedView();
   if (focused_view) {
-    const auto i = std::find_if(panes.cbegin(), panes.cend(),
-                                [focused_view](const auto* pane) {
-                                  return pane && pane->Contains(focused_view);
-                                });
+    const auto i =
+        base::ranges::find_if(panes, [focused_view](const auto* pane) {
+          return pane && pane->Contains(focused_view);
+        });
     if (i != panes.cend())
-      index = i - panes.cbegin();
+      index = static_cast<size_t>(i - panes.cbegin());
   }
 
   // Rotate focus.
-  int start_index = index;
-  for (;;) {
-    if (direction == Direction::kBackward)
-      index--;
-    else
-      index++;
+  for (const size_t start_index = index;;) {
+    index = ((direction == Direction::kBackward) ? (index + count - 1)
+                                                 : (index + 1)) %
+            count;
 
-    if (wrapping == FocusCycleWrapping::kDisabled &&
-        (index >= count || index < 0))
+    if ((wrapping == FocusCycleWrapping::kDisabled) &&
+        (index == ((direction == Direction::kBackward) ? (count - 1) : 0))) {
       return false;
-    index = (index + count) % count;
+    }
 
     // Ensure that we don't loop more than once.
     if (index == start_index)
-      break;
+      return false;
 
     views::View* pane = panes[index];
     DCHECK(pane);
-
-    if (!pane->GetVisible())
-      continue;
-
-    pane->RequestFocus();
-    // |pane| may be in a different widget, so don't assume its focus manager
-    // is |this|.
-    focused_view = pane->GetWidget()->GetFocusManager()->GetFocusedView();
-    if (pane == focused_view || pane->Contains(focused_view))
-      return true;
+    if (pane->GetVisible()) {
+      pane->RequestFocus();
+      // |pane| may be in a different widget, so don't assume its focus manager
+      // is |this|.
+      focused_view = pane->GetWidget()->GetFocusManager()->GetFocusedView();
+      if (pane == focused_view || pane->Contains(focused_view))
+        return true;
+    }
   }
-
-  return false;
 }
 
 View* FocusManager::GetNextFocusableView(View* original_starting_view,
@@ -337,7 +330,7 @@ void FocusManager::SetKeyboardAccessible(bool keyboard_accessible) {
 }
 
 bool FocusManager::IsSettingFocusedView() const {
-  return setting_focused_view_entrance_count > 0;
+  return setting_focused_view_entrance_count_ > 0;
 }
 
 void FocusManager::SetFocusedViewWithReason(View* view,
@@ -373,8 +366,8 @@ void FocusManager::SetFocusedViewWithReason(View* view,
   View* old_focused_view = focused_view_;
   focused_view_ = view;
   base::AutoReset<int> entrance_count_resetter(
-      &setting_focused_view_entrance_count,
-      setting_focused_view_entrance_count + 1);
+      &setting_focused_view_entrance_count_,
+      setting_focused_view_entrance_count_ + 1);
 
   if (old_focused_view) {
     old_focused_view->RemoveObserver(this);
@@ -489,31 +482,25 @@ View* FocusManager::FindFocusableView(FocusTraversable* focus_traversable,
                                       bool reverse) {
   FocusTraversable* new_focus_traversable = nullptr;
   View* new_starting_view = nullptr;
-  auto can_go_into_anchored_dialog =
+  const FocusSearch::AnchoredDialogPolicy can_go_into_anchored_dialog =
       FocusSearch::AnchoredDialogPolicy::kCanGoIntoAnchoredDialog;
-  View* v = focus_traversable->GetFocusSearch()->FindNextFocusableView(
-      starting_view,
+  const FocusSearch::SearchDirection search_direction =
       reverse ? FocusSearch::SearchDirection::kBackwards
-              : FocusSearch::SearchDirection::kForwards,
-      FocusSearch::TraversalDirection::kDown,
-      FocusSearch::StartingViewPolicy::kSkipStartingView,
-      can_go_into_anchored_dialog, &new_focus_traversable, &new_starting_view);
+              : FocusSearch::SearchDirection::kForwards;
+  View* v = nullptr;
 
   // Let's go down the FocusTraversable tree as much as we can.
-  while (new_focus_traversable) {
-    DCHECK(!v);
-    focus_traversable = new_focus_traversable;
-    new_focus_traversable = nullptr;
-    starting_view = nullptr;
+  do {
     v = focus_traversable->GetFocusSearch()->FindNextFocusableView(
-        starting_view,
-        reverse ? FocusSearch::SearchDirection::kBackwards
-                : FocusSearch::SearchDirection::kForwards,
-        FocusSearch::TraversalDirection::kDown,
+        starting_view, search_direction, FocusSearch::TraversalDirection::kDown,
         FocusSearch::StartingViewPolicy::kSkipStartingView,
         can_go_into_anchored_dialog, &new_focus_traversable,
         &new_starting_view);
-  }
+    DCHECK(!new_focus_traversable || !v);
+    focus_traversable = std::exchange(new_focus_traversable, nullptr);
+    starting_view = nullptr;
+  } while (focus_traversable);
+
   return v;
 }
 

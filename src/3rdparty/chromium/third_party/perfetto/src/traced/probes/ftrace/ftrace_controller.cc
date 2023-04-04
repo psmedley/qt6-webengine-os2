@@ -40,7 +40,7 @@
 #include "src/traced/probes/ftrace/atrace_hal_wrapper.h"
 #include "src/traced/probes/ftrace/cpu_reader.h"
 #include "src/traced/probes/ftrace/cpu_stats_parser.h"
-#include "src/traced/probes/ftrace/discover_vendor_tracepoints.h"
+#include "src/traced/probes/ftrace/vendor_tracepoints.h"
 #include "src/traced/probes/ftrace/event_info.h"
 #include "src/traced/probes/ftrace/ftrace_config_muxer.h"
 #include "src/traced/probes/ftrace/ftrace_data_source.h"
@@ -124,9 +124,10 @@ bool HardResetFtraceState() {
     bool res = true;
     res &= WriteToFile((prefix + "tracing_on").c_str(), "0");
     res &= WriteToFile((prefix + "buffer_size_kb").c_str(), "4");
-    // We deliberately don't check for this as on some older versions of Android
-    // events/enable was not writable by the shell user.
+    // Not checking success because these files might not be accessible on
+    // older or release builds of Android:
     WriteToFile((prefix + "events/enable").c_str(), "0");
+    WriteToFile((prefix + "current_tracer").c_str(), "nop");
     res &= ClearFile((prefix + "trace").c_str());
     if (res)
       return true;
@@ -150,12 +151,26 @@ std::unique_ptr<FtraceController> FtraceController::Create(
   if (!table)
     return nullptr;
 
-  AtraceHalWrapper hal;
-  auto vendor_evts =
-      vendor_tracepoints::DiscoverVendorTracepoints(&hal, ftrace_procfs.get());
+  std::map<std::string, std::vector<GroupAndName>> vendor_evts;
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  if (base::FileExists(vendor_tracepoints::kCategoriesFile)) {
+    base::Status status = vendor_tracepoints::DiscoverVendorTracepointsWithFile(
+        vendor_tracepoints::kCategoriesFile, &vendor_evts);
+    if (!status.ok()) {
+      PERFETTO_ELOG("Cannot load vendor categories: %s", status.c_message());
+    }
+  } else {
+    AtraceHalWrapper hal;
+    vendor_evts = vendor_tracepoints::DiscoverVendorTracepointsWithHal(
+        &hal, ftrace_procfs.get());
+  }
+#endif
 
-  std::unique_ptr<FtraceConfigMuxer> model = std::unique_ptr<FtraceConfigMuxer>(
-      new FtraceConfigMuxer(ftrace_procfs.get(), table.get(), vendor_evts));
+  auto syscalls = SyscallTable::FromCurrentArch();
+
+  std::unique_ptr<FtraceConfigMuxer> model =
+      std::unique_ptr<FtraceConfigMuxer>(new FtraceConfigMuxer(
+          ftrace_procfs.get(), table.get(), std::move(syscalls), vendor_evts));
   return std::unique_ptr<FtraceController>(
       new FtraceController(std::move(ftrace_procfs), std::move(table),
                            std::move(model), runner, observer));
@@ -207,10 +222,11 @@ void FtraceController::StartIfNeeded() {
     MaybeSnapshotFtraceClock();
   }
 
+  size_t num_cpus = ftrace_procfs_->NumberOfCpus();
   per_cpu_.clear();
-  per_cpu_.reserve(ftrace_procfs_->NumberOfCpus());
+  per_cpu_.reserve(num_cpus);
   size_t period_page_quota = ftrace_config_muxer_->GetPerCpuBufferSizePages();
-  for (size_t cpu = 0; cpu < ftrace_procfs_->NumberOfCpus(); cpu++) {
+  for (size_t cpu = 0; cpu < num_cpus; cpu++) {
     auto reader = std::unique_ptr<CpuReader>(new CpuReader(
         cpu, table_.get(), symbolizer_.get(), ftrace_clock_snapshot_.get(),
         ftrace_procfs_->OpenPipeForCpu(cpu)));
@@ -347,10 +363,6 @@ void FtraceController::DisableAllEvents() {
   ftrace_procfs_->DisableAllEvents();
 }
 
-void FtraceController::WriteTraceMarker(const std::string& s) {
-  ftrace_procfs_->WriteTraceMarker(s);
-}
-
 void FtraceController::Flush(FlushRequestID flush_id) {
   metatrace::ScopedEvent evt(metatrace::TAG_FTRACE,
                              metatrace::FTRACE_CPU_FLUSH);
@@ -381,8 +393,16 @@ void FtraceController::StopIfNeeded() {
   // non-graceful stop.
 
   per_cpu_.clear();
-  symbolizer_->Destroy();
   cpu_zero_stats_fd_.reset();
+
+  // Muxer cannot change the current_tracer until we close the trace pipe fds
+  // (i.e. per_cpu_). Hence an explicit request here.
+  ftrace_config_muxer_->ResetCurrentTracer();
+
+  if (!retain_ksyms_on_stop_) {
+    symbolizer_->Destroy();
+  }
+  retain_ksyms_on_stop_ = false;
 
   if (parsing_mem_.IsValid()) {
     parsing_mem_.AdviseDontNeed(parsing_mem_.Get(), parsing_mem_.size());
@@ -418,20 +438,20 @@ bool FtraceController::StartDataSource(FtraceDataSource* data_source) {
   started_data_sources_.insert(data_source);
   StartIfNeeded();
 
-  // If the config is requesting to symbolize kernel addresses, create the
-  // symbolizer and parse /proc/kallsyms (it will take 200-300 ms). This is not
-  // strictly required here but is to avoid hitting the parsing cost while
-  // processing the first ftrace event batch in CpuReader.
+  // Parse kernel symbols if required by the config. This can be an expensive
+  // operation (cpu-bound for 500ms+), so delay the StartDataSource
+  // acknowledgement until after we're done. This lets a consumer wait for the
+  // expensive work to be done by waiting on the "all data sources started"
+  // fence. This helps isolate the effects of the cpu-bound work on
+  // frequency scaling of cpus when recording benchmarks (b/236143653).
+  // Note that we're already recording data into the kernel ftrace
+  // buffers while doing the symbol parsing.
   if (data_source->config().symbolize_ksyms()) {
-    if (data_source->config().initialize_ksyms_synchronously_for_testing()) {
-      symbolizer_->GetOrCreateKernelSymbolMap();
-    } else {
-      auto weak_this = weak_factory_.GetWeakPtr();
-      task_runner_->PostTask([weak_this] {
-        if (weak_this)
-          weak_this->symbolizer_->GetOrCreateKernelSymbolMap();
-      });
-    }
+    symbolizer_->GetOrCreateKernelSymbolMap();
+    // If at least one config sets the KSYMS_RETAIN flag, keep the ksysm map
+    // around in StopIfNeeded().
+    const auto KRET = FtraceConfig::KSYMS_RETAIN;
+    retain_ksyms_on_stop_ |= data_source->config().ksyms_mem_policy() == KRET;
   }
 
   return true;

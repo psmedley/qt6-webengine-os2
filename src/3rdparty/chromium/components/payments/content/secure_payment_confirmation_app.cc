@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,6 +106,9 @@ void SecurePaymentConfirmationApp::InvokePaymentApp(
   options->allow_credentials = std::move(credentials);
 
   options->challenge = request_->challenge;
+  // TODO(crbug.com/1325854): The 'showOptOut' flag status must also be signed
+  // in the assertion, so that the verifier can check that the caller offered
+  // the experience if desired.
   authenticator_->SetPaymentOptions(blink::mojom::PaymentOptions::New(
       spec_->GetTotal(/*selected_app=*/this)->amount.Clone(),
       request_->instrument.Clone(), request_->payee_name,
@@ -119,12 +122,6 @@ void SecurePaymentConfirmationApp::InvokePaymentApp(
 
 bool SecurePaymentConfirmationApp::IsCompleteForPayment() const {
   return true;
-}
-
-uint32_t SecurePaymentConfirmationApp::GetCompletenessScore() const {
-  // This value is used for sorting multiple apps, but this app always appears
-  // on its own.
-  return 0;
 }
 
 bool SecurePaymentConfirmationApp::CanPreselect() const {
@@ -167,9 +164,7 @@ const SkBitmap* SecurePaymentConfirmationApp::icon_bitmap() const {
 }
 
 bool SecurePaymentConfirmationApp::IsValidForModifier(
-    const std::string& method,
-    bool supported_networks_specified,
-    const std::set<std::string>& supported_networks) const {
+    const std::string& method) const {
   bool is_valid = false;
   IsValidForPaymentMethodIdentifier(method, &is_valid);
   return is_valid;

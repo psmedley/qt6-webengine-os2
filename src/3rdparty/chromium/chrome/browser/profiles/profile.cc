@@ -32,6 +32,11 @@ bool Profile::IsRegularProfile() const {
          profile_metrics::BrowserProfileType::kRegular;
 }
 
+bool Profile::IsIncognitoProfile() const {
+  return profile_metrics::GetBrowserProfileType(this) ==
+         profile_metrics::BrowserProfileType::kIncognito;
+}
+
 bool Profile::IsGuestSession() const {
   return profile_metrics::GetBrowserProfileType(this) ==
          profile_metrics::BrowserProfileType::kGuest;
@@ -41,9 +46,3 @@ bool Profile::IsSystemProfile() const {
   return profile_metrics::GetBrowserProfileType(this) ==
          profile_metrics::BrowserProfileType::kSystem;
 }
-
-#ifdef TOOLKIT_QT
-std::string Profile::GetPushMessagingEndpoint() const {
-  return "";
-}
-#endif

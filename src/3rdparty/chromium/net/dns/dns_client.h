@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "net/base/address_list.h"
+#include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
 #include "net/base/rand_callback.h"
 #include "net/dns/dns_config.h"
@@ -89,7 +89,7 @@ class NET_EXPORT DnsClient {
 
   // Returns all preset addresses for the specified endpoint, if any are
   // present in the current effective DnsConfig.
-  virtual absl::optional<AddressList> GetPresetAddrs(
+  virtual absl::optional<std::vector<IPEndPoint>> GetPresetAddrs(
       const url::SchemeHostPort& endpoint) const = 0;
 
   // Returns null if the current config is not valid.

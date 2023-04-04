@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -176,8 +176,6 @@ const char kHistogramLongestInputDelay[] =
     "PageLoad.InteractiveTiming.LongestInputDelay4";
 const char kHistogramLongestInputTimestamp[] =
     "PageLoad.InteractiveTiming.LongestInputTimestamp4";
-const char kHistogramParseStartToFirstMeaningfulPaint[] =
-    "PageLoad.Experimental.PaintTiming.ParseStartToFirstMeaningfulPaint";
 const char kHistogramParseStartToFirstContentfulPaint[] =
     "PageLoad.PaintTiming.ParseStartToFirstContentfulPaint";
 const char kBackgroundHistogramParseStartToFirstContentfulPaint[] =
@@ -402,6 +400,29 @@ UmaPageLoadMetricsObserver::UmaPageLoadMetricsObserver()
       redirect_chain_size_(0) {}
 
 UmaPageLoadMetricsObserver::~UmaPageLoadMetricsObserver() {}
+
+const char* UmaPageLoadMetricsObserver::GetObserverName() const {
+  static const char kName[] = "UmaPageLoadMetricsObserver";
+  return kName;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+UmaPageLoadMetricsObserver::OnFencedFramesStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // This class needs forwarding for the events OnLoadedResource and
+  // OnV8MemoryChanged.
+  return FORWARD_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+UmaPageLoadMetricsObserver::OnPrerenderStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // PrerenderPageLoadMetricsObserver records prerendering version of metrics
+  // and this PLMO can stop on prerendering.
+  return STOP_OBSERVING;
+}
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 UmaPageLoadMetricsObserver::OnRedirect(
@@ -657,9 +678,6 @@ void UmaPageLoadMetricsObserver::OnFirstMeaningfulPaintInMainFrameDocument(
           timing.paint_timing->first_meaningful_paint, GetDelegate())) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstMeaningfulPaint,
                         timing.paint_timing->first_meaningful_paint.value());
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramParseStartToFirstMeaningfulPaint,
-                        timing.paint_timing->first_meaningful_paint.value() -
-                            timing.parse_timing->parse_start.value());
     RecordFirstMeaningfulPaintStatus(internal::FIRST_MEANINGFUL_PAINT_RECORDED);
   } else {
     RecordFirstMeaningfulPaintStatus(
@@ -810,10 +828,9 @@ void UmaPageLoadMetricsObserver::OnLoadedResource(
   if (timing_info.receive_headers_end.is_null())
     return;
 
-  base::StringPiece destination = network::RequestDestinationToString(
-      extra_request_complete_info.request_destination);
-  if (destination.empty())
-    destination = "empty";
+  base::StringPiece destination =
+      network::RequestDestinationToStringForHistogram(
+          extra_request_complete_info.request_destination);
 
   base::TimeDelta delta =
       timing_info.receive_headers_end - timing_info.request_start;
@@ -1267,8 +1284,8 @@ void UmaPageLoadMetricsObserver::OnV8MemoryChanged(
     if (!render_frame_host)
       continue;
 
-    if (!render_frame_host->GetParent()) {
-      // |render_frame_host| is the main frame.
+    if (!render_frame_host->GetParentOrOuterDocument()) {
+      // |render_frame_host| is the outermost main frame.
       main_frame_memory_usage_.UpdateUsage(update.delta_bytes);
     } else {
       aggregate_subframe_memory_usage_.UpdateUsage(update.delta_bytes);

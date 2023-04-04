@@ -11,7 +11,7 @@ import * as ApplicationComponents from './components/components.js';
 import * as Host from '../../core/host/host.js';
 
 import {ApplicationPanelTreeElement, ExpandableApplicationPanelTreeElement} from './ApplicationPanelTreeElement.js';
-import type {ResourcesPanel} from './ResourcesPanel.js';
+import {type ResourcesPanel} from './ResourcesPanel.js';
 import {ServiceWorkerCacheView} from './ServiceWorkerCacheViews.js';
 
 const UIStrings = {
@@ -41,7 +41,9 @@ export class ServiceWorkerCacheTreeElement extends ExpandableApplicationPanelTre
   constructor(resourcesPanel: ResourcesPanel) {
     super(resourcesPanel, i18nString(UIStrings.cacheStorage), 'CacheStorage');
     const icon = UI.Icon.Icon.create('mediumicon-database', 'resource-tree-item');
-    this.setLink('https://developer.chrome.com/docs/devtools/storage/cache/?utm_source=devtools');
+    this.setLink(
+        'https://developer.chrome.com/docs/devtools/storage/cache/?utm_source=devtools' as
+        Platform.DevToolsPath.UrlString);
     this.setLeadingIcons([icon]);
     this.swCacheModel = null;
     this.swCacheTreeElements = new Set();

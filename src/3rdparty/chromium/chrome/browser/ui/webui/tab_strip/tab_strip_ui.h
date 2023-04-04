@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,11 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/webui/mojo_web_ui_controller.h"
+#include "ui/webui/resources/cr_components/color_change_listener/color_change_listener.mojom.h"
+
+namespace ui {
+class ColorChangeHandler;
+}  // namespace ui
 
 class Browser;
 class TabStripPageHandler;
@@ -39,10 +44,18 @@ class TabStripUI : public ui::MojoWebUIController,
   void BindInterface(
       mojo::PendingReceiver<tab_strip::mojom::PageHandlerFactory> receiver);
 
-  // Initialize TabStripUI with its embedder and the Browser it's
-  // running in. Must be called exactly once. The WebUI won't work until
-  // this is called.
+  // Instantiates the implementor of the mojom::PageHandler mojo interface
+  // passing the pending receiver that will be internally bound.
+  void BindInterface(
+      mojo::PendingReceiver<color_change_listener::mojom::PageHandler>
+          receiver);
+
+  // Initialize TabStripUI with its embedder and the Browser it's running in.
+  // Must be called exactly once. The WebUI won't work until this is called.
+  // |Deinitialize| is called during |embedder|'s destructor. It release the
+  // references taken previously and release the objects depending on them.
   void Initialize(Browser* browser, TabStripUIEmbedder* embedder);
+  void Deinitialize();
 
   // The embedder should call this whenever the result of
   // Embedder::GetLayout() changes.
@@ -63,6 +76,8 @@ class TabStripUI : public ui::MojoWebUIController,
   WebuiLoadTimer webui_load_timer_;
 
   std::unique_ptr<TabStripPageHandler> page_handler_;
+
+  std::unique_ptr<ui::ColorChangeHandler> color_provider_handler_;
 
   mojo::Receiver<tab_strip::mojom::PageHandlerFactory> page_factory_receiver_{
       this};

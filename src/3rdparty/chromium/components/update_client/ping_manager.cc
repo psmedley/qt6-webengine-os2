@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,8 @@ void PingSender::SendPing(const Component& component,
   apps.push_back(MakeProtocolApp(
       component.id(), component.crx_component()->version,
       component.crx_component()->ap, component.crx_component()->brand,
-      config_->GetLang(), component.crx_component()->install_source,
+      config_->GetLang(), metadata.GetInstallDate(component.id()),
+      component.crx_component()->install_source,
       component.crx_component()->install_location,
       component.crx_component()->fingerprint,
       component.crx_component()->installer_attributes,

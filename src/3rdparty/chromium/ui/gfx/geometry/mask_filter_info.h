@@ -1,10 +1,11 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_GEOMETRY_MASK_FILTER_INFO_H_
 #define UI_GFX_GEOMETRY_MASK_FILTER_INFO_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/geometry_skia_export.h"
 #include "ui/gfx/geometry/linear_gradient.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -12,6 +13,7 @@
 
 namespace gfx {
 
+class AxisTransform2d;
 class Transform;
 
 // This class defines a mask filter to be applied to the given rect.
@@ -41,19 +43,27 @@ class GEOMETRY_SKIA_EXPORT MaskFilterInfo {
            rounded_corner_bounds_.GetType() != RRectF::Type::kRect;
   }
 
-  const gfx::LinearGradient& gradient_mask() const { return gradient_mask_; }
+  const absl::optional<gfx::LinearGradient>& gradient_mask() const {
+    return gradient_mask_;
+  }
 
   // True if this contains an effective gradient mask (requires filter bounds).
   bool HasGradientMask() const {
-    return !rounded_corner_bounds_.IsEmpty() && !gradient_mask_.IsEmpty();
+    if (rounded_corner_bounds_.IsEmpty())
+      return false;
+
+    return gradient_mask_ && !gradient_mask_->IsEmpty();
   }
 
   // True if this contains no effective mask information.
   bool IsEmpty() const { return rounded_corner_bounds_.IsEmpty(); }
 
-  // Transform the mask information. Returns false if the transform
+  // Transform the mask filter information. Returns false if the transform
   // cannot be applied.
-  bool Transform(const gfx::Transform& transform);
+  bool ApplyTransform(const Transform& transform);
+
+  // Transform the mask filter information. This form always succeeds.
+  void ApplyTransform(const AxisTransform2d& transform);
 
   std::string ToString() const;
 
@@ -63,16 +73,22 @@ class GEOMETRY_SKIA_EXPORT MaskFilterInfo {
   RRectF rounded_corner_bounds_;
 
   // Shader based linear gradient mask to be applied to a layer.
-  gfx::LinearGradient gradient_mask_;
+  absl::optional<gfx::LinearGradient> gradient_mask_;
 };
 
 inline bool operator==(const MaskFilterInfo& lhs, const MaskFilterInfo& rhs) {
-  return lhs.rounded_corner_bounds() == rhs.rounded_corner_bounds();
+  return (lhs.rounded_corner_bounds() == rhs.rounded_corner_bounds()) &&
+         (lhs.gradient_mask() == rhs.gradient_mask());
 }
 
 inline bool operator!=(const MaskFilterInfo& lhs, const MaskFilterInfo& rhs) {
   return !(lhs == rhs);
 }
+
+// This is declared here for use in gtest-based unit tests but is defined in
+// the //ui/gfx:test_support target. Depend on that to use this in your unit
+// test. This should not be used in production code - call ToString() instead.
+void PrintTo(const MaskFilterInfo&, ::std::ostream* os);
 
 }  // namespace gfx
 

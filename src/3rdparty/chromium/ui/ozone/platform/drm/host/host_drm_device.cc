@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -129,10 +129,12 @@ bool HostDrmDevice::GpuRefreshNativeDisplays() {
 
 void HostDrmDevice::GpuConfigureNativeDisplays(
     const std::vector<display::DisplayConfigurationParams>& config_requests,
-    display::ConfigureCallback callback) {
+    display::ConfigureCallback callback,
+    uint32_t modeset_flag) {
   DCHECK_CALLED_ON_VALID_THREAD(on_ui_thread_);
   if (IsConnected()) {
-    drm_device_->ConfigureNativeDisplays(config_requests, std::move(callback));
+    drm_device_->ConfigureNativeDisplays(config_requests, modeset_flag,
+                                         std::move(callback));
   } else {
     // Post this task to protect the callstack from accumulating too many
     // recursive calls to ConfigureDisplaysTask::Run() in cases in which the GPU
@@ -184,6 +186,23 @@ bool HostDrmDevice::GpuRemoveGraphicsDevice(const base::FilePath& path) {
   drm_device_->RemoveGraphicsDevice(std::move(path));
 
   return true;
+}
+
+void HostDrmDevice::GpuShouldDisplayEventTriggerConfiguration(
+    const EventPropertyMap& event_props) {
+  DCHECK_CALLED_ON_VALID_THREAD(on_ui_thread_);
+
+  // No connection to DRM device. Block the event since the entire configuration
+  // will most likely fail.
+  if (!IsConnected()) {
+    GpuShouldDisplayEventTriggerConfigurationCallback(/*should_trigger=*/false);
+    return;
+  }
+
+  auto callback = base::BindOnce(
+      &HostDrmDevice::GpuShouldDisplayEventTriggerConfigurationCallback, this);
+  drm_device_->ShouldDisplayEventTriggerConfiguration(event_props,
+                                                      std::move(callback));
 }
 
 bool HostDrmDevice::GpuGetHDCPState(int64_t display_id) {
@@ -262,6 +281,12 @@ void HostDrmDevice::GpuTakeDisplayControlCallback(bool success) const {
 void HostDrmDevice::GpuRelinquishDisplayControlCallback(bool success) const {
   DCHECK_CALLED_ON_VALID_THREAD(on_ui_thread_);
   display_manager_->GpuRelinquishedDisplayControl(success);
+}
+
+void HostDrmDevice::GpuShouldDisplayEventTriggerConfigurationCallback(
+    bool should_trigger) const {
+  DCHECK_CALLED_ON_VALID_THREAD(on_ui_thread_);
+  display_manager_->GpuShouldDisplayEventTriggerConfiguration(should_trigger);
 }
 
 void HostDrmDevice::GpuGetHDCPStateCallback(

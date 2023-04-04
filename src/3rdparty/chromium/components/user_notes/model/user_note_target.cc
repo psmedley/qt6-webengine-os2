@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 namespace user_notes {
 
 UserNoteTarget::UserNoteTarget(TargetType type,
-                               const std::string& original_text,
+                               const std::u16string& original_text,
                                GURL target_page,
                                const std::string& selector)
     : type_(type),

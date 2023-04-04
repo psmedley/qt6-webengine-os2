@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,8 @@ class DecoderBufferReader {
       base::RepeatingCallback<void(scoped_refptr<media::DecoderBuffer>)>;
 
   DecoderBufferReader(NewBufferCb new_buffer_cb,
+                      mojo::ScopedDataPipeConsumerHandle data_pipe);
+  DecoderBufferReader(DecoderBufferReader&& other,
                       mojo::ScopedDataPipeConsumerHandle data_pipe);
   ~DecoderBufferReader();
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -305,7 +305,7 @@ void AppendStyleInfo(Node* node,
   }
   element_info->setValue("style", std::move(computed_style));
 
-  if (!node_contrast.font_size.IsEmpty()) {
+  if (!node_contrast.font_size.empty()) {
     std::unique_ptr<protocol::DictionaryValue> contrast =
         protocol::DictionaryValue::create();
     contrast->setString("fontSize", node_contrast.font_size);
@@ -353,7 +353,7 @@ std::unique_ptr<protocol::DictionaryValue> BuildElementInfo(Element* element) {
     else if (pseudo_element->GetPseudoId() == kPseudoIdMarker)
       class_names.Append("::marker");
   }
-  if (!class_names.IsEmpty())
+  if (!class_names.empty())
     element_info->setString("className", class_names.ToString());
 
   LayoutObject* layout_object = element->GetLayoutObject();
@@ -405,7 +405,7 @@ void AppendLineStyleConfig(
 
   std::unique_ptr<protocol::DictionaryValue> config =
       protocol::DictionaryValue::create();
-  config->setString("color", line_style->color.Serialized());
+  config->setString("color", line_style->color.SerializeAsCSSColor());
   config->setString("pattern", line_style->pattern);
 
   parent_config->setValue(line_name, std::move(config));
@@ -421,8 +421,8 @@ void AppendBoxStyleConfig(
 
   std::unique_ptr<protocol::DictionaryValue> config =
       protocol::DictionaryValue::create();
-  config->setString("fillColor", box_style->fill_color.Serialized());
-  config->setString("hatchColor", box_style->hatch_color.Serialized());
+  config->setString("fillColor", box_style->fill_color.SerializeAsCSSColor());
+  config->setString("hatchColor", box_style->hatch_color.SerializeAsCSSColor());
 
   parent_config->setValue(box_name, std::move(config));
 }
@@ -487,39 +487,41 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridHighlightConfigInfo(
 
   if (grid_config.grid_color != Color::kTransparent) {
     grid_config_info->setString("gridBorderColor",
-                                grid_config.grid_color.Serialized());
+                                grid_config.grid_color.SerializeAsCSSColor());
   }
   if (grid_config.row_line_color != Color::kTransparent) {
-    grid_config_info->setString("rowLineColor",
-                                grid_config.row_line_color.Serialized());
+    grid_config_info->setString(
+        "rowLineColor", grid_config.row_line_color.SerializeAsCSSColor());
   }
   if (grid_config.column_line_color != Color::kTransparent) {
-    grid_config_info->setString("columnLineColor",
-                                grid_config.column_line_color.Serialized());
+    grid_config_info->setString(
+        "columnLineColor", grid_config.column_line_color.SerializeAsCSSColor());
   }
   if (grid_config.row_gap_color != Color::kTransparent) {
-    grid_config_info->setString("rowGapColor",
-                                grid_config.row_gap_color.Serialized());
+    grid_config_info->setString(
+        "rowGapColor", grid_config.row_gap_color.SerializeAsCSSColor());
   }
   if (grid_config.column_gap_color != Color::kTransparent) {
-    grid_config_info->setString("columnGapColor",
-                                grid_config.column_gap_color.Serialized());
+    grid_config_info->setString(
+        "columnGapColor", grid_config.column_gap_color.SerializeAsCSSColor());
   }
   if (grid_config.row_hatch_color != Color::kTransparent) {
-    grid_config_info->setString("rowHatchColor",
-                                grid_config.row_hatch_color.Serialized());
+    grid_config_info->setString(
+        "rowHatchColor", grid_config.row_hatch_color.SerializeAsCSSColor());
   }
   if (grid_config.column_hatch_color != Color::kTransparent) {
-    grid_config_info->setString("columnHatchColor",
-                                grid_config.column_hatch_color.Serialized());
+    grid_config_info->setString(
+        "columnHatchColor",
+        grid_config.column_hatch_color.SerializeAsCSSColor());
   }
   if (grid_config.area_border_color != Color::kTransparent) {
-    grid_config_info->setString("areaBorderColor",
-                                grid_config.area_border_color.Serialized());
+    grid_config_info->setString(
+        "areaBorderColor", grid_config.area_border_color.SerializeAsCSSColor());
   }
   if (grid_config.grid_background_color != Color::kTransparent) {
-    grid_config_info->setString("gridBackgroundColor",
-                                grid_config.grid_background_color.Serialized());
+    grid_config_info->setString(
+        "gridBackgroundColor",
+        grid_config.grid_background_color.SerializeAsCSSColor());
   }
   return grid_config_info;
 }
@@ -544,10 +546,11 @@ BuildIsolationModeHighlightConfigInfo(
   std::unique_ptr<protocol::DictionaryValue> config_info =
       protocol::DictionaryValue::create();
 
-  config_info->setString("resizerColor", config.resizer_color.Serialized());
+  config_info->setString("resizerColor",
+                         config.resizer_color.SerializeAsCSSColor());
   config_info->setString("resizerHandleColor",
-                         config.resizer_handle_color.Serialized());
-  config_info->setString("maskColor", config.mask_color.Serialized());
+                         config.resizer_handle_color.SerializeAsCSSColor());
+  config_info->setString("maskColor", config.mask_color.SerializeAsCSSColor());
 
   return config_info;
 }
@@ -914,41 +917,52 @@ std::unique_ptr<protocol::ListValue> BuildGridLineNames(
 
   std::unique_ptr<protocol::ListValue> lines = protocol::ListValue::create();
 
-  const NamedGridLinesMap& named_lines_map =
-      (direction == kForColumns)
-          ? grid_container_style.GridTemplateColumns().named_grid_lines
-          : grid_container_style.GridTemplateRows().named_grid_lines;
   LayoutUnit gap = grid_interface->GridGap(direction);
   LayoutUnit alt_axis_pos = GetPositionForFirstTrack(
       layout_object, direction == kForRows ? kForColumns : kForRows,
       alt_axis_positions);
 
-  for (const auto& item : named_lines_map) {
-    const String& name = item.key;
+  auto process_grid_lines_map = [&](const NamedGridLinesMap& named_lines_map) {
+    for (const auto& item : named_lines_map) {
+      const String& name = item.key;
 
-    for (const wtf_size_t index : item.value) {
-      LayoutUnit track =
-          GetPositionForTrackAt(layout_object, index, direction, positions);
+      for (const wtf_size_t index : item.value) {
+        LayoutUnit track =
+            GetPositionForTrackAt(layout_object, index, direction, positions);
 
-      LayoutUnit gap_offset =
-          index > 0 && index < positions.size() - 1 ? gap / 2 : LayoutUnit();
-      if (is_rtl)
-        gap_offset *= -1;
+        LayoutUnit gap_offset =
+            index > 0 && index < positions.size() - 1 ? gap / 2 : LayoutUnit();
+        if (is_rtl)
+          gap_offset *= -1;
 
-      LayoutUnit main_axis_pos = track - gap_offset;
-      PhysicalOffset line_name_pos(main_axis_pos, alt_axis_pos);
+        LayoutUnit main_axis_pos = track - gap_offset;
+        PhysicalOffset line_name_pos(main_axis_pos, alt_axis_pos);
 
-      if (direction == kForRows)
-        line_name_pos = Transpose(line_name_pos);
+        if (direction == kForRows)
+          line_name_pos = Transpose(line_name_pos);
 
-      std::unique_ptr<protocol::DictionaryValue> line =
-          BuildPosition(LocalToAbsolutePoint(node, line_name_pos, scale));
+        std::unique_ptr<protocol::DictionaryValue> line =
+            BuildPosition(LocalToAbsolutePoint(node, line_name_pos, scale));
 
-      line->setString("name", name);
+        line->setString("name", name);
 
-      lines->pushValue(std::move(line));
+        lines->pushValue(std::move(line));
+      }
     }
-  }
+  };
+
+  const NamedGridLinesMap& explicit_lines_map =
+      (direction == kForColumns)
+          ? grid_container_style.GridTemplateColumns().named_grid_lines
+          : grid_container_style.GridTemplateRows().named_grid_lines;
+
+  const NamedGridLinesMap& implicit_lines_map =
+      (direction == kForColumns)
+          ? grid_container_style.ImplicitNamedGridColumnLines()
+          : grid_container_style.ImplicitNamedGridRowLines();
+
+  process_grid_lines_map(explicit_lines_map);
+  process_grid_lines_map(implicit_lines_map);
 
   return lines;
 }
@@ -1072,7 +1086,8 @@ DevtoolsFlexInfo GetFlexLinesAndItems(LayoutBox* layout_box,
       LayoutUnit baseline =
           NGBoxFragment(layout_box->StyleRef().GetWritingDirection(),
                         *To<NGPhysicalBoxFragment>(child_fragment))
-              .BaselineOrSynthesize(layout_box->StyleRef().GetFontBaseline());
+              .FirstBaselineOrSynthesize(
+                  layout_box->StyleRef().GetFontBaseline());
       float adjusted_baseline = AdjustForAbsoluteZoom::AdjustFloat(
           baseline + box->MarginTop(), box->StyleRef());
 
@@ -1086,7 +1101,7 @@ DevtoolsFlexInfo GetFlexLinesAndItems(LayoutBox* layout_box,
       LayoutUnit item_end = is_horizontal ? item_rect.X() + item_rect.Width()
                                           : item_rect.Y() + item_rect.Height();
 
-      if (flex_lines.IsEmpty() ||
+      if (flex_lines.empty() ||
           (is_reverse ? item_end > progression : item_start < progression)) {
         flex_lines.emplace_back();
       }
@@ -1445,7 +1460,9 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
                        isPrimary);
 }
 
-void CollectQuadsRecursive(Node* node, Vector<gfx::QuadF>& out_quads) {
+void CollectQuads(Node* node,
+                  bool adjust_for_absolute_zoom,
+                  Vector<gfx::QuadF>& out_quads) {
   LayoutObject* layout_object = node->GetLayoutObject();
   // For inline elements, absoluteQuads will return a line box based on the
   // line-height and font metrics, which is technically incorrect as replaced
@@ -1461,20 +1478,18 @@ void CollectQuadsRecursive(Node* node, Vector<gfx::QuadF>& out_quads) {
       LayoutTreeBuilderTraversal::FirstChild(*node)) {
     for (Node* child = LayoutTreeBuilderTraversal::FirstChild(*node); child;
          child = LayoutTreeBuilderTraversal::NextSibling(*child))
-      CollectQuadsRecursive(child, out_quads);
+      CollectQuads(child, adjust_for_absolute_zoom, out_quads);
   } else if (layout_object) {
+    wtf_size_t old_size = out_quads.size();
     layout_object->AbsoluteQuads(out_quads);
-  }
-}
-
-void CollectQuads(Node* node, Vector<gfx::QuadF>& out_quads) {
-  CollectQuadsRecursive(node, out_quads);
-  LocalFrameView* containing_view =
-      node->GetLayoutObject() ? node->GetLayoutObject()->GetFrameView()
-                              : nullptr;
-  if (containing_view) {
-    for (gfx::QuadF& quad : out_quads)
-      FrameQuadToViewport(containing_view, quad);
+    wtf_size_t new_size = out_quads.size();
+    LocalFrameView* containing_view = layout_object->GetFrameView();
+    for (wtf_size_t i = old_size; i < new_size; i++) {
+      if (containing_view)
+        FrameQuadToViewport(containing_view, out_quads[i]);
+      if (adjust_for_absolute_zoom)
+        AdjustForAbsoluteZoom::AdjustQuad(out_quads[i], *layout_object);
+    }
   }
 }
 
@@ -1660,10 +1675,10 @@ void InspectorHighlightBase::AppendPath(
   std::unique_ptr<protocol::DictionaryValue> object =
       protocol::DictionaryValue::create();
   object->setValue("path", std::move(path));
-  object->setString("fillColor", fill_color.Serialized());
+  object->setString("fillColor", fill_color.SerializeAsCSSColor());
   if (outline_color != Color::kTransparent)
-    object->setString("outlineColor", outline_color.Serialized());
-  if (!name.IsEmpty())
+    object->setString("outlineColor", outline_color.SerializeAsCSSColor());
+  if (!name.empty())
     object->setString("name", name);
   highlight_paths_->pushValue(std::move(object));
 }
@@ -2090,7 +2105,7 @@ bool InspectorHighlight::BuildSVGQuads(Node* node, Vector<gfx::QuadF>& quads) {
   if (!layout_object->GetNode() || !layout_object->GetNode()->IsSVGElement() ||
       layout_object->IsSVGRoot())
     return false;
-  CollectQuads(node, quads);
+  CollectQuads(node, false /* adjust_for_absolute_zoom */, quads);
   return true;
 }
 
@@ -2098,17 +2113,14 @@ bool InspectorHighlight::BuildSVGQuads(Node* node, Vector<gfx::QuadF>& quads) {
 bool InspectorHighlight::GetContentQuads(
     Node* node,
     std::unique_ptr<protocol::Array<protocol::Array<double>>>* result) {
-  LayoutObject* layout_object = node->GetLayoutObject();
   LocalFrameView* view = node->GetDocument().View();
-  if (!layout_object || !view)
+  if (!view)
     return false;
   Vector<gfx::QuadF> quads;
-  CollectQuads(node, quads);
+  CollectQuads(node, true /* adjust_for_absolute_zoom */, quads);
   float scale = PageScaleFromFrameView(view);
-  for (gfx::QuadF& quad : quads) {
-    AdjustForAbsoluteZoom::AdjustQuad(quad, *layout_object);
+  for (gfx::QuadF& quad : quads)
     quad.Scale(scale, scale);
-  }
 
   *result = std::make_unique<protocol::Array<protocol::Array<double>>>();
   for (gfx::QuadF& quad : quads)
@@ -2261,9 +2273,9 @@ std::unique_ptr<protocol::DictionaryValue> InspectorScrollSnapHighlight(
   AppendLineStyleConfig(config.snap_area_border, scroll_snap_info,
                         "snapAreaBorder");
   scroll_snap_info->setString("scrollMarginColor",
-                              config.scroll_margin_color.Serialized());
-  scroll_snap_info->setString("scrollPaddingColor",
-                              config.scroll_padding_color.Serialized());
+                              config.scroll_margin_color.SerializeAsCSSColor());
+  scroll_snap_info->setString(
+      "scrollPaddingColor", config.scroll_padding_color.SerializeAsCSSColor());
 
   return scroll_snap_info;
 }

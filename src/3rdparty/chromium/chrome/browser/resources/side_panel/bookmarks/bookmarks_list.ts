@@ -1,15 +1,21 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import './commerce/shopping_list.js';
+
 import {getInstance as getAnnouncerInstance} from 'chrome://resources/cr_elements/cr_a11y_announcer/cr_a11y_announcer.js';
-import {FocusOutlineManager} from 'chrome://resources/js/cr/ui/focus_outline_manager.m.js';
+import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {afterNextRender, html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {listenOnce} from 'chrome://resources/js/util.js';
+import {afterNextRender, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BookmarkFolderElement, FOLDER_OPEN_CHANGED_EVENT, getBookmarkFromElement, isBookmarkFolderElement} from './bookmark_folder.js';
 import {BookmarksApiProxy, BookmarksApiProxyImpl} from './bookmarks_api_proxy.js';
 import {BookmarksDragManager} from './bookmarks_drag_manager.js';
+import {getTemplate} from './bookmarks_list.html.js';
+import {BookmarkProductInfo} from './commerce/shopping_list.mojom-webui.js';
+import {ShoppingListApiProxy, ShoppingListApiProxyImpl} from './commerce/shopping_list_api_proxy.js';
 
 // Key for localStorage object that refers to all the open folders.
 export const LOCAL_STORAGE_OPEN_FOLDERS_KEY = 'openFolders';
@@ -18,13 +24,19 @@ function getBookmarkName(bookmark: chrome.bookmarks.BookmarkTreeNode): string {
   return bookmark.title || bookmark.url || '';
 }
 
+export interface BookmarksListElement {
+  $: {
+    bookmarksContainer: HTMLElement,
+  };
+}
+
 export class BookmarksListElement extends PolymerElement {
   static get is() {
     return 'bookmarks-list';
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -48,13 +60,17 @@ export class BookmarksListElement extends PolymerElement {
 
   private bookmarksApi_: BookmarksApiProxy =
       BookmarksApiProxyImpl.getInstance();
+  private shoppingListApi_: ShoppingListApiProxy =
+      ShoppingListApiProxyImpl.getInstance();
   private bookmarksDragManager_: BookmarksDragManager =
       new BookmarksDragManager(this);
   private focusOutlineManager_: FocusOutlineManager;
   private listeners_ = new Map<string, Function>();
   private folders_: chrome.bookmarks.BookmarkTreeNode[];
+  private productInfos_: BookmarkProductInfo[];
   hoverVisible: boolean;
   private openFolders_: string[];
+  private shoppingListenerIds_: number[] = [];
 
   override ready() {
     super.ready();
@@ -70,6 +86,11 @@ export class BookmarksListElement extends PolymerElement {
   override connectedCallback() {
     super.connectedCallback();
     this.setAttribute('role', 'tree');
+    if (loadTimeData.getBoolean('unifiedSidePanel')) {
+      listenOnce(this.$.bookmarksContainer, 'dom-change', () => {
+        setTimeout(() => this.bookmarksApi_.showUI(), 0);
+      });
+    }
     this.focusOutlineManager_ = FocusOutlineManager.forDocument(document);
     this.bookmarksApi_.getFolders().then(folders => {
       this.folders_ = folders;
@@ -103,6 +124,20 @@ export class BookmarksListElement extends PolymerElement {
 
       this.bookmarksDragManager_.startObserving();
     });
+
+    this.shoppingListApi_.getAllPriceTrackedBookmarkProductInfo().then(res => {
+      this.productInfos_ = res.productInfos;
+      if (this.productInfos_.length > 0) {
+        chrome.metricsPrivate.recordUserAction(
+            'Commerce.PriceTracking.SidePanel.TrackedProductsShown');
+      }
+    });
+    const callbackRouter = this.shoppingListApi_.getCallbackRouter();
+    this.shoppingListenerIds_.push(
+        callbackRouter.priceTrackedForBookmark.addListener(
+            (product: BookmarkProductInfo) =>
+                this.onBookmarkPriceTracked(product)),
+    );
   }
 
   override disconnectedCallback() {
@@ -110,6 +145,8 @@ export class BookmarksListElement extends PolymerElement {
       this.bookmarksApi_.callbackRouter[eventName]!.removeListener(callback);
     }
     this.bookmarksDragManager_.stopObserving();
+    this.shoppingListenerIds_.forEach(
+        id => this.shoppingListApi_.getCallbackRouter().removeListener(id));
   }
 
   /** BookmarksDragDelegate */
@@ -168,7 +205,7 @@ export class BookmarksListElement extends PolymerElement {
   private findPathToId_(id: string): chrome.bookmarks.BookmarkTreeNode[] {
     const path: chrome.bookmarks.BookmarkTreeNode[] = [];
 
-    function findPathByIdInternal_(
+    function findPathByIdInternal(
         id: string, node: chrome.bookmarks.BookmarkTreeNode) {
       if (node.id === id) {
         path.push(node);
@@ -181,7 +218,7 @@ export class BookmarksListElement extends PolymerElement {
 
       path.push(node);
       const foundInChildren =
-          node.children.some(child => findPathByIdInternal_(id, child));
+          node.children.some(child => findPathByIdInternal(id, child));
       if (!foundInChildren) {
         path.pop();
       }
@@ -189,7 +226,7 @@ export class BookmarksListElement extends PolymerElement {
       return foundInChildren;
     }
 
-    this.folders_.some(folder => findPathByIdInternal_(id, folder));
+    this.folders_.some(folder => findPathByIdInternal(id, folder));
     return path;
   }
 
@@ -363,6 +400,8 @@ export class BookmarksListElement extends PolymerElement {
 
     getAnnouncerInstance().announce(loadTimeData.getStringF(
         'bookmarkDeleted', getBookmarkName(removedNode)));
+    this.productInfos_ =
+        this.productInfos_.filter(item => item.bookmarkId !== BigInt(id));
   }
 
   private focusBookmark_(id: string) {
@@ -384,6 +423,18 @@ export class BookmarksListElement extends PolymerElement {
     if (bookmarkElement) {
       bookmarkElement.focus();
     }
+  }
+
+  private onBookmarkPriceTracked(product: BookmarkProductInfo) {
+    // Here we only control the visibility of ShoppingListElement. The same
+    // signal will also be handled in ShoppingListElement to update shopping
+    // list.
+    if (this.productInfos_.length > 0) {
+      return;
+    }
+    this.push('productInfos_', product);
+    chrome.metricsPrivate.recordUserAction(
+        'Commerce.PriceTracking.SidePanel.TrackedProductsShown');
   }
 }
 

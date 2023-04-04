@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -57,7 +57,7 @@ def _GetResults(driver, optargs):
 
 class JetStream(browserbench.BrowserBench):
   def __init__(self):
-    super(JetStream, self).__init__('JetStream')
+    super(JetStream, self).__init__('JetStream', '2')
 
   def AddExtraParserOptions(self, parser):
     parser.add_option(

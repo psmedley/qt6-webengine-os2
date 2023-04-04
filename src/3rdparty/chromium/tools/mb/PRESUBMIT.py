@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,8 +9,8 @@ _IGNORE_FREEZE_FOOTER = 'Ignore-Freeze'
 
 # The time module's handling of timezones is abysmal, so the boundaries are
 # precomputed in UNIX time
-_FREEZE_START = 1639641600  # 2021/12/16 00:00 -0800
-_FREEZE_END = 1641196800  # 2022/01/03 00:00 -0800
+_FREEZE_START = 1671177600  # 2022/12/16 00:00 -0800
+_FREEZE_END = 1672646400  # 2023/01/02 00:00 -0800
 
 
 def CheckFreeze(input_api, output_api):
@@ -52,14 +52,13 @@ def _CommonChecks(input_api, output_api):
       output_api,
       version='2.7',
       # pylint complains about Checkfreeze not being defined, its probably
-      # finding a different PRESUBMIT.py
+      # finding a different PRESUBMIT.py. Note that this warning only appears if
+      # the number of Pylint jobs is greater than one.
       files_to_skip=['PRESUBMIT_test.py'],
-      # Disabling certain python3-specific warnings until the conversion
-      # is complete.
+      # Disabling this warning because this pattern - involving ToSrcRelPath -
+      # seems intrinsic to how mb_unittest.py is implemented.
       disabled_warnings=[
-          'super-with-arguments',
-          'raise-missing-from',
-          'useless-object-inheritance',
+          'attribute-defined-outside-init',
       ],
   )
   results.extend(input_api.RunTests(pylint_checks))
@@ -70,10 +69,12 @@ def _CommonChecks(input_api, output_api):
                                                       output_api,
                                                       '.',
                                                       [r'^.+_unittest\.py$'],
+                                                      run_on_python2=False,
+                                                      run_on_python3=True,
                                                       skip_shebang_check=True))
 
   # Validate the format of the mb_config.pyl file.
-  cmd = [input_api.python_executable, 'mb.py', 'validate']
+  cmd = [input_api.python3_executable, 'mb.py', 'validate']
   kwargs = {'cwd': input_api.PresubmitLocalPath()}
   results.extend(input_api.RunTests([
       input_api.Command(name='mb_validate',

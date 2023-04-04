@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ namespace cloud_devices {
 
 namespace {
 
-bool IsValidTicketImpl(const base::Value::Dict& value) {
+bool IsValidTicket(const base::Value::Dict& value) {
   const std::string* version = value.FindString(json::kVersion);
   return version && *version == json::kVersion10;
 }
@@ -39,19 +39,11 @@ bool CloudDeviceDescription::InitFromString(const std::string& json) {
 bool CloudDeviceDescription::InitFromValue(base::Value ticket) {
   if (!ticket.is_dict())
     return false;
-  root_ = std::move(ticket.GetDict());
-  return IsValidTicketImpl(root_);
+  root_ = std::move(ticket).TakeDict();
+  return IsValidTicket(root_);
 }
 
-// static
-bool CloudDeviceDescription::IsValidTicket(const base::Value& ticket) {
-  if (!ticket.is_dict())
-    return false;
-
-  return IsValidTicketImpl(ticket.GetDict());
-}
-
-std::string CloudDeviceDescription::ToString() const {
+std::string CloudDeviceDescription::ToStringForTesting() const {
   std::string json;
   base::JSONWriter::WriteWithOptions(
       root_, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);

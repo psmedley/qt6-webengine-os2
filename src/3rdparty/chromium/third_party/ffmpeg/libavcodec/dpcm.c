@@ -37,11 +37,10 @@
  * the fourcc 'Axan' in the 'auds' chunk of the AVI header.
  */
 
-#include "libavutil/intreadwrite.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "mathops.h"
 
 typedef struct DPCMContext {
@@ -207,12 +206,11 @@ static av_cold int dpcm_decode_init(AVCodecContext *avctx)
 }
 
 
-static int dpcm_decode_frame(AVCodecContext *avctx, void *data,
+static int dpcm_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                              int *got_frame_ptr, AVPacket *avpkt)
 {
     int buf_size = avpkt->size;
     DPCMContext *s = avctx->priv_data;
-    AVFrame *frame = data;
     int out = 0, ret;
     int predictor[2];
     int ch = 0;
@@ -413,14 +411,13 @@ static int dpcm_decode_frame(AVCodecContext *avctx, void *data,
 #define DPCM_DECODER(id_, name_, long_name_)                \
 const FFCodec ff_ ## name_ ## _decoder = {                  \
     .p.name         = #name_,                               \
-    .p.long_name    = NULL_IF_CONFIG_SMALL(long_name_),     \
+    CODEC_LONG_NAME(long_name_),                            \
     .p.type         = AVMEDIA_TYPE_AUDIO,                   \
     .p.id           = id_,                                  \
     .p.capabilities = AV_CODEC_CAP_DR1,                     \
     .priv_data_size = sizeof(DPCMContext),                  \
     .init           = dpcm_decode_init,                     \
-    .decode         = dpcm_decode_frame,                    \
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,         \
+    FF_CODEC_DECODE_CB(dpcm_decode_frame),                  \
 }
 
 DPCM_DECODER(AV_CODEC_ID_DERF_DPCM,      derf_dpcm,      "DPCM Xilam DERF");

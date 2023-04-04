@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/memory/raw_ptr.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/common/content_export.h"
-#include "content/common/frame.mojom.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -20,6 +19,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "third_party/blink/public/common/messaging/transferable_message.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom.h"
 #include "third_party/blink/public/mojom/portal/portal.mojom.h"
 
 namespace content {
@@ -66,8 +66,10 @@ class CONTENT_EXPORT Portal : public blink::mojom::Portal,
   void DestroySelf();
 
   // Called from a synchronous IPC from the renderer process in order to create
-  // the proxy.
-  RenderFrameProxyHost* CreateProxyAndAttachPortal();
+  // the proxy. `remote_frame_interfaces` must not be null.
+  RenderFrameProxyHost* CreateProxyAndAttachPortal(
+      blink::mojom::RemoteFrameInterfacesFromRendererPtr
+          remote_frame_interfaces);
 
   // Closes the contents associated with this object gracefully, and destroys
   // itself thereafter. This will fire unload and related event handlers.
@@ -115,9 +117,9 @@ class CONTENT_EXPORT Portal : public blink::mojom::Portal,
   base::UnguessableToken GetDevToolsFrameToken() const;
 
   // Returns the Portal's WebContents.
-  WebContentsImpl* GetPortalContents();
+  WebContentsImpl* GetPortalContents() const;
   // Returns the WebContents that hosts this portal.
-  WebContentsImpl* GetPortalHostContents();
+  WebContentsImpl* GetPortalHostContents() const;
 
   RenderFrameHostImpl* owner_render_frame_host() {
     return owner_render_frame_host_;
@@ -191,15 +193,13 @@ class CONTENT_EXPORT Portal : public blink::mojom::Portal,
     std::unique_ptr<WebContents> owned_contents_;
   };
 
-  void SetPortalContents(std::unique_ptr<WebContents> web_contents);
-
   std::pair<bool, blink::mojom::PortalActivateResult> CanActivate();
   void ActivateImpl(blink::TransferableMessage data,
                     base::TimeTicks activation_time,
                     uint64_t trace_id,
                     ActivateCallback callback);
 
-  raw_ptr<RenderFrameHostImpl> owner_render_frame_host_;
+  const raw_ptr<RenderFrameHostImpl> owner_render_frame_host_;
 
   // Uniquely identifies the portal, this token is used by the browser process
   // to reference this portal when communicating with the renderer.

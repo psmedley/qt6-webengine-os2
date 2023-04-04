@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_service_factory.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "extensions/browser/extension_system_provider.h"
 
 namespace extensions {
@@ -34,9 +33,7 @@ PasswordsPrivateDelegateFactory*
 }
 
 PasswordsPrivateDelegateFactory::PasswordsPrivateDelegateFactory()
-    : BrowserContextKeyedServiceFactory(
-          "PasswordsPrivateDelegate",
-          BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("PasswordsPrivateDelegate") {
   DependsOn(BulkLeakCheckServiceFactory::GetInstance());
   DependsOn(PasswordStoreFactory::GetInstance());
   DependsOn(SyncServiceFactory::GetInstance());

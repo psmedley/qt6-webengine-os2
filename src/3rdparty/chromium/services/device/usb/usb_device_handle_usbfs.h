@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequence_bound.h"
 #include "services/device/usb/usb_device_handle.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 struct usbdevfs_urb;
 
@@ -36,6 +37,7 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
       scoped_refptr<UsbDevice> device,
       base::ScopedFD fd,
       base::ScopedFD lifeline_fd,
+      const std::string& client_id,
       scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
 
   // UsbDeviceHandle implementation.
@@ -110,6 +112,9 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
                                             int alternate_setting,
                                             ResultCallback callback,
                                             bool success);
+  void DetachInterfaceComplete(int interface_number,
+                               ResultCallback callback,
+                               bool success);
   void ReleaseInterfaceComplete(int interface_number,
                                 ResultCallback callback,
                                 bool success);
@@ -135,6 +140,8 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
 
   scoped_refptr<UsbDevice> device_;
   int fd_;  // Copy of the base::ScopedFD held by |helper_|. Valid if |device_|.
+  absl::optional<std::string>
+      client_id_;  // Client ID assigned by the Permission Broker.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // Maps claimed interfaces by interface number to their current alternate

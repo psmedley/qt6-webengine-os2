@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,12 +31,13 @@ class CORE_EXPORT LayoutNGFieldset final : public LayoutNGBlockFlow {
 
  protected:
   bool IsOfType(LayoutObjectType) const override;
+  void InsertedIntoTree() override;
   void UpdateAnonymousChildStyle(const LayoutObject* child,
                                  ComputedStyle& child_style) const override;
   void InvalidatePaint(const PaintInvalidatorContext& context) const final;
   bool BackgroundIsKnownToBeOpaqueInRect(const PhysicalRect&) const override;
 
-  bool AllowsNonVisibleOverflow() const override {
+  bool RespectsCSSOverflow() const override {
     NOT_DESTROYED();
     return false;
   }

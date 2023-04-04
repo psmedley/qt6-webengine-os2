@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,10 @@ CanvasFontCache::CanvasFontCache(Document& document)
   default_font_description.SetFamily(font_family);
   default_font_description.SetSpecifiedSize(defaultFontSize);
   default_font_description.SetComputedSize(defaultFontSize);
-  default_font_style_ = document.GetStyleResolver().CreateComputedStyle();
+  if (document.IsActive())
+    default_font_style_ = document.GetStyleResolver().CreateComputedStyle();
+  else
+    default_font_style_ = ComputedStyle::CreateInitialStyleSingleton();
   default_font_style_->SetFontDescription(default_font_description);
 }
 

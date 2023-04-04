@@ -146,10 +146,10 @@ bool SkLineClipper::IntersectLine(const SkPoint src[2], const SkRect& clip,
     }
 
     if (tmp[index0].fX < clip.fLeft) {
-        tmp[index0].set(clip.fLeft, sect_with_vertical(src, clip.fLeft));
+        tmp[index0].set(clip.fLeft, sect_with_vertical(tmp, clip.fLeft));
     }
     if (tmp[index1].fX > clip.fRight) {
-        tmp[index1].set(clip.fRight, sect_with_vertical(src, clip.fRight));
+        tmp[index1].set(clip.fRight, sect_with_vertical(tmp, clip.fRight));
     }
 #ifdef SK_DEBUG
     bounds.set(tmp[0], tmp[1]);
@@ -172,7 +172,7 @@ static bool is_between_unsorted(SkScalar value,
 }
 #endif
 
-int SkLineClipper::ClipLine(const SkPoint pts[], const SkRect& clip, SkPoint lines[],
+int SkLineClipper::ClipLine(const SkPoint pts[2], const SkRect& clip, SkPoint lines[kMaxPoints],
                             bool canCullToTheRight) {
     int index0, index1;
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/lru_cache.h"
@@ -22,6 +23,7 @@
 #include "components/optimization_guide/core/model_enums.h"
 #include "components/optimization_guide/core/optimization_guide_enums.h"
 #include "components/optimization_guide/core/prediction_model_download_observer.h"
+#include "components/optimization_guide/optimization_guide_internals/webui/optimization_guide_internals.mojom.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "url/origin.h"
 
@@ -53,8 +55,11 @@ class PredictionManager : public PredictionModelDownloadObserver {
   // BackgroundDownloadService is only available once the profile is fully
   // initialized and that cannot be done as part of |Initialize|. Get a provider
   // to retrieve the service when it is needed.
-  typedef base::OnceCallback<download::BackgroundDownloadService*(void)>
-      BackgroundDownloadServiceProvider;
+  using BackgroundDownloadServiceProvider =
+      base::OnceCallback<download::BackgroundDownloadService*(void)>;
+
+  // Callback to whether component updates are enabled for the browser.
+  using ComponentUpdatesEnabledProvider = base::RepeatingCallback<bool(void)>;
 
   PredictionManager(
       base::WeakPtr<OptimizationGuideStore> model_and_features_store,
@@ -64,7 +69,8 @@ class PredictionManager : public PredictionModelDownloadObserver {
       const std::string& application_locale,
       const base::FilePath& models_dir_path,
       OptimizationGuideLogger* optimization_guide_logger,
-      BackgroundDownloadServiceProvider background_dowload_service_provider);
+      BackgroundDownloadServiceProvider background_download_service_provider,
+      ComponentUpdatesEnabledProvider component_updates_enabled_provider);
 
   PredictionManager(const PredictionManager&) = delete;
   PredictionManager& operator=(const PredictionManager&) = delete;
@@ -131,6 +137,9 @@ class PredictionManager : public PredictionModelDownloadObserver {
   void OnModelDownloadFailed(
       proto::OptimizationTarget optimization_target) override;
 
+  std::vector<optimization_guide_internals::mojom::DownloadedModelInfoPtr>
+  GetDownloadedModelsInfoForWebUI() const;
+
  protected:
   // Process |prediction_models| to be stored in the in memory optimization
   // target prediction model map for immediate use and asynchronously write the
@@ -185,6 +194,12 @@ class PredictionManager : public PredictionModelDownloadObserver {
   void OnLoadPredictionModel(
       proto::OptimizationTarget optimization_target,
       bool record_availability_metrics,
+      std::unique_ptr<proto::PredictionModel> prediction_model);
+
+  // Callback run after a prediction model is loaded from a command-line
+  // override.
+  void OnPredictionModelOverrideLoaded(
+      proto::OptimizationTarget optimization_target,
       std::unique_ptr<proto::PredictionModel> prediction_model);
 
   // Process loaded |model| into memory. Return true if a prediction
@@ -279,6 +294,10 @@ class PredictionManager : public PredictionModelDownloadObserver {
 
   // A reference to the PrefService for this profile. Not owned.
   raw_ptr<PrefService> pref_service_ = nullptr;
+
+  // The repeating callback that will be used to determine if component updates
+  // are enabled.
+  ComponentUpdatesEnabledProvider component_updates_enabled_provider_;
 
   // Time the prediction manager got initialized.
   base::TimeTicks init_time_;

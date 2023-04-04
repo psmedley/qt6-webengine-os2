@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,6 +102,18 @@ enum class WebappInstallSource {
   // Chrome Android service for installing WebAPKs from another app.
   CHROME_SERVICE = 19,
 
+  // PWA rich install bottom sheet in WebLayer.
+  RICH_INSTALL_UI_WEBLAYER = 20,
+
+  // Installed by Kiosk on Chrome OS.
+  KIOSK = 21,
+
+  // Isolated app installation for development.
+  ISOLATED_APP_DEV_INSTALL = 22,
+
+  // Lock screen app infrastructure installing to the lock screen app profile.
+  EXTERNAL_LOCK_SCREEN = 23,
+
   // Add any new values above this one.
   COUNT,
 };
@@ -162,8 +174,16 @@ enum class WebappUninstallSource {
   // yet been fully uninstalled are re-uninstalled.
   kStartupCleanup = 16,
 
+  // Used to track uninstalls for web_apps which are installed as sub-apps and
+  // are being removed because of the removal of the parent app.
+  kParentUninstall = 17,
+
+  // Lock screen app infrastructure uninstalling from the lock screen app
+  // profile.
+  kExternalLockScreen = 18,
+
   // Add any new values above this one.
-  kMaxValue = kStartupCleanup,
+  kMaxValue = kExternalLockScreen,
 };
 
 // This is the result of the promotability check that is recorded in the
@@ -195,9 +215,6 @@ class InstallableMetrics {
   // TrackInstallEvent.
   static bool IsReportableInstallSource(WebappInstallSource source);
 
-  // Returns whether the install initiated by the user based on install source.
-  static bool IsUserInitiatedInstallSource(WebappInstallSource source);
-
   // Returns the appropriate WebappInstallSource for |web_contents| when the
   // install originates from |trigger|.
   static WebappInstallSource GetInstallSource(
@@ -221,6 +238,9 @@ class InstallableMetrics {
 
   // Records |source| in the Webapp.Install.UninstallEvent histogram.
   static void TrackUninstallEvent(WebappUninstallSource source);
+
+  // Records the result for WebApp.Install.Result histogram.
+  static void TrackInstallResult(bool result);
 };
 
 }  // namespace webapps

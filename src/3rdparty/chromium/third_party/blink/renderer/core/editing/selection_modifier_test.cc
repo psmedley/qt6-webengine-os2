@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -441,6 +441,30 @@ TEST_F(SelectionModifierTest, PositionDisconnectedInFlatTree2) {
                 GetSelectionTextFromBody(modifier.Selection().AsSelection()));
     }
   }
+}
+
+// For https://crbug.com/1312704
+TEST_F(SelectionModifierTest, OptgroupAndTable) {
+  InsertStyleElement(
+      "optgroup, table { display: inline-table; }"
+      "table { appearance:button; }");
+  SelectionModifier modifier(
+      GetFrame(), SetSelectionTextToBody(
+                      "<optgroup>^</optgroup>|<table><td></td></table>"));
+  EXPECT_TRUE(modifier.Modify(SelectionModifyAlteration::kExtend,
+                              SelectionModifyDirection::kForward,
+                              TextGranularity::kLine));
+
+  const SelectionInDOMTree& selection = modifier.Selection().AsSelection();
+  EXPECT_EQ(
+      "<optgroup></optgroup><table><tbody><tr><td></td></tr></tbody></table>",
+      GetSelectionTextFromBody(selection));
+
+  Element* optgroup = GetDocument().QuerySelector("optgroup");
+  ShadowRoot* shadow_root = optgroup->GetShadowRoot();
+  Element* label = shadow_root->getElementById("optgroup-label");
+  EXPECT_EQ(Position(label, 0), selection.Base());
+  EXPECT_EQ(Position(shadow_root, 1), selection.Extent());
 }
 
 }  // namespace blink

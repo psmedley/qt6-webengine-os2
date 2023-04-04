@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@ import 'chrome://resources/js/ios/web_ui.js';
 
 import './strings.m.js';
 import {addWebUIListener, sendWithPromise} from 'chrome://resources/js/cr.m.js';
-import {$} from 'chrome://resources/js/util.m.js';
+import {$} from 'chrome://resources/js/util.js';
 
 /**
  * Promise resolution handler for variations list and command line equivalent.
@@ -61,12 +61,13 @@ function returnOsFirmwareVersion(firmwareVersion) {
 }
 
 /**
- * Callback from the backend with the ARC version to display.
- * @param {string} arcVersion The ARC version to display.
+ * Callback from the backend with the ARC Android SDK version to display.
+ * @param {string} arcAndroidSdkVersion The ARC Android SDK version to display,
+ *     already localized.
  */
-function returnARCVersion(arcVersion) {
-  $('arc_version').textContent = arcVersion;
-  $('arc_holder').hidden = !arcVersion;
+function returnArcAndArcAndroidSdkVersions(arcAndroidSdkVersion) {
+  $('arc_holder').hidden = false;
+  $('arc_and_arc_android_sdk_versions').textContent = arcAndroidSdkVersion;
 }
 
 /**
@@ -82,7 +83,7 @@ function returnCustomizationId(response) {
 }
 // </if>
 
-// <if expr="chromeos_ash or chromeos_lacros">
+// <if expr="is_chromeos">
 /**
  * Callback from the backend to inform if Lacros is primary or not.
  * @param {string} isPrimary True if it is primary.
@@ -109,6 +110,12 @@ function copyToClipboard() {
   navigator.clipboard.writeText($('copy-content').innerText);
 }
 
+// <if expr="chromeos_lacros">
+function copyOSContentToClipboard() {
+  navigator.clipboard.writeText($('copy-os-content').innerText);
+}
+// </if>
+
 /* All the work we do onload. */
 function onLoadWork() {
   // <if expr="chromeos_ash or is_win">
@@ -116,9 +123,11 @@ function onLoadWork() {
   // </if>
   // <if expr="chromeos_ash">
   addWebUIListener('return-os-firmware-version', returnOsFirmwareVersion);
-  addWebUIListener('return-arc-version', returnARCVersion);
+  addWebUIListener(
+      'return-arc-and-arc-android-sdk-versions',
+      returnArcAndArcAndroidSdkVersions);
   // </if>
-  // <if expr="chromeos_ash or chromeos_lacros">
+  // <if expr="is_chromeos">
   addWebUIListener('return-lacros-primary', returnLacrosPrimary);
   // </if>
 
@@ -138,6 +147,11 @@ function onLoadWork() {
   }
 
   $('copy-to-clipboard').addEventListener('click', copyToClipboard);
+
+  // <if expr="chromeos_lacros">
+  $('copy-os-content-to-clipboard')
+      .addEventListener('click', copyOSContentToClipboard);
+  // </if>
 }
 
 document.addEventListener('DOMContentLoaded', onLoadWork);

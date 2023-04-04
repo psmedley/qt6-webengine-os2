@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -271,6 +271,12 @@ PasswordFormMetricsRecorder::~PasswordFormMetricsRecorder() {
     UMA_HISTOGRAM_ENUMERATION("PasswordGeneration.UserDecision",
                               static_cast<GeneratedPasswordStatus>(
                                   generated_password_status_.value()));
+  }
+
+  if (submitted_form_frame_.has_value()) {
+    base::UmaHistogramEnumeration(
+        "PasswordManager.SubmittedFormFrame2", submitted_form_frame_.value(),
+        metrics_util::SubmittedFormFrame::SUBMITTED_FORM_FRAME_COUNT);
   }
 
   if (password_generation_popup_shown_ !=
@@ -662,6 +668,9 @@ void PasswordFormMetricsRecorder::RecordPasswordBubbleShown(
     case metrics_util::AUTOMATIC_SIGNIN_TOAST:
     case metrics_util::AUTOMATIC_COMPROMISED_CREDENTIALS_REMINDER:
     case metrics_util::AUTOMATIC_MOVE_TO_ACCOUNT_STORE:
+    case metrics_util::AUTOMATIC_BIOMETRIC_AUTHENTICATION_FOR_FILLING:
+    case metrics_util::MANUAL_BIOMETRIC_AUTHENTICATION_FOR_FILLING:
+    case metrics_util::AUTOMATIC_BIOMETRIC_AUTHENTICATION_CONFIRMATION:
       // Do nothing.
       return;
 

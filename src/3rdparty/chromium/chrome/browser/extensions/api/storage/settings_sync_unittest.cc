@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory.h"
-#include "components/sync/test/model/sync_change_processor_wrapper_for_test.h"
-#include "components/sync/test/model/sync_error_factory_mock.h"
+#include "components/sync/test/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/test/sync_error_factory_mock.h"
 #include "components/value_store/test_value_store_factory.h"
 #include "components/value_store/testing_value_store.h"
 #include "content/public/test/browser_task_environment.h"
@@ -98,7 +98,8 @@ testing::AssertionResult SettingsEq(const char* _1,
            << "Expected: " << expected
            << ", actual has error: " << actual.status().message;
   }
-  return ValuesEq(_1, _2, &expected, &actual.settings());
+  base::Value settings(actual.PassSettings());
+  return ValuesEq(_1, _2, &expected, &settings);
 }
 
 // SyncChangeProcessor which just records the changes made, accessed after
@@ -1450,25 +1451,24 @@ namespace {
 static void UnlimitedSyncStorageTestCallback(ValueStore* sync_storage) {
   // Sync storage should still run out after ~100K; the unlimitedStorage
   // permission can't apply to sync.
-  std::unique_ptr<base::Value> kilobyte = settings_test_util::CreateKilobyte();
+  base::Value kilobyte = settings_test_util::CreateKilobyte();
   for (int i = 0; i < 100; ++i) {
-    sync_storage->Set(ValueStore::DEFAULTS, base::NumberToString(i), *kilobyte);
+    sync_storage->Set(ValueStore::DEFAULTS, base::NumberToString(i), kilobyte);
   }
 
-  EXPECT_FALSE(sync_storage->Set(ValueStore::DEFAULTS, "WillError", *kilobyte)
+  EXPECT_FALSE(sync_storage->Set(ValueStore::DEFAULTS, "WillError", kilobyte)
                    .status()
                    .ok());
 }
 
 static void UnlimitedLocalStorageTestCallback(ValueStore* local_storage) {
   // Local storage should never run out.
-  std::unique_ptr<base::Value> megabyte = settings_test_util::CreateMegabyte();
+  base::Value megabyte = settings_test_util::CreateMegabyte();
   for (int i = 0; i < 7; ++i) {
-    local_storage->Set(ValueStore::DEFAULTS, base::NumberToString(i),
-                       *megabyte);
+    local_storage->Set(ValueStore::DEFAULTS, base::NumberToString(i), megabyte);
   }
 
-  EXPECT_TRUE(local_storage->Set(ValueStore::DEFAULTS, "WontError", *megabyte)
+  EXPECT_TRUE(local_storage->Set(ValueStore::DEFAULTS, "WontError", megabyte)
                   .status()
                   .ok());
 }

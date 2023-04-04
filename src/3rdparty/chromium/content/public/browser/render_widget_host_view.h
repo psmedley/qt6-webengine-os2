@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/ime/mojom/virtual_keyboard_types.mojom-forward.h"
 #include "ui/display/screen_infos.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/native_widget_types.h"
@@ -209,24 +210,25 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // Copies the given subset of the view's surface, optionally scales it, and
   // returns the result as a bitmap via the provided callback. This is meant for
   // one-off snapshots. For continuous video capture of the surface, please use
-  // CreateVideoCapturer() instead.
+  // `CreateVideoCapturer()` instead.
   //
-  // |src_rect| is either the subset of the view's surface, in view coordinates,
+  // `src_rect` is either the subset of the view's surface, in view coordinates,
   // or empty to indicate that all of it should be copied. This is NOT the same
-  // coordinate system as that used GetViewBounds() (https://crbug.com/73362).
+  // coordinate system as that used `GetViewBounds()` (https://crbug.com/73362).
   //
-  // |output_size| is the size of the resulting bitmap, or empty to indicate no
+  // `output_size` is the size of the resulting bitmap, or empty to indicate no
   // scaling is desired. If an empty size is provided, note that the resulting
-  // bitmap's size may not be the same as |src_rect.size()| due to the pixel
+  // bitmap's size may not be the same as `src_rect.size()` due to the pixel
   // scale used by the underlying device.
   //
-  // |callback| is guaranteed to be run, either synchronously or at some point
+  // `callback` is guaranteed to be run, either synchronously or at some point
   // in the future (depending on the platform implementation and the current
-  // state of the Surface). If the copy failed, the bitmap's drawsNothing()
-  // method will return true.
+  // state of the Surface). If the copy failed, the bitmap's `drawsNothing()`
+  // method will return true. `callback` isn't guaranteed to run on the same
+  // task sequence as this method was called from.
   //
-  // If the view's renderer is suspended (see WasOccluded()), this may result in
-  // copying old data or failing.
+  // If the view's renderer is suspended (see `WasOccluded()`), this may result
+  // in copying old data or failing.
   virtual void CopyFromSurface(
       const gfx::Rect& src_rect,
       const gfx::Size& output_size,
@@ -292,14 +294,11 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // have anything to show.
   virtual void TakeFallbackContentFrom(RenderWidgetHostView* view) = 0;
 
-  // Returns true if the overlaycontent flag is set in the JS, else false.
-  // This determines whether to fire geometrychange event to JS and also not
-  // resize the visual/layout viewports in response to keyboard visibility
-  // changes.
-  virtual bool ShouldVirtualKeyboardOverlayContent() = 0;
+  // Returns the virtual keyboard mode requested via author APIs.
+  virtual ui::mojom::VirtualKeyboardMode GetVirtualKeyboardMode() = 0;
 
-  // Create a geometrychange event and forward it to the JS with the
-  // keyboard coordinates.
+  // Create a geometrychange event and forward it to the JS with the keyboard
+  // coordinates. No-op unless VirtualKeyboardMode is kOverlaysContent.
   virtual void NotifyVirtualKeyboardOverlayRect(
       const gfx::Rect& keyboard_rect) = 0;
 

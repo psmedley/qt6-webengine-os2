@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,8 +38,7 @@ class DrmOverlayValidator {
  private:
   DrmOverlayPlane MakeOverlayPlane(
       const OverlaySurfaceCandidate& param,
-      std::vector<scoped_refptr<DrmFramebuffer>>& reusable_buffers,
-      size_t& total_allocated_memory_size);
+      std::vector<scoped_refptr<DrmFramebuffer>>& reusable_buffers);
 
   DrmWindow* const window_;  // Not owned.
 };

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,7 +85,6 @@ class PlatformSensorFusion : public PlatformSensor,
                            FusionIsSignificantlyDifferent);
 
  private:
-  SensorReading reading_;
   std::unique_ptr<PlatformSensorFusionAlgorithm> fusion_algorithm_;
   SourcesMap source_sensors_;
   mojom::ReportingMode reporting_mode_;

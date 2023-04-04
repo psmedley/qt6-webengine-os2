@@ -8,19 +8,22 @@
 #ifndef SKSL_EXPRESSION
 #define SKSL_EXPRESSION
 
+#include "include/core/SkTypes.h"
+#include "include/private/SkSLIRNode.h"
 #include "include/private/SkSLStatement.h"
-#include "include/private/SkTHash.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLType.h"
 
+#include <cstdint>
+#include <memory>
 #include <optional>
-#include <unordered_map>
+#include <string>
 
 namespace SkSL {
 
 class AnyConstructor;
-class Expression;
-class IRGenerator;
-class Variable;
+class Context;
+enum class OperatorPrecedence : uint8_t;
 
 /**
  * Abstract supertype of all expressions.
@@ -30,7 +33,6 @@ public:
     enum class Kind {
         kBinary = (int) Statement::Kind::kLast + 1,
         kChildCall,
-        kCodeString,
         kConstructorArray,
         kConstructorArrayCast,
         kConstructorCompound,
@@ -61,11 +63,6 @@ public:
         kLast = kVariableReference
     };
 
-    enum class Property {
-        kSideEffects,
-        kContainsRTAdjust
-    };
-
     Expression(Position pos, Kind kind, const Type* type)
         : INHERITED(pos, (int) kind)
         , fType(type) {
@@ -90,7 +87,7 @@ public:
     }
 
     bool isAnyConstructor() const {
-        static_assert((int)Kind::kConstructorArray - 1 == (int)Kind::kCodeString);
+        static_assert((int)Kind::kConstructorArray - 1 == (int)Kind::kChildCall);
         static_assert((int)Kind::kConstructorStruct + 1 == (int)Kind::kExternalFunctionCall);
         return this->kind() >= Kind::kConstructorArray && this->kind() <= Kind::kConstructorStruct;
     }
@@ -126,14 +123,6 @@ public:
     const AnyConstructor& asAnyConstructor() const;
 
     /**
-     * Returns true if this expression is constant. compareConstant must be implemented for all
-     * constants!
-     */
-    virtual bool isCompileTimeConstant() const {
-        return false;
-    }
-
-    /**
      * Returns true if this expression is incomplete. Specifically, dangling function/method-call
      * references that were never invoked, or type references that were never constructed, are
      * considered incomplete expressions and should result in an error.
@@ -154,26 +143,7 @@ public:
         return ComparisonResult::kUnknown;
     }
 
-    /**
-     * Returns true if, given fixed values for uniforms, this expression always evaluates to the
-     * same result with no side effects.
-     */
-    virtual bool isConstantOrUniform() const {
-        SkASSERT(!this->isCompileTimeConstant() || !this->hasSideEffects());
-        return this->isCompileTimeConstant();
-    }
-
-    virtual bool hasProperty(Property property) const = 0;
-
-    bool hasSideEffects() const {
-        return this->hasProperty(Property::kSideEffects);
-    }
-
-    bool containsRTAdjust() const {
-        return this->hasProperty(Property::kContainsRTAdjust);
-    }
-
-    virtual CoercionCost coercionCost(const Type& target) const {
+    CoercionCost coercionCost(const Type& target) const {
         return this->type().coercionCost(target);
     }
 
@@ -204,16 +174,19 @@ public:
         return std::nullopt;
     }
 
-    virtual std::unique_ptr<Expression> clone() const = 0;
+    virtual std::unique_ptr<Expression> clone(Position pos) const = 0;
 
     /**
-     * Returns a clone with a modified position.
+     * Returns a clone at the same position.
      */
-    std::unique_ptr<Expression> clone(Position pos) {
-        std::unique_ptr<Expression> result = this->clone();
-        result->fPosition = pos;
-        return result;
-    }
+    std::unique_ptr<Expression> clone() const { return this->clone(fPosition); }
+
+    /**
+     * Returns a description of the expression.
+     */
+    std::string description() const final;
+    virtual std::string description(OperatorPrecedence parentPrecedence) const = 0;
+
 
 private:
     const Type* fType;

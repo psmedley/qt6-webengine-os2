@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 
 #include "base/containers/stack.h"
 #include "base/memory/raw_ptr.h"
-#include "base/strings/char_traits.h"
 #include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -25,13 +24,17 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_text_attributes.h"
 #include "ui/accessibility/ax_tree_id.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace ui {
 
 class AXComputedNodeData;
+class AXSelection;
 class AXTableInfo;
+class AXTreeManager;
+
 struct AXLanguageInfo;
-struct AXTreeData;
+class AXTree;
 
 // This class is used to represent a node in an accessibility tree (`AXTree`).
 class AX_EXPORT AXNode final {
@@ -49,42 +52,9 @@ class AX_EXPORT AXNode final {
   // We compute the embedded characters' length instead of manually typing it in
   // order to avoid the variable pairs getting out of sync in a future update.
   static constexpr int kEmbeddedObjectCharacterLengthUTF8 =
-      base::CharTraits<char>::length(kEmbeddedObjectCharacterUTF8);
+      std::char_traits<char>::length(kEmbeddedObjectCharacterUTF8);
   static constexpr int kEmbeddedObjectCharacterLengthUTF16 =
-      base::CharTraits<char16_t>::length(kEmbeddedObjectCharacterUTF16);
-
-  // Interface to the tree class that owns an AXNode. We use this instead
-  // of letting AXNode have a pointer to its AXTree directly so that we're
-  // forced to think twice before calling an AXTree interface that might not
-  // be necessary.
-  class OwnerTree {
-   public:
-    struct Selection {
-      bool is_backward;
-      AXNodeID anchor_object_id;
-      int anchor_offset;
-      ax::mojom::TextAffinity anchor_affinity;
-      AXNodeID focus_object_id;
-      int focus_offset;
-      ax::mojom::TextAffinity focus_affinity;
-    };
-
-    // See AXTree::GetAXTreeID.
-    virtual AXTreeID GetAXTreeID() const = 0;
-    // See `AXTree::GetTableInfo`.
-    virtual AXTableInfo* GetTableInfo(const AXNode* table_node) const = 0;
-    // See AXTree::GetFromId.
-    virtual AXNode* GetFromId(AXNodeID id) const = 0;
-    // See AXTree::data.
-    virtual const AXTreeData& data() const = 0;
-
-    virtual absl::optional<int> GetPosInSet(const AXNode& node) = 0;
-    virtual absl::optional<int> GetSetSize(const AXNode& node) = 0;
-
-    virtual Selection GetUnignoredSelection() const = 0;
-    virtual bool GetTreeUpdateInProgressState() const = 0;
-    virtual bool HasPaginationSupport() const = 0;
-  };
+      std::char_traits<char16_t>::length(kEmbeddedObjectCharacterUTF16);
 
   template <typename NodeType,
             NodeType* (NodeType::*NextSibling)() const,
@@ -112,22 +82,22 @@ class AX_EXPORT AXNode final {
 
    protected:
     raw_ptr<const NodeType> parent_;
-    raw_ptr<NodeType> child_;
+    raw_ptr<NodeType, DanglingUntriaged> child_;
   };
 
   // The constructor requires a parent, id, and index in parent, but
   // the data is not required. After initialization, only index_in_parent
   // and unignored_index_in_parent is allowed to change, the others are
   // guaranteed to never change.
-  AXNode(OwnerTree* tree,
+  AXNode(AXTree* tree,
          AXNode* parent,
          AXNodeID id,
          size_t index_in_parent,
-         size_t unignored_index_in_parent = 0);
+         size_t unignored_index_in_parent = 0u);
   virtual ~AXNode();
 
   // Accessors.
-  OwnerTree* tree() const { return tree_; }
+  AXTree* tree() const { return tree_; }
   AXNodeID id() const { return data_.id; }
   const AXNodeData& data() const { return data_; }
 
@@ -168,10 +138,18 @@ class AX_EXPORT AXNode final {
   AXNode* GetLastChildCrossingTreeBoundary() const;
   AXNode* GetLastUnignoredChild() const;
   AXNode* GetLastUnignoredChildCrossingTreeBoundary() const;
+
+  // TODO(accessibility): Consider renaming all "GetDeepest...Child" methods to
+  // "GetDeepest...Descendant".
   AXNode* GetDeepestFirstChild() const;
+  AXNode* GetDeepestFirstChildCrossingTreeBoundary() const;
   AXNode* GetDeepestFirstUnignoredChild() const;
+  AXNode* GetDeepestFirstUnignoredChildCrossingTreeBoundary() const;
   AXNode* GetDeepestLastChild() const;
+  AXNode* GetDeepestLastChildCrossingTreeBoundary() const;
   AXNode* GetDeepestLastUnignoredChild() const;
+  AXNode* GetDeepestLastUnignoredChildCrossingTreeBoundary() const;
+
   AXNode* GetNextSibling() const;
   AXNode* GetNextUnignoredSibling() const;
   AXNode* GetPreviousSibling() const;
@@ -232,6 +210,14 @@ class AX_EXPORT AXNode final {
   UnignoredChildCrossingTreeBoundaryIterator
   UnignoredChildrenCrossingTreeBoundaryEnd() const;
 
+  // Returns true if this is a node on which accessibility events make sense to
+  // be fired. Events are not needed on nodes that will, for example, never
+  // appear in a tree that is visible to assistive software, as there will be no
+  // software to handle the event on the other end.
+  bool CanFireEvents() const;
+
+  AXNode* GetLowestCommonAncestor(const AXNode& other);
+
   // Returns an optional integer indicating the logical order of this node
   // compared to another node, or returns an empty optional if the nodes are not
   // comparable. Nodes are not comparable if they do not share a common
@@ -246,6 +232,8 @@ class AX_EXPORT AXNode final {
   // traverse from the root, the node that we visited earlier is always going to
   // be before (logically less) the node we visit later.
   absl::optional<int> CompareTo(const AXNode& other) const;
+
+  bool IsDataValid() const { return data_.id != kInvalidAXNodeID; }
 
   // Returns true if the node has any of the text related roles, including
   // kStaticText, kInlineTextBox and kListMarker (for Legacy Layout). Does not
@@ -292,6 +280,24 @@ class AX_EXPORT AXNode final {
   // common cases.
   SkColor ComputeColor() const;
   SkColor ComputeBackgroundColor() const;
+
+  AXTreeManager* GetManager() const;
+
+  //
+  // Methods for accessing caret and selection information.
+  //
+
+  // Returns true if the caret is visible or there is an active selection inside
+  // this node.
+  bool HasVisibleCaretOrSelection() const;
+
+  // Gets the current selection from the accessibility tree.
+  AXSelection GetSelection() const;
+
+  // Gets the unignored selection from the accessibility tree, meaning the
+  // selection whose endpoints are on unignored nodes. (An "ignored" node is a
+  // node that is not exposed to platform APIs: See `IsIgnored`.)
+  AXSelection GetUnignoredSelection() const;
 
   //
   // Methods for accessing accessibility attributes including attributes that
@@ -388,6 +394,9 @@ class AX_EXPORT AXNode final {
   }
   bool HasHtmlAttribute(const char* attribute) const {
     return data().HasHtmlAttribute(attribute);
+  }
+  std::u16string GetHtmlAttribute(const char* attribute) const {
+    return data().GetHtmlAttribute(attribute);
   }
   bool GetHtmlAttribute(const char* attribute, std::string* value) const {
     return data().GetHtmlAttribute(attribute, value);
@@ -493,6 +502,18 @@ class AX_EXPORT AXNode final {
   int GetTextContentLengthUTF8() const;
   int GetTextContentLengthUTF16() const;
 
+  // Returns the smallest bounding box that can enclose the given range of
+  // characters in the node's text contents. The bounding box is relative to
+  // this node's coordinate system as specified in
+  // `AXNodeData::relative_bounds`.
+  //
+  // Note that `start_offset` and `end_offset` are either in UTF8 or UTF16 code
+  // units, not in grapheme clusters.
+  gfx::RectF GetTextContentRangeBoundsUTF8(int start_offset,
+                                           int end_offset) const;
+  gfx::RectF GetTextContentRangeBoundsUTF16(int start_offset,
+                                            int end_offset) const;
+
   // Returns a string representing the language code.
   //
   // This will consider the language declared in the DOM, and may eventually
@@ -553,6 +574,9 @@ class AX_EXPORT AXNode final {
   // one column node for each table column, followed by one
   // table header container node, or nullptr if not applicable.
   const std::vector<AXNode*>* GetExtraMacNodes() const;
+
+  // Return true for mock nodes added to the map, such as extra mac nodes.
+  bool IsGenerated() const;
 
   // Table row-like nodes.
   bool IsTableRow() const;
@@ -660,14 +684,18 @@ class AX_EXPORT AXNode final {
   // of a list marker node. Returns false otherwise.
   bool IsInListMarker() const;
 
-  // Returns true if this node is a collapsed popup button that is parent to a
-  // menu list popup.
-  bool IsCollapsedMenuListPopUpButton() const;
+  // Returns true if this node is a collapsed combobox select that is parent to
+  // a menu list popup.
+  bool IsCollapsedMenuListSelect() const;
+
+  // Returns true if this node is at the root of an accessibility tree that is
+  // hosted by a presentational iframe.
+  bool IsRootWebAreaForPresentationalIframe() const;
 
   // Returns the popup button ancestor of this current node if any. The popup
   // button needs to be the parent of a menu list popup and needs to be
   // collapsed.
-  AXNode* GetCollapsedMenuListPopUpButtonAncestor() const;
+  AXNode* GetCollapsedMenuListSelectAncestor() const;
 
   // If this node is exposed to the platform's accessibility layer, returns this
   // node. Otherwise, returns the lowest ancestor that is exposed to the
@@ -680,6 +708,11 @@ class AX_EXPORT AXNode final {
   // an editable region is synonymous to a node with the kTextField role, or a
   // contenteditable without the role, (see `AXNodeData::IsTextField()`).
   AXNode* GetTextFieldAncestor() const;
+
+  // Get the native text field's deepest container; the lowest descendant that
+  // contains all its text. Returns nullptr if the text field is empty, or if it
+  // is not an atomic text field, (e.g., <input> or <textarea>).
+  AXNode* GetTextFieldInnerEditorElement() const;
 
   // If this node is within a container (or widget) that supports either single
   // or multiple selection, returns the node that represents the container.
@@ -699,9 +732,12 @@ class AX_EXPORT AXNode final {
   // Finds and returns a pointer to ordered set containing node.
   AXNode* GetOrderedSet() const;
 
-  // Returns false if the |data_| is uninitialized or has been taken. Returns
-  // true otherwise.
-  bool IsDataValid() const;
+  // Returns true if the node supports the read-only attribute.
+  bool IsReadOnlySupported() const;
+
+  // Returns true if the node is marked read-only or is disabled. By default,
+  // all nodes that can't be edited are read-only.
+  bool IsReadOnlyOrDisabled() const;
 
  private:
   AXTableInfo* GetAncestorTableInfo() const;
@@ -724,7 +760,7 @@ class AX_EXPORT AXNode final {
   // blended with ancestor colors.
   SkColor ComputeColorAttribute(ax::mojom::IntAttribute color_attr) const;
 
-  const raw_ptr<OwnerTree> tree_;  // Owns this.
+  const raw_ptr<AXTree> tree_;  // Owns this.
   size_t index_in_parent_;
   size_t unignored_index_in_parent_;
   size_t unignored_child_count_ = 0;
@@ -734,13 +770,6 @@ class AX_EXPORT AXNode final {
   // Stores information about this node that is immutable and which has been
   // computed by the tree's source, such as `content::BlinkAXTreeSource`.
   AXNodeData data_;
-
-  // Used to track when this object's data_ is valid. If either of these are
-  // true, and data is accessed, there will be a crash.
-  // TODO(crbug.com/1237353): Wrap this inside of an `#if DCHECK_IS_ON()` after
-  // removing `DumpWithoutCrashing`.
-  bool is_data_still_uninitialized_ = true;
-  bool has_data_been_taken_ = false;
 
   // See the class comment in "ax_hypertext.h" for an explanation of this
   // member.

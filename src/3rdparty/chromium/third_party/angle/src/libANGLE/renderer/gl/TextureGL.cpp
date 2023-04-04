@@ -29,7 +29,7 @@
 #include "libANGLE/renderer/gl/SurfaceGL.h"
 #include "libANGLE/renderer/gl/formatutilsgl.h"
 #include "libANGLE/renderer/gl/renderergl_utils.h"
-#include "platform/FeaturesGL.h"
+#include "platform/FeaturesGL_autogen.h"
 
 using angle::CheckedNumeric;
 
@@ -73,7 +73,7 @@ bool GetDepthStencilWorkaround(GLenum format)
 bool GetEmulatedAlphaChannel(const angle::FeaturesGL &features,
                              const gl::InternalFormat &originalInternalFormat)
 {
-    return (features.rgbDXT1TexturesSampleZeroAlpha.enabled &&
+    return (features.RGBDXT1TexturesSampleZeroAlpha.enabled &&
             originalInternalFormat.sizedInternalFormat == GL_COMPRESSED_RGB_S3TC_DXT1_EXT) ||
            (features.emulateRGB10.enabled && originalInternalFormat.format == GL_RGB &&
             originalInternalFormat.type == GL_UNSIGNED_INT_2_10_10_10_REV_EXT);
@@ -590,6 +590,7 @@ angle::Result TextureGL::setCompressedImage(const gl::Context *context,
         nativegl::GetCompressedTexImageFormat(functions, features, internalFormat);
 
     stateManager->bindTexture(getType(), mTextureID);
+    ANGLE_TRY(stateManager->setPixelUnpackState(context, unpack));
     if (nativegl::UseTexImage2D(getType()))
     {
         ASSERT(size.depth == 1);
@@ -602,6 +603,7 @@ angle::Result TextureGL::setCompressedImage(const gl::Context *context,
     else
     {
         ASSERT(nativegl::UseTexImage3D(getType()));
+
         ANGLE_GL_TRY_ALWAYS_CHECK(
             context, functions->compressedTexImage3D(ToGLenum(target), static_cast<GLint>(level),
                                                      compressedTexImageFormat.internalFormat,
@@ -715,6 +717,12 @@ angle::Result TextureGL::copyImage(const gl::Context *context,
         ANGLE_TRY(stateManager->setPixelUnpackState(context, unpack));
         ANGLE_TRY(stateManager->setPixelUnpackBuffer(context, nullptr));
 
+        // getImplementationColorReadType aligns the type with ES client version
+        if (type == GL_HALF_FLOAT_OES && functions->standard == STANDARD_GL_DESKTOP)
+        {
+            type = GL_HALF_FLOAT;
+        }
+
         ANGLE_GL_TRY_ALWAYS_CHECK(
             context, functions->texImage2D(ToGLenum(target), static_cast<GLint>(level),
                                            copyTexImageFormat.internalFormat, sourceArea.width,
@@ -793,11 +801,34 @@ angle::Result TextureGL::copyImage(const gl::Context *context,
             }
             else
             {
-                ANGLE_GL_TRY_ALWAYS_CHECK(
-                    context, functions->copyTexImage2D(ToGLenum(target), static_cast<GLint>(level),
-                                                       copyTexImageFormat.internalFormat,
-                                                       clippedArea.x, clippedArea.y,
-                                                       clippedArea.width, clippedArea.height, 0));
+                if (features.emulateCopyTexImage2D.enabled)
+                {
+                    if (type == GL_HALF_FLOAT_OES && functions->standard == STANDARD_GL_DESKTOP)
+                    {
+                        type = GL_HALF_FLOAT;
+                    }
+
+                    ANGLE_GL_TRY_ALWAYS_CHECK(
+                        context,
+                        functions->texImage2D(
+                            ToGLenum(target), static_cast<GLint>(level),
+                            copyTexImageFormat.internalFormat, sourceArea.width, sourceArea.height,
+                            0, gl::GetUnsizedFormat(copyTexImageFormat.internalFormat), type,
+                            nullptr));
+                    ANGLE_GL_TRY_ALWAYS_CHECK(
+                        context,
+                        functions->copyTexSubImage2D(ToGLenum(target), static_cast<GLint>(level), 0,
+                                                     0, sourceArea.x, sourceArea.y,
+                                                     sourceArea.width, sourceArea.height));
+                }
+                else
+                {
+                    ANGLE_GL_TRY_ALWAYS_CHECK(
+                        context, functions->copyTexImage2D(
+                                     ToGLenum(target), static_cast<GLint>(level),
+                                     copyTexImageFormat.internalFormat, sourceArea.x, sourceArea.y,
+                                     sourceArea.width, sourceArea.height, 0));
+                }
             }
         }
         setLevelInfo(context, target, level, 1, levelInfo);
@@ -1360,7 +1391,7 @@ angle::Result TextureGL::generateMipmap(const gl::Context *context)
 
     stateManager->bindTexture(getType(), mTextureID);
     if (baseLevelInternalFormat.colorEncoding == GL_SRGB &&
-        features.encodeAndDecodeSRGBForGenerateMipmap.enabled && getType() == gl::TextureType::_2D)
+        features.decodeEncodeSRGBForGenerateMipmap.enabled && getType() == gl::TextureType::_2D)
     {
         nativegl::TexImageFormat texImageFormat = nativegl::GetTexImageFormat(
             functions, features, baseLevelInternalFormat.internalFormat,
@@ -2020,6 +2051,7 @@ gl::TextureType TextureGL::getType() const
 }
 
 angle::Result TextureGL::initializeContents(const gl::Context *context,
+                                            GLenum binding,
                                             const gl::ImageIndex &imageIndex)
 {
     ContextGL *contextGL              = GetImplAs<ContextGL>(context);

@@ -1,10 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_OZONE_PLATFORM_WAYLAND_HOST_WAYLAND_ZWP_POINTER_GESTURES_H_
 #define UI_OZONE_PLATFORM_WAYLAND_HOST_WAYLAND_ZWP_POINTER_GESTURES_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/events/types/event_type.h"
@@ -71,8 +72,8 @@ class WaylandZwpPointerGestures
   wl::Object<zwp_pointer_gestures_v1> obj_;
   wl::Object<zwp_pointer_gesture_pinch_v1> pinch_;
   double current_scale_ = 1;
-  WaylandConnection* const connection_;
-  Delegate* const delegate_;
+  const raw_ptr<WaylandConnection> connection_;
+  const raw_ptr<Delegate> delegate_;
 };
 
 class WaylandZwpPointerGestures::Delegate {

@@ -173,6 +173,9 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCreateRayTracingPipelinesKHR',
             'vkCreateSampler',
             'vkCreateDescriptorSetLayout',
+            'vkCreateBufferView',
+            'vkCreateSemaphore',
+            'vkCreateEvent',
             'vkFreeDescriptorSets',
             'vkUpdateDescriptorSets',
             'vkBeginCommandBuffer',
@@ -224,6 +227,13 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCreateSamplerYcbcrConversion',
             'vkCreateSamplerYcbcrConversionKHR',
             'vkImportSemaphoreFdKHR',
+            'vkGetSemaphoreFdKHR',
+            'vkImportFenceFdKHR',
+            'vkGetFenceFdKHR',
+            'vkImportFenceWin32HandleKHR',
+            'vkGetFenceWin32HandleKHR',
+            'vkImportSemaphoreWin32HandleKHR',
+            'vkGetSemaphoreWin32HandleKHR',
             'vkCmdBindVertexBuffers',
             'vkCreateImageView',
             'vkCopyAccelerationStructureToMemoryKHR',
@@ -233,8 +243,10 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCopyMemoryToAccelerationStructureKHR',
             'vkCmdCopyMemoryToAccelerationStructureKHR',
             'vkCmdDrawIndirectCount',
+            'vkCmdDrawIndirectCountAMD',
             'vkCmdDrawIndirectCountKHR',
             'vkCmdDrawIndexedIndirectCount',
+            'vkCmdDrawIndexedIndirectCountAMD',
             'vkCmdDrawIndexedIndirectCountKHR',
             'vkCmdWriteAccelerationStructuresPropertiesKHR',
             'vkWriteAccelerationStructuresPropertiesKHR',
@@ -242,6 +254,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCmdTraceRaysKHR',
             'vkCmdTraceRaysNV',
             'vkCmdTraceRaysIndirectKHR',
+            'vkCmdTraceRaysIndirect2KHR',
             'vkCmdBuildAccelerationStructureIndirectKHR',
             'vkGetDeviceAccelerationStructureCompatibilityKHR',
             'vkCmdSetViewportWithCountEXT',
@@ -261,7 +274,6 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCmdSetVertexInputEXT',
             'vkCmdPushConstants',
             'vkMergePipelineCaches',
-            'vkGetPhysicalDeviceVideoFormatPropertiesKHR',
             'vkCmdClearColorImage',
             'vkCmdBeginRenderPass',
             'vkCmdBeginRenderPass2KHR',
@@ -277,6 +289,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkGetPhysicalDeviceSurfaceCapabilities2KHR',
             'vkGetPhysicalDeviceSurfaceFormats2KHR',
             'vkGetPhysicalDeviceSurfacePresentModes2EXT',
+            'vkExportMetalObjectsEXT',
             ]
 
         # Commands to ignore
@@ -1170,6 +1183,9 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         if value.extstructs:
             extStructVar = 'allowed_structs_{}'.format(struct_type_name)
             extStructCount = 'ARRAY_SIZE({})'.format(extStructVar)
+            if struct_type_name == 'VkInstanceCreateInfo':
+                value.extstructs.append('VkInstanceLayerSettingsEXT')
+                self.structTypes['VkInstanceLayerSettingsEXT'] = 'static_cast<VkStructureType>(VK_STRUCTURE_TYPE_INSTANCE_LAYER_SETTINGS_EXT)'
             extStructNames = '"' + ', '.join(value.extstructs) + '"'
             checkExpr.append('const VkStructureType {}[] = {{ {} }};\n'.format(extStructVar, ', '.join([self.structTypes[s] for s in value.extstructs])))
         checkExpr.append('skip |= validate_struct_pnext("{}", {ppp}"{}"{pps}, {}, {}{}, {}, {}, GeneratedVulkanHeaderVersion, {}, {});\n'.format(
@@ -1418,6 +1434,11 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                                         if struct_field and struct_field.isoptional:
                                             cvReq = 'false'
                         else:
+                            vuidNameTag = structTypeName if structTypeName is not None else funcName
+                            vuidName = self.GetVuid(vuidNameTag, "%s-arraylength" % (lenParam.name))
+                            arrayVuidExceptions = ["\"VUID-vkCmdBindVertexBuffers2-bindingCount-arraylength\""] # This VUID is considered special, as it is the only one whose names ends in "-arraylength" but has special conditions allowing bindingCount to be 0.
+                            if vuidName in arrayVuidExceptions:
+                                continue
                             if lenParam.isoptional:
                                 cvReq = 'false'
                             elif value.noautovalidity:

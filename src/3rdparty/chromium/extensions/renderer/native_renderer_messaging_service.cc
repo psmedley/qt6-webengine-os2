@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -449,12 +449,14 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
     sender_builder.Set("frameId", source->frame_id);
   if (!source->document_id.empty())
     sender_builder.Set("documentId", source->document_id);
+  if (!source->document_lifecycle.empty())
+    sender_builder.Set("documentLifecycle", source->document_lifecycle);
 
   const Extension* extension = script_context->extension();
   if (extension) {
-    if (!source->tab.DictEmpty() && !extension->is_platform_app()) {
+    if (!source->tab.empty() && !extension->is_platform_app()) {
       sender_builder.Set("tab", content::V8ValueConverter::Create()->ToV8Value(
-                                    &source->tab, v8_context));
+                                    source->tab, v8_context));
     }
 
     ExternallyConnectableInfo* externally_connectable =
@@ -490,23 +492,22 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
 
   if (binding::IsContextValid(v8_context) &&
       APIActivityLogger::IsLoggingEnabled()) {
-    std::vector<base::Value> list;
+    base::Value::List list;
     list.reserve(2u);
     if (info.source_endpoint.extension_id)
-      list.emplace_back(*info.source_endpoint.extension_id);
+      list.Append(*info.source_endpoint.extension_id);
     else if (info.source_endpoint.native_app_name)
-      list.emplace_back(*info.source_endpoint.native_app_name);
+      list.Append(*info.source_endpoint.native_app_name);
     else
-      list.emplace_back();
+      list.Append(base::Value());
 
     if (!info.source_url.is_empty())
-      list.emplace_back(info.source_url.spec());
+      list.Append(info.source_url.spec());
     else
-      list.emplace_back();
+      list.Append(base::Value());
 
-    APIActivityLogger::LogEvent(
-        bindings_system_->GetIPCMessageSender(), script_context, event_name,
-        std::make_unique<base::ListValue>(std::move(list)));
+    APIActivityLogger::LogEvent(bindings_system_->GetIPCMessageSender(),
+                                script_context, event_name, std::move(list));
   }
 }
 

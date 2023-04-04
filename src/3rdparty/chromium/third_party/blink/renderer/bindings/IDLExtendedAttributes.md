@@ -966,9 +966,9 @@ For now, this label is only supported for attribute getters, although the `[High
 
 ### [DeprecateAs] _(m, a, c)_
 
-Summary: Measures usage of a deprecated feature via `UseCounter`, and notifies developers about deprecation via a console warning.
+Summary: Measures usage of a deprecated feature via `UseCounter`, and notifies developers about deprecation via a devtools issue.
 
-`[DeprecateAs]` can be considered an extended form of `[MeasureAs]`: it both measures the feature's usage via the same `UseCounter` mechanism, and also sends out a warning to the console (optionally with a message) in order to inform developers that the code they've written will stop working at some point in the relatively near future.
+`[DeprecateAs]` can be considered an extended form of `[MeasureAs]`: it both measures the feature's usage via the same `UseCounter` mechanism, and also sends out an issue to devtools in order to inform developers that the code they've written will stop working at some point in the relatively near future.
 
 Usage: `[DeprecateAs]` can be specified on methods, attributes, and constants.
 
@@ -978,7 +978,7 @@ Usage: `[DeprecateAs]` can be specified on methods, attributes, and constants.
     [DeprecateAs=DeprecatedPrefixedConstant] const short DEPRECATED_PREFIXED_CONSTANT = 1;
 ```
 
-The deprecation message shown on the console can be specified via the [Deprecation::GetDeprecationInfo](https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/renderer/core/frame/deprecation.cc;l=194) method.
+For more documentation on deprecations, see [the documentation](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/core/frame/deprecation/README.md).
 
 ### [DoNotTestNewObject] _(m)_
 
@@ -1150,6 +1150,8 @@ The `[ReflectEmpty]` extended attribute specifies the value that an IDL getter f
 Non-empty string value specified by `[ReflectEmpty]` must be added to
 `core/html/keywords.json5`.
 
+When no value is specified by `[ReflectEmpty]`, the value will be IDL null if the attribute type is nullable, otherwise the empty string.
+
 ### [ReflectInvalid] _(a)_
 
 Specification: [Limited value attributes](http://www.whatwg.org/specs/web-apps/current-work/#limited-to-only-known-values) - _defined in spec prose, not as an IDL extended attribute._
@@ -1171,6 +1173,8 @@ The `[ReflectInvalid]` extended attribute specifies the value that an IDL getter
 Non-empty string value specified by `[ReflectInvalid]` must be added to
 `core/html/keywords.json5`.
 
+When no value is specified by `[ReflectInvalid]`, the value will be IDL null if the attribute type is nullable, otherwise the empty string.
+
 ### [ReflectMissing] _(a)_
 
 Specification: [Limited value attributes](http://www.whatwg.org/specs/web-apps/current-work/#limited-to-only-known-values) - _defined in spec prose, not as an IDL extended attribute._
@@ -1191,6 +1195,8 @@ The `[ReflectMissing]` extended attribute specifies the value that an IDL getter
 
 Non-empty string value specified by `[ReflectMissing]` must be added to
 `core/html/keywords.json5`.
+
+When no value is specified by `[ReflectMissing]`, the value will be IDL null if the attribute type is nullable, otherwise the empty string.
 
 ### [ReflectOnly] _(a)_
 
@@ -1600,16 +1606,17 @@ In case of `func1(...)`, if JavaScript calls `func1(100, 200)`, then `HTMLFoo::f
 In case of `func2(...)` which adds `[DefaultValue=Undefined]`, if JavaScript calls `func2(100, 200)`, then it behaves as if JavaScript called `func2(100, 200, undefined)`. Consequently, `HTMLFoo::func2(int a, int b, int c)` is called in Blink. 100 is passed to `a`, 200 is passed to `b`, and 0 is passed to `c`. (A JavaScript `undefined` is converted to 0, following the value conversion rule in the Web IDL spec; if it were a DOMString parameter, it would end up as the string `"undefined"`.) In this way, Blink needs to just implement `func2(int a, int b, int c)` and needs not to implement both `func2(int a, int b)` and `func2(int a, int b, int c)`.
 
 
-### [DirectSocketEnabled] _(a, i, m)_
+### [IsolatedApplication] _(a, i, m)_
 
-Summary: Interfaces and interface members with a `DirectSocketEnabled` extended attribute are exposed only inside contexts whose [cross-origin isolated capability](https://html.spec.whatwg.org/multipage/webappapis.html#concept-settings-object-cross-origin-isolated-capability) is enabled, and when the [kDirectSocket](https://source.chromium.org/chromium/chromium/src/+/main:content/public/common/content_features.cc;drc=25b97f298830b78a443fd7cdfd0b3e190817d1dd;l=556) feature flag is enabled.
+Summary: Interfaces and interface members with a `IsolatedApplication` extended attribute are exposed only inside contexts with isolated application isolation level. 
+See [explainer](https://github.com/reillyeon/isolated-web-apps) for more details.
 
 Note that it's likely for these requirements to shift over time: <https://crbug.com/1206150>.
 
-Usage: The `[DirectSocketEnabled]` extended attribute may be specified on interfaces, attributes, and operations:
+Usage: The `[IsolatedApplication]` extended attribute may be specified on interfaces, attributes, and operations:
 
 ```webidl
-[DirectSocketEnabled]
+[IsolatedApplication]
 interface TCPSocket {
   ...
 };
@@ -1643,6 +1650,12 @@ Standard: [TC39 Dynamic Code Brand Checks](https://github.com/tc39/proposal-dyna
 ## Discouraged Blink-specific IDL Extended Attributes
 
 These extended attributes are _discouraged_ - they are not deprecated, but they should be avoided and removed if possible.
+
+### [BufferSourceTypeNoSizeLimit] _(t)_
+
+Summary: The byte length of buffer source types is currently restricted to be under 2 GB (exactly speaking, it must be less than the max size of a direct mapped memory of PartitionAlloc, which is a little less than 2 GB).  This extended attribute removes this limitation.
+
+Consult with the bindings team before you use this extended attribute.
 
 ### [DoNotCheckConstants] _(i)_
 
@@ -1683,6 +1696,12 @@ Usage: The possible usage is `[ImplementedAs=XXX]`, where XXX is a method name i
 ```
 
 Method names in Blink default to being the same as the name in an IDL file. In some cases this is not possible, e.g., `delete` is a C++ reserved word. In such cases, you can explicitly specify the method name in Blink by `[ImplementedAs]`. Generally the `[ImplementedAs]` name should be in lowerCamelCase. You should _not_ use `[ImplementedAs]` simply to avoid renaming Blink methods.
+
+### [TargetOfExposed] _(i)_
+
+Summary: Interfaces specified with `[Global]` expose top-level IDL constructs specified with `[Exposed]` as JS data properties, however `[Global]` means a lot more (e.g. global object, named properties object, etc.). Interfaces specified with `[TargetOfExposed]` only expose top-level IDL constructs specified with `[Exposed]` and means nothing else.
+
+This extended attribute should be used only for pseudo namespace(-ish) objects like `globalThis.chromeos`. Consult with the bindings team before you use this extended attribute.
 
 ## Deprecated Blink-specific IDL Extended Attributes
 

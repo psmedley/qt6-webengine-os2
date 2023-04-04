@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,7 +63,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #if defined(ARCH_CPU_X86_64)
-#include "chromeos/memory/userspace_swap/userspace_swap_renderer_initialization_impl.h"
+#include "chromeos/ash/components/memory/userspace_swap/userspace_swap_renderer_initialization_impl.h"
 #endif  // defined(X86_64)
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
@@ -71,7 +71,7 @@
 #include "chromeos/system/core_scheduling.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
 #include "content/renderer/pepper/pepper_plugin_registry.h"
 #endif
 
@@ -158,16 +158,24 @@ int RendererMain(MainFunctionParams parameters) {
   }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if BUILDFLAG(IS_CHROMEOS)
-  // When we start the renderer on ChromeOS if the system has core scheduling
-  // available we want to turn it on.
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Turn on core scheduling for ash renderers only if kLacrosOnly is not
+  // enabled. If kLacrosOnly is enabled, ash renderers don't run user code. This
+  // means they don't need core scheduling. Lacros renderers will get core
+  // scheduling in this case.
+  if (!command_line.HasSwitch(switches::kAshWebBrowserDisabled)) {
+    chromeos::system::EnableCoreSchedulingIfAvailable();
+  }
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Turn on core scheduling for lacros renderers since they run user code in
+  // most cases.
   chromeos::system::EnableCoreSchedulingIfAvailable();
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #if defined(ARCH_CPU_X86_64)
   using UserspaceSwapInit =
-      chromeos::memory::userspace_swap::UserspaceSwapRendererInitializationImpl;
+      ash::memory::userspace_swap::UserspaceSwapRendererInitializationImpl;
   absl::optional<UserspaceSwapInit> swap_init;
   if (UserspaceSwapInit::UserspaceSwapSupportedAndEnabled()) {
     swap_init.emplace();
@@ -208,7 +216,7 @@ int RendererMain(MainFunctionParams parameters) {
 
   platform.PlatformInitialize();
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
   // Load pepper plugins before engaging the sandbox.
   PepperPluginRegistry::GetInstance();
 #endif
@@ -221,9 +229,17 @@ int RendererMain(MainFunctionParams parameters) {
 #endif
 
   {
+    content::ContentRendererClient* client = GetContentClient()->renderer();
     bool should_run_loop = true;
     bool need_sandbox =
         !command_line.HasSwitch(sandbox::policy::switches::kNoSandbox);
+
+    if (!need_sandbox) {
+      // The post-sandbox actions still need to happen at some point.
+      if (client) {
+        client->PostSandboxInitialized();
+      }
+    }
 
 #if !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_MAC)
     // Sandbox is enabled before RenderProcess initialization on all platforms,
@@ -232,6 +248,9 @@ int RendererMain(MainFunctionParams parameters) {
     if (need_sandbox) {
       should_run_loop = platform.EnableSandbox();
       need_sandbox = false;
+      if (client) {
+        client->PostSandboxInitialized();
+      }
     }
 #endif
 
@@ -270,8 +289,12 @@ int RendererMain(MainFunctionParams parameters) {
     }
 #endif
 
-    if (need_sandbox)
+    if (need_sandbox) {
       should_run_loop = platform.EnableSandbox();
+      if (client) {
+        client->PostSandboxInitialized();
+      }
+    }
 
 #if BUILDFLAG(MOJO_RANDOM_DELAYS_ENABLED)
     mojo::BeginRandomMojoDelays();

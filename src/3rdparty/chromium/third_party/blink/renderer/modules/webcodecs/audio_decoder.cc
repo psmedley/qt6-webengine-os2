@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "media/base/mime_util.h"
 #include "media/base/supported_types.h"
 #include "media/base/waiting.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_decoder_config.h"
@@ -74,37 +74,6 @@ void AudioDecoderTraits::UpdateDecoderLog(const MediaDecoderType& decoder,
       << "Initialized AudioDecoder: " << media_config.AsHumanReadableString();
   base::UmaHistogramEnumeration("Blink.WebCodecs.AudioDecoder.Codec",
                                 media_config.codec());
-}
-
-// static
-media::DecoderStatus::Or<AudioDecoderTraits::OutputType*>
-AudioDecoderTraits::MakeOutput(scoped_refptr<MediaOutputType> output,
-                               ExecutionContext* context) {
-  if (!blink::audio_utilities::IsValidAudioBufferSampleRate(
-          output->sample_rate())) {
-    return media::DecoderStatus(
-        media::DecoderStatus::Codes::kInvalidArgument,
-        String::Format("Invalid decoded audio output sample rate. Got %u, "
-                       "which is outside [%f, %f]",
-                       output->sample_rate(),
-                       blink::audio_utilities::MinAudioBufferSampleRate(),
-                       blink::audio_utilities::MaxAudioBufferSampleRate())
-            .Ascii());
-  }
-
-  if (static_cast<uint32_t>(output->channel_count()) >
-      BaseAudioContext::MaxNumberOfChannels()) {
-    return media::DecoderStatus(
-        media::DecoderStatus::Codes::kInvalidArgument,
-        String::Format("Invalid decoded audio output channel "
-                       "count. Got %u, which exceeds %u",
-                       output->channel_count(),
-                       BaseAudioContext::MaxNumberOfChannels())
-            .Ascii());
-  }
-
-  return MakeGarbageCollected<AudioDecoderTraits::OutputType>(
-      std::move(output));
 }
 
 // static
@@ -263,10 +232,44 @@ absl::optional<media::AudioDecoderConfig> AudioDecoder::MakeMediaConfig(
 }
 
 media::DecoderStatus::Or<scoped_refptr<media::DecoderBuffer>>
-AudioDecoder::MakeDecoderBuffer(const InputType& chunk, bool verify_key_frame) {
+AudioDecoder::MakeInput(const InputType& chunk, bool verify_key_frame) {
   if (verify_key_frame && !chunk.buffer()->is_key_frame())
     return media::DecoderStatus::Codes::kKeyFrameRequired;
   return chunk.buffer();
+}
+
+media::DecoderStatus::Or<AudioDecoder::OutputType*> AudioDecoder::MakeOutput(
+    scoped_refptr<MediaOutputType> output,
+    ExecutionContext* context) {
+  if (!blink::audio_utilities::IsValidAudioBufferSampleRate(
+          output->sample_rate())) {
+    return media::DecoderStatus(
+        media::DecoderStatus::Codes::kInvalidArgument,
+        String::Format("Invalid decoded audio output sample rate. Got %u, "
+                       "which is outside [%f, %f]",
+                       output->sample_rate(),
+                       blink::audio_utilities::MinAudioBufferSampleRate(),
+                       blink::audio_utilities::MaxAudioBufferSampleRate())
+            .Ascii());
+  }
+
+  if (static_cast<uint32_t>(output->channel_count()) >
+      BaseAudioContext::MaxNumberOfChannels()) {
+    return media::DecoderStatus(
+        media::DecoderStatus::Codes::kInvalidArgument,
+        String::Format("Invalid decoded audio output channel "
+                       "count. Got %u, which exceeds %u",
+                       output->channel_count(),
+                       BaseAudioContext::MaxNumberOfChannels())
+            .Ascii());
+  }
+
+  return MakeGarbageCollected<AudioDecoderTraits::OutputType>(
+      std::move(output));
+}
+
+const AtomicString& AudioDecoder::InterfaceName() const {
+  return event_target_names::kAudioDecoder;
 }
 
 }  // namespace blink

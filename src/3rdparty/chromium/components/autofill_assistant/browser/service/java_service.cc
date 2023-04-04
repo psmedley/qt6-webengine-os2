@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,10 +94,24 @@ void JavaService::GetNextActions(
 
 void JavaService::GetUserData(const CollectUserDataOptions& options,
                               uint64_t run_id,
+                              const UserData* user_data,
                               ServiceRequestSender::ResponseCallback callback) {
   JNIEnv* env = base::android::AttachCurrentThread();
   auto jresponse =
       Java_AutofillAssistantTestService_getUserDataNative(env, java_service_);
+  std::string response;
+  base::android::JavaByteArrayToString(env, jresponse, &response);
+  std::move(callback).Run(net::HTTP_OK, response,
+                          ServiceRequestSender::ResponseInfo{});
+}
+
+void JavaService::ReportProgress(
+    const std::string& token,
+    const std::string& payload,
+    ServiceRequestSender::ResponseCallback callback) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  auto jresponse = Java_AutofillAssistantTestService_reportProgressNative(
+      env, java_service_);
   std::string response;
   base::android::JavaByteArrayToString(env, jresponse, &response);
   std::move(callback).Run(net::HTTP_OK, response,

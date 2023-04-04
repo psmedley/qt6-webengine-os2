@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       }
       case 13: {
         const char* data_result = nullptr;
-        int length_result = 0;
+        size_t length_result = 0;
         std::ignore = iter.ReadData(&data_result, &length_result);
         break;
       }
@@ -106,17 +106,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         const char* data_result = nullptr;
         int read_length =
             data_provider.ConsumeIntegralInRange(0, kMaxReadLength);
-        std::ignore = iter.ReadBytes(&data_result, read_length);
+        std::ignore =
+            iter.ReadBytes(&data_result, static_cast<size_t>(read_length));
         break;
       }
       case 15: {
-        int result = 0;
+        size_t result = 0;
         std::ignore = iter.ReadLength(&result);
         break;
       }
       case 16: {
-        std::ignore = iter.SkipBytes(
-            data_provider.ConsumeIntegralInRange(0, kMaxSkipBytes));
+        std::ignore = iter.SkipBytes(static_cast<size_t>(
+            data_provider.ConsumeIntegralInRange(0, kMaxSkipBytes)));
         break;
       }
     }

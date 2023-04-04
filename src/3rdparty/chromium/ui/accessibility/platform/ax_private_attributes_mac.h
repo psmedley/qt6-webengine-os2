@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,9 @@
 #include "ui/accessibility/ax_export.h"
 
 // Private WebKit accessibility attributes.
+AX_EXPORT constexpr NSString* const
+    NSAccessibilityAttributedStringForTextMarkerRangeParameterizedAttribute =
+        @"AXAttributedStringForTextMarkerRange";
 AX_EXPORT constexpr NSString* const NSAccessibilityAccessKeyAttribute =
     @"AXAccessKey";
 AX_EXPORT constexpr NSString* const NSAccessibilityARIAAtomicAttribute =
@@ -36,6 +39,11 @@ AX_EXPORT constexpr NSString* const NSAccessibilityARIASetSizeAttribute =
     @"AXARIASetSize";
 AX_EXPORT constexpr NSString* const NSAccessibilityAutocompleteValueAttribute =
     @"AXAutocompleteValue";
+AX_EXPORT constexpr NSString* const NSAccessibilityBrailleLabelAttribute =
+    @"AXBrailleLabel";
+AX_EXPORT constexpr NSString* const NSAccessibilityBrailleRoleDescription =
+    @"AXBrailleRoleDescription";
+
 AX_EXPORT constexpr NSString* const NSAccessibilityBlockQuoteLevelAttribute =
     @"AXBlockQuoteLevel";
 AX_EXPORT constexpr NSString* const NSAccessibilityChromeAXNodeIdAttribute =
@@ -99,19 +107,5 @@ AX_EXPORT constexpr NSString* const NSAccessibilityPopupValueAttribute =
     @"AXPopupValue";
 AX_EXPORT constexpr NSString* const NSAccessibilityVisitedAttribute =
     @"AXVisited";
-
-#if defined(MAC_OS_X_VERSION_10_12) && \
-    (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_12)
-#warning NSAccessibilityRequiredAttributeChrome \
-  should be removed since the deployment target is >= 10.12
-#endif
-
-// The following private WebKit accessibility attribute became public in 10.12,
-// but it can't be used on all OS because it has availability of 10.12. Instead,
-// define a similarly named constant with the "Chrome" suffix, and the same
-// string. This is used as the key to a dictionary, so string-comparison will
-// work.
-AX_EXPORT constexpr NSString* const NSAccessibilityRequiredAttributeChrome =
-    @"AXRequired";
 
 #endif  // UI_ACCESSIBILITY_PLATFORM_AX_PRIVATE_ATTRIBUTES_MAC_H_

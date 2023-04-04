@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,10 @@
 #include <iosfwd>
 #include <string>
 
+#include "components/autofill_assistant/browser/service.pb.h"
+#include "components/autofill_assistant/core/public/autofill_assistant_intent.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class TimeDelta;
@@ -90,8 +93,10 @@ class Metrics {
     // The user implicitly rejected the onboarding. Some of the possible reasons
     // include navigating away, tapping the back button, closing the tab, etc.
     OB_NO_ANSWER = 4,
+    // The onboarding flow is provided externally.
+    OB_EXTERNAL = 5,
 
-    kMaxValue = OB_NO_ANSWER
+    kMaxValue = OB_EXTERNAL
   };
 
   // The different actions that can be performed on TTS button click.
@@ -339,9 +344,6 @@ class Metrics {
     // Since Chrome M-88. The proactive help switch was enabled at start, but
     // then manually disabled in the Chrome settings.
     DISABLED_PROACTIVE_HELP_SETTING = 23,
-    // Since Chrome M-88. The client failed to base64-decode the trigger script
-    // specified in the script parameters.
-    BASE64_DECODING_ERROR = 24,
     // The user rejected the bottom sheet onboarding
     BOTTOMSHEET_ONBOARDING_REJECTED = 25,
     // Transitioning from CCT to regular tab is currently not supported.
@@ -378,6 +380,11 @@ class Metrics {
     PROMPT_FAILED_OTHER = 12,
     // Since Chrome M-88. The bottom sheet was swipe-dismissed by the user.
     PROMPT_SWIPE_DISMISSED = 16,
+
+    // Note: DEPRECATED since M-105
+    // Since Chrome M-88. The client failed to base64-decode the trigger script
+    // specified in the script parameters.
+    BASE64_DECODING_ERROR = 24,
 
     kMaxValue = CANCELED
   };
@@ -469,10 +476,16 @@ class Metrics {
     SEARCH_ADS = 4,
     SHOPPING_PROPERTY = 5,
     EMULATOR = 6,
+    // The run was started from within Chrome (e.g., URL heuristic match or
+    // password change launched from the settings page).
     IN_CHROME = 7,
+    // The run was triggered by the Direction Action API in Chrome.
     DIRECT_ACTION = 8,
+    // The run was started by Google Password Manager (passwords.google.com or
+    // credential_manager in gmscore module on Android).
+    GOOGLE_PASSWORD_MANAGER = 9,
 
-    kMaxValue = DIRECT_ACTION
+    kMaxValue = GOOGLE_PASSWORD_MANAGER
   };
 
   // Used for logging the SOURCE script parameter.
@@ -494,30 +507,6 @@ class Metrics {
     G_CAROUSEL = 9,
 
     kMaxValue = G_CAROUSEL
-  };
-
-  // Used for logging the intent of an autofill-assistant flow.
-  //
-  // This enum is used in UKM metrics, do not remove/renumber entries. Only add
-  // at the end and update kMaxValue. Also remember to update the
-  // AutofillAssistantIntent enum listing in
-  // tools/metrics/histograms/enums.xml.
-  enum class AutofillAssistantIntent {
-    UNDEFINED_INTENT = 0,
-    BUY_MOVIE_TICKET = 3,
-    RENT_CAR = 9,
-    SHOPPING = 10,
-    TELEPORT = 11,
-    SHOPPING_ASSISTED_CHECKOUT = 14,
-    FLIGHTS_CHECKIN = 15,
-    FOOD_ORDERING = 17,
-    PASSWORD_CHANGE = 18,
-    FOOD_ORDERING_PICKUP = 19,
-    FOOD_ORDERING_DELIVERY = 20,
-    UNLAUNCHED_VERTICAL_1 = 22,
-    FIND_COUPONS = 25,
-
-    kMaxValue = FIND_COUPONS
   };
 
   // Used for logging active autofill-assistant experiments. This is intended
@@ -627,10 +616,26 @@ class Metrics {
   // tools/metrics/ukm/ukm.xml as necessary.
   enum class UserDataSource {
     UNKNOWN,
+
+    // Only used backend data.
     BACKEND,
+
+    // Only used Chrome Autofill data.
     CHROME_AUTOFILL,
 
-    kMaxValue = CHROME_AUTOFILL
+    // Attempted to use backend data but request failed, had to fallback to
+    // Chrome Autofill.
+    FALLBACK_CHROME_AUTOFILL_ON_FAILED_REQUEST,
+
+    // Use backend data when possible, fallback to Chrome Autofill if
+    // not. Fallback was not necessary.
+    FALLBACK_BACKEND,
+
+    // Use backend data when possible, fallback to Chrome Autofill if
+    // not. Fallback was necessary (backend data was missing).
+    FALLBACK_CHROME_AUTOFILL_ON_MISSING_DATA,
+
+    kMaxValue = FALLBACK_CHROME_AUTOFILL_ON_MISSING_DATA
   };
 
   // Outcome of the CUP verification process for GetAction RPC calls. CUP
@@ -662,8 +667,10 @@ class Metrics {
     SIGNING_DISABLED = 4,
     // HTTP call didn't return "OK" 200. Rpc verification won't be performed.
     HTTP_FAILED = 5,
+    // Server did not provide a signature. Rpc verification won't be performed.
+    EMPTY_SIGNATURE = 6,
 
-    kMaxValue = HTTP_FAILED
+    kMaxValue = EMPTY_SIGNATURE
   };
 
   // Used for bitmasks for the InitialContactFieldsStatus,
@@ -710,12 +717,62 @@ class Metrics {
     kMaxValue = kInvalidData
   };
 
+  // Reports notable events that occur before, during or after the execution
+  // of a Autofill Assistant JS flow.
+  //
+  // This enum is used in UKM metrics, do not remove/renumber entries. Only add
+  // at the end and update kMaxValue. Also remember to update the
+  // AutofillAssistantJsFlowStartedEvent enum listing in
+  // tools/metrics/histograms/enums.xml and the description in
+  // tools/metrics/histograms/metadata/android/histograms.xml as necessary.
+  enum class JsFlowStartedEvent {
+    // The JS flow executer was started.
+    EXECUTOR_STARTED = 0,
+    // A JS flow was attempting to start before the previous one had finished.
+    // This is a client bug.
+    FAILED_ALREADY_RUNNING = 1,
+    // Failed to get the frame tree of the WebContents the JS flow was attached
+    // to.
+    FAILED_TO_GET_FRAME_TREE = 2,
+    // Failed to create the isolated world.
+    FAILED_TO_CREATE_ISOLATED_WORLD = 3,
+    // The JS flow execution was started.
+    SCRIPT_STARTED = 4,
+
+    kMaxValue = SCRIPT_STARTED
+  };
+
+  // This enum is used in histograms, do not remove/renumber entries. Only add
+  // at the end and update kMaxValue. Also remember to update the
+  // AutofillAssistantFlowFinishedState enum listing in
+  // tools/metrics/histograms/enums.xml.
+  enum class FlowFinishedState {
+    UNKNOWN = 0,
+    // For now, this means that the script finished successfully, i.e., the
+    // script executor returned 'true' as result. This does not mean that the
+    // run will be counted towards our backend metrics - it's just an indicator
+    // that the script ran until a scripted end.
+    SUCCESS = 1,
+    // There was a script execution error. This can have a variety of causes
+    // such as network outage and many others.
+    FAILURE = 2,
+    // The controller was destroyed mid-script. Usually, this happens if the
+    // tab owning the controller was destroyed, or if the entire activity was
+    // closed by the user.
+    DESTROYED = 3,
+    kMaxValue = DESTROYED
+  };
+
   static void RecordDropOut(DropOutReason reason, const std::string& intent);
   static void RecordPaymentRequestPrefilledSuccess(
       bool initially_complete,
       CollectUserDataResult result);
   static void RecordPaymentRequestAutofillChanged(bool changed,
                                                   CollectUserDataResult result);
+  static void RecordCollectUserDataProfileDeduplicationForContact(
+      int number_of_profiles_deduplicated_for_contact);
+  static void RecordCollectUserDataProfileDeduplicationForAddress(
+      int number_of_profiles_deduplicated_for_address);
   static void RecordPaymentRequestFirstNameOnly(bool first_name_only);
   static void RecordTriggerScriptStarted(ukm::UkmRecorder* ukm_recorder,
                                          ukm::SourceId source_id,
@@ -787,6 +844,17 @@ class Metrics {
   static void RecordOnboardingFetcherResult(
       OnboardingFetcherResultStatus status);
   static void RecordCupRpcVerificationEvent(CupRpcVerificationEvent event);
+  static void RecordJsFlowStartedEvent(JsFlowStartedEvent event);
+  static void RecordServiceRequestRetryCount(int count, bool success);
+  static void RecordFlowFinished(ukm::UkmRecorder* ukm_recorder,
+                                 ukm::SourceId source_id,
+                                 FlowFinishedState state,
+                                 RoundtripNetworkStats flow_network_stats);
+
+  // Extracts the enum value corresponding to the intent specified in
+  // |script_parameters|.
+  static AutofillAssistantIntent ExtractIntentFromScriptParameters(
+      const ScriptParameters& script_parameters);
 
   // Intended for debugging: writes string representation of |reason| to
   // |out|.

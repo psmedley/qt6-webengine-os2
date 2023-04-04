@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,7 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
   AutofillExternalDelegate(const AutofillExternalDelegate&) = delete;
   AutofillExternalDelegate& operator=(const AutofillExternalDelegate&) = delete;
 
-  virtual ~AutofillExternalDelegate();
+  ~AutofillExternalDelegate() override;
 
   // AutofillPopupDelegate implementation.
   void OnPopupShown() override;
@@ -48,11 +48,8 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
   void OnPopupSuppressed() override;
   void DidSelectSuggestion(const std::u16string& value,
                            int frontend_id,
-                           const std::string& backend_id) override;
-  void DidAcceptSuggestion(const std::u16string& value,
-                           int frontend_id,
-                           const std::string& backend_id,
-                           int position) override;
+                           const Suggestion::BackendId& backend_id) override;
+  void DidAcceptSuggestion(const Suggestion& suggestion, int position) override;
   bool GetDeletionConfirmationText(const std::u16string& value,
                                    int frontend_id,
                                    std::u16string* title,
@@ -117,7 +114,7 @@ class AutofillExternalDelegate : public AutofillPopupDelegate {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AutofillExternalDelegateUnitTest,
-                           FillCreditCardForm);
+                           FillCreditCardFormImpl);
 
   // Called when a credit card is scanned using device camera.
   void OnCreditCardScanned(const CreditCard& card);

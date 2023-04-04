@@ -78,6 +78,9 @@ ParagraphImpl::ParagraphImpl(const SkString& text,
         , fOldWidth(0)
         , fOldHeight(0)
         , fUnicode(std::move(unicode))
+        , fHasLineBreaks(false)
+        , fHasWhitespacesInside(false)
+        , fTrailingSpaces(0)
 {
     SkASSERT(fUnicode);
 }
@@ -96,7 +99,7 @@ ParagraphImpl::ParagraphImpl(const std::u16string& utf16text,
                         std::move(unicode))
 {
     SkASSERT(fUnicode);
-    fText =  fUnicode->convertUtf16ToUtf8(utf16text);
+    fText =  SkUnicode::convertUtf16ToUtf8(utf16text);
 }
 
 ParagraphImpl::~ParagraphImpl() = default;
@@ -130,7 +133,6 @@ void ParagraphImpl::layout(SkScalar rawWidth) {
 
     if (fState < kShaped) {
         this->fCodeUnitProperties.reset();
-        this->fCodeUnitProperties.push_back_n(fText.size() + 1, CodeUnitFlags::kNoCodeUnitFlag);
         this->fWords.clear();
         this->fBidiRegions.clear();
         this->fUTF8IndexForUTF16Index.reset();
@@ -237,39 +239,37 @@ bool ParagraphImpl::computeCodeUnitProperties() {
         return false;
     }
 
-    // Get all spaces
-    fUnicode->forEachCodepoint(fText.c_str(), fText.size(),
-       [this](SkUnichar unichar, int32_t start, int32_t end, int32_t count) {
-            if (fUnicode->isWhitespace(unichar)) {
-                for (auto i = start; i < end; ++i) {
-                    fCodeUnitProperties[i] |=  CodeUnitFlags::kPartOfWhiteSpaceBreak;
-                }
-            }
-            if (fUnicode->isSpace(unichar)) {
-                for (auto i = start; i < end; ++i) {
-                    fCodeUnitProperties[i] |=  CodeUnitFlags::kPartOfIntraWordBreak;
-                }
-            }
-       });
-
-    // Get line breaks
-    std::vector<SkUnicode::LineBreakBefore> lineBreaks;
-    if (!fUnicode->getLineBreaks(fText.c_str(), fText.size(), &lineBreaks)) {
+    // Collect all spaces and some extra information
+    // (and also substitute \t with a space while we are at it)
+    if (!fUnicode->computeCodeUnitFlags(&fText[0],
+                                        fText.size(),
+                                        this->paragraphStyle().getReplaceTabCharacters(),
+                                        &fCodeUnitProperties)) {
         return false;
     }
-    for (auto& lineBreak : lineBreaks) {
-        fCodeUnitProperties[lineBreak.pos] |= lineBreak.breakType == SkUnicode::LineBreakType::kHardLineBreak
-                                           ? CodeUnitFlags::kHardLineBreakBefore
-                                           : CodeUnitFlags::kSoftLineBreakBefore;
+
+    // Get some information about trailing spaces / hard line breaks
+    fTrailingSpaces = fText.size();
+    TextIndex firstWhitespace = EMPTY_INDEX;
+    for (auto i = 0ul; i < fCodeUnitProperties.size(); ++i) {
+        auto flags = fCodeUnitProperties[i];
+        if (SkUnicode::isPartOfWhiteSpaceBreak(flags)) {
+            if (fTrailingSpaces  == fText.size()) {
+                fTrailingSpaces = i;
+            }
+            if (firstWhitespace == EMPTY_INDEX) {
+                firstWhitespace = i;
+            }
+        } else {
+            fTrailingSpaces = fText.size();
+        }
+        if (SkUnicode::isHardLineBreak(flags)) {
+            fHasLineBreaks = true;
+        }
     }
 
-    // Get graphemes
-    std::vector<SkUnicode::Position> graphemes;
-    if (!fUnicode->getGraphemes(fText.c_str(), fText.size(), &graphemes)) {
-        return false;
-    }
-    for (auto pos : graphemes) {
-        fCodeUnitProperties[pos] |= CodeUnitFlags::kGraphemeStart;
+    if (firstWhitespace < fTrailingSpaces) {
+        fHasWhitespacesInside = true;
     }
 
     return true;
@@ -322,10 +322,10 @@ Cluster::Cluster(ParagraphImpl* owner,
         }
     } else {
         for (auto i = fTextRange.start; i < fTextRange.end; ++i) {
-            if (fOwner->codeUnitHasProperty(i, CodeUnitFlags::kPartOfWhiteSpaceBreak)) {
+            if (fOwner->codeUnitHasProperty(i, SkUnicode::CodeUnitFlags::kPartOfWhiteSpaceBreak)) {
                 ++whiteSpacesBreakLen;
             }
-            if (fOwner->codeUnitHasProperty(i, CodeUnitFlags::kPartOfIntraWordBreak)) {
+            if (fOwner->codeUnitHasProperty(i, SkUnicode::CodeUnitFlags::kPartOfIntraWordBreak)) {
                 ++intraWordBreakLen;
             }
         }
@@ -333,7 +333,8 @@ Cluster::Cluster(ParagraphImpl* owner,
 
     fIsWhiteSpaceBreak = whiteSpacesBreakLen == fTextRange.width();
     fIsIntraWordBreak = intraWordBreakLen == fTextRange.width();
-    fIsHardBreak = fOwner->codeUnitHasProperty(fTextRange.end, CodeUnitFlags::kHardLineBreakBefore);
+    fIsHardBreak = fOwner->codeUnitHasProperty(fTextRange.end,
+                                               SkUnicode::CodeUnitFlags::kHardLineBreakBefore);
 }
 
 SkScalar Run::calculateWidth(size_t start, size_t end, bool clip) const {
@@ -381,7 +382,7 @@ void ParagraphImpl::applySpacingAndBuildClusterTable() {
         this->buildClusterTable();
         // This is something Flutter requires
         for (auto& cluster : fClusters) {
-            cluster.setHalfLetterSpacing(fTextStyles[0].fStyle.getLetterSpacing()/2);
+            cluster.setHalfLetterSpacing(style.getLetterSpacing()/2);
         }
         return;
     }
@@ -440,7 +441,7 @@ void ParagraphImpl::buildClusterTable() {
     int cluster_count = 1;
     for (auto& run : fRuns) {
         cluster_count += run.isPlaceholder() ? 1 : run.size();
-        fCodeUnitProperties[run.fTextRange.start] |= CodeUnitFlags::kGraphemeStart;
+        fCodeUnitProperties[run.fTextRange.start] |= SkUnicode::CodeUnitFlags::kGraphemeStart;
     }
     fClusters.reserve_back(cluster_count);
 
@@ -455,8 +456,8 @@ void ParagraphImpl::buildClusterTable() {
             }
             // There are no glyphs but we want to have one cluster
             fClusters.emplace_back(this, runIndex, 0ul, 1ul, this->text(run.textRange()), run.advance().fX, run.advance().fY);
-            fCodeUnitProperties[run.textRange().start] |= CodeUnitFlags::kSoftLineBreakBefore;
-            fCodeUnitProperties[run.textRange().end] |= CodeUnitFlags::kSoftLineBreakBefore;
+            fCodeUnitProperties[run.textRange().start] |= SkUnicode::CodeUnitFlags::kSoftLineBreakBefore;
+            fCodeUnitProperties[run.textRange().end] |= SkUnicode::CodeUnitFlags::kSoftLineBreakBefore;
         } else {
             // Walk through the glyph in the direction of input text
             run.iterateThroughClustersInTextOrder([runIndex, this](size_t glyphStart,
@@ -515,6 +516,69 @@ bool ParagraphImpl::shapeTextIntoEndlessLine() {
 }
 
 void ParagraphImpl::breakShapedTextIntoLines(SkScalar maxWidth) {
+
+    if (!fHasLineBreaks &&
+        !fHasWhitespacesInside &&
+        fPlaceholders.size() == 1 &&
+        fRuns.size() == 1 && fRuns[0].fAdvance.fX <= maxWidth) {
+        // This is a short version of a line breaking when we know that:
+        // 1. We have only one line of text
+        // 2. It's shaped into a single run
+        // 3. There are no placeholders
+        // 4. There are no linebreaks (which will format text into multiple lines)
+        // 5. There are no whitespaces so the minIntrinsicWidth=maxIntrinsicWidth
+        // (To think about that, the last condition is not quite right;
+        // we should calculate minIntrinsicWidth by soft line breaks.
+        // However, it's how it's done in Flutter now)
+        auto& run = this->fRuns[0];
+        auto advance = run.advance();
+        auto textRange = TextRange(0, this->text().size());
+        auto textExcludingSpaces = TextRange(0, fTrailingSpaces);
+        InternalLineMetrics metrics(this->strutForceHeight());
+        metrics.add(&run);
+        auto disableFirstAscent = this->paragraphStyle().getTextHeightBehavior() &
+                                  TextHeightBehavior::kDisableFirstAscent;
+        auto disableLastDescent = this->paragraphStyle().getTextHeightBehavior() &
+                                  TextHeightBehavior::kDisableLastDescent;
+        if (disableFirstAscent) {
+            metrics.fAscent = metrics.fRawAscent;
+        }
+        if (disableLastDescent) {
+            metrics.fDescent = metrics.fRawDescent;
+        }
+        if (this->strutEnabled()) {
+            this->strutMetrics().updateLineMetrics(metrics);
+        }
+        ClusterIndex trailingSpaces = fClusters.size();
+        do {
+            --trailingSpaces;
+            auto& cluster = fClusters[trailingSpaces];
+            if (!cluster.isWhitespaceBreak()) {
+                ++trailingSpaces;
+                break;
+            }
+            advance.fX -= cluster.width();
+        } while (trailingSpaces != 0);
+
+        advance.fY = metrics.height();
+        auto clusterRange = ClusterRange(0, trailingSpaces);
+        auto clusterRangeWithGhosts = ClusterRange(0, this->clusters().size() - 1);
+        this->addLine(SkPoint::Make(0, 0), advance,
+                      textExcludingSpaces, textRange, textRange,
+                      clusterRange, clusterRangeWithGhosts, run.advance().x(),
+                      metrics);
+
+        fLongestLine = nearlyZero(advance.fX) ? run.advance().fX : advance.fX;
+        fHeight = advance.fY;
+        fWidth = maxWidth;
+        fMaxIntrinsicWidth = run.advance().fX;
+        fMinIntrinsicWidth = advance.fX;
+        fAlphabeticBaseline = fLines.empty() ? fEmptyMetrics.alphabeticBaseline() : fLines.front().alphabeticBaseline();
+        fIdeographicBaseline = fLines.empty() ? fEmptyMetrics.ideographicBaseline() : fLines.front().ideographicBaseline();
+        fExceededMaxLines = false;
+        return;
+    }
+
     TextWrapper textWrapper;
     textWrapper.breakTextIntoLines(
             this,
@@ -536,7 +600,6 @@ void ParagraphImpl::breakShapedTextIntoLines(SkScalar maxWidth) {
                 if (addEllipsis) {
                     line.createEllipsis(maxWidth, getEllipsis(), true);
                 }
-
                 fLongestLine = std::max(fLongestLine, nearlyZero(advance.fX) ? widthWithSpaces : advance.fX);
             });
 
@@ -840,7 +903,6 @@ void ParagraphImpl::setState(InternalState state) {
         case kUnknown:
             fRuns.reset();
             fCodeUnitProperties.reset();
-            fCodeUnitProperties.push_back_n(fText.size() + 1, kNoCodeUnitFlag);
             fWords.clear();
             fBidiRegions.clear();
             fUTF8IndexForUTF16Index.reset();
@@ -934,7 +996,7 @@ SkString ParagraphImpl::getEllipsis() const {
     if (!ellipsis8.isEmpty()) {
         return ellipsis8;
     } else {
-        return fUnicode->convertUtf16ToUtf8(fParagraphStyle.getEllipsisUtf16());
+        return SkUnicode::convertUtf16ToUtf8(fParagraphStyle.getEllipsisUtf16());
     }
 }
 
@@ -994,7 +1056,7 @@ void ParagraphImpl::updateBackgroundPaint(size_t from, size_t to, SkPaint paint)
 
 TextIndex ParagraphImpl::findPreviousGraphemeBoundary(TextIndex utf8) {
     while (utf8 > 0 &&
-          (fCodeUnitProperties[utf8] & CodeUnitFlags::kGraphemeStart) == 0) {
+          (fCodeUnitProperties[utf8] & SkUnicode::CodeUnitFlags::kGraphemeStart) == 0) {
         --utf8;
     }
     return utf8;
@@ -1002,41 +1064,19 @@ TextIndex ParagraphImpl::findPreviousGraphemeBoundary(TextIndex utf8) {
 
 TextIndex ParagraphImpl::findNextGraphemeBoundary(TextIndex utf8) {
     while (utf8 < fText.size() &&
-          (fCodeUnitProperties[utf8] & CodeUnitFlags::kGraphemeStart) == 0) {
+          (fCodeUnitProperties[utf8] & SkUnicode::CodeUnitFlags::kGraphemeStart) == 0) {
         ++utf8;
     }
     return utf8;
 }
 
 void ParagraphImpl::ensureUTF16Mapping() {
-    if (!fUTF16IndexForUTF8Index.empty()) {
-        return;
-    }
-    // Fill out code points 16
-    auto ptr = fText.c_str();
-    auto end = fText.c_str() + fText.size();
-    while (ptr < end) {
-
-        size_t index = ptr - fText.c_str();
-        SkUnichar u = SkUTF::NextUTF8(&ptr, end);
-
-        // All utf8 units refer to the same codepoint
-        size_t next = ptr - fText.c_str();
-        for (auto i = index; i < next; ++i) {
-            fUTF16IndexForUTF8Index.emplace_back(fUTF8IndexForUTF16Index.size());
-        }
-        SkASSERT(fUTF16IndexForUTF8Index.size() == next);
-
-        // One or two codepoints refer to the same text index
-        uint16_t buffer[2];
-        size_t count = SkUTF::ToUTF16(u, buffer);
-        fUTF8IndexForUTF16Index.emplace_back(index);
-        if (count > 1) {
-            fUTF8IndexForUTF16Index.emplace_back(index);
-        }
-    }
-    fUTF16IndexForUTF8Index.emplace_back(fUTF8IndexForUTF16Index.size());
-    fUTF8IndexForUTF16Index.emplace_back(fText.size());
+    fillUTF16MappingOnce([&] {
+        fUnicode->extractUtfConversionMapping(
+                this->text(),
+                [&](size_t index) { fUTF8IndexForUTF16Index.emplace_back(index); },
+                [&](size_t index) { fUTF16IndexForUTF8Index.emplace_back(index); });
+    });
 }
 
 void ParagraphImpl::visit(const Visitor& visitor) {

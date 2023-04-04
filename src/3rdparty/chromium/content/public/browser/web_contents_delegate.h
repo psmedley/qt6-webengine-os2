@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,6 +48,7 @@ class WeakPtr;
 namespace blink {
 namespace mojom {
 class FileChooserParams;
+class WindowFeatures;
 }
 }  // namespace blink
 
@@ -89,6 +90,7 @@ enum class ProtocolHandlerSecurityLevel;
 
 namespace content {
 
+class AudioStreamBrokerFactory;
 struct OpenURLParams;
 
 enum class KeyboardEventProcessingResult;
@@ -140,20 +142,22 @@ class CONTENT_EXPORT WebContentsDelegate {
   // security state changed and that security UI should be updated.
   virtual void VisibleSecurityStateChanged(WebContents* source) {}
 
-  // Creates a new tab with the already-created WebContents |new_contents|.
+  // Creates a new tab with the already-created WebContents `new_contents`.
   // The window for the added contents should be reparented correctly when this
-  // method returns. |target_url| is set to the value provided when
-  // |new_contents| was created. If |disposition| is NEW_POPUP, |initial_rect|
-  // should hold the initial position and size. If |was_blocked| is non-nullptr,
-  // then |*was_blocked| will be set to true if the popup gets blocked, and left
+  // method returns. `target_url` is set to the value provided when
+  // `new_contents` was created. If `disposition` is NEW_POPUP,
+  // `window_features` should hold the initial position, size and other
+  // properties of the window. If `was_blocked` is non-nullptr, then
+  // `*was_blocked` will be set to true if the popup gets blocked, and left
   // unchanged otherwise.
-  virtual void AddNewContents(WebContents* source,
-                              std::unique_ptr<WebContents> new_contents,
-                              const GURL& target_url,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_rect,
-                              bool user_gesture,
-                              bool* was_blocked) {}
+  virtual void AddNewContents(
+      WebContents* source,
+      std::unique_ptr<WebContents> new_contents,
+      const GURL& target_url,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
+      bool user_gesture,
+      bool* was_blocked) {}
 
   // Selects the specified contents, bringing its container to the front.
   virtual void ActivateContents(WebContents* contents) {}
@@ -165,7 +169,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // in UI elements. It is generally true for different-document navigations and
   // false for most same-document navigations (because same-documents are
   // typically instantaneous so there's no point in flickering the UI). The
-  // exception is the navigation API's transitionWhile(), which is the sole type
+  // exception is the navigation API's intercept(), which is the sole type
   // of same-document navigation that is asynchronous, and therefore a UI change
   // is sensible.
   virtual void LoadingStateChanged(WebContents* source,
@@ -457,7 +461,16 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Called when the renderer puts a tab out of fullscreen mode.
   virtual void ExitFullscreenModeForTab(WebContents*) {}
 
+  // Returns true if the given `web_contents` is, or is transitioning to
+  // tab-fullscreen.
   virtual bool IsFullscreenForTabOrPending(const WebContents* web_contents);
+
+  // Overload of IsFullscreenForTabOrPending which also outputs the current or
+  // target display of the fullscreen tab. If the function returns true and
+  // `display_id` is not nullptr, the target display ID of the tab will be
+  // written to `display_id`.
+  virtual bool IsFullscreenForTabOrPending(const WebContents* web_contents,
+                                           int64_t* display_id);
 
   // Returns the actual display mode of the top-level browsing context.
   // For example, it should return 'blink::mojom::DisplayModeFullscreen'
@@ -562,6 +575,12 @@ class CONTENT_EXPORT WebContentsDelegate {
   // For example, this returns an extension name for title instead of extension
   // url.
   virtual std::string GetTitleForMediaControls(WebContents* web_contents);
+
+  // Returns AudioStreamBrokerFactory to use to create AudioStreamBroker when
+  // creating audio I/O streams. Returned `AudioStreamBrokerFactory` is used and
+  // deleted on the IO thread.
+  virtual std::unique_ptr<AudioStreamBrokerFactory>
+  CreateAudioStreamBrokerFactory(WebContents* web_contents);
 
 #if BUILDFLAG(IS_ANDROID)
   // Returns true if the given media should be blocked to load.
@@ -673,6 +692,14 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Picture-in-Picture mode has ended.
   virtual void ExitPictureInPicture() {}
 
+#if BUILDFLAG(IS_ANDROID)
+  // Updates information to determine whether a user gesture should carryover to
+  // future navigations. This is needed so navigations within a certain
+  // timeframe of a request initiated by a gesture will be treated as if they
+  // were initiated by a gesture too, otherwise the navigation may be blocked.
+  virtual void UpdateUserGestureCarryoverInfo(WebContents* web_contents) {}
+#endif
+
   // Returns true if lazy loading of images and frames should be enabled.
   virtual bool ShouldAllowLazyLoad();
 
@@ -680,8 +707,8 @@ class CONTENT_EXPORT WebContentsDelegate {
   // indication that the cache will be used.
   virtual bool IsBackForwardCacheSupported();
 
-  // Returns true if Prerender2 (see content/browser/prerender/README.md for
-  // details) is supported.
+  // Returns true if Prerender2 (see
+  // content/browser/preloading/prerender/README.md for details) is supported.
   virtual bool IsPrerender2Supported(WebContents& web_contents);
 
   // Requests the delegate to replace |predecessor_contents| with

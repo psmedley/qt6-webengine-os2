@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/scheme_registry.h"
-#include "third_party/blink/public/mojom/use_counter/css_property_id.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/css_property_id.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace {
 const char kExtensionFeaturesHistogramName[] =
@@ -558,6 +559,103 @@ TEST_F(UseCounterImplTest, CSSMarkerPseudoElementAuthor) {
   )HTML");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterImplTest, H1UserAgentFontSizeInSectionApplied) {
+  auto dummy_page_holder =
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kH1UserAgentFontSizeInSectionApplied;
+
+  EXPECT_FALSE(document.IsUseCounted(feature));
+
+  document.documentElement()->setInnerHTML("<h1></h1>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(feature))
+      << "Not inside sectioning element";
+
+  document.documentElement()->setInnerHTML(R"HTML(
+      <article><h1 style="font-size: 10px"></h1></article>
+  )HTML");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(feature))
+      << "Inside sectioning element with author font-size";
+
+  document.documentElement()->setInnerHTML(R"HTML(
+      <article><h1></h1></article>
+  )HTML");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(feature))
+      << "Inside sectioning element with UA font-size";
+}
+
+TEST_F(UseCounterImplTest, CSSAtSupportsDropInvalidWhileForgivingParsing) {
+  ScopedCSSAtSupportsAlwaysNonForgivingParsingForTest scoped_feature(false);
+
+  auto test_counter = [this](const char* selector, bool counted) {
+    auto dummy_page_holder =
+        std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
+    Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+    Document& document = dummy_page_holder->GetDocument();
+    WebFeature feature =
+        WebFeature::kCSSAtSupportsDropInvalidWhileForgivingParsing;
+    EXPECT_FALSE(document.IsUseCounted(feature));
+
+    {
+      StringBuilder html;
+      html.Append("<style> ");
+      html.Append(selector);
+      html.Append(" {} </style>");
+      document.body()->setInnerHTML(html.ReleaseString());
+      UpdateAllLifecyclePhases(document);
+      EXPECT_FALSE(document.IsUseCounted(feature)) << selector;
+    }
+
+    {
+      StringBuilder html;
+      html.Append("<style> @supports selector(");
+      html.Append(selector);
+      html.Append(") {} </style>");
+      document.body()->setInnerHTML(html.ReleaseString());
+      UpdateAllLifecyclePhases(document);
+      EXPECT_EQ(document.IsUseCounted(feature), counted) << selector;
+    }
+  };
+
+  test_counter(":is(.a)", false);
+  test_counter(":is(.a .b)", false);
+  test_counter(":is(.a, .b)", false);
+  test_counter(":is(:not(.a))", false);
+  test_counter(":host(:is(.a))", false);
+  test_counter(":is()", true);
+  test_counter(":is(:foo)", true);
+  test_counter(":is(:foo,.a)", true);
+  test_counter(":is(.a,:foo)", true);
+  test_counter(":is(,.a)", true);
+  test_counter(":is(::first-line)", true);
+  test_counter(":host(:is())", true);
+  test_counter(":host(:is(:foo))", true);
+  test_counter(":host(:is(,.a))", true);
+  test_counter(":host(:is(.a .b))", true);
+  test_counter("::part(foo):is(.a)", true);
+
+  test_counter(":has(.a)", false);
+  test_counter(":has(.a .b)", false);
+  test_counter(":has(.a, .b)", false);
+  test_counter(":has(:not(.a))", false);
+  test_counter(":has()", true);
+  test_counter(":has(:foo)", true);
+  test_counter(":has(:foo,.a)", true);
+  test_counter(":has(.a,:foo)", true);
+  test_counter(":has(,.a)", true);
+  test_counter(":has(::first-line)", true);
+  test_counter(":host(:has())", true);
+  test_counter(":host(:has(:foo))", true);
+  test_counter(":host(:has(,.a))", true);
+  test_counter(":host(:has(.a))", true);
+  test_counter("::part(foo):has(.a)", true);
+  test_counter(":has(:has(.a))", true);
 }
 
 }  // namespace blink

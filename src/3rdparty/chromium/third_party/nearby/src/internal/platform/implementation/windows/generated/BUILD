@@ -32,6 +32,8 @@ cc_library(
         "comsuppwd.lib",
         "setupapi.lib",
         "dnsapi.lib",
+        "wlanapi.lib",
+        "shlwapi.lib",
     ],
     textual_hdrs = glob(["**/*.h"]),
     visibility = [

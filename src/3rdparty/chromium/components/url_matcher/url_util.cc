@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,12 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "components/google/core/common/google_util.h"
 #include "components/url_formatter/url_fixer.h"
 #include "components/url_matcher/url_matcher.h"
-#include "net/base/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/url_util.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -139,7 +139,7 @@ class EmbeddedURLExtractor {
       if (re2::RE2::FullMatch(url.path(), google_amp_viewer_path_regex_, &s,
                               &embedded)) {
         // The embedded URL may be percent-encoded. Undo that.
-        embedded = net::UnescapeBinaryURLComponent(embedded);
+        embedded = base::UnescapeBinaryURLComponent(embedded);
         return BuildURL(!s.empty(), embedded);
       }
     }
@@ -220,7 +220,7 @@ bool GetAsStringVector(const base::Value* value,
   if (!value->is_list())
     return false;
 
-  for (const base::Value& item : value->GetListDeprecated()) {
+  for (const base::Value& item : value->GetList()) {
     if (!item.is_string())
       return false;
 
@@ -260,7 +260,7 @@ bool FilterComponents::IsWildcard() const {
 
 scoped_refptr<URLMatcherConditionSet> CreateConditionSet(
     URLMatcher* url_matcher,
-    int id,
+    base::MatcherStringPattern::ID id,
     const std::string& scheme,
     const std::string& host,
     bool match_subdomains,
@@ -410,21 +410,16 @@ bool FilterToComponents(const std::string& filter,
 
 void AddFilters(URLMatcher* matcher,
                 bool allow,
-                URLMatcherConditionSet::ID* id,
-                const base::ListValue* patterns,
-                std::map<url_matcher::URLMatcherConditionSet::ID,
+                base::MatcherStringPattern::ID* id,
+                const base::Value::List& patterns,
+                std::map<base::MatcherStringPattern::ID,
                          url_matcher::util::FilterComponents>* filters) {
   URLMatcherConditionSet::Vector all_conditions;
-  base::Value::ConstListView patterns_list = patterns->GetListDeprecated();
-  size_t size = std::min(kMaxFiltersAllowed, patterns_list.size());
+  size_t size = std::min(kMaxFiltersAllowed, patterns.size());
   scoped_refptr<URLMatcherConditionSet> condition_set;
   for (size_t i = 0; i < size; ++i) {
-    std::string pattern;
-    if (patterns_list[i].is_string()) {
-      pattern = patterns_list[i].GetString();
-    } else {
-      DCHECK(false);
-    }
+    DCHECK(patterns[i].is_string());
+    const std::string pattern = patterns[i].GetString();
     FilterComponents components;
     components.allow = allow;
     if (!FilterToComponents(pattern, &components.scheme, &components.host,
@@ -449,9 +444,9 @@ void AddFilters(URLMatcher* matcher,
 
 void AddFilters(URLMatcher* matcher,
                 bool allow,
-                URLMatcherConditionSet::ID* id,
+                base::MatcherStringPattern::ID* id,
                 const std::vector<std::string>& patterns,
-                std::map<url_matcher::URLMatcherConditionSet::ID,
+                std::map<base::MatcherStringPattern::ID,
                          url_matcher::util::FilterComponents>* filters) {
   URLMatcherConditionSet::Vector all_conditions;
   size_t size = std::min(kMaxFiltersAllowed, patterns.size());
@@ -480,14 +475,14 @@ void AddFilters(URLMatcher* matcher,
 }
 
 void AddAllowFilters(url_matcher::URLMatcher* matcher,
-                     const base::ListValue* patterns) {
-  url_matcher::URLMatcherConditionSet::ID id(0);
+                     const base::Value::List& patterns) {
+  base::MatcherStringPattern::ID id(0);
   AddFilters(matcher, true, &id, patterns);
 }
 
 void AddAllowFilters(url_matcher::URLMatcher* matcher,
                      const std::vector<std::string>& patterns) {
-  url_matcher::URLMatcherConditionSet::ID id(0);
+  base::MatcherStringPattern::ID id(0);
   AddFilters(matcher, true, &id, patterns);
 }
 

@@ -838,10 +838,10 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
     return ret;
 }
 
-static int decode(AVCodecContext *avctx, void *data, int *got_sub, AVPacket *avpkt)
+static int decode(AVCodecContext *avctx, AVSubtitle *sub,
+                  int *got_sub, const AVPacket *avpkt)
 {
     CCaptionSubContext *ctx = avctx->priv_data;
-    AVSubtitle *sub = data;
     int64_t in_time = sub->pts;
     int64_t start_time;
     int64_t end_time;
@@ -946,7 +946,7 @@ static const AVClass ccaption_dec_class = {
 
 const FFCodec ff_ccaption_decoder = {
     .p.name         = "cc_dec",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Closed Caption (EIA-608 / CEA-708)"),
+    CODEC_LONG_NAME("Closed Caption (EIA-608 / CEA-708)"),
     .p.type         = AVMEDIA_TYPE_SUBTITLE,
     .p.id           = AV_CODEC_ID_EIA_608,
     .p.priv_class   = &ccaption_dec_class,
@@ -955,6 +955,5 @@ const FFCodec ff_ccaption_decoder = {
     .init           = init_decoder,
     .close          = close_decoder,
     .flush          = flush_decoder,
-    .decode         = decode,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    FF_CODEC_DECODE_SUB_CB(decode),
 };

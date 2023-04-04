@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,8 @@ class BookmarkModelObserverImpl : public bookmarks::BookmarkModelObserver {
                          size_t new_index) override;
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override;
+                         size_t index,
+                         bool added_by_user) override;
   void OnWillRemoveBookmarks(bookmarks::BookmarkModel* model,
                              const bookmarks::BookmarkNode* parent,
                              size_t old_index,
@@ -91,8 +92,27 @@ class BookmarkModelObserverImpl : public bookmarks::BookmarkModelObserver {
   // |bookmark_tracker_| accordingly. If |node| is a bookmark, it gets marked
   // as deleted and that it requires a commit. If it's a folder, it recurses
   // over all children before processing the folder itself.
-  void ProcessDelete(const bookmarks::BookmarkNode* parent,
-                     const bookmarks::BookmarkNode* node);
+  void ProcessDelete(const bookmarks::BookmarkNode* node);
+
+  // Returns current unique_position from sync metadata for the tracked |node|.
+  syncer::UniquePosition GetUniquePositionForNode(
+      const bookmarks::BookmarkNode* node) const;
+
+  // Updates the unique position in sync metadata for the tracked |node| and
+  // returns the new position. A new position is generated based on the left and
+  // right node's positions. At least one of |prev| and |next| must be valid.
+  syncer::UniquePosition UpdateUniquePositionForNode(
+      const bookmarks::BookmarkNode* node,
+      bookmarks::BookmarkModel* model,
+      const syncer::UniquePosition& prev,
+      const syncer::UniquePosition& next);
+
+  // Updates unique positions for all children from |parent| starting from
+  // |start_index| (must not be 0).
+  void UpdateAllUniquePositionsStartingAt(
+      const bookmarks::BookmarkNode* parent,
+      bookmarks::BookmarkModel* bookmark_model,
+      size_t start_index);
 
   // Points to the tracker owned by the processor. It keeps the mapping between
   // bookmark nodes and corresponding sync server entities.

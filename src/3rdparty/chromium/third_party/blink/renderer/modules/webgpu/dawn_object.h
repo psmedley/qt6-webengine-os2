@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,6 +50,10 @@ class WebGPUInterface;
 
 namespace blink {
 
+namespace scheduler {
+class EventLoop;
+}  // namespace scheduler
+
 template <typename T>
 struct WGPUReleaseFn;
 
@@ -84,27 +88,16 @@ class DawnObjectBase {
 
   // Ensure commands up until now on this object's parent device are flushed by
   // the end of the task.
-  void EnsureFlush();
+  void EnsureFlush(scheduler::EventLoop& event_loop);
 
   // Flush commands up until now on this object's parent device immediately.
   void FlushNow();
 
   // GPUObjectBase mixin implementation
-  const ScriptValue label(ScriptState* script_state,
-                          ExceptionState& exception_state) const {
-    if (label_.IsNull()) {
-      v8::Isolate* isolate = script_state->GetIsolate();
-      return ScriptValue(isolate, v8::Undefined(isolate));
-    }
-    return ScriptValue::From(script_state, label_);
-  }
-  void setLabel(ScriptState* script_state,
-                const ScriptValue value,
-                ExceptionState& exception_state);
-
+  const String& label() const { return label_; }
   void setLabel(const String& value);
 
-  virtual void setLabelImpl(const String& value){};
+  virtual void setLabelImpl(const String& value) {}
 
  private:
   scoped_refptr<DawnControlClientHolder> dawn_control_client_;
@@ -142,6 +135,8 @@ class DawnObject : public DawnObjectImpl {
   }
 
   ~DawnObject() override {
+    DCHECK(handle_);
+
     // Note: The device is released last because all child objects must be
     // destroyed first.
     (GetProcs().*WGPUReleaseFn<Handle>::fn)(handle_);

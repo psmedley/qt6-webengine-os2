@@ -38,6 +38,7 @@
 #include "mpeg4video.h"
 #include "mpeg4videodata.h"
 #include "mpeg4videodec.h"
+#include "mpeg4videodefs.h"
 #include "h263.h"
 #include "h263data.h"
 #include "h263dec.h"
@@ -772,7 +773,8 @@ static int mpeg4_decode_partition_a(Mpeg4DecContext *ctx)
             int dir = 0;
 
             mb_num++;
-            ff_update_block_index(s);
+            ff_update_block_index(s, s->avctx->bits_per_raw_sample,
+                                  s->avctx->lowres, s->chroma_x_shift);
             if (s->mb_x == s->resync_mb_x && s->mb_y == s->resync_mb_y + 1)
                 s->first_slice_line = 0;
 
@@ -963,7 +965,8 @@ static int mpeg4_decode_partition_b(MpegEncContext *s, int mb_count)
             const int xy = s->mb_x + s->mb_y * s->mb_stride;
 
             mb_num++;
-            ff_update_block_index(s);
+            ff_update_block_index(s, s->avctx->bits_per_raw_sample,
+                                  s->avctx->lowres, s->chroma_x_shift);
             if (s->mb_x == s->resync_mb_x && s->mb_y == s->resync_mb_y + 1)
                 s->first_slice_line = 0;
 
@@ -3532,6 +3535,7 @@ static int mpeg4_update_thread_context(AVCodecContext *dst,
     s->vol_sprite_usage          = s1->vol_sprite_usage;
     s->sprite_brightness_change  = s1->sprite_brightness_change;
     s->num_sprite_warping_points = s1->num_sprite_warping_points;
+    s->m.data_partitioning       = s1->m.data_partitioning;
     s->rvlc                      = s1->rvlc;
     s->resync_marker             = s1->resync_marker;
     s->t_frame                   = s1->t_frame;
@@ -3588,7 +3592,7 @@ static av_cold void mpeg4_init_static(void)
                                  0, 0, 528);
 
     for (unsigned i = 0, offset = 0; i < 12; i++) {
-        static VLC_TYPE vlc_buf[6498][2];
+        static VLCElem vlc_buf[6498];
 
         studio_intra_tab[i].table           = &vlc_buf[offset];
         studio_intra_tab[i].table_allocated = FF_ARRAY_ELEMS(vlc_buf) - offset;
@@ -3664,27 +3668,26 @@ static const AVClass mpeg4_class = {
 
 const FFCodec ff_mpeg4_decoder = {
     .p.name                = "mpeg4",
-    .p.long_name           = NULL_IF_CONFIG_SMALL("MPEG-4 part 2"),
+    CODEC_LONG_NAME("MPEG-4 part 2"),
     .p.type                = AVMEDIA_TYPE_VIDEO,
     .p.id                  = AV_CODEC_ID_MPEG4,
     .priv_data_size        = sizeof(Mpeg4DecContext),
     .init                  = decode_init,
     .close                 = ff_h263_decode_end,
-    .decode                = ff_h263_decode_frame,
+    FF_CODEC_DECODE_CB(ff_h263_decode_frame),
     .p.capabilities        = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 |
 #if FF_API_FLAG_TRUNCATED
                              AV_CODEC_CAP_TRUNCATED |
 #endif
                              AV_CODEC_CAP_DELAY | AV_CODEC_CAP_FRAME_THREADS,
-    .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE |
-                             FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM |
+    .caps_internal         = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM |
                              FF_CODEC_CAP_ALLOCATE_PROGRESS,
     .flush                 = ff_mpeg_flush,
     .p.max_lowres          = 3,
     .p.pix_fmts            = ff_h263_hwaccel_pixfmt_list_420,
     .p.profiles            = NULL_IF_CONFIG_SMALL(ff_mpeg4_video_profiles),
-    .update_thread_context = ONLY_IF_THREADS_ENABLED(mpeg4_update_thread_context),
-    .update_thread_context_for_user = ONLY_IF_THREADS_ENABLED(mpeg4_update_thread_context_for_user),
+    UPDATE_THREAD_CONTEXT(mpeg4_update_thread_context),
+    UPDATE_THREAD_CONTEXT_FOR_USER(mpeg4_update_thread_context_for_user),
     .p.priv_class = &mpeg4_class,
     .hw_configs            = (const AVCodecHWConfigInternal *const []) {
 #if CONFIG_MPEG4_NVDEC_HWACCEL

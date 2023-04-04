@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ template <typename T>
 using ValueTypeConverter = T (base::Value::*)() const;
 
 template <typename T, typename U>
-bool ParseHelper(const base::DictionaryValue& dict,
+bool ParseHelper(const base::Value::Dict& dict,
                  base::StringPiece key,
                  base::Value::Type expected_type,
                  ValueTypeConverter<U> type_converter,
@@ -80,7 +80,7 @@ void PopulateFinalError(std::u16string* error,
 }
 
 const base::Value* FindKeyOfType(
-    const base::DictionaryValue& dict,
+    const base::Value::Dict& dict,
     base::StringPiece key,
     base::Value::Type expected_type,
     std::u16string* error,
@@ -90,7 +90,7 @@ const base::Value* FindKeyOfType(
   DCHECK(error_path_reversed);
   DCHECK(error_path_reversed->empty());
 
-  const base::Value* value = dict.FindKey(key);
+  const base::Value* value = dict.Find(key);
   if (!value) {
     error_path_reversed->push_back(key);
     *error = u"Manifest key is required.";
@@ -109,7 +109,7 @@ const base::Value* FindKeyOfType(
   return value;
 }
 
-bool ParseFromDictionary(const base::DictionaryValue& dict,
+bool ParseFromDictionary(const base::Value::Dict& dict,
                          base::StringPiece key,
                          int* out,
                          std::u16string* error,
@@ -118,7 +118,7 @@ bool ParseFromDictionary(const base::DictionaryValue& dict,
                      &base::Value::GetInt, out, error, error_path_reversed);
 }
 
-bool ParseFromDictionary(const base::DictionaryValue& dict,
+bool ParseFromDictionary(const base::Value::Dict& dict,
                          base::StringPiece key,
                          bool* out,
                          std::u16string* error,
@@ -127,7 +127,7 @@ bool ParseFromDictionary(const base::DictionaryValue& dict,
                      &base::Value::GetBool, out, error, error_path_reversed);
 }
 
-bool ParseFromDictionary(const base::DictionaryValue& dict,
+bool ParseFromDictionary(const base::Value::Dict& dict,
                          base::StringPiece key,
                          double* out,
                          std::u16string* error,
@@ -136,7 +136,7 @@ bool ParseFromDictionary(const base::DictionaryValue& dict,
                      &base::Value::GetDouble, out, error, error_path_reversed);
 }
 
-bool ParseFromDictionary(const base::DictionaryValue& dict,
+bool ParseFromDictionary(const base::Value::Dict& dict,
                          base::StringPiece key,
                          std::string* out,
                          std::u16string* error,

@@ -7,7 +7,7 @@ Introduction
 
 SwiftShader is a high-performance CPU-based implementation of the Vulkan graphics API<sup>1</sup><sup>2</sup>. Its goal is to provide hardware independence for advanced 3D graphics.
 
-> NOTE: SwiftShader's OpenGL ES implementation is no longer supported, and will be removed. The [ANGLE](http://angleproject.org/) project can be used to achieve a layered implementation of OpenGL ES (aka. "SwANGLE").
+> NOTE: The [ANGLE](http://angleproject.org/) project can be used to achieve a layered implementation of OpenGL ES (aka. "SwANGLE").
 
 Building
 --------
@@ -25,7 +25,7 @@ Android and Chrome (OS) build environments are also supported.
 
   ./vk-unittests
   ```
-  Tip: Set the [CMAKE_BUILD_PARALLEL_LEVEL](https://cmake.org/cmake/help/latest/envvar/.CMAKE_BUILD_PARALLEL_LEVEL.html#envvar:CMAKE_BUILD_PARALLEL_LEVEL) environment variable to control the level of parallelism.
+  Tip: Set the [CMAKE_BUILD_PARALLEL_LEVEL](https://cmake.org/cmake/help/latest/envvar/CMAKE_BUILD_PARALLEL_LEVEL.html) environment variable to control the level of parallelism.
 
 
 * **Visual Studio**

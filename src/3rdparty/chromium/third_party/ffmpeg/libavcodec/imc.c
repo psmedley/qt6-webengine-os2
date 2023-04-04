@@ -33,7 +33,6 @@
 
 #include <math.h>
 #include <stddef.h>
-#include <stdio.h>
 
 #include "libavutil/channel_layout.h"
 #include "libavutil/ffmath.h"
@@ -45,9 +44,9 @@
 #include "avcodec.h"
 #include "bswapdsp.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "fft.h"
-#include "internal.h"
 #include "sinewin.h"
 
 #include "imcdata.h"
@@ -118,7 +117,7 @@ static VLC huffman_vlc[4][4];
 #define IMC_VLC_BITS 9
 #define VLC_TABLES_SIZE 9512
 
-static VLC_TYPE vlc_tables[VLC_TABLES_SIZE][2];
+static VLCElem vlc_tables[VLC_TABLES_SIZE];
 
 static inline double freq2bark(double freq)
 {
@@ -877,7 +876,7 @@ static int imc_decode_block(AVCodecContext *avctx, IMCContext *q, int ch)
     int imc_hdr, i, j, ret;
     int flag;
     int bits;
-    int counter, bitscount;
+    int bitscount;
     IMCChannel *chctx = q->chctx + ch;
 
 
@@ -926,7 +925,6 @@ static int imc_decode_block(AVCodecContext *avctx, IMCContext *q, int ch)
 
     memcpy(chctx->old_floor, chctx->flcoeffs1, 32 * sizeof(float));
 
-    counter = 0;
     if (stream_format_code & 0x1) {
         for (i = 0; i < BANDS; i++) {
             chctx->bandWidthT[i]   = band_tab[i + 1] - band_tab[i];
@@ -938,7 +936,6 @@ static int imc_decode_block(AVCodecContext *avctx, IMCContext *q, int ch)
         for (i = 0; i < BANDS; i++) {
             if (chctx->levlCoeffBuf[i] == 16) {
                 chctx->bandWidthT[i] = 0;
-                counter++;
             } else
                 chctx->bandWidthT[i] = band_tab[i + 1] - band_tab[i];
         }
@@ -1020,10 +1017,9 @@ static int imc_decode_block(AVCodecContext *avctx, IMCContext *q, int ch)
     return 0;
 }
 
-static int imc_decode_frame(AVCodecContext *avctx, void *data,
+static int imc_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                             int *got_frame_ptr, AVPacket *avpkt)
 {
-    AVFrame *frame     = data;
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     int ret, i;
@@ -1087,34 +1083,32 @@ static av_cold void flush(AVCodecContext *avctx)
 #if CONFIG_IMC_DECODER
 const FFCodec ff_imc_decoder = {
     .p.name         = "imc",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("IMC (Intel Music Coder)"),
+    CODEC_LONG_NAME("IMC (Intel Music Coder)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_IMC,
     .priv_data_size = sizeof(IMCContext),
     .init           = imc_decode_init,
     .close          = imc_decode_close,
-    .decode         = imc_decode_frame,
+    FF_CODEC_DECODE_CB(imc_decode_frame),
     .flush          = flush,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
 #endif
 #if CONFIG_IAC_DECODER
 const FFCodec ff_iac_decoder = {
     .p.name         = "iac",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("IAC (Indeo Audio Coder)"),
+    CODEC_LONG_NAME("IAC (Indeo Audio Coder)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_IAC,
     .priv_data_size = sizeof(IMCContext),
     .init           = imc_decode_init,
     .close          = imc_decode_close,
-    .decode         = imc_decode_frame,
+    FF_CODEC_DECODE_CB(imc_decode_frame),
     .flush          = flush,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,7 @@ class DrmDisplay {
   ~DrmDisplay();
 
   int64_t display_id() const { return display_id_; }
+  int64_t base_connector_id() const { return base_connector_id_; }
   scoped_refptr<DrmDevice> drm() const { return drm_; }
   uint32_t crtc() const { return crtc_; }
   uint32_t connector() const;
@@ -94,6 +95,7 @@ class DrmDisplay {
       const std::vector<display::GammaRampRGBEntry>& gamma_lut);
 
   int64_t display_id_ = -1;
+  int64_t base_connector_id_ = 0;
   const scoped_refptr<DrmDevice> drm_;
   uint32_t crtc_ = 0;
   ScopedDrmConnectorPtr connector_;

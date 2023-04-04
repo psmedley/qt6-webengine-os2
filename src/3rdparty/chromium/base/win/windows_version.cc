@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/win/registry.h"
 #include "build/build_config.h"
 
@@ -125,7 +126,7 @@ OSInfo::WindowsArchitecture OSInfo::GetArchitecture() {
 
 OSInfo::OSInfo(const _OSVERSIONINFOEXW& version_info,
                const _SYSTEM_INFO& system_info,
-               int os_type)
+               DWORD os_type)
     : version_(Version::PRE_XP),
       wow_process_machine_(WowProcessMachine::kUnknown),
       wow_native_machine_(WowNativeMachine::kUnknown) {
@@ -140,7 +141,7 @@ OSInfo::OSInfo(const _OSVERSIONINFOEXW& version_info,
   service_pack_.minor = version_info.wServicePackMinor;
   service_pack_str_ = WideToUTF8(version_info.szCSDVersion);
 
-  processors_ = system_info.dwNumberOfProcessors;
+  processors_ = static_cast<int>(system_info.dwNumberOfProcessors);
   allocation_granularity_ = system_info.dwAllocationGranularity;
 
   if (version_info.dwMajorVersion == 6 || version_info.dwMajorVersion == 10) {
@@ -216,6 +217,11 @@ OSInfo::OSInfo(const _OSVERSIONINFOEXW& version_info,
 OSInfo::~OSInfo() = default;
 
 Version OSInfo::Kernel32Version() const {
+  // Allow the calls to `Kernel32BaseVersion()` to block, as they only happen
+  // once (after which the result is cached in `kernel32_version`), and reading
+  // from kernel32.dll is fast in practice because it is used by all processes
+  // and therefore likely to be in the OS's file cache.
+  base::ScopedAllowBlocking allow_blocking;
   static const Version kernel32_version =
       MajorMinorBuildToVersion(Kernel32BaseVersion().components()[0],
                                Kernel32BaseVersion().components()[1],
@@ -224,7 +230,7 @@ Version OSInfo::Kernel32Version() const {
 }
 
 OSInfo::VersionNumber OSInfo::Kernel32VersionNumber() const {
-  DCHECK(Kernel32BaseVersion().components().size() == 4);
+  DCHECK_EQ(Kernel32BaseVersion().components().size(), 4u);
   static const VersionNumber version = {
       /*.major =*/ Kernel32BaseVersion().components()[0],
       /*.minor =*/ Kernel32BaseVersion().components()[1],

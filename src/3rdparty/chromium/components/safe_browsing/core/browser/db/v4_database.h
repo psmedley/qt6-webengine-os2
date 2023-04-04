@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,6 +117,9 @@ class V4Database {
 
   // Initialize state that lives on the IO thread.
   void InitializeOnIOSequence();
+
+  // Destroy state that lives on the IO thread.
+  void StopOnIO();
 
   V4Database(const V4Database&) = delete;
   V4Database& operator=(const V4Database&) = delete;

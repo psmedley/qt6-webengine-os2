@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) SandboxFileSystemBackend
   void Initialize(FileSystemContext* context) override;
   void ResolveURL(const FileSystemURL& url,
                   OpenFileSystemMode mode,
-                  OpenFileSystemCallback callback) override;
+                  ResolveURLCallback callback) override;
   AsyncFileUtil* GetAsyncFileUtil(FileSystemType type) override;
   WatcherManager* GetWatcherManager(FileSystemType type) override;
   CopyOrMoveFileValidatorFactory* GetCopyOrMoveFileValidatorFactory(

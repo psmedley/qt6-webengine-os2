@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,14 @@ namespace blink {
 // TODO(wuchengli): add unittest.
 class RTCVideoDecoderFactory : public webrtc::VideoDecoderFactory {
  public:
+  // The `decoder_factory` and `media_task_runner` are only needed if the
+  // experiment `media::kUseDecoderStreamForWebRTC` is enabled. If the
+  // RTCVideoDecoderFactory instance is only used to query supported codec
+  // configurations (i.e., by calling GetSupportedFormats() and
+  // QueryCodecSupport()), it may be created with `decoder_factory` and
+  // `media_task_runner` being null pointers. See https://crbug.com/1349423.
+  // TODO(crbug.com/1157227): Delete `decoder_factory` and `media_task_runner`
+  // arguments if the RTCVideoDecoderStreamAdapter is deleted.
   explicit RTCVideoDecoderFactory(
       media::GpuVideoAcceleratorFactories* gpu_factories,
       base::WeakPtr<media::DecoderFactory> decoder_factory,

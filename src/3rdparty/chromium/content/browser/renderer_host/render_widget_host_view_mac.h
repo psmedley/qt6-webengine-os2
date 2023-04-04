@@ -1,9 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_
+
+#include "base/memory/raw_ptr.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-forward.h"
 
 #import <Cocoa/Cocoa.h>
 
@@ -176,8 +179,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void UnlockKeyboard() override;
   bool IsKeyboardLocked() override;
   base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;
-  void GestureEventAck(const blink::WebGestureEvent& event,
-                       blink::mojom::InputEventResultState ack_result) override;
+  void GestureEventAck(
+      const blink::WebGestureEvent& event,
+      blink::mojom::InputEventResultState ack_result,
+      blink::mojom::ScrollResultDataPtr scroll_result_data) override;
   void ProcessAckedTouchEvent(
       const TouchEventWithLatencyInfo& touch,
       blink::mojom::InputEventResultState ack_result) override;
@@ -308,6 +313,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   }
 
   // RenderWidgetHostNSViewHostHelper implementation.
+  id GetAccessibilityElement() override;
   id GetRootBrowserAccessibilityElement() override;
   id GetFocusedBrowserAccessibilityElement() override;
   void SetAccessibilityWindow(NSWindow* window) override;
@@ -403,6 +409,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void StopSpeaking() override;
   bool SyncIsSpeaking(bool* is_speaking) override;
   void SyncIsSpeaking(SyncIsSpeakingCallback callback) override;
+  void GetRenderWidgetAccessibilityToken(
+      GetRenderWidgetAccessibilityTokenCallback callback) override;
   void SetRemoteAccessibilityWindowToken(
       const std::vector<uint8_t>& window_token) override;
 
@@ -546,7 +554,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // Interface through which the NSView is to be manipulated. This points either
   // to |in_process_ns_view_bridge_| or to |remote_ns_view_|.
-  remote_cocoa::mojom::RenderWidgetHostNSView* ns_view_ = nullptr;
+  raw_ptr<remote_cocoa::mojom::RenderWidgetHostNSView> ns_view_ = nullptr;
 
   // If |ns_view_| is hosted in this process, then this will be non-null,
   // and may be used to query the actual RenderWidgetHostViewCocoa that is being
@@ -587,10 +595,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   bool is_loading_;
 
   // Our parent host view, if this is a popup.  NULL otherwise.
-  RenderWidgetHostViewMac* popup_parent_host_view_;
+  raw_ptr<RenderWidgetHostViewMac> popup_parent_host_view_;
 
   // Our child popup host. NULL if we do not have a child popup.
-  RenderWidgetHostViewMac* popup_child_host_view_;
+  raw_ptr<RenderWidgetHostViewMac> popup_child_host_view_;
 
   // Display link for getting vsync info.
   scoped_refptr<ui::DisplayLinkMac> display_link_;
@@ -680,11 +688,14 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // This also allows the screen_infos_ to only be updated outside of resize by
   // holding any updates temporarily in this variable.
   absl::optional<display::ScreenInfos> new_screen_infos_from_shim_;
+  display::ScreenInfos original_screen_infos_;
 
   // Represents a feature of the physical display whose offset and mask_length
   // are expressed in DIPs relative to the view. See display_feature.h for more
   // details.
   absl::optional<DisplayFeature> display_feature_;
+
+  const uint64_t ns_view_id_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;

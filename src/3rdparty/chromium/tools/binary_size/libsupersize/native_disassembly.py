@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Class to get the native disassembly for symbols."""
@@ -160,9 +160,7 @@ def _GetTopChangedSymbols(delta_size_info):
       return False
     return True
 
-  sorted_symbols = delta_size_info.raw_symbols.Filter(filter_symbol).Sorted(
-      reverse=True)
-  return sorted_symbols
+  return delta_size_info.raw_symbols.Filter(filter_symbol).Sorted()
 
 
 def AddDisassembly(delta_size_info, before_path_resolver, after_path_resolver):

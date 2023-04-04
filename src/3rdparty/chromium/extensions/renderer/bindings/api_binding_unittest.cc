@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "extensions/renderer/bindings/api_binding_hooks_test_delegate.h"
 #include "extensions/renderer/bindings/api_binding_test.h"
 #include "extensions/renderer/bindings/api_binding_test_util.h"
+#include "extensions/renderer/bindings/api_binding_types.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
 #include "extensions/renderer/bindings/api_event_handler.h"
 #include "extensions/renderer/bindings/api_invocation_errors.h"
@@ -210,23 +211,19 @@ class APIBindingUnittest : public APIBindingTest {
   }
 
   void SetFunctions(const char* functions) {
-    binding_functions_ = DeprecatedListValueFromString(functions);
-    ASSERT_TRUE(binding_functions_);
+    binding_functions_ = ListValueFromString(functions);
   }
 
   void SetEvents(const char* events) {
-    binding_events_ = DeprecatedListValueFromString(events);
-    ASSERT_TRUE(binding_events_);
+    binding_events_ = ListValueFromString(events);
   }
 
   void SetTypes(const char* types) {
-    binding_types_ = DeprecatedListValueFromString(types);
-    ASSERT_TRUE(binding_types_);
+    binding_types_ = ListValueFromString(types);
   }
 
   void SetProperties(const char* properties) {
-    binding_properties_ = DeprecatedDictionaryValueFromString(properties);
-    ASSERT_TRUE(binding_properties_);
+    binding_properties_ = DictValueFromString(properties);
   }
 
   void SetHooks(std::unique_ptr<APIBindingHooks> hooks) {
@@ -310,11 +307,10 @@ class APIBindingUnittest : public APIBindingTest {
     access_checker_ = std::make_unique<BindingAccessChecker>(
         api_availability_callback_, promise_availability_callback_);
     binding_ = std::make_unique<APIBinding>(
-        kBindingName, binding_functions_.get(), binding_types_.get(),
-        binding_events_.get(), binding_properties_.get(), create_custom_type_,
-        on_silent_request_, std::move(binding_hooks_), &type_refs_,
-        request_handler_.get(), event_handler_.get(), access_checker_.get());
-    EXPECT_EQ(!binding_types_.get(), type_refs_.empty());
+        kBindingName, &binding_functions_, &binding_types_, &binding_events_,
+        &binding_properties_, create_custom_type_, on_silent_request_,
+        std::move(binding_hooks_), &type_refs_, request_handler_.get(),
+        event_handler_.get(), access_checker_.get());
   }
 
   v8::Local<v8::Value> ExpectPass(
@@ -385,10 +381,10 @@ class APIBindingUnittest : public APIBindingTest {
   std::unique_ptr<BindingAccessChecker> access_checker_;
   APITypeReferenceMap type_refs_;
 
-  std::unique_ptr<base::ListValue> binding_functions_;
-  std::unique_ptr<base::ListValue> binding_events_;
-  std::unique_ptr<base::ListValue> binding_types_;
-  std::unique_ptr<base::DictionaryValue> binding_properties_;
+  base::Value::List binding_functions_;
+  base::Value::List binding_events_;
+  base::Value::List binding_types_;
+  base::Value::Dict binding_properties_;
   std::unique_ptr<APIBindingHooks> binding_hooks_;
   std::unique_ptr<APIBindingHooksDelegate> binding_hooks_delegate_;
   APIBinding::CreateCustomType create_custom_type_;
@@ -801,7 +797,7 @@ TEST_F(APIBindingUnittest, TestRefProperties) {
   auto create_custom_type = [](v8::Isolate* isolate,
                                const std::string& type_name,
                                const std::string& property_name,
-                               const base::ListValue* property_values) {
+                               const base::Value::List* property_values) {
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
     v8::Local<v8::Object> result = v8::Object::New(isolate);
     if (type_name == "AlphaRef") {
@@ -1823,11 +1819,11 @@ TEST_F(APIBindingUnittest, TestSendingRequestsAndSilentRequestsWithHooks) {
          v8::Local<v8::Context> context,
          std::vector<v8::Local<v8::Value>>* arguments,
          const APITypeReferenceMap& map) {
-        handler->StartRequest(context, "test.handleAndSendRequest",
-                              std::make_unique<base::ListValue>(),
-                              binding::AsyncResponseType::kNone,
-                              v8::Local<v8::Function>(),
-                              v8::Local<v8::Function>());
+        handler->StartRequest(
+            context, "test.handleAndSendRequest",
+            std::make_unique<base::ListValue>(),
+            binding::AsyncResponseType::kNone, v8::Local<v8::Function>(),
+            v8::Local<v8::Function>(), binding::ResultModifierFunction());
         return RequestResult(RequestResult::HANDLED);
       };
   hooks->AddHandler(
@@ -1977,6 +1973,227 @@ TEST_F(APIBindingUnittest, TestHooksWithCustomCallback) {
 
   EXPECT_EQ("true", GetStringPropertyFromObject(context->Global(), context,
                                                 "calledCustomCallback"));
+}
+
+// Test native hooks that don't handle the result, but add a result modifier.
+TEST_F(APIBindingUnittest, TestHooksWithResultModifier) {
+  SetFunctions(kFunctionsWithPromiseSignatures);
+
+  bool context_allows_promises = true;
+  SetPromiseAvailabilityFlag(&context_allows_promises);
+
+  // Register a hook for the test.supportsPromises method with a result modifier
+  // that changes the result when the async response type is callback based.
+  auto hooks = std::make_unique<APIBindingHooksTestDelegate>();
+  int total_modifier_call_count = 0;
+  auto result_modifier =
+      [&total_modifier_call_count](
+          const std::vector<v8::Local<v8::Value>>& result_args,
+          v8::Local<v8::Context> context,
+          binding::AsyncResponseType async_type) {
+        total_modifier_call_count++;
+        if (async_type == binding::AsyncResponseType::kCallback) {
+          // For callback based calls change the result to a vector with
+          // multiple arguments by appending "bar" to the end.
+          std::vector<v8::Local<v8::Value>> new_args{
+              result_args[0], gin::StringToV8(context->GetIsolate(), "bar")};
+          return new_args;
+        }
+        return result_args;
+      };
+
+  auto hook_with_result_modifier =
+      [&result_modifier](const APISignature* signature,
+                         v8::Local<v8::Context> context,
+                         std::vector<v8::Local<v8::Value>>* arguments,
+                         const APITypeReferenceMap& ref_map) {
+        APIBindingHooks::RequestResult result(
+            APIBindingHooks::RequestResult::NOT_HANDLED,
+            v8::Local<v8::Function>(),
+            base::BindLambdaForTesting(result_modifier));
+        return result;
+      };
+  hooks->AddHandler("test.supportsPromises",
+                    base::BindLambdaForTesting(hook_with_result_modifier));
+  SetHooksDelegate(std::move(hooks));
+
+  InitializeBinding();
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+  v8::Local<v8::Object> binding_object = binding()->CreateInstance(context);
+
+  // A promise-based call should remain unmodified and return as normal.
+  {
+    v8::Local<v8::Function> promise_api_call = FunctionFromString(
+        context, "(function(api) { return api.supportsPromises(1); });");
+    v8::Local<v8::Value> args[] = {binding_object};
+    v8::Local<v8::Value> api_result =
+        RunFunctionOnGlobal(promise_api_call, context, std::size(args), args);
+
+    v8::Local<v8::Promise> promise;
+    ASSERT_TRUE(GetValueAs(api_result, &promise));
+    EXPECT_EQ(v8::Promise::kPending, promise->State());
+
+    ASSERT_TRUE(last_request());
+    request_handler()->CompleteRequest(last_request()->request_id,
+                                       ListValueFromString(R"(["foo"])"),
+                                       std::string());
+
+    EXPECT_EQ(v8::Promise::kFulfilled, promise->State());
+    EXPECT_EQ(R"("foo")", V8ToString(promise->Result(), context));
+    EXPECT_EQ(1, total_modifier_call_count);
+  }
+
+  // A callback-based call will be modified by the hook and return with multiple
+  // parameters.
+  {
+    constexpr char kFunctionCall[] =
+        R"((function(api) {
+             api.supportsPromises(2, (normalResult, addedResult) => {
+               this.argument1 = normalResult;
+               this.argument2 = addedResult;
+             });
+           }))";
+    v8::Local<v8::Function> callback_api_call =
+        FunctionFromString(context, kFunctionCall);
+    v8::Local<v8::Value> args[] = {binding_object};
+    RunFunctionOnGlobal(callback_api_call, context, std::size(args), args);
+
+    ASSERT_TRUE(last_request());
+    request_handler()->CompleteRequest(last_request()->request_id,
+                                       ListValueFromString(R"(["foo"])"),
+                                       std::string());
+
+    EXPECT_EQ(R"("foo")", GetStringPropertyFromObject(context->Global(),
+                                                      context, "argument1"));
+    EXPECT_EQ(R"("bar")", GetStringPropertyFromObject(context->Global(),
+                                                      context, "argument2"));
+    EXPECT_EQ(2, total_modifier_call_count);
+  }
+
+  // A call which results in an error should reject as expected and the result
+  // modifier should never be called.
+  {
+    v8::Local<v8::Function> promise_api_call = FunctionFromString(
+        context, "(function(api) { return api.supportsPromises(3) });");
+    v8::Local<v8::Value> args[] = {binding_object};
+    v8::Local<v8::Value> api_result =
+        RunFunctionOnGlobal(promise_api_call, context, std::size(args), args);
+
+    v8::Local<v8::Promise> promise = api_result.As<v8::Promise>();
+    ASSERT_FALSE(api_result.IsEmpty());
+    EXPECT_EQ(v8::Promise::kPending, promise->State());
+
+    ASSERT_TRUE(last_request());
+    request_handler()->CompleteRequest(last_request()->request_id,
+                                       base::Value::List(), "Error message");
+    EXPECT_EQ(v8::Promise::kRejected, promise->State());
+    ASSERT_TRUE(promise->Result()->IsObject());
+    EXPECT_EQ(R"("Error message")",
+              GetStringPropertyFromObject(promise->Result().As<v8::Object>(),
+                                          context, "message"));
+    // Since the result modifier should have never been called, the total call
+    // count should still be the same as in the previous test case.
+    EXPECT_EQ(2, total_modifier_call_count);
+  }
+}
+
+// Test native hooks that add a result modifier are compatible with JS hooks
+// which handle the request.
+TEST_F(APIBindingUnittest, TestHooksWithResultModifierAndJSHook) {
+  bool context_allows_promises = true;
+  SetPromiseAvailabilityFlag(&context_allows_promises);
+
+  // Register a JS hook for supportsPromises.
+  const char kRegisterHook[] = R"(
+      (function(hooks) {
+        hooks.setHandleRequest('supportsPromises', (firstArg, callback) => {
+          // Call the callback, appending "-foo" to the argument passed in.
+          callback(firstArg + '-foo');
+        });
+      }))";
+
+  InitializeJSHooks(kRegisterHook);
+  SetFunctions(kFunctionsWithPromiseSignatures);
+
+  // Register a native hook for test.supportsPromises with a result modifier
+  // that changes the result when the async response type is callback based.
+  auto hooks = std::make_unique<APIBindingHooksTestDelegate>();
+  auto result_modifier =
+      [](const std::vector<v8::Local<v8::Value>>& result_args,
+         v8::Local<v8::Context> context,
+         binding::AsyncResponseType async_type) {
+        if (async_type == binding::AsyncResponseType::kCallback) {
+          // For callback based calls change the result to a vector with
+          // multiple arguments by appending "bar" to the end.
+          std::vector<v8::Local<v8::Value>> new_args{
+              result_args[0], gin::StringToV8(context->GetIsolate(), "bar")};
+          return new_args;
+        }
+        return result_args;
+      };
+
+  auto hook_with_result_modifier =
+      [&result_modifier](const APISignature* signature,
+                         v8::Local<v8::Context> context,
+                         std::vector<v8::Local<v8::Value>>* arguments,
+                         const APITypeReferenceMap& ref_map) {
+        APIBindingHooks::RequestResult result(
+            APIBindingHooks::RequestResult::NOT_HANDLED,
+            v8::Local<v8::Function>(), base::BindOnce(result_modifier));
+        return result;
+      };
+  // Normally handlers are bound using base::BindRepeating, but to bind a lambda
+  // with a capture we have to use BindLambdaForTesting.
+  hooks->AddHandler("test.supportsPromises",
+                    base::BindLambdaForTesting(hook_with_result_modifier));
+  SetHooksDelegate(std::move(hooks));
+
+  InitializeBinding();
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+  v8::Local<v8::Object> binding_object = binding()->CreateInstance(context);
+
+  // A promise-based call should just be modified by the JS hook..
+  {
+    v8::Local<v8::Function> promise_api_call = FunctionFromString(
+        context, "(function(api) { return api.supportsPromises(1); });");
+    v8::Local<v8::Value> args[] = {binding_object};
+    v8::Local<v8::Value> api_result =
+        RunFunctionOnGlobal(promise_api_call, context, std::size(args), args);
+
+    // Since the JS callback completes the request right away, the promise
+    // should already be fulfilled without us needing to manually complete the
+    // request.
+    v8::Local<v8::Promise> promise;
+    ASSERT_TRUE(GetValueAs(api_result, &promise));
+    EXPECT_EQ(v8::Promise::kFulfilled, promise->State());
+    EXPECT_EQ(R"("1-foo")", V8ToString(promise->Result(), context));
+  }
+
+  // A callback-based call will be modified by the native hook to return with
+  // multiple parameters, as well as having the first parameter modified by the
+  // JS hook.
+  {
+    constexpr char kFunctionCall[] =
+        R"((function(api) {
+             api.supportsPromises(2, (normalResult, addedResult) => {
+               this.argument1 = normalResult;
+               this.argument2 = addedResult;
+             });
+           }))";
+    v8::Local<v8::Function> promise_api_call =
+        FunctionFromString(context, kFunctionCall);
+    v8::Local<v8::Value> args[] = {binding_object};
+    RunFunctionOnGlobal(promise_api_call, context, std::size(args), args);
+
+    EXPECT_EQ(R"("2-foo")", GetStringPropertyFromObject(context->Global(),
+                                                        context, "argument1"));
+    EXPECT_EQ(R"("bar")", GetStringPropertyFromObject(context->Global(),
+                                                      context, "argument2"));
+  }
 }
 
 TEST_F(APIBindingUnittest, AccessAPIMethodsAndEventsAfterInvalidation) {

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,6 +47,7 @@ void GeneratePasswordForFormFieldAction::InternalProcessAction(
 void GeneratePasswordForFormFieldAction::OnGetFormAndFieldDataForGeneration(
     const std::string& memory_key,
     const ClientStatus& status,
+    content::RenderFrameHost* rfh,
     const autofill::FormData& form_data,
     const autofill::FormFieldData& field_data) {
   if (!status.ok()) {
@@ -57,7 +58,7 @@ void GeneratePasswordForFormFieldAction::OnGetFormAndFieldDataForGeneration(
   uint64_t max_length = field_data.max_length;
   absl::optional<std::string> password =
       delegate_->GetWebsiteLoginManager()->GeneratePassword(
-          autofill::CalculateFormSignature(form_data),
+          rfh, autofill::CalculateFormSignature(form_data),
           autofill::CalculateFieldSignatureForField(field_data), max_length);
 
   if (!password) {

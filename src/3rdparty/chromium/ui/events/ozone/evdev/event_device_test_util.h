@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -115,6 +115,7 @@ extern const DeviceCapabilities kMicrosoftBluetoothNumberPad;
 extern const DeviceCapabilities kDellLatitudeE6510Touchpad;
 extern const DeviceCapabilities kHPProBook6560bTouchpad;
 extern const DeviceCapabilities kJinlonKeyboard;
+extern const DeviceCapabilities kSymbolTechBarcodeScanner;
 }  // namespace ui
 
 #endif  // UI_EVENTS_OZONE_EVDEV_EVENT_DEVICE_TEST_UTIL_H_

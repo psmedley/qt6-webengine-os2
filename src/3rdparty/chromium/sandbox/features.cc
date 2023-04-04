@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,12 @@
 namespace sandbox::features {
 #if BUILDFLAG(IS_WIN)
 bool IsAppContainerSandboxSupported() {
-  // Since some APIs used for LPAC are unsupported below Windows 10 RS2 (1703
-  // build 15063) so place a check here in a central place.
+  // Some APIs used for LPAC are unsupported below Windows 10 RS2 (1703 build
+  // 15063). In addition, it is not possible to apply process mitigations to an
+  // app container process until RS5. Place a check here in a central place.
   static const bool supported =
 #ifndef TOOLKIT_QT
-      base::win::GetVersion() >= base::win::Version::WIN10_RS2;
+      base::win::GetVersion() >= base::win::Version::WIN10_RS5;
 #else
       false;
 #endif

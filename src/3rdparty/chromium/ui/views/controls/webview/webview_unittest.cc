@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -26,6 +27,7 @@
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/controls/native/native_view_host.h"
+#include "ui/views/test/views_test_utils.h"
 #include "ui/views/test/widget_test.h"
 
 #if defined(USE_AURA)
@@ -172,9 +174,9 @@ class WebViewUnitTest : public views::test::WidgetTest {
     top_level_widget_->SetBounds(gfx::Rect(0, 10, 100, 100));
     View* const contents_view =
         top_level_widget_->SetContentsView(std::make_unique<View>());
-    web_view_ = new WebView(browser_context_.get());
-    web_view_->SetBoundsRect(gfx::Rect(contents_view->size()));
-    contents_view->AddChildView(web_view_.get());
+    auto web_view = std::make_unique<WebView>(browser_context_.get());
+    web_view->SetBoundsRect(gfx::Rect(contents_view->size()));
+    web_view_ = contents_view->AddChildView(std::move(web_view));
     top_level_widget_->Show();
     ASSERT_EQ(gfx::Rect(0, 0, 100, 100), web_view_->bounds());
   }
@@ -230,8 +232,8 @@ TEST_F(WebViewUnitTest, TestWebViewAttachDetachWebContents) {
   EXPECT_FALSE(observer1.was_shown());
 
   web_view()->SetWebContents(web_contents1.get());
-  // Layout() is normally async, call it now to ensure visibility is updated.
-  web_view()->Layout();
+  // Layout is normally async, ensure it runs now so visibility is updated.
+  views::test::RunScheduledLayout(web_view());
   EXPECT_TRUE(observer1.was_shown());
 #if defined(USE_AURA)
   EXPECT_TRUE(web_contents1->GetNativeView()->IsVisible());
@@ -250,8 +252,8 @@ TEST_F(WebViewUnitTest, TestWebViewAttachDetachWebContents) {
 
   // Setting the new WebContents should hide the existing one.
   web_view()->SetWebContents(web_contents2.get());
-  // Layout() is normally async, call it now to ensure visibility is updated.
-  web_view()->Layout();
+  // Layout is normally async, ensure it runs now so visibility is updated.
+  views::test::RunScheduledLayout(web_view());
   EXPECT_FALSE(observer1.was_shown());
   EXPECT_TRUE(observer2.was_shown());
   EXPECT_TRUE(observer2.valid_root_while_shown());
@@ -269,16 +271,9 @@ TEST_F(WebViewUnitTest, TestWebViewAttachDetachWebContents) {
 
   EXPECT_EQ(1, observer1.shown_count());
   web_view()->SetWebContents(web_contents1.get());
-  // Layout() is normally async, call it now to ensure visibility is updated.
-  web_view()->Layout();
-#if defined(USE_AURA)
+  // Layout is normally async, ensure it runs now so visibility is updated.
+  views::test::RunScheduledLayout(web_view());
   EXPECT_EQ(1, observer1.shown_count());
-#else
-  // On Mac, setting the web contents adds a WebContentsViewCocoa
-  // to the view hierarchy. The window change (from nil to non-nil)
-  // generates one more web contents visibility update that Aura.
-  EXPECT_EQ(2, observer1.shown_count());
-#endif
 
   // Nothing else should change.
   EXPECT_EQ(1, observer1.hidden_count());
@@ -367,7 +362,7 @@ TEST_F(WebViewUnitTest, CrashedOverlayView) {
   tester->SetIsCrashed(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
   EXPECT_TRUE(web_contents->IsCrashed());
   static_cast<content::WebContentsObserver*>(web_view.get())
-      ->RenderFrameDeleted(web_contents->GetMainFrame());
+      ->RenderFrameDeleted(web_contents->GetPrimaryMainFrame());
   EXPECT_TRUE(crashed_overlay_view->IsDrawn());
 }
 
@@ -392,7 +387,7 @@ TEST_F(WebViewUnitTest, CrashedOverlayViewOwnedbyClient) {
   tester->SetIsCrashed(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
   EXPECT_TRUE(web_contents->IsCrashed());
   static_cast<content::WebContentsObserver*>(web_view.get())
-      ->RenderFrameDeleted(web_contents->GetMainFrame());
+      ->RenderFrameDeleted(web_contents->GetPrimaryMainFrame());
   EXPECT_TRUE(crashed_overlay_view->IsDrawn());
 
   web_view->SetCrashedOverlayView(nullptr);

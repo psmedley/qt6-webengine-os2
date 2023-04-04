@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@
 #include "content/browser/media/session/media_session_uma_helper.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/media_session.h"
+#include "content/public/browser/page_user_data.h"
+#include "content/public/browser/presentation_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -70,7 +72,8 @@ class MediaSessionAndroid;
 // work with it.
 class MediaSessionImpl : public MediaSession,
                          public WebContentsObserver,
-                         public WebContentsUserData<MediaSessionImpl> {
+                         public WebContentsUserData<MediaSessionImpl>,
+                         public PresentationObserver {
  public:
   enum class State { ACTIVE, SUSPENDED, INACTIVE };
 
@@ -286,6 +289,9 @@ class MediaSessionImpl : public MediaSession,
   // Mute or unmute the media player.
   void SetMute(bool mute) override;
 
+  // PresentationObserver:
+  void OnPresentationsChanged(bool has_presentation) override;
+
   // Downloads the bitmap version of a MediaImage at least |minimum_size_px|
   // and closest to |desired_size_px|. If the download failed, was too small or
   // the image did not come from the media session then returns a null image.
@@ -311,6 +317,10 @@ class MediaSessionImpl : public MediaSession,
   // device switching.
   void OnAudioOutputSinkChangingDisabled();
 
+  // Update the value of `remote_playback_metadata_`.
+  void SetRemotePlaybackMetadata(
+      media_session::mojom::RemotePlaybackMetadataPtr metadata);
+
   // Returns whether the action should be routed to |routed_service_|.
   bool ShouldRouteAction(media_session::mojom::MediaSessionAction action) const;
 
@@ -320,6 +330,8 @@ class MediaSessionImpl : public MediaSession,
 
   // Returns the Audio Focus request ID associated with this media session.
   const base::UnguessableToken& GetRequestId() const;
+
+  CONTENT_EXPORT bool HasImageCacheForTest(const GURL& image_url) const;
 
  private:
   friend class content::WebContentsUserData<MediaSessionImpl>;
@@ -525,6 +537,37 @@ class MediaSessionImpl : public MediaSession,
   url::Origin origin_;
   absl::optional<std::string> audio_device_id_for_origin_;
 
+  class PageData : public content::PageUserData<PageData> {
+   public:
+    explicit PageData(content::Page& page);
+
+    PageData(const PageData&) = delete;
+    PageData& operator=(const PageData&) = delete;
+
+    ~PageData() override;
+
+    void AddImageCache(const GURL& image_url, const SkBitmap& bitmap) {
+      image_cache_.emplace(image_url, bitmap);
+    }
+
+    const SkBitmap* GetImageCache(const GURL& image_url) const {
+      auto it = image_cache_.find(image_url);
+      if (it == image_cache_.end())
+        return nullptr;
+
+      return &it->second;
+    }
+
+    PAGE_USER_DATA_KEY_DECL();
+
+   private:
+    // Cache of images that have been requested by clients.
+    base::flat_map<GURL, SkBitmap> image_cache_;
+  };
+
+  // Returns the PageData for the specified |page|.
+  PageData& GetPageData(content::Page& page) const;
+
 #if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<MediaSessionAndroid> session_android_;
 #endif  // BUILDFLAG(IS_ANDROID)
@@ -538,9 +581,6 @@ class MediaSessionImpl : public MediaSession,
   base::flat_map<media_session::mojom::MediaSessionImageType,
                  std::vector<media_session::MediaImage>>
       images_;
-
-  // Cache of images that have been requested by clients.
-  base::flat_map<GURL, SkBitmap> image_cache_;
 
   // The collection of all managed services (non-owned pointers). The services
   // are owned by RenderFrameHost and should be registered on creation and
@@ -565,7 +605,12 @@ class MediaSessionImpl : public MediaSession,
 
   bool should_throttle_duration_update_ = false;
 
+  // Whether the associated WebContents is connected to a presentation.
+  bool has_presentation_ = false;
+
   absl::optional<PlayerIdentifier> guarding_player_id_;
+
+  media_session::mojom::RemotePlaybackMetadataPtr remote_playback_metadata_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,11 @@ struct IntentFile {
   IntentFile(const IntentFile&) = delete;
   IntentFile& operator=(const IntentFile&) = delete;
   ~IntentFile();
+
+  bool operator==(const IntentFile& other) const;
+  bool operator!=(const IntentFile& other) const;
+
+  std::unique_ptr<IntentFile> Clone() const;
 
   // Returns true if matches `condition_value`, otherwise, returns false.
   bool MatchConditionValue(const ConditionValuePtr& condition_value);
@@ -58,30 +63,20 @@ using IntentFilePtr = std::unique_ptr<IntentFile>;
 // ConvertIntentToValue and ConvertValueToIntent in
 // components/services/app_service/public/cpp/intent_util.*
 struct Intent {
+  // Factory methods for more complicated Intents are available in
+  // intent_util.h.
   explicit Intent(const std::string& action);
-  explicit Intent(const GURL& url);
-
-  // Creates an intent for sharing `filesystem_urls`. `filesystem_urls` must be
-  // co-indexed with `mime_types`.
-  Intent(const std::vector<GURL>& filesystem_urls,
-         const std::vector<std::string>& mime_types);
-
-  // Creates an intent with the list of `files`.
-  explicit Intent(std::vector<IntentFilePtr> files);
-
-  // Creates an intent for sharing `filesystem_urls`, along with `text` content
-  // and `title`. `filesystem_urls` must be co-indexed with  mime_types.
-  Intent(const std::vector<GURL>& filesystem_urls,
-         const std::vector<std::string>& mime_types,
-         const std::string& text,
-         const std::string& title);
-
-  // Creates an intent for sharing `text`, with `title`.
-  Intent(const std::string& text, const std::string& title);
+  explicit Intent(const std::string& action, const GURL& url);
+  explicit Intent(const std::string& action, std::vector<IntentFilePtr> files);
 
   Intent(const Intent&) = delete;
   Intent& operator=(const Intent&) = delete;
   ~Intent();
+
+  bool operator==(const Intent& other) const;
+  bool operator!=(const Intent& other) const;
+
+  std::unique_ptr<Intent> Clone() const;
 
   // Gets the field that need to be checked/matched based on `condition_type`.
   absl::optional<std::string> GetIntentConditionValueByType(
@@ -95,6 +90,15 @@ struct Intent {
 
   // Returns true if matches all existing conditions in the filter.
   bool MatchFilter(const IntentFilterPtr& filter);
+
+  // Returns true if `intent` corresponds to a share intent.
+  bool IsShareIntent();
+
+  // Check if the intent only mean to share to Google Drive.
+  bool OnlyShareToDrive();
+
+  // Check the if the intent is valid, e.g. action matches content.
+  bool IsIntentValid();
 
   // Intent action. e.g. view, send.
   std::string action;

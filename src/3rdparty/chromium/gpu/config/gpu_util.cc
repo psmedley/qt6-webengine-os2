@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
-#include "build/build_config.h"
 #include "gpu/config/device_perf_info.h"
 #include "gpu/config/gpu_blocklist.h"
 #include "gpu/config/gpu_crash_keys.h"
@@ -47,8 +46,10 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/extension_set.h"
 #include "ui/gl/buildflags.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_utils.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/no_destructor.h"
@@ -127,7 +128,7 @@ GpuFeatureStatus GetAndroidSurfaceControlFeatureStatus(
   // synchronization, this is based on Android native fence sync
   // support. If that is unavailable, i.e. on emulator or SwiftShader,
   // don't claim SurfaceControl support.
-  if (!gl::GLSurfaceEGL::IsAndroidNativeFenceSyncSupported())
+  if (!gl::GetDefaultDisplayEGL()->IsAndroidNativeFenceSyncSupported())
     return kGpuFeatureStatusDisabled;
 
   DCHECK(gfx::SurfaceControl::IsSupported());
@@ -747,10 +748,10 @@ bool PopGpuFeatureInfoCache(GpuFeatureInfo* gpu_feature_info) {
 }
 
 #if BUILDFLAG(IS_ANDROID)
-bool InitializeGLThreadSafe(base::CommandLine* command_line,
-                            const GpuPreferences& gpu_preferences,
-                            GPUInfo* out_gpu_info,
-                            GpuFeatureInfo* out_gpu_feature_info) {
+gl::GLDisplay* InitializeGLThreadSafe(base::CommandLine* command_line,
+                                      const GpuPreferences& gpu_preferences,
+                                      GPUInfo* out_gpu_info,
+                                      GpuFeatureInfo* out_gpu_feature_info) {
   static base::NoDestructor<base::Lock> gl_bindings_initialization_lock;
   base::AutoLock auto_lock(*gl_bindings_initialization_lock);
   DCHECK(command_line);
@@ -761,15 +762,21 @@ bool InitializeGLThreadSafe(base::CommandLine* command_line,
   if (gpu_info_cached) {
     // GL bindings have already been initialized in another thread.
     DCHECK_NE(gl::kGLImplementationNone, gl::GetGLImplementation());
-    return true;
+    return gl::GetDefaultDisplayEGL();
   }
+
+  gl::GLDisplay* gl_display = nullptr;
   if (gl::GetGLImplementation() == gl::kGLImplementationNone) {
     // Some tests initialize bindings by themselves.
-    if (!gl::init::InitializeGLNoExtensionsOneOff(/*init_bindings=*/true,
-                                                  /*system_device_id=*/0)) {
+    gl_display =
+        gl::init::InitializeGLNoExtensionsOneOff(/*init_bindings=*/true,
+                                                 /*system_device_id=*/0);
+    if (!gl_display) {
       VLOG(1) << "gl::init::InitializeGLNoExtensionsOneOff failed";
-      return false;
+      return nullptr;
     }
+  } else {
+    gl_display = gl::GetDefaultDisplayEGL();
   }
   CollectContextGraphicsInfo(out_gpu_info);
   *out_gpu_feature_info = ComputeGpuFeatureInfo(*out_gpu_info, gpu_preferences,
@@ -778,13 +785,13 @@ bool InitializeGLThreadSafe(base::CommandLine* command_line,
     gl::init::SetDisabledExtensionsPlatform(
         out_gpu_feature_info->disabled_extensions);
   }
-  if (!gl::init::InitializeExtensionSettingsOneOffPlatform()) {
+  if (!gl::init::InitializeExtensionSettingsOneOffPlatform(gl_display)) {
     VLOG(1) << "gl::init::InitializeExtensionSettingsOneOffPlatform failed";
-    return false;
+    return nullptr;
   }
   CacheGPUInfo(*out_gpu_info);
   CacheGpuFeatureInfo(*out_gpu_feature_info);
-  return true;
+  return gl_display;
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
@@ -928,6 +935,7 @@ std::string GetIntelGpuGeneration(uint32_t vendor_id, uint32_t device_id) {
       case IntelGpuSeriesType::kSkylake:
       case IntelGpuSeriesType::kGeminilake:
       case IntelGpuSeriesType::kKabylake:
+      case IntelGpuSeriesType::kAmberlake:
       case IntelGpuSeriesType::kCoffeelake:
       case IntelGpuSeriesType::kWhiskeylake:
       case IntelGpuSeriesType::kCometlake:
@@ -939,6 +947,8 @@ std::string GetIntelGpuGeneration(uint32_t vendor_id, uint32_t device_id) {
       case IntelGpuSeriesType::kJasperlake:
         return "11";
       case IntelGpuSeriesType::kTigerlake:
+      case IntelGpuSeriesType::kRocketlake:
+      case IntelGpuSeriesType::kDG1:
       case IntelGpuSeriesType::kAlderlake:
       case IntelGpuSeriesType::kAlchemist:
         return "12";

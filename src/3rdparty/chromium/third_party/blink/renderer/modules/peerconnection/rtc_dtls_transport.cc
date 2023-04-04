@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,7 @@ RTCDtlsTransport::RTCDtlsTransport(
     : ExecutionContextClient(context),
       current_state_(webrtc::DtlsTransportState::kNew),
       native_transport_(native_transport),
-      proxy_(CreateProxy(context, native_transport, this)),
+      proxy_(CreateProxy(context, native_transport.get(), this)),
       ice_transport_(ice_transport) {}
 
 RTCDtlsTransport::~RTCDtlsTransport() {}

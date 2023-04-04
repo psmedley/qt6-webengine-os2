@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "build/build_config.h"
 #include "content/browser/xr/metrics/session_metrics_helper.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "device/vr/public/mojom/isolated_xr_service.mojom-forward.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
@@ -25,6 +24,10 @@
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-forward.h"
+
+namespace blink {
+enum class PermissionType;
+}
 
 namespace content {
 class RenderFrameHost;
@@ -80,7 +83,6 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
   void OnExitPresent();
   void OnVisibilityStateChanged(
       device::mojom::XRVisibilityState visibility_state);
-  void OnDisplayInfoChanged();
   void RuntimesChanged();
   void OnMakeXrCompatibleComplete(device::mojom::XrCompatibleResult result);
 
@@ -146,9 +148,14 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
   void GetPermissionStatus(SessionRequestData request,
                            BrowserXRRuntimeImpl* runtime);
 
-  void OnPermissionResults(
+  void OnPermissionResultsForMode(
       SessionRequestData request,
-      const std::vector<content::PermissionType>& permissions,
+      const std::vector<blink::PermissionType>& permissions,
+      const std::vector<blink::mojom::PermissionStatus>& permission_statuses);
+
+  void OnPermissionResultsForFeatures(
+      SessionRequestData request,
+      const std::vector<blink::PermissionType>& permissions,
       const std::vector<blink::mojom::PermissionStatus>& permission_statuses);
 
   void EnsureRuntimeInstalled(SessionRequestData request,

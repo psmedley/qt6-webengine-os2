@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,11 +59,15 @@ class BASE_EXPORT PooledSingleThreadTaskRunnerManager final {
   ~PooledSingleThreadTaskRunnerManager();
 
   // Starts threads for existing SingleThreadTaskRunners and allows threads to
-  // be started when SingleThreadTaskRunners are created in the future. If
-  // specified, |worker_thread_observer| will be notified when a worker
-  // enters and exits its main function. It must not be destroyed before
-  // JoinForTesting() has returned (must never be destroyed in production).
-  void Start(WorkerThreadObserver* worker_thread_observer = nullptr);
+  // be started when SingleThreadTaskRunners are created in the future.
+  // `io_thread_task_runner` is used to setup FileDescriptorWatcher on worker
+  // threads. `io_thread_task_runner` must refer to a Thread with
+  // MessgaePumpType::IO. If specified, |worker_thread_observer| will be
+  // notified when a worker enters and exits its main function. It must not be
+  // destroyed before JoinForTesting() has returned (must never be destroyed in
+  // production).
+  void Start(scoped_refptr<SingleThreadTaskRunner> io_thread_task_runner,
+             WorkerThreadObserver* worker_thread_observer = nullptr);
 
   // Wakes up workers as appropriate for the new CanRunPolicy policy. Must be
   // called after an update to CanRunPolicy in TaskTracker.
@@ -116,7 +120,7 @@ class BASE_EXPORT PooledSingleThreadTaskRunnerManager final {
   WorkerThread* CreateAndRegisterWorkerThread(
       const std::string& name,
       SingleThreadTaskRunnerThreadMode thread_mode,
-      ThreadPriority priority_hint) EXCLUSIVE_LOCKS_REQUIRED(lock_);
+      ThreadType thread_type_hint) EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   template <typename DelegateType>
   WorkerThread*& GetSharedWorkerThreadForTraits(const TaskTraits& traits);
@@ -127,6 +131,8 @@ class BASE_EXPORT PooledSingleThreadTaskRunnerManager final {
 
   const TrackedRef<TaskTracker> task_tracker_;
   const raw_ptr<DelayedTaskManager> delayed_task_manager_;
+
+  scoped_refptr<SingleThreadTaskRunner> io_thread_task_runner_;
 
   // Optional observer notified when a worker enters and exits its main
   // function. Set in Start() and never modified afterwards.

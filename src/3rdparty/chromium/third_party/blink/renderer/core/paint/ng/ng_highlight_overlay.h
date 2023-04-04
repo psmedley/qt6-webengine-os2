@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,6 +36,9 @@ class CORE_EXPORT NGHighlightOverlay {
   // Identifies a highlight layer, such as the originating content, one of the
   // highlight pseudos, or a custom highlight (name unique within a registry).
   struct CORE_EXPORT HighlightLayer {
+    DISALLOW_NEW();
+
+   public:
     explicit HighlightLayer(HighlightLayerType type,
                             AtomicString name = g_null_atom)
         : type(type), name(name) {}
@@ -56,6 +59,9 @@ class CORE_EXPORT NGHighlightOverlay {
   // Represents the |start| or end of a highlighted range for the given |layer|,
   // at the given |offset| in canonical text space <https://goo.gl/CJbxky>.
   struct CORE_EXPORT HighlightEdge {
+    DISALLOW_NEW();
+
+   public:
     HighlightEdge(unsigned offset, HighlightLayer layer, HighlightEdgeType type)
         : offset(offset), layer(layer), type(type) {}
 
@@ -78,6 +84,9 @@ class CORE_EXPORT NGHighlightOverlay {
   // that needs its text proper painted in the style of the given |layer| with
   // the given |decorations|.
   struct CORE_EXPORT HighlightPart {
+    DISALLOW_NEW();
+
+   public:
     HighlightPart(HighlightLayer, unsigned, unsigned, Vector<HighlightLayer>);
     HighlightPart(HighlightLayer, unsigned, unsigned);
 
@@ -96,7 +105,6 @@ class CORE_EXPORT NGHighlightOverlay {
   // that need to be painted, in overlay painting order.
   static Vector<HighlightLayer> ComputeLayers(
       const HighlightRegistry*,
-      const NGTextFragmentPaintInfo& originating,
       const LayoutSelectionStatus* selection,
       const DocumentMarkerVector& custom,
       const DocumentMarkerVector& grammar,
@@ -108,6 +116,7 @@ class CORE_EXPORT NGHighlightOverlay {
   static Vector<HighlightEdge> ComputeEdges(
       const Node*,
       const HighlightRegistry*,
+      bool is_generated_text_fragment,
       const NGTextFragmentPaintInfo& originating,
       const LayoutSelectionStatus* selection,
       const DocumentMarkerVector& custom,
@@ -115,10 +124,14 @@ class CORE_EXPORT NGHighlightOverlay {
       const DocumentMarkerVector& spelling,
       const DocumentMarkerVector& target);
 
-  // Given highlight |layers| and |edges|, returns the ranges that the given
-  // |layer| should paint text proper for, suppressing ranges where it’s not the
-  // topmost active highlight and splitting for underlying decoration changes.
+  // Given highlight |layers| and |edges|, returns the ranges of text that can
+  // be painted in the same layer with the same decorations, clamping the result
+  // to the given |originating| fragment.
+  //
+  // The edges must not represent overlapping ranges. If the highlight is active
+  // in overlapping ranges, those ranges must be merged before ComputeEdges.
   static Vector<HighlightPart> ComputeParts(
+      const NGTextFragmentPaintInfo& originating,
       const Vector<HighlightLayer>& layers,
       const Vector<HighlightEdge>& edges);
 };

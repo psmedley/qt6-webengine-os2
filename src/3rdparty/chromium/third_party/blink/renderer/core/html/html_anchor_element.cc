@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/anchor_element_metrics_sender.h"
-#include "third_party/blink/renderer/core/html/conversion_measurement_parsing.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -84,7 +83,7 @@ bool ShouldInterveneDownloadByFramePolicy(LocalFrame* frame) {
   if (!has_gesture) {
     UseCounter::Count(document, WebFeature::kDownloadWithoutUserGesture);
   }
-  if (frame->IsAdSubframe()) {
+  if (frame->IsAdFrame()) {
     UseCounter::Count(document, WebFeature::kDownloadInAdFrame);
     if (!has_gesture) {
       UseCounter::Count(document,
@@ -120,7 +119,7 @@ HTMLAnchorElement::HTMLAnchorElement(const QualifiedName& tag_name,
 HTMLAnchorElement::~HTMLAnchorElement() = default;
 
 bool HTMLAnchorElement::SupportsFocus() const {
-  if (HasEditableStyle(*this))
+  if (IsEditable(*this))
     return HTMLElement::SupportsFocus();
   // If not a link we should still be able to focus the element if it has
   // tabIndex.
@@ -213,11 +212,11 @@ void HTMLAnchorElement::DefaultEventHandler(Event& event) {
 }
 
 bool HTMLAnchorElement::HasActivationBehavior() const {
-  return true;
+  return IsLink();
 }
 
 void HTMLAnchorElement::SetActive(bool active) {
-  if (active && HasEditableStyle(*this))
+  if (active && IsEditable(*this))
     return;
 
   HTMLElement::SetActive(active);
@@ -289,7 +288,7 @@ bool HTMLAnchorElement::HasLegalLinkAttribute(const QualifiedName& name) const {
 bool HTMLAnchorElement::CanStartSelection() const {
   if (!IsLink())
     return HTMLElement::CanStartSelection();
-  return HasEditableStyle(*this);
+  return IsEditable(*this);
 }
 
 bool HTMLAnchorElement::draggable() const {
@@ -349,7 +348,7 @@ const AtomicString& HTMLAnchorElement::GetName() const {
 
 const AtomicString& HTMLAnchorElement::GetEffectiveTarget() const {
   const AtomicString& target = FastGetAttribute(html_names::kTargetAttr);
-  if (!target.IsEmpty())
+  if (!target.empty())
     return target;
   return GetDocument().BaseTarget();
 }
@@ -359,12 +358,7 @@ int HTMLAnchorElement::DefaultTabIndex() const {
 }
 
 bool HTMLAnchorElement::IsLiveLink() const {
-  return IsLink() && !HasEditableStyle(*this);
-}
-
-bool HTMLAnchorElement::HasImpression() const {
-  return hasAttribute(html_names::kAttributionsourceeventidAttr) &&
-         hasAttribute(html_names::kAttributiondestinationAttr);
+  return IsLink() && !IsEditable(*this);
 }
 
 void HTMLAnchorElement::SendPings(const KURL& destination_url) const {
@@ -464,12 +458,12 @@ void HTMLAnchorElement::HandleClick(Event& event) {
     }
 
     if (auto* navigation_api = NavigationApi::navigation(*window)) {
-      NavigationApi::DispatchParams params(completed_url,
-                                           NavigateEventType::kCrossDocument,
-                                           WebFrameLoadType::kStandard);
+      auto* params = MakeGarbageCollected<NavigateEventDispatchParams>(
+          completed_url, NavigateEventType::kCrossDocument,
+          WebFrameLoadType::kStandard);
       if (event.isTrusted())
-        params.involvement = UserNavigationInvolvement::kActivation;
-      params.download_filename = download_attr;
+        params->involvement = UserNavigationInvolvement::kActivation;
+      params->download_filename = download_attr;
       if (navigation_api->DispatchNavigateEvent(params) !=
           NavigationApi::DispatchResult::kContinue) {
         return;
@@ -520,7 +514,8 @@ void HTMLAnchorElement::HandleClick(Event& event) {
 
   frame->MaybeLogAdClickNavigation();
 
-  if (request.HasUserGesture()) {
+  if (request.HasUserGesture() &&
+      FastHasAttribute(html_names::kAttributionsrcAttr)) {
     // An impression must be attached prior to the
     // FindOrCreateFrameForNavigation() call, as that call may result in
     // performing a navigation if the call results in creating a new window with
@@ -530,22 +525,23 @@ void HTMLAnchorElement::HandleClick(Event& event) {
     // set `target_frame` to `frame`, but end up targeting a new window.
     // Attach the impression regardless, the embedder will be able to drop
     // impressions for subframe navigations.
-    absl::optional<WebImpression> impression;
 
-    // Favor the attributionsrc API over the html attribute data API for
-    // Attribution Reporting.
-    if (FastHasAttribute(html_names::kAttributionsrcAttr)) {
-      const AtomicString& attribution_src_value =
-          FastGetAttribute(html_names::kAttributionsrcAttr);
-      if (!attribution_src_value.IsNull()) {
-        impression = frame->GetAttributionSrcLoader()->RegisterNavigation(
-            GetDocument().CompleteURL(attribution_src_value));
-      }
-    } else if (HasImpression()) {
-      impression = GetImpressionForAnchor(this);
+    const AtomicString& attribution_src_value =
+        FastGetAttribute(html_names::kAttributionsrcAttr);
+    if (!attribution_src_value.empty()) {
+      frame_request.SetImpression(
+          frame->GetAttributionSrcLoader()->RegisterNavigation(
+              GetDocument().CompleteURL(attribution_src_value), this));
     }
-    if (impression)
-      frame_request.SetImpression(*impression);
+
+    // If the impression could not be set, or if the value was null, mark that
+    // the frame request is eligible for attribution by adding an impression.
+    if (!frame_request.Impression() &&
+        frame->GetAttributionSrcLoader()->CanRegister(
+            completed_url, this,
+            /*request_id=*/absl::nullopt)) {
+      frame_request.SetImpression(blink::Impression());
+    }
   }
 
   Frame* target_frame =

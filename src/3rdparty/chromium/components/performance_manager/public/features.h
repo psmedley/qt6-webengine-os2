@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,55 +16,70 @@
 namespace performance_manager::features {
 
 // The feature that gates whether or not the PM runs on the main (UI) thread.
-extern const base::Feature kRunOnMainThread;
+BASE_DECLARE_FEATURE(kRunOnMainThread);
 
 #if !BUILDFLAG(IS_ANDROID)
-// Enables urgent discarding of pages directly from PerformanceManager rather
-// than via TabManager.
-extern const base::Feature kUrgentDiscardingFromPerformanceManager;
 
-// The discard strategy to use.
-// Integer values are specified to allow conversion from the integer value in
-// the DiscardStrategy feature param.
-enum class DiscardStrategy : int {
-  // Discards the least recently used tab among the eligible ones. This is the
-  // default strategy.
-  LRU = 0,
-  // Discard the tab with the biggest resident set among the eligible ones.
-  BIGGEST_RSS = 1,
-};
-
-class UrgentDiscardingParams {
- public:
-  ~UrgentDiscardingParams();
-
-  static UrgentDiscardingParams GetParams();
-
-  DiscardStrategy discard_strategy() const { return discard_strategy_; }
-
-  static constexpr base::FeatureParam<int> kDiscardStrategy{
-      &features::kUrgentDiscardingFromPerformanceManager, "DiscardStrategy",
-      static_cast<int>(DiscardStrategy::LRU)};
-
- private:
-  UrgentDiscardingParams();
-  UrgentDiscardingParams(const UrgentDiscardingParams& rhs);
-
-  DiscardStrategy discard_strategy_;
-};
-
-// Feature that controls whether or not tabs should be automatically discarded
-// when the total PMF is too high.
-extern const base::Feature kHighPMFDiscardPolicy;
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_LINUX)
+#define URGENT_DISCARDING_FROM_PERFORMANCE_MANAGER() false
+#else
+#define URGENT_DISCARDING_FROM_PERFORMANCE_MANAGER() true
+#endif
 
 // Enable background tab loading of pages (restored via session restore)
 // directly from Performance Manager rather than via TabLoader.
-extern const base::Feature kBackgroundTabLoadingFromPerformanceManager;
+BASE_DECLARE_FEATURE(kBackgroundTabLoadingFromPerformanceManager);
+
+// Make the High-Efficiency or Battery Saver Modes available to users. If this
+// is enabled, it doesn't mean the specific Mode is enabled, just that the user
+// has the option of toggling it.
+BASE_DECLARE_FEATURE(kHighEfficiencyModeAvailable);
+BASE_DECLARE_FEATURE(kBatterySaverModeAvailable);
+
+// Defines the time in seconds before a background tab is discarded for
+// High-Efficiency Mode.
+extern const base::FeatureParam<base::TimeDelta>
+    kHighEfficiencyModeTimeBeforeDiscard;
+
+// The default state of the high-efficiency mode pref
+extern const base::FeatureParam<bool> kHighEfficiencyModeDefaultState;
+
+// The number of tabs at which the user may be prompted to enable high
+// efficiency mode.
+extern const base::FeatureParam<int> kHighEfficiencyModePromoTabCountThreshold;
+
+// The percentage of used memory at which the user may be prompted to enable
+// high efficiency mode. For instance, if this parameter is set to 70, the promo
+// would be triggered when memory use exceeds 70% of available memory.
+extern const base::FeatureParam<int>
+    kHighEfficiencyModePromoMemoryPercentThreshold;
+
+// On certain platforms (ChromeOS), the battery level displayed to the user is
+// artificially lower than the actual battery level. Unfortunately, the battery
+// level that Battery Saver Mode looks at is the "actual" level, so users on
+// that platform may see Battery Saver Mode trigger at say 17% rather than the
+// "advertised" 20%. This parameter allows us to heuristically tweak the
+// threshold on those platforms, by being added to the 20% threshold value (so
+// setting this parameter to 3 would result in battery saver being activated at
+// 23% actual battery level).
+extern const base::FeatureParam<int>
+    kBatterySaverModeThresholdAdjustmentForDisplayLevel;
 #endif
 
 // Policy that evicts the BFCache of pages that become non visible or the
 // BFCache of all pages when the system is under memory pressure.
-extern const base::Feature kBFCachePerformanceManagerPolicy;
+BASE_DECLARE_FEATURE(kBFCachePerformanceManagerPolicy);
+
+// Whether tabs are discarded under high memory pressure.
+BASE_DECLARE_FEATURE(kUrgentPageDiscarding);
+
+// Enable PageTimelineMonitor timer and by extension, PageTimelineState event
+// collection.
+BASE_DECLARE_FEATURE(kPageTimelineMonitor);
+
+// Set the interval in seconds between calls of
+// PageTimelineMonitor::CollectSlice()
+extern const base::FeatureParam<base::TimeDelta> kPageTimelineStateIntervalTime;
 
 }  // namespace performance_manager::features
 

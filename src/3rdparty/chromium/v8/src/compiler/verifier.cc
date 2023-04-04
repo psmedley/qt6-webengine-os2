@@ -20,11 +20,9 @@
 #include "src/compiler/operator-properties.h"
 #include "src/compiler/operator.h"
 #include "src/compiler/schedule.h"
-#include "src/compiler/simplified-operator.h"
 #include "src/compiler/state-values-utils.h"
 #include "src/compiler/type-cache.h"
 #include "src/utils/bit-vector.h"
-#include "src/utils/ostreams.h"
 
 namespace v8 {
 namespace internal {
@@ -50,7 +48,7 @@ class Verifier::Visitor {
  private:
   void CheckNotTyped(Node* node) {
     // Verification of simplified lowering sets types of many additional nodes.
-    if (FLAG_verify_simplified_lowering) return;
+    if (v8_flags.verify_simplified_lowering) return;
 
     if (NodeProperties::IsTyped(node)) {
       std::ostringstream str;
@@ -153,8 +151,7 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
 
   // If this node has any effect outputs, make sure that it is
   // consumed as an effect input somewhere else.
-  // TODO(mvstanton): support this kind of verification for Wasm compiles, too.
-  if (code_type != kWasm && node->op()->EffectOutputCount() > 0) {
+  if (node->op()->EffectOutputCount() > 0) {
 #ifdef DEBUG
     int effect_edges = 0;
     for (Edge edge : node->use_edges()) {
@@ -420,9 +417,17 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     }
     case IrOpcode::kInt32Constant:  // TODO(turbofan): rename Word32Constant?
     case IrOpcode::kInt64Constant:  // TODO(turbofan): rename Word64Constant?
-    case IrOpcode::kTaggedIndexConstant:
     case IrOpcode::kFloat32Constant:
-    case IrOpcode::kFloat64Constant:
+    case IrOpcode::kFloat64Constant: {
+      // Constants have no inputs.
+      CHECK_EQ(0, input_count);
+      // Wasm numeric constants have types. However, since wasm only gets
+      // verified in untyped mode, we do not need to check that the types match.
+      // TODO(manoskouk): Verify the type if wasm runs in typed mode.
+      if (code_type != kWasm) CheckNotTyped(node);
+      break;
+    }
+    case IrOpcode::kTaggedIndexConstant:
     case IrOpcode::kRelocatableInt32Constant:
     case IrOpcode::kRelocatableInt64Constant:
       // Constants have no inputs.
@@ -785,7 +790,10 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckValueInputIs(node, 0, Type::Any());
       CheckTypeIs(node, Type::NonInternal());
       break;
-
+    case IrOpcode::kJSFindNonDefaultConstructorOrConstruct:
+      CheckValueInputIs(node, 0, Type::Any());
+      CheckValueInputIs(node, 1, Type::Any());
+      break;
     case IrOpcode::kJSHasContextExtension:
       CheckTypeIs(node, Type::Boolean());
       break;
@@ -924,7 +932,6 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kAbortCSADcheck:
     case IrOpcode::kDebugBreak:
     case IrOpcode::kRetain:
-    case IrOpcode::kUnsafePointerAdd:
     case IrOpcode::kRuntimeAbort:
       CheckNotTyped(node);
       break;
@@ -963,6 +970,9 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       break;
     case IrOpcode::kSpeculativeBigIntAdd:
     case IrOpcode::kSpeculativeBigIntSubtract:
+    case IrOpcode::kSpeculativeBigIntMultiply:
+    case IrOpcode::kSpeculativeBigIntDivide:
+    case IrOpcode::kSpeculativeBigIntBitwiseAnd:
       CheckTypeIs(node, Type::BigInt());
       break;
     case IrOpcode::kSpeculativeBigIntNegate:
@@ -975,6 +985,9 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       break;
     case IrOpcode::kBigIntAdd:
     case IrOpcode::kBigIntSubtract:
+    case IrOpcode::kBigIntMultiply:
+    case IrOpcode::kBigIntDivide:
+    case IrOpcode::kBigIntBitwiseAnd:
       CheckValueInputIs(node, 0, Type::BigInt());
       CheckValueInputIs(node, 1, Type::BigInt());
       CheckTypeIs(node, Type::BigInt());
@@ -1088,6 +1101,11 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kNumberToUint32:
     case IrOpcode::kNumberToUint8Clamped:
       CheckValueInputIs(node, 0, Type::Number());
+      CheckTypeIs(node, Type::Unsigned32());
+      break;
+    case IrOpcode::kUnsigned32Divide:
+      CheckValueInputIs(node, 0, Type::Unsigned32());
+      CheckValueInputIs(node, 1, Type::Unsigned32());
       CheckTypeIs(node, Type::Unsigned32());
       break;
     case IrOpcode::kSpeculativeToNumber:
@@ -1240,6 +1258,10 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckValueInputIs(node, 1, Type::Signed32());
       CheckTypeIs(node, Type::SignedSmall());
       break;
+    case IrOpcode::kFindOrderedHashSetEntry:
+      CheckValueInputIs(node, 0, Type::Any());
+      CheckTypeIs(node, Type::SignedSmall());
+      break;
     case IrOpcode::kArgumentsLength:
     case IrOpcode::kRestLength:
       CheckTypeIs(node, TypeCache::Get()->kArgumentsLengthType);
@@ -1259,9 +1281,6 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckValueInputIs(node, 0, TypeCache::Get()->kStringLengthType);
       CheckValueInputIs(node, 1, Type::String());
       CheckValueInputIs(node, 2, Type::String());
-      CheckTypeIs(node, Type::String());
-      break;
-    case IrOpcode::kDelayedStringConstant:
       CheckTypeIs(node, Type::String());
       break;
     case IrOpcode::kAllocate:
@@ -1497,6 +1516,7 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kCheckedUint32ToTaggedSigned:
     case IrOpcode::kCheckedUint64Bounds:
     case IrOpcode::kCheckedUint64ToInt32:
+    case IrOpcode::kCheckedUint64ToInt64:
     case IrOpcode::kCheckedUint64ToTaggedSigned:
     case IrOpcode::kCheckedFloat64ToInt32:
     case IrOpcode::kCheckedFloat64ToInt64:
@@ -1508,6 +1528,7 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kCheckedTaggedToTaggedSigned:
     case IrOpcode::kCheckedTaggedToTaggedPointer:
     case IrOpcode::kCheckedTruncateTaggedToWord32:
+    case IrOpcode::kCheckedBigInt64Add:
     case IrOpcode::kAssertType:
     case IrOpcode::kVerifyType:
       break;
@@ -1626,6 +1647,10 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CheckValueInputIs(node, 0, Type::Any());
       CheckTypeIs(node, Type::BigInt());
       break;
+    case IrOpcode::kCheckBigInt64:
+      CheckValueInputIs(node, 0, Type::Any());
+      CheckTypeIs(node, Type::SignedBigInt64());
+      break;
     case IrOpcode::kFastApiCall:
       CHECK_GE(value_count, 1);
       CheckValueInputIs(node, 0, Type::Any());  // receiver
@@ -1639,6 +1664,17 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
       CHECK_GE(value_count, 3);
       CheckTypeIs(node, Type::Any());
       CheckValueInputIs(node, 0, Type::Any());  // callee
+      break;
+    case IrOpcode::kWasmTypeCheck:
+    case IrOpcode::kWasmTypeCast:
+    case IrOpcode::kRttCanon:
+    case IrOpcode::kNull:
+    case IrOpcode::kIsNull:
+    case IrOpcode::kIsNotNull:
+    case IrOpcode::kAssertNotNull:
+    case IrOpcode::kWasmExternInternalize:
+    case IrOpcode::kWasmExternExternalize:
+      // TODO(manoskouk): What are the constraints here?
       break;
 #endif  // V8_ENABLE_WEBASSEMBLY
 
@@ -1706,12 +1742,15 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kInt64Sub:
     case IrOpcode::kInt64SubWithOverflow:
     case IrOpcode::kInt64Mul:
+    case IrOpcode::kInt64MulHigh:
+    case IrOpcode::kInt64MulWithOverflow:
     case IrOpcode::kInt64Div:
     case IrOpcode::kInt64Mod:
     case IrOpcode::kInt64LessThan:
     case IrOpcode::kInt64LessThanOrEqual:
     case IrOpcode::kUint64Div:
     case IrOpcode::kUint64Mod:
+    case IrOpcode::kUint64MulHigh:
     case IrOpcode::kUint64LessThan:
     case IrOpcode::kUint64LessThanOrEqual:
     case IrOpcode::kFloat32Add:
@@ -1807,6 +1846,8 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kTryTruncateFloat64ToInt64:
     case IrOpcode::kTryTruncateFloat32ToUint64:
     case IrOpcode::kTryTruncateFloat64ToUint64:
+    case IrOpcode::kTryTruncateFloat64ToInt32:
+    case IrOpcode::kTryTruncateFloat64ToUint32:
     case IrOpcode::kFloat64ExtractLowWord32:
     case IrOpcode::kFloat64ExtractHighWord32:
     case IrOpcode::kFloat64InsertLowWord32:
@@ -1861,6 +1902,7 @@ void Verifier::Visitor::Check(Node* node, const AllNodes& all) {
     case IrOpcode::kSignExtendWord32ToInt64:
     case IrOpcode::kStaticAssert:
     case IrOpcode::kStackPointerGreaterThan:
+    case IrOpcode::kTraceInstruction:
 
 #define SIMD_MACHINE_OP_CASE(Name) case IrOpcode::k##Name:
       MACHINE_SIMD_OP_LIST(SIMD_MACHINE_OP_CASE)

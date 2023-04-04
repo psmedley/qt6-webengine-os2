@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,14 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
-// Set output to stereo by default.
-static const unsigned defaultNumberOfOutputChannels = 2;
-
 namespace blink {
+
+namespace {
+
+// Set output to stereo by default.
+constexpr unsigned kDefaultNumberOfOutputChannelsDCH = 2;
+
+}  // namespace
 
 DynamicsCompressorHandler::DynamicsCompressorHandler(
     AudioNode& node,
@@ -35,7 +39,7 @@ DynamicsCompressorHandler::DynamicsCompressorHandler(
       attack_(&attack),
       release_(&release) {
   AddInput();
-  AddOutput(defaultNumberOfOutputChannels);
+  AddOutput(kDefaultNumberOfOutputChannelsDCH);
 
   SetInternalChannelCountMode(kClampedMax);
 
@@ -104,7 +108,7 @@ void DynamicsCompressorHandler::Initialize() {
 
   AudioHandler::Initialize();
   dynamics_compressor_ = std::make_unique<DynamicsCompressor>(
-      Context()->sampleRate(), defaultNumberOfOutputChannels);
+      Context()->sampleRate(), kDefaultNumberOfOutputChannelsDCH);
 }
 
 bool DynamicsCompressorHandler::RequiresTailProcessing() const {

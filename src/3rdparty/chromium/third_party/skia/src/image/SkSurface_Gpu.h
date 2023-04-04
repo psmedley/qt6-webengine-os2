@@ -14,11 +14,11 @@
 #if SK_SUPPORT_GPU
 
 class GrBackendFormat;
-namespace skgpu { class BaseDevice; }
+namespace skgpu::v1 { class Device; }
 
 class SkSurface_Gpu : public SkSurface_Base {
 public:
-    SkSurface_Gpu(sk_sp<skgpu::BaseDevice>);
+    SkSurface_Gpu(sk_sp<skgpu::v1::Device>);
     ~SkSurface_Gpu() override;
 
     GrRecordingContext* onGetRecordingContext() override;
@@ -32,14 +32,16 @@ public:
     sk_sp<SkSurface> onNewSurface(const SkImageInfo&) override;
     sk_sp<SkImage> onNewImageSnapshot(const SkIRect* subset) override;
     void onWritePixels(const SkPixmap&, int x, int y) override;
-    void onAsyncRescaleAndReadPixels(const SkImageInfo& info, const SkIRect& srcRect,
+    void onAsyncReadPixels(const SkImageInfo& info, SkIRect srcRect,
+                           ReadPixelsCallback callback, ReadPixelsContext context) override;
+    void onAsyncRescaleAndReadPixels(const SkImageInfo& info, SkIRect srcRect,
                                      RescaleGamma rescaleGamma, RescaleMode,
                                      ReadPixelsCallback callback,
                                      ReadPixelsContext context) override;
     void onAsyncRescaleAndReadPixelsYUV420(SkYUVColorSpace yuvColorSpace,
                                            sk_sp<SkColorSpace> dstColorSpace,
-                                           const SkIRect& srcRect,
-                                           const SkISize& dstSize,
+                                           SkIRect srcRect,
+                                           SkISize dstSize,
                                            RescaleGamma rescaleGamma,
                                            RescaleMode,
                                            ReadPixelsCallback callback,
@@ -48,7 +50,7 @@ public:
     void onDiscard() override;
     void onResolveMSAA() override;
     GrSemaphoresSubmitted onFlush(BackendSurfaceAccess access, const GrFlushInfo& info,
-                                  const GrBackendSurfaceMutableState*) override;
+                                  const skgpu::MutableTextureState*) override;
     bool onWait(int numSemaphores, const GrBackendSemaphore* waitSemaphores,
                  bool deleteSemaphoresAfterWait) override;
     bool onCharacterize(SkSurfaceCharacterization*) const override;
@@ -57,10 +59,11 @@ public:
                 const SkPaint* paint) override;
     bool onDraw(sk_sp<const SkDeferredDisplayList>, SkIPoint offset) override;
 
-    skgpu::BaseDevice* getDevice();
+    sk_sp<const SkCapabilities> onCapabilities() override;
+    skgpu::v1::Device* getDevice();
 
 private:
-    sk_sp<skgpu::BaseDevice> fDevice;
+    sk_sp<skgpu::v1::Device> fDevice;
 
     using INHERITED = SkSurface_Base;
 };

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,11 +104,8 @@ void OnContentBlockedOnUI(int render_process_id,
                           int32_t render_frame_id,
                           ContentSettingsType type) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  PageSpecificContentSettings* settings =
-      PageSpecificContentSettings::GetForFrame(render_process_id,
-                                               render_frame_id);
-  if (settings)
-    settings->OnContentBlocked(type);
+  PageSpecificContentSettings::ContentBlocked(render_process_id,
+                                              render_frame_id, type);
 }
 
 // We may or may not be on the UI thread depending on whether the
@@ -173,7 +170,8 @@ void ContentSettingsManagerImpl::AllowStorageAccess(
   GURL url = origin.GetURL();
 
   bool allowed = cookie_settings_->IsFullCookieAccessAllowed(
-      url, site_for_cookies, top_frame_origin);
+      url, site_for_cookies, top_frame_origin,
+      CookieSettings::QueryReason::kSiteStorage);
   if (delegate_->AllowStorageAccess(render_process_id_, render_frame_id,
                                     storage_type, url, allowed, &callback)) {
     DCHECK(!callback);

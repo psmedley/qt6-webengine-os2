@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Require the Qt (not WebEngine) minimum supported CMake version.
 # Another WebEngine-specific version check will be done in configure.cmake
 # and reported in the configure summary.

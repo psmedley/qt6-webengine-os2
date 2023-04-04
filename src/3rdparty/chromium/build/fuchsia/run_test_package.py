@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Contains a helper function for deploying and executing a packaged
@@ -132,7 +132,7 @@ class RunTestPackageArgs:
   use_run_test_component: If True then the test package will be run hermetically
                           via 'run-test-component', rather than using 'run'.
   output_directory: If set, the output directory for CFv2 tests that use
-                    custom artifacts; see fxb/75690.
+                    custom artifacts; see fxbug.dev/75690.
   """
 
   def __init__(self):

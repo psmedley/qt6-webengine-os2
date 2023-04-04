@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/task/common/lazy_now.h"
 #include "base/task/sequence_manager/enqueue_order.h"
 #include "base/task/sequence_manager/fence.h"
-#include "base/task/sequence_manager/lazy_now.h"
 #include "base/task/sequence_manager/sequence_manager.h"
 #include "base/task/sequence_manager/task_order.h"
 #include "base/task/sequence_manager/task_queue_impl.h"
@@ -52,7 +52,7 @@ class WorkQueueTest : public testing::Test {
   void SetUp() override {
     task_queue_ = std::make_unique<TaskQueueImpl>(
         /*sequence_manager=*/nullptr, /*wake_up_queue=*/nullptr,
-        TaskQueue::Spec("test"));
+        TaskQueue::Spec(QueueName::TEST_TQ));
 
     work_queue_ =
         std::make_unique<WorkQueue>(task_queue_.get(), "test", queue_type_);

@@ -19,7 +19,6 @@
 #include "include/utils/SkPaintFilterCanvas.h"
 #include "src/core/SkAutoPixmapStorage.h"
 #include "src/core/SkColorSpacePriv.h"
-#include "src/core/SkGlyphRun.h"
 #include "src/core/SkImagePriv.h"
 #include "src/core/SkMD5.h"
 #include "src/core/SkOSFile.h"
@@ -36,6 +35,7 @@
 #include "src/gpu/ganesh/GrPersistentCacheUtils.h"
 #include "src/image/SkImage_Base.h"
 #include "src/sksl/SkSLCompiler.h"
+#include "src/text/GlyphRun.h"
 #include "src/utils/SkJSONWriter.h"
 #include "src/utils/SkOSPath.h"
 #include "src/utils/SkShaderUtils.h"
@@ -74,6 +74,12 @@
 
 #if defined(SK_ENABLE_SKOTTIE)
     #include "tools/viewer/SkottieSlide.h"
+#endif
+
+#include "tools/viewer/RiveSlide.h"
+
+#if defined(SK_ENABLE_SVG)
+#include "modules/svg/include/SkSVGOpenTypeSVGDecoder.h"
 #endif
 
 class CapturingShaderErrorHandler : public GrContextOptions::ShaderErrorHandler {
@@ -171,6 +177,8 @@ static DEFINE_string(lotties, PATH_PREFIX "lotties", "Directory to read (Bodymov
 #undef PATH_PREFIX
 
 static DEFINE_string(svgs, "", "Directory to read SVGs from, or a single SVG file.");
+
+static DEFINE_string(rives, "", "Directory to read RIVs from, or a single .riv file.");
 
 static DEFINE_int_2(threads, j, -1,
                "Run threadsafe tests on a threadpool with this many extra threads, "
@@ -324,6 +332,8 @@ extern bool gUseSkVMBlitter;
 extern bool gSkVMAllowJIT;
 extern bool gSkVMJITViaDylib;
 
+static bool ColrV1VariationsEnabledForTest() { return true; }
+
 Viewer::Viewer(int argc, char** argv, void* platformData)
     : fCurrentSlide(-1)
     , fRefresh(false)
@@ -354,6 +364,10 @@ Viewer::Viewer(int argc, char** argv, void* platformData)
     , fPerspectiveMode(kPerspective_Off)
 {
     SkGraphics::Init();
+#if defined(SK_ENABLE_SVG)
+    SkGraphics::SetOpenTypeSVGDecoderFactory(SkSVGOpenTypeSVGDecoder::Make);
+#endif
+    SkGraphics::SetVariableColrV1EnabledFunc(ColrV1VariationsEnabledForTest);
 
     gPathRendererNames[GpuPathRenderers::kDefault] = "Default Path Renderers";
     gPathRendererNames[GpuPathRenderers::kAtlas] = "Atlas (tessellation)";
@@ -394,6 +408,7 @@ Viewer::Viewer(int argc, char** argv, void* platformData)
             GrContextOptions::ShaderCacheStrategy::kSkSL;
     displayParams.fGrContextOptions.fShaderErrorHandler = &gShaderErrorHandler;
     displayParams.fGrContextOptions.fSuppressPrints = true;
+    displayParams.fGrContextOptions.fSupportBilerpFromGlyphAtlas = true;
     if (FLAGS_dmsaa) {
         displayParams.fSurfaceProps = SkSurfaceProps(
                 displayParams.fSurfaceProps.flags() | SkSurfaceProps::kDynamicMSAA_Flag,
@@ -777,6 +792,10 @@ void Viewer::initSlides() {
                 return sk_make_sp<SkottieSlide>(name, path);}
         },
 #endif
+        { ".riv", "rive-dir", FLAGS_rives,
+            [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
+                return sk_make_sp<RiveSlide>(name, path);}
+        },
 #if defined(SK_ENABLE_SVG)
         { ".svg", "svg-dir", FLAGS_svgs,
             [](const SkString& name, const SkString& path) -> sk_sp<Slide> {
@@ -823,7 +842,7 @@ void Viewer::initSlides() {
     if (!FLAGS_bisect.isEmpty()) {
         sk_sp<BisectSlide> bisect = BisectSlide::Create(FLAGS_bisect[0]);
         if (bisect && !CommandLineFlags::ShouldSkip(FLAGS_match, bisect->getName().c_str())) {
-            if (FLAGS_bisect.count() >= 2) {
+            if (FLAGS_bisect.size() >= 2) {
                 for (const char* ch = FLAGS_bisect[1]; *ch; ++ch) {
                     bisect->onChar(*ch);
                 }
@@ -1060,7 +1079,7 @@ void Viewer::updateTitle() {
 
     if (ColorMode::kLegacy != fColorMode) {
         int curPrimaries = -1;
-        for (size_t i = 0; i < SK_ARRAY_COUNT(gNamedPrimaries); ++i) {
+        for (size_t i = 0; i < std::size(gNamedPrimaries); ++i) {
             if (primaries_equal(*gNamedPrimaries[i].fPrimaries, fColorSpacePrimaries)) {
                 curPrimaries = i;
                 break;
@@ -1375,7 +1394,8 @@ public:
             this->filterTextBlob(paint, blob, &cache), x, y, paint);
     }
 
-    void onDrawGlyphRunList(const SkGlyphRunList& glyphRunList, const SkPaint& paint) override {
+    void onDrawGlyphRunList(
+            const sktext::GlyphRunList& glyphRunList, const SkPaint& paint) override {
         sk_sp<SkTextBlob> cache;
         sk_sp<SkTextBlob> blob = glyphRunList.makeBlob();
         this->filterTextBlob(paint, blob.get(), &cache);
@@ -1383,8 +1403,9 @@ public:
             this->SkPaintFilterCanvas::onDrawGlyphRunList(glyphRunList, paint);
             return;
         }
-        SkGlyphRunBuilder builder;
-        const SkGlyphRunList& filtered = builder.blobToGlyphRunList(*cache, glyphRunList.origin());
+        sktext::GlyphRunBuilder builder;
+        const sktext::GlyphRunList& filtered =
+                builder.blobToGlyphRunList(*cache, glyphRunList.origin());
         this->SkPaintFilterCanvas::onDrawGlyphRunList(filtered, paint);
     }
 
@@ -1873,9 +1894,9 @@ static std::string build_metal_highlight_shader(const std::string& inShader) {
 }
 
 static std::string build_glsl_highlight_shader(const GrShaderCaps& shaderCaps) {
-    const char* versionDecl = shaderCaps.versionDeclString();
+    const char* versionDecl = shaderCaps.fVersionDeclString;
     std::string highlight = versionDecl ? versionDecl : "";
-    if (shaderCaps.usesPrecisionModifiers()) {
+    if (shaderCaps.fUsesPrecisionModifiers) {
         highlight.append("precision mediump float;\n");
     }
     SkSL::String::appendf(&highlight, "out vec4 sk_FragColor;\n"
@@ -2450,7 +2471,7 @@ void Viewer::drawImGui() {
 
                 // Pick from common gamuts:
                 int primariesIdx = 4; // Default: Custom
-                for (size_t i = 0; i < SK_ARRAY_COUNT(gNamedPrimaries); ++i) {
+                for (size_t i = 0; i < std::size(gNamedPrimaries); ++i) {
                     if (primaries_equal(*gNamedPrimaries[i].fPrimaries, fColorSpacePrimaries)) {
                         primariesIdx = i;
                         break;
@@ -2564,13 +2585,13 @@ void Viewer::drawImGui() {
                 // If we are changing the compile mode, we want to reset the cache and redo
                 // everything.
                 static bool sDoDeferredView = false;
-                if (doDump || newOptLevel != fOptLevel) {
+                if (doView || doDump || newOptLevel != fOptLevel) {
                     sksl = doDump || (newOptLevel == kShaderOptLevel_Source);
                     fOptLevel = (ShaderOptLevel)newOptLevel;
                     switch (fOptLevel) {
                         case kShaderOptLevel_Source:
-                            Compiler::EnableOptimizer(OverrideFlag::kDefault);
-                            Compiler::EnableInliner(OverrideFlag::kDefault);
+                            Compiler::EnableOptimizer(OverrideFlag::kOff);
+                            Compiler::EnableInliner(OverrideFlag::kOff);
                             break;
                         case kShaderOptLevel_Compile:
                             Compiler::EnableOptimizer(OverrideFlag::kOff);
@@ -2940,8 +2961,8 @@ static void WriteStateObject(SkJSONWriter& writer, const char* name, const char*
                              OptionsFunc&& optionsFunc) {
     writer.beginObject();
     {
-        writer.appendString(kName , name);
-        writer.appendString(kValue, value);
+        writer.appendCString(kName , name);
+        writer.appendCString(kValue, value);
 
         writer.beginArray(kOptions);
         {
@@ -2969,7 +2990,7 @@ void Viewer::updateUIState() {
     WriteStateObject(writer, kSlideStateName, fSlides[fCurrentSlide]->getName().c_str(),
         [this](SkJSONWriter& writer) {
             for(const auto& slide : fSlides) {
-                writer.appendString(slide->getName().c_str());
+                writer.appendString(slide->getName());
             }
         });
 
@@ -2977,7 +2998,7 @@ void Viewer::updateUIState() {
     WriteStateObject(writer, kBackendStateName, kBackendTypeStrings[fBackendType],
         [](SkJSONWriter& writer) {
             for (const auto& str : kBackendTypeStrings) {
-                writer.appendString(str);
+                writer.appendCString(str);
             }
         });
 
@@ -3002,36 +3023,34 @@ void Viewer::updateUIState() {
         [this](SkJSONWriter& writer) {
             auto ctx = fWindow->directContext();
             if (!ctx) {
-                writer.appendString("Software");
+                writer.appendNString("Software");
             } else {
-                writer.appendString(gPathRendererNames[GpuPathRenderers::kDefault].c_str());
+                writer.appendString(gPathRendererNames[GpuPathRenderers::kDefault]);
 #if SK_GPU_V1
                 if (fWindow->sampleCount() > 1 || FLAGS_dmsaa) {
                     const auto* caps = ctx->priv().caps();
                     if (skgpu::v1::AtlasPathRenderer::IsSupported(ctx)) {
-                        writer.appendString(
-                                gPathRendererNames[GpuPathRenderers::kAtlas].c_str());
+                        writer.appendString(gPathRendererNames[GpuPathRenderers::kAtlas]);
                     }
                     if (skgpu::v1::TessellationPathRenderer::IsSupported(*caps)) {
-                        writer.appendString(
-                                gPathRendererNames[GpuPathRenderers::kTessellation].c_str());
+                        writer.appendString(gPathRendererNames[GpuPathRenderers::kTessellation]);
                     }
                 }
 #endif
                 if (1 == fWindow->sampleCount()) {
-                    writer.appendString(gPathRendererNames[GpuPathRenderers::kSmall].c_str());
+                    writer.appendString(gPathRendererNames[GpuPathRenderers::kSmall]);
                 }
-                writer.appendString(gPathRendererNames[GpuPathRenderers::kTriangulating].c_str());
-                writer.appendString(gPathRendererNames[GpuPathRenderers::kNone].c_str());
+                writer.appendString(gPathRendererNames[GpuPathRenderers::kTriangulating]);
+                writer.appendString(gPathRendererNames[GpuPathRenderers::kNone]);
             }
         });
 
     // Softkey state
     WriteStateObject(writer, kSoftkeyStateName, kSoftkeyHint,
         [this](SkJSONWriter& writer) {
-            writer.appendString(kSoftkeyHint);
+            writer.appendNString(kSoftkeyHint);
             for (const auto& softkey : fCommands.getCommandsAsSoftkeys()) {
-                writer.appendString(softkey.c_str());
+                writer.appendString(softkey);
             }
         });
 

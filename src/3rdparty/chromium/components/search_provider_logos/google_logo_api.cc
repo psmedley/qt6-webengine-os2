@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -153,18 +153,18 @@ std::unique_ptr<EncodedLogo> ParseDoodleLogoResponse(
   // Default parsing failure to be true.
   *parsing_failed = true;
 
-  base::JSONReader::ValueWithError parsed_json =
-      base::JSONReader::ReadAndReturnValueWithError(response_sp);
-  if (!parsed_json.value) {
-    LOG(WARNING) << parsed_json.error_message << " at "
-                 << parsed_json.error_line << ":" << parsed_json.error_column;
+  auto parsed_json = base::JSONReader::ReadAndReturnValueWithError(response_sp);
+  if (!parsed_json.has_value()) {
+    LOG(WARNING) << parsed_json.error().message << " at "
+                 << parsed_json.error().line << ":"
+                 << parsed_json.error().column;
     return nullptr;
   }
 
-  if (!parsed_json.value->is_dict())
+  if (!parsed_json->is_dict())
     return nullptr;
 
-  const base::Value* ddljson = parsed_json.value->FindDictKey("ddljson");
+  const base::Value* ddljson = parsed_json->FindDictKey("ddljson");
   if (!ddljson)
     return nullptr;
 

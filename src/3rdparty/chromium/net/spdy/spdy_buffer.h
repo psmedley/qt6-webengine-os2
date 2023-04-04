@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,7 +100,7 @@ class NET_EXPORT_PRIVATE SpdyBuffer {
 
   const scoped_refptr<SharedFrame> shared_frame_;
   std::vector<ConsumeCallback> consume_callbacks_;
-  size_t offset_;
+  size_t offset_ = 0;
 };
 
 }  // namespace net

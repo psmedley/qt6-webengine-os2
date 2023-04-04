@@ -17,39 +17,38 @@
 #include "src/tint/ast/variable_decl_statement.h"
 #include "src/tint/writer/glsl/test_helper.h"
 
+using namespace tint::number_suffixes;  // NOLINT
+
 namespace tint::writer::glsl {
 namespace {
 
 using GlslSanitizerTest = TestHelper;
 
 TEST_F(GlslSanitizerTest, Call_ArrayLength) {
-  auto* s = Structure("my_struct", {Member(0, "a", ty.array<f32>(4))});
-  Global("b", ty.Of(s), ast::StorageClass::kStorage, ast::Access::kRead,
-         ast::AttributeList{
-             create<ast::BindingAttribute>(1),
-             create<ast::GroupAttribute>(2),
+    auto* s = Structure("my_struct", utils::Vector{Member(0, "a", ty.array<f32>(4))});
+    GlobalVar("b", ty.Of(s), ast::AddressSpace::kStorage, ast::Access::kRead, Binding(1_a),
+              Group(2_a));
+
+    Func("a_func", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(Var("len", ty.u32(), Call("arrayLength", AddressOf(MemberAccessor("b", "a"))))),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
          });
 
-  Func("a_func", ast::VariableList{}, ty.void_(),
-       ast::StatementList{
-           Decl(Var("len", ty.u32(), ast::StorageClass::kNone,
-                    Call("arrayLength", AddressOf(MemberAccessor("b", "a"))))),
-       },
-       ast::AttributeList{
-           Stage(ast::PipelineStage::kFragment),
-       });
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  GeneratorImpl& gen = SanitizeAndBuild();
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
-layout(binding = 1, std430) buffer my_struct_1 {
+layout(binding = 1, std430) buffer my_struct_ssbo {
   float a[];
 } b;
+
 void a_func() {
   uint len = uint(b.a.length());
 }
@@ -59,41 +58,38 @@ void main() {
   return;
 }
 )";
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 TEST_F(GlslSanitizerTest, Call_ArrayLength_OtherMembersInStruct) {
-  auto* s = Structure("my_struct", {
-                                       Member(0, "z", ty.f32()),
-                                       Member(4, "a", ty.array<f32>(4)),
-                                   });
-  Global("b", ty.Of(s), ast::StorageClass::kStorage, ast::Access::kRead,
-         ast::AttributeList{
-             create<ast::BindingAttribute>(1),
-             create<ast::GroupAttribute>(2),
+    auto* s = Structure("my_struct", utils::Vector{
+                                         Member(0, "z", ty.f32()),
+                                         Member(4, "a", ty.array<f32>(4)),
+                                     });
+    GlobalVar("b", ty.Of(s), ast::AddressSpace::kStorage, ast::Access::kRead, Binding(1_a),
+              Group(2_a));
+
+    Func("a_func", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(Var("len", ty.u32(), Call("arrayLength", AddressOf(MemberAccessor("b", "a"))))),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
          });
 
-  Func("a_func", ast::VariableList{}, ty.void_(),
-       ast::StatementList{
-           Decl(Var("len", ty.u32(), ast::StorageClass::kNone,
-                    Call("arrayLength", AddressOf(MemberAccessor("b", "a"))))),
-       },
-       ast::AttributeList{
-           Stage(ast::PipelineStage::kFragment),
-       });
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  GeneratorImpl& gen = SanitizeAndBuild();
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
-layout(binding = 1, std430) buffer my_struct_1 {
+layout(binding = 1, std430) buffer my_struct_ssbo {
   float z;
   float a[];
 } b;
+
 void a_func() {
   uint len = uint(b.a.length());
 }
@@ -104,42 +100,39 @@ void main() {
 }
 )";
 
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 TEST_F(GlslSanitizerTest, Call_ArrayLength_ViaLets) {
-  auto* s = Structure("my_struct", {Member(0, "a", ty.array<f32>(4))});
-  Global("b", ty.Of(s), ast::StorageClass::kStorage, ast::Access::kRead,
-         ast::AttributeList{
-             create<ast::BindingAttribute>(1),
-             create<ast::GroupAttribute>(2),
+    auto* s = Structure("my_struct", utils::Vector{Member(0, "a", ty.array<f32>(4))});
+    GlobalVar("b", ty.Of(s), ast::AddressSpace::kStorage, ast::Access::kRead, Binding(1_a),
+              Group(2_a));
+
+    auto* p = Let("p", AddressOf("b"));
+    auto* p2 = Let("p2", AddressOf(MemberAccessor(Deref(p), "a")));
+
+    Func("a_func", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(p),
+             Decl(p2),
+             Decl(Var("len", ty.u32(), Call("arrayLength", p2))),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
          });
 
-  auto* p = Const("p", nullptr, AddressOf("b"));
-  auto* p2 = Const("p2", nullptr, AddressOf(MemberAccessor(Deref(p), "a")));
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  Func("a_func", ast::VariableList{}, ty.void_(),
-       ast::StatementList{
-           Decl(p),
-           Decl(p2),
-           Decl(Var("len", ty.u32(), ast::StorageClass::kNone,
-                    Call("arrayLength", p2))),
-       },
-       ast::AttributeList{
-           Stage(ast::PipelineStage::kFragment),
-       });
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  GeneratorImpl& gen = SanitizeAndBuild();
-
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
-layout(binding = 1, std430) buffer my_struct_1 {
+layout(binding = 1, std430) buffer my_struct_ssbo {
   float a[];
 } b;
+
 void a_func() {
   uint len = uint(b.a.length());
 }
@@ -150,33 +143,33 @@ void main() {
 }
 )";
 
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 TEST_F(GlslSanitizerTest, PromoteArrayInitializerToConstVar) {
-  auto* array_init = array<i32, 4>(1, 2, 3, 4);
-  auto* array_index = IndexAccessor(array_init, 3);
-  auto* pos = Var("pos", ty.i32(), ast::StorageClass::kNone, array_index);
+    auto* array_init = array<i32, 4>(1_i, 2_i, 3_i, 4_i);
 
-  Func("main", ast::VariableList{}, ty.void_(),
-       {
-           Decl(pos),
-       },
-       {
-           Stage(ast::PipelineStage::kFragment),
-       });
+    Func("main", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(Var("idx", Expr(3_i))),
+             Decl(Var("pos", ty.i32(), IndexAccessor(array_init, "idx"))),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
+         });
 
-  GeneratorImpl& gen = SanitizeAndBuild();
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
 void tint_symbol() {
+  int idx = 3;
   int tint_symbol_1[4] = int[4](1, 2, 3, 4);
-  int pos = tint_symbol_1[3];
+  int pos = tint_symbol_1[idx];
 }
 
 void main() {
@@ -184,34 +177,33 @@ void main() {
   return;
 }
 )";
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 TEST_F(GlslSanitizerTest, PromoteStructInitializerToConstVar) {
-  auto* str = Structure("S", {
-                                 Member("a", ty.i32()),
-                                 Member("b", ty.vec3<f32>()),
-                                 Member("c", ty.i32()),
-                             });
-  auto* struct_init = Construct(ty.Of(str), 1, vec3<f32>(2.f, 3.f, 4.f), 4);
-  auto* struct_access = MemberAccessor(struct_init, "b");
-  auto* pos =
-      Var("pos", ty.vec3<f32>(), ast::StorageClass::kNone, struct_access);
+    auto* str = Structure("S", utils::Vector{
+                                   Member("a", ty.i32()),
+                                   Member("b", ty.vec3<f32>()),
+                                   Member("c", ty.i32()),
+                               });
+    auto* struct_init = Construct(ty.Of(str), 1_i, vec3<f32>(2_f, 3_f, 4_f), 4_i);
+    auto* struct_access = MemberAccessor(struct_init, "b");
+    auto* pos = Var("pos", ty.vec3<f32>(), struct_access);
 
-  Func("main", ast::VariableList{}, ty.void_(),
-       {
-           Decl(pos),
-       },
-       {
-           Stage(ast::PipelineStage::kFragment),
-       });
+    Func("main", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(pos),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
+         });
 
-  GeneratorImpl& gen = SanitizeAndBuild();
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
 struct S {
@@ -230,34 +222,33 @@ void main() {
   return;
 }
 )";
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 TEST_F(GlslSanitizerTest, InlinePtrLetsBasic) {
-  // var v : i32;
-  // let p : ptr<function, i32> = &v;
-  // let x : i32 = *p;
-  auto* v = Var("v", ty.i32());
-  auto* p =
-      Const("p", ty.pointer<i32>(ast::StorageClass::kFunction), AddressOf(v));
-  auto* x = Var("x", ty.i32(), ast::StorageClass::kNone, Deref(p));
+    // var v : i32;
+    // let p : ptr<function, i32> = &v;
+    // let x : i32 = *p;
+    auto* v = Var("v", ty.i32());
+    auto* p = Let("p", ty.pointer<i32>(ast::AddressSpace::kFunction), AddressOf(v));
+    auto* x = Var("x", ty.i32(), Deref(p));
 
-  Func("main", ast::VariableList{}, ty.void_(),
-       {
-           Decl(v),
-           Decl(p),
-           Decl(x),
-       },
-       {
-           Stage(ast::PipelineStage::kFragment),
-       });
+    Func("main", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(v),
+             Decl(p),
+             Decl(x),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
+         });
 
-  GeneratorImpl& gen = SanitizeAndBuild();
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
 void tint_symbol() {
@@ -270,46 +261,42 @@ void main() {
   return;
 }
 )";
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 TEST_F(GlslSanitizerTest, InlinePtrLetsComplexChain) {
-  // var a : array<mat4x4<f32>, 4>;
-  // let ap : ptr<function, array<mat4x4<f32>, 4>> = &a;
-  // let mp : ptr<function, mat4x4<f32>> = &(*ap)[3];
-  // let vp : ptr<function, vec4<f32>> = &(*mp)[2];
-  // let v : vec4<f32> = *vp;
-  auto* a = Var("a", ty.array(ty.mat4x4<f32>(), 4));
-  auto* ap = Const(
-      "ap",
-      ty.pointer(ty.array(ty.mat4x4<f32>(), 4), ast::StorageClass::kFunction),
-      AddressOf(a));
-  auto* mp =
-      Const("mp", ty.pointer(ty.mat4x4<f32>(), ast::StorageClass::kFunction),
-            AddressOf(IndexAccessor(Deref(ap), 3)));
-  auto* vp =
-      Const("vp", ty.pointer(ty.vec4<f32>(), ast::StorageClass::kFunction),
-            AddressOf(IndexAccessor(Deref(mp), 2)));
-  auto* v = Var("v", ty.vec4<f32>(), ast::StorageClass::kNone, Deref(vp));
+    // var a : array<mat4x4<f32>, 4u>;
+    // let ap : ptr<function, array<mat4x4<f32>, 4u>> = &a;
+    // let mp : ptr<function, mat4x4<f32>> = &(*ap)[3i];
+    // let vp : ptr<function, vec4<f32>> = &(*mp)[2i];
+    // let v : vec4<f32> = *vp;
+    auto* a = Var("a", ty.array(ty.mat4x4<f32>(), 4_u));
+    auto* ap = Let("ap", ty.pointer(ty.array(ty.mat4x4<f32>(), 4_u), ast::AddressSpace::kFunction),
+                   AddressOf(a));
+    auto* mp = Let("mp", ty.pointer(ty.mat4x4<f32>(), ast::AddressSpace::kFunction),
+                   AddressOf(IndexAccessor(Deref(ap), 3_i)));
+    auto* vp = Let("vp", ty.pointer(ty.vec4<f32>(), ast::AddressSpace::kFunction),
+                   AddressOf(IndexAccessor(Deref(mp), 2_i)));
+    auto* v = Var("v", ty.vec4<f32>(), Deref(vp));
 
-  Func("main", ast::VariableList{}, ty.void_(),
-       {
-           Decl(a),
-           Decl(ap),
-           Decl(mp),
-           Decl(vp),
-           Decl(v),
-       },
-       {
-           Stage(ast::PipelineStage::kFragment),
-       });
+    Func("main", utils::Empty, ty.void_(),
+         utils::Vector{
+             Decl(a),
+             Decl(ap),
+             Decl(mp),
+             Decl(vp),
+             Decl(v),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kFragment),
+         });
 
-  GeneratorImpl& gen = SanitizeAndBuild();
+    GeneratorImpl& gen = SanitizeAndBuild();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
+    ASSERT_TRUE(gen.Generate()) << gen.error();
 
-  auto got = gen.result();
-  auto* expect = R"(#version 310 es
+    auto got = gen.result();
+    auto* expect = R"(#version 310 es
 precision mediump float;
 
 void tint_symbol() {
@@ -322,7 +309,7 @@ void main() {
   return;
 }
 )";
-  EXPECT_EQ(expect, got);
+    EXPECT_EQ(expect, got);
 }
 
 }  // namespace

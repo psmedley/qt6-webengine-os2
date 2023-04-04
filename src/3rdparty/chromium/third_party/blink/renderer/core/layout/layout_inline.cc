@@ -410,6 +410,9 @@ bool LayoutInline::ComputeInitialShouldCreateBoxFragment(
       style.MayHaveMargin())
     return true;
 
+  if (!style.AnchorName().IsNull())
+    return true;
+
   return ComputeIsAbsoluteContainer(&style) ||
          NGOutlineUtils::HasPaintedOutline(style, GetNode()) ||
          CanBeHitTestTargetPseudoNodeStyle(style);
@@ -549,30 +552,7 @@ void LayoutInline::AddChildIgnoringContinuation(LayoutObject* new_child,
       !new_child->IsTablePart()) {
     if (UNLIKELY(RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled()) &&
         !ForceLegacyLayout()) {
-      DCHECK(!new_child->IsInline());
-      LayoutBlockFlow* anonymous_box;
-      if (!before_child) {
-        anonymous_box = DynamicTo<LayoutBlockFlow>(LastChild());
-      } else if (before_child->IsInline() ||
-                 before_child->IsFloatingOrOutOfFlowPositioned()) {
-        anonymous_box =
-            DynamicTo<LayoutBlockFlow>(before_child->PreviousSibling());
-      } else {
-        // If |before_child| is not inline, it should have been added to the
-        // anonymous block.
-        anonymous_box = DynamicTo<LayoutBlockFlow>(before_child->Parent());
-        DCHECK(anonymous_box);
-        DCHECK(anonymous_box->IsBlockInInline());
-        anonymous_box->AddChild(new_child, before_child);
-        return;
-      }
-      if (!anonymous_box || !anonymous_box->IsBlockInInline()) {
-        anonymous_box =
-            CreateAnonymousContainerForBlockChildren(/* split_flow */ false);
-        LayoutBoxModelObject::AddChild(anonymous_box, before_child);
-      }
-      DCHECK(anonymous_box->IsBlockInInline());
-      anonymous_box->AddChild(new_child);
+      AddChildAsBlockInInline(new_child, before_child);
       return;
     }
     LayoutBlockFlow* new_box =
@@ -600,6 +580,35 @@ void LayoutInline::AddChildIgnoringContinuation(LayoutObject* new_child,
 
   new_child->SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
       layout_invalidation_reason::kChildChanged);
+}
+
+void LayoutInline::AddChildAsBlockInInline(LayoutObject* new_child,
+                                           LayoutObject* before_child) {
+  DCHECK(RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled());
+  DCHECK(!ForceLegacyLayout());
+  DCHECK(!new_child->IsInline());
+  LayoutBlockFlow* anonymous_box;
+  if (!before_child) {
+    anonymous_box = DynamicTo<LayoutBlockFlow>(LastChild());
+  } else if (before_child->IsInline() ||
+             before_child->IsFloatingOrOutOfFlowPositioned()) {
+    anonymous_box = DynamicTo<LayoutBlockFlow>(before_child->PreviousSibling());
+  } else {
+    // If |before_child| is not inline, it should have been added to the
+    // anonymous block.
+    anonymous_box = DynamicTo<LayoutBlockFlow>(before_child->Parent());
+    DCHECK(anonymous_box);
+    DCHECK(anonymous_box->IsBlockInInline());
+    anonymous_box->AddChild(new_child, before_child);
+    return;
+  }
+  if (!anonymous_box || !anonymous_box->IsBlockInInline()) {
+    anonymous_box =
+        CreateAnonymousContainerForBlockChildren(/* split_flow */ false);
+    LayoutBoxModelObject::AddChild(anonymous_box, before_child);
+  }
+  DCHECK(anonymous_box->IsBlockInInline());
+  anonymous_box->AddChild(new_child);
 }
 
 LayoutInline* LayoutInline::Clone() const {
@@ -824,7 +833,7 @@ LayoutBlockFlow* LayoutInline::CreateAnonymousContainerForBlockChildren(
 LayoutBox* LayoutInline::CreateAnonymousBoxToSplit(
     const LayoutBox* box_to_split) const {
   NOT_DESTROYED();
-  DCHECK(box_to_split->IsAnonymous());
+  DCHECK(box_to_split->IsBlockInInline());
   DCHECK(IsA<LayoutBlockFlow>(box_to_split));
   DCHECK(RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled());
   DCHECK(!ForceLegacyLayout());
@@ -1078,7 +1087,7 @@ void LayoutInline::QuadsForSelfInternal(Vector<gfx::QuadF>& quads,
         else
           quads.push_back(gfx::QuadF(gfx::RectF(rect)));
       });
-  if (quads.IsEmpty()) {
+  if (quads.empty()) {
     if (map_to_absolute)
       PushAbsoluteQuad(PhysicalRect());
     else
@@ -1205,7 +1214,7 @@ LayoutUnit LayoutInline::MarginBottom() const {
 bool LayoutInline::NodeAtPoint(HitTestResult& result,
                                const HitTestLocation& hit_test_location,
                                const PhysicalOffset& accumulated_offset,
-                               HitTestAction hit_test_action) {
+                               HitTestPhase phase) {
   NOT_DESTROYED();
   if (IsInLayoutNGInlineFormattingContext()) {
     // TODO(crbug.com/965976): We should fix the root cause of the missed
@@ -1246,9 +1255,10 @@ bool LayoutInline::NodeAtPoint(HitTestResult& result,
       // up to the fragment itself. Compute this offset.
       const PhysicalOffset child_offset =
           accumulated_offset + item.OffsetInContainerFragment();
-      if (NGBoxFragmentPainter(cursor, item, *box_fragment)
+      NGInlinePaintContext inline_context;
+      if (NGBoxFragmentPainter(cursor, item, *box_fragment, &inline_context)
               .NodeAtPoint(result, hit_test_location, child_offset,
-                           accumulated_offset, hit_test_action)) {
+                           accumulated_offset, phase)) {
         return true;
       }
     }
@@ -1256,8 +1266,7 @@ bool LayoutInline::NodeAtPoint(HitTestResult& result,
   }
 
   return LineBoxes()->HitTest(LineLayoutBoxModel(this), result,
-                              hit_test_location, accumulated_offset,
-                              hit_test_action);
+                              hit_test_location, accumulated_offset, phase);
 }
 
 bool LayoutInline::HitTestCulledInline(HitTestResult& result,
@@ -1606,7 +1615,7 @@ PhysicalRect LayoutInline::PhysicalVisualOverflowRect() const {
       AddOutlineRects(rects, nullptr, PhysicalOffset(),
                       style.OutlineRectsShouldIncludeBlockVisualOverflow());
     }
-    if (!rects.IsEmpty()) {
+    if (!rects.empty()) {
       PhysicalRect outline_rect = UnionRect(rects);
       outline_rect.Inflate(outline_outset);
       overflow_rect.Unite(outline_rect);
@@ -2018,15 +2027,6 @@ void LayoutInline::InvalidateDisplayItemClients(
 
   for (InlineFlowBox* box : *LineBoxes())
     paint_invalidator.InvalidateDisplayItemClient(*box, invalidation_reason);
-}
-
-void LayoutInline::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
-                                      TransformState& transform_state,
-                                      MapCoordinatesFlags mode) const {
-  NOT_DESTROYED();
-  if (CanContainFixedPositionObjects())
-    mode &= ~kIsFixed;
-  LayoutBoxModelObject::MapLocalToAncestor(ancestor, transform_state, mode);
 }
 
 PhysicalRect LayoutInline::DebugRect() const {

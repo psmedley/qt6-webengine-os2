@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ bool IsAvoidBreakValue(const NGConstraintSpace&, Property);
 
 // Return true if we're resuming layout after a previous break.
 inline bool IsResumingLayout(const NGBlockBreakToken* token) {
-  return token && !token->IsBreakBefore();
+  return token && !token->IsBreakBefore() && !token->IsRepeated();
 }
 
 // Return true if the node may break into multiple fragments (or has already
@@ -71,8 +71,16 @@ inline bool IsResumingLayout(const NGBlockBreakToken* token) {
 // currently performing block fragmentation; we also need to know if it has
 // already been fragmented (to resume layout correctly, but not break again).
 inline bool InvolvedInBlockFragmentation(const NGBoxFragmentBuilder& builder) {
-  return builder.ConstraintSpace()->HasBlockFragmentation() ||
+  return builder.ConstraintSpace().HasBlockFragmentation() ||
          IsResumingLayout(builder.PreviousBreakToken());
+}
+
+// Return the fragment index (into the layout results vector in LayoutBox),
+// based on incoming break token.
+inline wtf_size_t FragmentIndex(const NGBlockBreakToken* incoming_break_token) {
+  if (incoming_break_token && !incoming_break_token->IsBreakBefore())
+    return incoming_break_token->SequenceNumber() + 1;
+  return 0;
 }
 
 // Calculate the final "break-between" value at a class A or C breakpoint. This
@@ -143,26 +151,35 @@ inline LayoutUnit FragmentainerCapacity(const NGConstraintSpace& space) {
 }
 
 // Return the block space that was available in the current fragmentainer at the
-// start of the current block formatting context. Note that if the start of the
-// current block formatting context is in a previous fragmentainer, the size of
-// the current fragmentainer is returned instead. If available space is
-// negative, zero is returned. In the case of initial column balancing, the size
-// is unknown, in which case kIndefiniteSize is returned.
-inline LayoutUnit FragmentainerSpaceAtBfcStart(const NGConstraintSpace& space) {
+// start of the current block. Note that if the start of the current block is in
+// a previous fragmentainer, the size of the current fragmentainer is returned
+// instead. If available space is negative, zero is returned. In the case of
+// initial column balancing, the size is unknown, in which case kIndefiniteSize
+// is returned.
+inline LayoutUnit FragmentainerSpaceLeft(const NGConstraintSpace& space) {
   if (!space.HasKnownFragmentainerBlockSize())
     return kIndefiniteSize;
   LayoutUnit available_space =
-      FragmentainerCapacity(space) - space.FragmentainerOffsetAtBfc();
+      FragmentainerCapacity(space) - space.FragmentainerOffset();
   return available_space.ClampNegativeToZero();
 }
 
-// Same as FragmentainerSpaceAtBfcStart(), but not to be called in the initial
+// Return the border edge block-offset from the block-start of the fragmentainer
+// relative to the block-start of the current block formatting context in the
+// current fragmentainer. Note that if the current block formatting context
+// starts in a previous fragmentainer, we'll return the block-offset relative to
+// the current fragmentainer.
+inline LayoutUnit FragmentainerOffsetAtBfc(const NGConstraintSpace& space) {
+  return space.FragmentainerOffset() - space.ExpectedBfcBlockOffset();
+}
+
+// Same as FragmentainerSpaceLeft(), but not to be called in the initial
 // column balancing pass (when fragmentainer block-size is unknown), and without
 // any clamping of negative values.
-inline LayoutUnit UnclampedFragmentainerSpaceAtBfcStart(
+inline LayoutUnit UnclampedFragmentainerSpaceLeft(
     const NGConstraintSpace& space) {
   DCHECK(space.HasKnownFragmentainerBlockSize());
-  return FragmentainerCapacity(space) - space.FragmentainerOffsetAtBfc();
+  return FragmentainerCapacity(space) - space.FragmentainerOffset();
 }
 
 // Adjust margins to take fragmentation into account. Leading/trailing block
@@ -246,11 +263,13 @@ enum class NGBreakStatus {
 };
 
 // Update and write fragmentation information to the fragment builder after
-// layout. This will update the block-size stored in the builder. When
-// calculating the block-size, a layout algorithm will include the accumulated
-// block-size of all fragments generated for this node - as if they were all
-// stitched together as one tall fragment. This is the most convenient thing to
-// do, since any block-size specified in CSS applies to the entire box,
+// layout. This will update the block-size stored in the builder. It may also
+// update the stored intrinsic block-size.
+//
+// When calculating the block-size, a layout algorithm will include the
+// accumulated block-size of all fragments generated for this node - as if they
+// were all stitched together as one tall fragment. This is the most convenient
+// thing to do, since any block-size specified in CSS applies to the entire box,
 // regardless of fragmentation. This function will update the block-size to the
 // actual fragment size, by examining possible breakpoints, if necessary.
 //
@@ -347,6 +366,18 @@ void PropagateSpaceShortage(
     LayoutUnit fragmentainer_block_offset,
     NGBoxFragmentBuilder*,
     absl::optional<LayoutUnit> block_size_override = absl::nullopt);
+// Calculate how much we would need to stretch the column block-size to fit the
+// current result (if applicable). |block_size_override| should only be supplied
+// when you wish to propagate a different block-size than that of the provided
+// layout result.
+LayoutUnit CalculateSpaceShortage(
+    const NGConstraintSpace&,
+    const NGLayoutResult*,
+    LayoutUnit fragmentainer_block_offset,
+    absl::optional<LayoutUnit> block_size_override = absl::nullopt);
+// Update |minimal_space_shortage| based on the current |space_shortage|.
+void UpdateMinimalSpaceShortage(absl::optional<LayoutUnit> space_shortage,
+                                LayoutUnit* minimal_space_shortage);
 
 // Move past the breakpoint before the child, if possible, and return true. Also
 // update the appeal of breaking before or inside the child (if we're not going
@@ -434,15 +465,14 @@ NGBoxFragmentBuilder CreateContainerBuilderForMulticol(
 NGConstraintSpace CreateConstraintSpaceForMulticol(const NGBlockNode& multicol);
 
 // Return the adjusted child margin to be applied at the end of a fragment.
-// Margins should collapse with the fragmentainer boundary. |bfc_block_offset|
-// is the BFC offset where the margin should be applied (i.e. after the
-// block-end border edge of the last child fragment).
+// Margins should collapse with the fragmentainer boundary. |block_offset| is
+// the block-offset where the margin should be applied (i.e. after the block-end
+// border edge of the last child fragment).
 inline LayoutUnit AdjustedMarginAfterFinalChildFragment(
     const NGConstraintSpace& space,
-    LayoutUnit bfc_block_offset,
+    LayoutUnit block_offset,
     LayoutUnit block_end_margin) {
-  LayoutUnit space_left =
-      FragmentainerSpaceAtBfcStart(space) - bfc_block_offset;
+  LayoutUnit space_left = FragmentainerSpaceLeft(space) - block_offset;
   return std::min(block_end_margin, space_left.ClampNegativeToZero());
 }
 
@@ -479,6 +509,17 @@ PhysicalOffset OffsetInStitchedFragments(
 LayoutUnit BlockSizeForFragmentation(
     const NGLayoutResult&,
     WritingDirectionMode container_writing_direction);
+
+// Return true if we support painting of multiple fragments for the given
+// content. Will return true for anything that is fragmentable / non-monolithic.
+// Will also return true for certain types of monolithic content, because, even
+// if it's unbreakable, it may generate multiple fragments, if it's part of
+// repeated content (such as table headers and footers). This is the case for
+// e.g. images, which may for instance be repeated in table headers /
+// footers. Return false for monolithic content that we don't want to repeat
+// (e.g. iframes).
+bool CanPaintMultipleFragments(const NGPhysicalBoxFragment&);
+bool CanPaintMultipleFragments(const LayoutObject&);
 
 }  // namespace blink
 

@@ -7,13 +7,19 @@
 
 #include "src/sksl/ir/SkSLConstructorCompoundCast.h"
 
+#include "include/core/SkTypes.h"
+#include "include/private/SkSLDefines.h"
+#include "src/sksl/SkSLAnalysis.h"
 #include "src/sksl/SkSLConstantFolder.h"
-#include "src/sksl/SkSLProgramSettings.h"
-#include "src/sksl/ir/SkSLConstructor.h"
 #include "src/sksl/ir/SkSLConstructorCompound.h"
 #include "src/sksl/ir/SkSLConstructorDiagonalMatrix.h"
 #include "src/sksl/ir/SkSLConstructorScalarCast.h"
 #include "src/sksl/ir/SkSLConstructorSplat.h"
+#include "src/sksl/ir/SkSLLiteral.h"
+#include "src/sksl/ir/SkSLType.h"
+
+#include <cstddef>
+#include <optional>
 
 namespace SkSL {
 
@@ -85,7 +91,7 @@ std::unique_ptr<Expression> ConstructorCompoundCast::Make(const Context& context
     arg = ConstantFolder::MakeConstantValueForVariable(pos, std::move(arg));
 
     // We can cast a vector of compile-time constants at compile-time.
-    if (arg->isCompileTimeConstant()) {
+    if (Analysis::IsCompileTimeConstant(*arg)) {
         return cast_constant_composite(context, pos, type, std::move(arg));
     }
     return std::make_unique<ConstructorCompoundCast>(pos, type, std::move(arg));

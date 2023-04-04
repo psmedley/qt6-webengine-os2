@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,8 +22,6 @@ from pylib.symbols import deobfuscator
 from pylib.symbols import stack_symbolizer
 from pylib.utils import dexdump
 from pylib.utils import gold_utils
-from pylib.utils import instrumentation_tracing
-from pylib.utils import proguard
 from pylib.utils import shared_preference_utils
 from pylib.utils import test_filter
 
@@ -38,9 +36,11 @@ _ACTIVITY_RESULT_OK = -1
 _COMMAND_LINE_PARAMETER = 'cmdlinearg-parameter'
 _DEFAULT_ANNOTATIONS = [
     'SmallTest', 'MediumTest', 'LargeTest', 'EnormousTest', 'IntegrationTest']
+# This annotation is for disabled tests that should not be run in Test Reviver.
+_DO_NOT_REVIVE_ANNOTATIONS = ['DoNotRevive', 'Manual']
 _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS = [
     'DisabledTest', 'FlakyTest', 'Manual']
-_VALID_ANNOTATIONS = set(_DEFAULT_ANNOTATIONS +
+_VALID_ANNOTATIONS = set(_DEFAULT_ANNOTATIONS + _DO_NOT_REVIVE_ANNOTATIONS +
                          _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS)
 
 _TEST_LIST_JUNIT4_RUNNERS = [
@@ -427,18 +427,6 @@ def FilterTests(tests, filter_str=None, annotations=None,
 
   return return_tests
 
-# TODO(yolandyan): remove this once the tests are converted to junit4
-def GetAllTestsFromJar(test_jar):
-  pickle_path = '%s-proguard.pickle' % test_jar
-  try:
-    tests = GetTestsFromPickle(pickle_path, os.path.getmtime(test_jar))
-  except TestListPickleException as e:
-    logging.info('Could not get tests from pickle: %s', e)
-    logging.info('Getting tests from JAR via proguard.')
-    tests = _GetTestsFromProguard(test_jar)
-    SaveTestsToPickle(pickle_path, tests)
-  return tests
-
 
 def GetAllTestsFromApk(test_apk):
   pickle_path = '%s-dexdump.pickle' % test_apk
@@ -450,6 +438,7 @@ def GetAllTestsFromApk(test_apk):
     tests = _GetTestsFromDexdump(test_apk)
     SaveTestsToPickle(pickle_path, tests)
   return tests
+
 
 def GetTestsFromPickle(pickle_path, test_mtime):
   if not os.path.exists(pickle_path):
@@ -464,61 +453,45 @@ def GetTestsFromPickle(pickle_path, test_mtime):
   return pickle_data['TEST_METHODS']
 
 
-# TODO(yolandyan): remove this once the test listing from java runner lands
-@instrumentation_tracing.no_tracing
-def _GetTestsFromProguard(jar_path):
-  p = proguard.Dump(jar_path)
-  class_lookup = dict((c['class'], c) for c in p['classes'])
-
-  def is_test_class(c):
-    return c['class'].endswith('Test')
-
-  def is_test_method(m):
-    return m['method'].startswith('test')
-
-  def recursive_class_annotations(c):
-    s = c['superclass']
-    if s in class_lookup:
-      a = recursive_class_annotations(class_lookup[s])
-    else:
-      a = {}
-    a.update(c['annotations'])
-    return a
-
-  def stripped_test_class(c):
-    return {
-      'class': c['class'],
-      'annotations': recursive_class_annotations(c),
-      'methods': [m for m in c['methods'] if is_test_method(m)],
-      'superclass': c['superclass'],
-    }
-
-  return [stripped_test_class(c) for c in p['classes']
-          if is_test_class(c)]
-
-
 def _GetTestsFromDexdump(test_apk):
   dex_dumps = dexdump.Dump(test_apk)
   tests = []
 
-  def get_test_methods(methods):
-    return [
-        {
-          'method': m,
-          # No annotation info is available from dexdump.
-          # Set MediumTest annotation for default.
-          'annotations': {'MediumTest': None},
-        } for m in methods if m.startswith('test')]
+  def get_test_methods(methods, annotations):
+    test_methods = []
+
+    for method in methods:
+      if method.startswith('test'):
+        method_annotations = annotations.get(method, {})
+
+        # Dexdump used to not return any annotation info
+        # So MediumTest annotation was added to all methods
+        # Preserving this behaviour by adding MediumTest if none of the
+        # size annotations are included in these annotations
+        if not any(valid in method_annotations for valid in _VALID_ANNOTATIONS):
+          method_annotations.update({'MediumTest': None})
+
+        test_methods.append({
+            'method': method,
+            'annotations': method_annotations
+        })
+
+    return test_methods
 
   for dump in dex_dumps:
     for package_name, package_info in six.iteritems(dump):
       for class_name, class_info in six.iteritems(package_info['classes']):
-        if class_name.endswith('Test'):
+        if class_name.endswith('Test') and not class_info['is_abstract']:
+          classAnnotations, methodsAnnotations = class_info['annotations']
           tests.append({
-              'class': '%s.%s' % (package_name, class_name),
-              'annotations': {},
-              'methods': get_test_methods(class_info['methods']),
-              'superclass': class_info['superclass'],
+              'class':
+              '%s.%s' % (package_name, class_name),
+              'annotations':
+              classAnnotations,
+              'methods':
+              get_test_methods(class_info['methods'], methodsAnnotations),
+              'superclass':
+              class_info['superclass'],
           })
   return tests
 
@@ -610,6 +583,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     super().__init__()
 
     self._additional_apks = []
+    self._additional_apexs = []
+    self._forced_queryable_additional_apks = []
+    self._instant_additional_apks = []
     self._apk_under_test = None
     self._apk_under_test_incremental_install_json = None
     self._modules = None
@@ -618,8 +594,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._package_info = None
     self._suite = None
     self._test_apk = None
+    self._test_apk_as_instant = False
     self._test_apk_incremental_install_json = None
-    self._test_jar = None
     self._test_package = None
     self._junit3_runner_class = None
     self._junit4_runner_class = None
@@ -630,6 +606,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._data_deps = None
     self._data_deps_delegate = None
     self._runtime_deps_path = None
+    self._store_data_in_app_directory = False
     self._initializeDataDependencyAttributes(args, data_deps_delegate)
 
     self._annotations = None
@@ -665,6 +642,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._system_packages_to_remove = None
     self._initializeSystemPackagesToRemoveAttributes(args)
 
+    self._use_voice_interaction_service = None
+    self._initializeUseVoiceInteractionService(args)
+
     self._use_webview_provider = None
     self._initializeUseWebviewProviderAttributes(args)
 
@@ -674,10 +654,17 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._test_launcher_batch_limit = None
     self._initializeTestLauncherAttributes(args)
 
+    self._approve_app_links_domain = None
+    self._approve_app_links_package = None
+    self._initializeApproveAppLinksAttributes(args)
+
     self._wpr_enable_record = args.wpr_enable_record
 
     self._external_shard_index = args.test_launcher_shard_index
     self._total_external_shards = args.test_launcher_total_shards
+
+    self._is_unit_test = False
+    self._initializeUnitTestFlag(args)
 
   def _initializeApkAttributes(self, args, error_func):
     if args.apk_under_test:
@@ -712,6 +699,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._test_apk = apk_helper.ToHelper(test_apk_path)
     self._suite = os.path.splitext(os.path.basename(args.test_apk))[0]
 
+    self._test_apk_as_instant = args.test_apk_as_instant
+
     self._apk_under_test_incremental_install_json = (
         args.apk_under_test_incremental_install_json)
     self._test_apk_incremental_install_json = (
@@ -725,17 +714,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._fake_modules = args.fake_modules
     self._additional_locales = args.additional_locales
 
-    self._test_jar = args.test_jar
     self._test_support_apk = apk_helper.ToHelper(os.path.join(
         constants.GetOutDirectory(), constants.SDK_BUILD_TEST_JAVALIB_DIR,
         '%sSupport.apk' % self._suite))
-
-    if not self._test_jar:
-      logging.warning('Test jar not specified. Test runner will not have '
-                      'Java annotation info available. May not handle test '
-                      'timeouts correctly.')
-    elif not os.path.exists(self._test_jar):
-      error_func('Unable to find test JAR: %s' % self._test_jar)
 
     self._test_package = self._test_apk.GetPackageName()
     all_instrumentations = self._test_apk.GetAllInstrumentations()
@@ -782,17 +763,27 @@ class InstrumentationTestInstance(test_instance.TestInstance):
           '(This may just mean that the test package is '
           'currently being installed.)', self._test_package)
 
-    for apk in args.additional_apks:
-      if not os.path.exists(apk):
-        error_func('Unable to find additional APK: %s' % apk)
-    self._additional_apks = (
-        [apk_helper.ToHelper(x) for x in args.additional_apks])
+    for x in set(args.additional_apks + args.forced_queryable_additional_apks +
+                 args.instant_additional_apks):
+      if not os.path.exists(x):
+        error_func('Unable to find additional APK: %s' % x)
+
+      apk = apk_helper.ToHelper(x)
+      self._additional_apks.append(apk)
+
+      if x in args.forced_queryable_additional_apks:
+        self._forced_queryable_additional_apks.append(apk)
+
+      if x in args.instant_additional_apks:
+        self._instant_additional_apks.append(apk)
+
+    self._additional_apexs = args.additional_apexs
 
   def _initializeDataDependencyAttributes(self, args, data_deps_delegate):
     self._data_deps = []
     self._data_deps_delegate = data_deps_delegate
     self._runtime_deps_path = args.runtime_deps_path
-
+    self._store_data_in_app_directory = args.store_data_in_app_directory
     if not self._runtime_deps_path:
       logging.warning('No data dependencies will be pushed.')
 
@@ -819,7 +810,11 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       self._excluded_annotations = []
 
     requested_annotations = set(a[0] for a in self._annotations)
-    if not args.run_disabled:
+    if args.run_disabled:
+      self._excluded_annotations.extend(
+          annotation_element(a) for a in _DO_NOT_REVIVE_ANNOTATIONS
+          if a not in requested_annotations)
+    else:
       self._excluded_annotations.extend(
           annotation_element(a) for a in _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS
           if a not in requested_annotations)
@@ -875,6 +870,12 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       return
     self._system_packages_to_remove = args.system_packages_to_remove
 
+  def _initializeUseVoiceInteractionService(self, args):
+    if (not hasattr(args, 'use_voice_interaction_service')
+        or not args.use_voice_interaction_service):
+      return
+    self._use_voice_interaction_service = args.use_voice_interaction_service
+
   def _initializeUseWebviewProviderAttributes(self, args):
     if (not hasattr(args, 'use_webview_provider')
         or not args.use_webview_provider):
@@ -888,9 +889,30 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     if hasattr(args, 'test_launcher_batch_limit'):
       self._test_launcher_batch_limit = args.test_launcher_batch_limit
 
+  def _initializeApproveAppLinksAttributes(self, args):
+    if (not hasattr(args, 'approve_app_links') or not args.approve_app_links):
+      return
+
+    # The argument will be formatted as com.android.thing:www.example.com .
+    app_links = args.approve_app_links.split(':')
+
+    if (len(app_links) != 2 or not app_links[0] or not app_links[1]):
+      logging.warning('--approve_app_links option provided, but malformed.')
+      return
+
+    self._approve_app_links_package = app_links[0]
+    self._approve_app_links_domain = app_links[1]
+
+  def _initializeUnitTestFlag(self, args):
+    self._is_unit_test = args.is_unit_test
+
   @property
   def additional_apks(self):
     return self._additional_apks
+
+  @property
+  def additional_apexs(self):
+    return self._additional_apexs
 
   @property
   def apk_under_test(self):
@@ -899,6 +921,14 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   @property
   def apk_under_test_incremental_install_json(self):
     return self._apk_under_test_incremental_install_json
+
+  @property
+  def approve_app_links_package(self):
+    return self._approve_app_links_package
+
+  @property
+  def approve_app_links_domain(self):
+    return self._approve_app_links_domain
 
   @property
   def modules(self):
@@ -933,6 +963,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._flags
 
   @property
+  def is_unit_test(self):
+    return self._is_unit_test
+
+  @property
   def junit3_runner_class(self):
     return self._junit3_runner_class
 
@@ -953,6 +987,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._replace_system_package
 
   @property
+  def use_voice_interaction_service(self):
+    return self._use_voice_interaction_service
+
+  @property
   def use_webview_provider(self):
     return self._use_webview_provider
 
@@ -963,6 +1001,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   @property
   def skia_gold_properties(self):
     return self._skia_gold_properties
+
+  @property
+  def store_data_in_app_directory(self):
+    return self._store_data_in_app_directory
 
   @property
   def store_tombstones(self):
@@ -985,16 +1027,16 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._test_apk
 
   @property
+  def test_apk_as_instant(self):
+    return self._test_apk_as_instant
+
+  @property
   def test_apk_incremental_install_json(self):
     return self._test_apk_incremental_install_json
 
   @property
   def test_filter(self):
     return self._test_filter
-
-  @property
-  def test_jar(self):
-    return self._test_jar
 
   @property
   def test_launcher_batch_limit(self):
@@ -1060,10 +1102,12 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._data_deps
 
   def GetTests(self):
-    if self.test_jar:
-      raw_tests = GetAllTestsFromJar(self.test_jar)
-    else:
-      raw_tests = GetAllTestsFromApk(self.test_apk.path)
+    if self._test_apk_incremental_install_json:
+      # Would likely just be a matter of calling GetAllTestsFromApk on all
+      # .dex files listed in the .json.
+      raise Exception('Support not implemented for incremental_install=true on '
+                      'tests that do not use //base\'s test runner.')
+    raw_tests = GetAllTestsFromApk(self.test_apk.path)
     return self.ProcessRawTests(raw_tests)
 
   def MaybeDeobfuscateLines(self, lines):
@@ -1085,6 +1129,12 @@ class InstrumentationTestInstance(test_instance.TestInstance):
         logging.debug('  %s', GetUniqueTestName(t))
       logging.warning('Unmatched Filter: %s', self._test_filter)
     return filtered_tests
+
+  def IsApkForceQueryable(self, apk):
+    return apk in self._forced_queryable_additional_apks
+
+  def IsApkInstant(self, apk):
+    return apk in self._instant_additional_apks
 
   # pylint: disable=no-self-use
   def _InflateTests(self, tests):

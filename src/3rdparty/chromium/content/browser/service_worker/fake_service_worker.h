@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,8 @@ class FakeServiceWorker : public blink::mojom::ServiceWorker {
       blink::mojom::ServiceWorkerObjectInfoPtr service_worker_info,
       FetchHandlerExistence fetch_handler_existence,
       mojo::PendingReceiver<blink::mojom::ReportingObserver>
-          reporting_observer_receiver) override;
+          reporting_observer_receiver,
+      blink::mojom::AncestorFrameType ancestor_frame_type) override;
   void DispatchInstallEvent(DispatchInstallEventCallback callback) override;
   void DispatchActivateEvent(DispatchActivateEventCallback callback) override;
   void DispatchBackgroundFetchAbortEvent(

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -129,7 +129,7 @@ TEST_F(WebBundleParserFactoryTest, GetParserForFile) {
     base::test::TestFuture<mojom::BundleMetadataPtr,
                            mojom::BundleMetadataParseErrorPtr>
         future;
-    parser->ParseMetadata(future.GetCallback());
+    parser->ParseMetadata(/*offset=*/-1, future.GetCallback());
     metadata = std::get<0>(future.Take());
   }
   ASSERT_TRUE(metadata);

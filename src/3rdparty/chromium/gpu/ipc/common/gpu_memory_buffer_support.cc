@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,6 +75,7 @@ bool GpuMemoryBufferSupport::IsNativeGpuMemoryBufferConfigurationSupported(
       return format == gfx::BufferFormat::BGRA_8888 ||
              format == gfx::BufferFormat::RGBA_8888 ||
              format == gfx::BufferFormat::BGRX_8888 ||
+             format == gfx::BufferFormat::RGBX_8888 ||
              format == gfx::BufferFormat::R_8 ||
              format == gfx::BufferFormat::RGBA_F16 ||
              format == gfx::BufferFormat::BGRA_1010102 ||

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "base/check.h"
-#include "content/browser/attribution_reporting/attribution_source_type.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 
 namespace content {
@@ -29,56 +28,33 @@ AttributionTrigger::AttributionTrigger(
     url::Origin destination_origin,
     url::Origin reporting_origin,
     AttributionFilterData filters,
+    AttributionFilterData not_filters,
     absl::optional<uint64_t> debug_key,
+    absl::optional<uint64_t> aggregatable_dedup_key,
     std::vector<EventTriggerData> event_triggers,
-    AttributionAggregatableTrigger aggregatable_trigger)
+    std::vector<AttributionAggregatableTriggerData> aggregatable_trigger_data,
+    AttributionAggregatableValues aggregatable_values)
     : destination_origin_(std::move(destination_origin)),
       reporting_origin_(std::move(reporting_origin)),
       filters_(std::move(filters)),
+      not_filters_(std::move(not_filters)),
       debug_key_(debug_key),
+      aggregatable_dedup_key_(aggregatable_dedup_key),
       event_triggers_(std::move(event_triggers)),
-      aggregatable_trigger_(std::move(aggregatable_trigger)) {
+      aggregatable_trigger_data_(std::move(aggregatable_trigger_data)),
+      aggregatable_values_(std::move(aggregatable_values)) {
   DCHECK(network::IsOriginPotentiallyTrustworthy(reporting_origin_));
   DCHECK(network::IsOriginPotentiallyTrustworthy(destination_origin_));
 }
 
-AttributionTrigger::AttributionTrigger(
-    uint64_t trigger_data,
-    url::Origin destination_origin,
-    url::Origin reporting_origin,
-    uint64_t event_source_trigger_data,
-    int64_t priority,
-    absl::optional<uint64_t> dedup_key,
-    absl::optional<uint64_t> debug_key,
-    AttributionAggregatableTrigger aggregatable_trigger)
-    : AttributionTrigger(std::move(destination_origin),
-                         std::move(reporting_origin),
-                         /*filters=*/AttributionFilterData(),
-                         debug_key,
-                         std::vector<EventTriggerData>(),
-                         std::move(aggregatable_trigger)) {
-  event_triggers_.reserve(2);
-  event_triggers_.emplace_back(
-      trigger_data, priority, dedup_key,
-      /*filters=*/
-      AttributionFilterData::ForSourceType(AttributionSourceType::kNavigation),
-      /*not_filters=*/AttributionFilterData());
-  event_triggers_.emplace_back(
-      event_source_trigger_data, priority, dedup_key,
-      /*filters=*/
-      AttributionFilterData::ForSourceType(AttributionSourceType::kEvent),
-      /*not_filters=*/AttributionFilterData());
-}
+AttributionTrigger::AttributionTrigger(const AttributionTrigger&) = default;
 
-AttributionTrigger::AttributionTrigger(const AttributionTrigger& other) =
+AttributionTrigger& AttributionTrigger::operator=(const AttributionTrigger&) =
     default;
 
-AttributionTrigger& AttributionTrigger::operator=(
-    const AttributionTrigger& other) = default;
+AttributionTrigger::AttributionTrigger(AttributionTrigger&&) = default;
 
-AttributionTrigger::AttributionTrigger(AttributionTrigger&& other) = default;
-
-AttributionTrigger& AttributionTrigger::operator=(AttributionTrigger&& other) =
+AttributionTrigger& AttributionTrigger::operator=(AttributionTrigger&&) =
     default;
 
 AttributionTrigger::~AttributionTrigger() = default;

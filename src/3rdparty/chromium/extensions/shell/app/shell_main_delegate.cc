@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -123,7 +123,7 @@ ShellMainDelegate::ShellMainDelegate() {
 ShellMainDelegate::~ShellMainDelegate() {
 }
 
-bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
+absl::optional<int> ShellMainDelegate::BasicStartupComplete() {
   InitLogging();
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -136,7 +136,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
   nacl::RegisterPathProvider();
 #endif
   extensions::RegisterPathProvider();
-  return false;
+  return absl::nullopt;
 }
 
 void ShellMainDelegate::PreSandboxStartup() {
@@ -177,12 +177,6 @@ void ShellMainDelegate::ZygoteStarting(
 #endif  // BUILDFLAG(ENABLE_NACL)
 }
 #endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
-
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-void ShellMainDelegate::PostEarlyInitialization(bool is_running_tests) {}
-#endif
 
 // static
 bool ShellMainDelegate::ProcessNeedsResourceBundle(

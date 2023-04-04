@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -202,6 +202,8 @@ class VerdictCacheManager : public history::HistoryServiceObserver,
   PrefChangeRegistrar pref_change_registrar_;
 
   std::unique_ptr<SafeBrowsingSyncObserver> sync_observer_;
+
+  bool is_shut_down_ = false;
 
   base::WeakPtrFactory<VerdictCacheManager> weak_factory_{this};
 

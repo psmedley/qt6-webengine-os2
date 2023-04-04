@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,17 @@ std::string FilePathToString(const base::FilePath& file_path);
 
 // Returns the base file name to use for storing all prediction models.
 base::FilePath GetBaseFileNameForModels();
+
+// Returns the separator used in the model override switch below, which differs
+// between platforms.
+std::string ModelOverrideSeparator();
+
+// Returns the file path string and metadata for the model provided via
+// command-line for |optimization_target|, if applicable.
+absl::optional<
+    std::pair<std::string, absl::optional<optimization_guide::proto::Any>>>
+GetModelOverrideForOptimizationTarget(
+    optimization_guide::proto::OptimizationTarget optimization_target);
 
 }  // namespace optimization_guide
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ AutofillClient::PopupOpenArgs::PopupOpenArgs() = default;
 AutofillClient::PopupOpenArgs::PopupOpenArgs(
     const gfx::RectF& element_bounds,
     base::i18n::TextDirection text_direction,
-    std::vector<autofill::Suggestion> suggestions,
+    std::vector<Suggestion> suggestions,
     AutoselectFirstSuggestion autoselect_first_suggestion,
     PopupType popup_type)
     : element_bounds(element_bounds),
@@ -43,11 +43,28 @@ version_info::Channel AutofillClient::GetChannel() const {
   return version_info::Channel::UNKNOWN;
 }
 
+IBANManager* AutofillClient::GetIBANManager() {
+  return nullptr;
+}
+
+MerchantPromoCodeManager* AutofillClient::GetMerchantPromoCodeManager() {
+  return nullptr;
+}
+
 #if !defined(TOOLKIT_QT)
 std::unique_ptr<SingleFieldFormFillRouter>
-AutofillClient::GetSingleFieldFormFillRouter() {
+AutofillClient::CreateSingleFieldFormFillRouter() {
   return std::make_unique<SingleFieldFormFillRouter>(
-      GetAutocompleteHistoryManager());
+      GetAutocompleteHistoryManager(), GetIBANManager(),
+      GetMerchantPromoCodeManager());
+}
+
+CreditCardCVCAuthenticator* AutofillClient::GetCVCAuthenticator() {
+  return nullptr;
+}
+
+CreditCardOtpAuthenticator* AutofillClient::GetOtpAuthenticator() {
+  return nullptr;
 }
 
 AutofillOfferManager* AutofillClient::GetAutofillOfferManager() {
@@ -79,7 +96,7 @@ void AutofillClient::DismissUnmaskAuthenticatorSelectionDialog(
   // ChromeAutofillClient (Chrome Desktop and Clank) implements this.
 }
 
-raw_ptr<VirtualCardEnrollmentManager>
+VirtualCardEnrollmentManager*
 AutofillClient::GetVirtualCardEnrollmentManager() {
   // This is overridden by platform subclasses. Currently only
   // ChromeAutofillClient (Chrome Desktop and Clank) implements this.
@@ -103,8 +120,7 @@ void AutofillClient::HideVirtualCardEnrollBubbleAndIconIfVisible() {
 
 #if !BUILDFLAG(IS_IOS)
 std::unique_ptr<webauthn::InternalAuthenticator>
-AutofillClient::CreateCreditCardInternalAuthenticator(
-    content::RenderFrameHost* rfh) {
+AutofillClient::CreateCreditCardInternalAuthenticator(AutofillDriver* driver) {
   return nullptr;
 }
 #endif
@@ -142,12 +158,14 @@ void AutofillClient::OnVirtualCardDataAvailable(
   // ChromeAutofillClient (Chrome Desktop & Android) implements this.
 }
 
-void AutofillClient::ShowVirtualCardErrorDialog(bool is_permanent_error) {
+void AutofillClient::ShowVirtualCardErrorDialog(
+    const AutofillErrorDialogContext& context) {
   // This is overridden by platform subclasses. Currently only
   // ChromeAutofillClient (Chrome Desktop & Android) implements this.
 }
 
 void AutofillClient::ShowAutofillProgressDialog(
+    AutofillProgressDialogType autofill_progress_dialog_type,
     base::OnceClosure cancel_callback) {
   // This is overridden by platform subclasses. Currently only
   // ChromeAutofillClient (Chrome Desktop & Android) implements this.

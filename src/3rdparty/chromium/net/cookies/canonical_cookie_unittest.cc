@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,9 @@ using testing::Eq;
 using testing::Not;
 using testing::Property;
 
+// Tests which use this class verify the expiry date clamping behavior when
+// kClampCookieExpiryTo400Days is enabled. This caps expiry dates on new/updated
+// cookies to max of 400 days, but does not affect previously stored cookies.
 class CanonicalCookieWithClampingTest
     : public testing::Test,
       public testing::WithParamInterface<bool> {
@@ -74,7 +77,7 @@ TEST(CanonicalCookieTest, Constructor) {
   // CreateUnsafeCookieForTesting just forwards to the constructor.
   auto cookie1 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
+      base::Time(), base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
       COOKIE_PRIORITY_DEFAULT, false, absl::nullopt,
       CookieSourceScheme::kSecure, 443);
   EXPECT_EQ("A", cookie1->Name());
@@ -92,7 +95,7 @@ TEST(CanonicalCookieTest, Constructor) {
 
   auto cookie2 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", ".www.example.com", "/", current_time, base::Time(),
-      base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
+      base::Time(), base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
       COOKIE_PRIORITY_DEFAULT, true,
       CookiePartitionKey::FromURLForTesting(GURL("https://foo.com")),
       CookieSourceScheme::kNonSecure, 65536);
@@ -115,15 +118,15 @@ TEST(CanonicalCookieTest, Constructor) {
   // Set Secure to true but don't specify source_scheme or port.
   auto cookie3 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", ".www.example.com", "/", current_time, base::Time(),
-      base::Time(), true /* secure */, false, CookieSameSite::NO_RESTRICTION,
-      COOKIE_PRIORITY_DEFAULT, false);
+      base::Time(), base::Time(), true /* secure */, false,
+      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
   EXPECT_TRUE(cookie3->IsSecure());
   EXPECT_EQ(cookie3->SourceScheme(), CookieSourceScheme::kUnset);
   EXPECT_EQ(cookie3->SourcePort(), url::PORT_UNSPECIFIED);
 
   auto cookie4 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", ".www.example.com", "/test", current_time, base::Time(),
-      base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
+      base::Time(), base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
       COOKIE_PRIORITY_DEFAULT, false);
   EXPECT_EQ("A", cookie4->Name());
   EXPECT_EQ("2", cookie4->Value());
@@ -140,17 +143,17 @@ TEST(CanonicalCookieTest, Constructor) {
   // Test some port edge cases: unspecified.
   auto cookie5 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", ".www.example.com", "/", current_time, base::Time(),
-      base::Time(), true /* secure */, false, CookieSameSite::NO_RESTRICTION,
-      COOKIE_PRIORITY_DEFAULT, false, absl::nullopt, CookieSourceScheme::kUnset,
-      url::PORT_UNSPECIFIED);
+      base::Time(), base::Time(), true /* secure */, false,
+      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false,
+      absl::nullopt, CookieSourceScheme::kUnset, url::PORT_UNSPECIFIED);
   EXPECT_EQ(cookie5->SourcePort(), url::PORT_UNSPECIFIED);
 
   // Test some port edge cases: invalid.
   auto cookie6 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", ".www.example.com", "/", current_time, base::Time(),
-      base::Time(), true /* secure */, false, CookieSameSite::NO_RESTRICTION,
-      COOKIE_PRIORITY_DEFAULT, false, absl::nullopt, CookieSourceScheme::kUnset,
-      url::PORT_INVALID);
+      base::Time(), base::Time(), true /* secure */, false,
+      CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false,
+      absl::nullopt, CookieSourceScheme::kUnset, url::PORT_INVALID);
   EXPECT_EQ(cookie6->SourcePort(), url::PORT_INVALID);
 }
 
@@ -363,10 +366,6 @@ TEST(CanonicalCookieTest, Create) {
 // Test that a cookie string with an empty domain attribute generates a
 // canonical host cookie.
 TEST(CanonicalCookieTest, CreateHostCookieFromString) {
-  // Enable the feature flag for this test.
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      features::kCookieDomainAttributeEmptyString);
   // Create a new canonical host cookie via empty string domain in the
   // cookie_line.
   GURL url("http://www.example.com/test/foo.html");
@@ -449,6 +448,56 @@ TEST(CanonicalCookieTest, CreateWithInvalidDomain) {
   EXPECT_EQ(nullptr, cookie.get());
   EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_INVALID_DOMAIN}));
+}
+
+TEST(CanonicalCookieTest, CreateWithNonASCIIDomain) {
+  GURL url("http://www.xn--xample-9ua.com/test/foo.html");
+  base::Time now = base::Time::Now();
+  absl::optional<base::Time> server_time = absl::nullopt;
+
+  // Test with feature flag enabled.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeature(features::kCookieDomainRejectNonASCII);
+    CookieInclusionStatus status;
+
+    // Test that non-ascii characters are rejected.
+    std::unique_ptr<CanonicalCookie> cookie = CanonicalCookie::Create(
+        url, "A=1; Domain=\xC3\xA9xample.com", now, server_time,
+        absl::nullopt /* cookie_partition_key */, &status);
+    EXPECT_EQ(nullptr, cookie.get());
+    EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+        {CookieInclusionStatus::EXCLUDE_INVALID_DOMAIN,
+         CookieInclusionStatus::EXCLUDE_DOMAIN_NON_ASCII}));
+    EXPECT_FALSE(
+        status.HasWarningReason(CookieInclusionStatus::WARN_DOMAIN_NON_ASCII));
+  }
+
+  // Test with feature flag disabled.
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndDisableFeature(features::kCookieDomainRejectNonASCII);
+    CookieInclusionStatus status2;
+
+    std::unique_ptr<CanonicalCookie> cookie2 = CanonicalCookie::Create(
+        url, "A=2; Domain=\xC3\xA9xample.com", now, server_time,
+        absl::nullopt /* cookie_partition_key */, &status2);
+
+    EXPECT_TRUE(cookie2.get());
+    EXPECT_TRUE(status2.IsInclude());
+    EXPECT_TRUE(
+        status2.HasWarningReason(CookieInclusionStatus::WARN_DOMAIN_NON_ASCII));
+  }
+
+  // Test that regular ascii punycode still works.
+  CookieInclusionStatus status3;
+  std::unique_ptr<CanonicalCookie> cookie3 = CanonicalCookie::Create(
+      url, "A=3; Domain=xn--xample-9ua.com", now, server_time,
+      absl::nullopt /* cookie_partition_key */, &status3);
+  EXPECT_TRUE(cookie3.get());
+  EXPECT_TRUE(status3.IsInclude());
+  EXPECT_FALSE(
+      status3.HasWarningReason(CookieInclusionStatus::WARN_DOMAIN_NON_ASCII));
 }
 
 TEST(CanonicalCookieTest, CreateWithDomainAsIP) {
@@ -599,57 +648,42 @@ TEST(CanonicalCookieTest, CreateWithPartitioned) {
   EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
 
-  // Invalid Partitioned attribute: No Path attribute.
+  // Partitioned attribute: No Path attribute.
   status = CookieInclusionStatus();
   cookie =
       CanonicalCookie::Create(url, "A=2; Partitioned; Secure", creation_time,
                               server_time, partition_key, &status);
-  EXPECT_FALSE(cookie.get());
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
+  EXPECT_TRUE(cookie.get());
+  EXPECT_TRUE(status.IsInclude());
+  EXPECT_TRUE(cookie->IsPartitioned());
+  EXPECT_EQ(partition_key, cookie->PartitionKey());
 
-  // Invalid Partitioned attribute: invalid Path attribute.
+  // Partitioned attribute: Path attribute not equal to "/".
   status = CookieInclusionStatus();
   cookie = CanonicalCookie::Create(
       url, "A=2; Partitioned; Path=/foobar; Secure", creation_time, server_time,
       partition_key, &status);
-  EXPECT_FALSE(cookie.get());
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
-
-  // Invalid Partitioned attribute: Domain cookie.
-  status = CookieInclusionStatus();
-  cookie = CanonicalCookie::Create(
-      url, "A=2; Partitioned; Path=/; Domain=example.com", creation_time,
-      server_time, partition_key, &status);
-  EXPECT_FALSE(cookie.get());
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
-
-  // Invalid Partitioned attribute: SameParty cookie.
-  status = CookieInclusionStatus();
-  cookie = CanonicalCookie::Create(
-      url, "A=2; Partitioned; Path=/; Secure; SameParty", creation_time,
-      server_time, partition_key, &status);
-  EXPECT_FALSE(cookie.get());
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
-
-  // Invalid Partitioned attribute: SameParty cookie but with a nonce.
-  auto partition_key_with_nonce =
-      absl::make_optional(CookiePartitionKey::FromURLForTesting(
-          GURL("https://toplevelsite.com"), base::UnguessableToken::Create()));
-  status = CookieInclusionStatus();
-  cookie = CanonicalCookie::Create(
-      url, "A=2; Partitioned; Path=/; Secure; SameParty", creation_time,
-      server_time, partition_key_with_nonce, &status);
   EXPECT_TRUE(cookie.get());
   EXPECT_TRUE(status.IsInclude());
   EXPECT_TRUE(cookie->IsPartitioned());
-  EXPECT_EQ(partition_key_with_nonce, cookie->PartitionKey());
+  EXPECT_EQ(partition_key, cookie->PartitionKey());
+
+  // Partitioned attribute: Domain cookie.
+  status = CookieInclusionStatus();
+  cookie = CanonicalCookie::Create(
+      url, "A=2; Partitioned; Path=/; Secure; Domain=example.com",
+      creation_time, server_time, partition_key, &status);
+  EXPECT_TRUE(cookie.get());
+  LOG(ERROR) << status;
+  EXPECT_TRUE(status.IsInclude());
+  EXPECT_TRUE(cookie->IsPartitioned());
+  EXPECT_EQ(partition_key, cookie->PartitionKey());
 
   // No Partitioned attribute but with a nonce.
   status = CookieInclusionStatus();
+  auto partition_key_with_nonce =
+      absl::make_optional(CookiePartitionKey::FromURLForTesting(
+          GURL("https://toplevelsite.com"), base::UnguessableToken::Create()));
   cookie =
       CanonicalCookie::Create(url, "__Host-A=2; Path=/; Secure", creation_time,
                               server_time, partition_key_with_nonce, &status);
@@ -672,6 +706,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_FALSE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Seconds(60) + creation_time, cookie->ExpiryDate());
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Max-age with expires (max-age should take precedence).
   cookie = CanonicalCookie::Create(
@@ -681,6 +716,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_FALSE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Seconds(60) + creation_time, cookie->ExpiryDate());
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Max-age=0 should create an expired cookie with expiry equal to the earliest
   // representable time.
@@ -691,6 +727,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_TRUE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Time::Min(), cookie->ExpiryDate());
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Negative max-age should create an expired cookie with expiry equal to the
   // earliest representable time.
@@ -701,6 +738,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_TRUE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Time::Min(), cookie->ExpiryDate());
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Max-age with whitespace (should be trimmed out).
   cookie = CanonicalCookie::Create(url, "A=1; max-age = 60  ; Secure",
@@ -710,6 +748,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_FALSE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Seconds(60) + creation_time, cookie->ExpiryDate());
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Max-age with non-integer should be ignored.
   cookie = CanonicalCookie::Create(url, "A=1; max-age=abcd", creation_time,
@@ -718,6 +757,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie.get());
   EXPECT_FALSE(cookie->IsPersistent());
   EXPECT_FALSE(cookie->IsExpired(creation_time));
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Overflow max-age should be clipped.
   cookie = CanonicalCookie::Create(url,
@@ -735,6 +775,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   } else {
     EXPECT_EQ(base::Time::Max(), cookie->ExpiryDate());
   }
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Underflow max-age should be clipped.
   cookie = CanonicalCookie::Create(url,
@@ -748,6 +789,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithMaxAge) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_TRUE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Time::Min(), cookie->ExpiryDate());
+  EXPECT_TRUE(cookie->IsCanonical());
 }
 
 TEST_P(CanonicalCookieWithClampingTest, CreateWithExpires) {
@@ -765,6 +807,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithExpires) {
   EXPECT_TRUE(cookie->IsExpired(creation_time));
   EXPECT_TRUE((past_date - cookie->ExpiryDate()).magnitude() <
               base::Seconds(1));
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Expires in the future
   base::Time future_date = base::Time::Now() + base::Days(10);
@@ -776,6 +819,7 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithExpires) {
   EXPECT_FALSE(cookie->IsExpired(creation_time));
   EXPECT_TRUE((future_date - cookie->ExpiryDate()).magnitude() <
               base::Seconds(1));
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Expires in the far future
   future_date = base::Time::Now() + base::Days(800);
@@ -793,22 +837,29 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithExpires) {
     EXPECT_TRUE((future_date - cookie->ExpiryDate()).magnitude() <
                 base::Seconds(1));
   }
+  EXPECT_TRUE(cookie->IsCanonical());
 
   // Expires in the far future using CreateUnsafeCookieForTesting.
   cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "1", url.host(), url.path(), creation_time, base::Time::Max(),
-      base::Time(), true, false, CookieSameSite::UNSPECIFIED,
+      base::Time(), base::Time(), true, false, CookieSameSite::UNSPECIFIED,
       COOKIE_PRIORITY_HIGH, false, absl::nullopt /* cookie_partition_key */,
       CookieSourceScheme::kSecure, 443);
   EXPECT_TRUE(cookie.get());
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_FALSE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Time::Max(), cookie->ExpiryDate());
+  EXPECT_EQ(base::Time(), cookie->LastUpdateDate());
+  if (IsClampCookieExpiryTo400DaysEnabled()) {
+    EXPECT_FALSE(cookie->IsCanonical());
+  } else {
+    EXPECT_TRUE(cookie->IsCanonical());
+  }
 
   // Expires in the far future using FromStorage.
   cookie = CanonicalCookie::FromStorage(
       "A", "B", "www.foo.com", "/bar", creation_time, base::Time::Max(),
-      base::Time(), false /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 443);
@@ -816,6 +867,12 @@ TEST_P(CanonicalCookieWithClampingTest, CreateWithExpires) {
   EXPECT_TRUE(cookie->IsPersistent());
   EXPECT_FALSE(cookie->IsExpired(creation_time));
   EXPECT_EQ(base::Time::Max(), cookie->ExpiryDate());
+  EXPECT_EQ(base::Time(), cookie->LastUpdateDate());
+  if (IsClampCookieExpiryTo400DaysEnabled()) {
+    EXPECT_FALSE(cookie->IsCanonical());
+  } else {
+    EXPECT_TRUE(cookie->IsCanonical());
+  }
 }
 
 TEST(CanonicalCookieTest, EmptyExpiry) {
@@ -852,6 +909,54 @@ TEST(CanonicalCookieTest, EmptyExpiry) {
   EXPECT_EQ(base::Time(), cookie->ExpiryDate());
 }
 
+TEST_P(CanonicalCookieWithClampingTest, CreateWithLastUpdate) {
+  GURL url("http://www.example.com/test/foo.html");
+  base::Time creation_time = base::Time::Now() - base::Days(1);
+  base::Time last_update_time = base::Time::Now() - base::Hours(1);
+  absl::optional<base::Time> server_time = absl::nullopt;
+
+  // Creating a cookie sets the last update date as now.
+  std::unique_ptr<CanonicalCookie> cookie =
+      CanonicalCookie::Create(url, "A=1", creation_time, server_time,
+                              /*cookie_partition_key=*/absl::nullopt);
+  ASSERT_TRUE(cookie.get());
+  EXPECT_TRUE((base::Time::Now() - cookie->LastUpdateDate()).magnitude() <
+              base::Seconds(1));
+
+  // Creating a sanitized cookie sets the last update date as now.
+  cookie = CanonicalCookie::CreateSanitizedCookie(
+      url, "A", "1", url.host(), url.path(), creation_time, base::Time(),
+      creation_time, /*secure=*/true,
+      /*http_only=*/false, CookieSameSite::NO_RESTRICTION,
+      COOKIE_PRIORITY_DEFAULT, /*same_party=*/false,
+      /*partition_key=*/absl::nullopt);
+  ASSERT_TRUE(cookie.get());
+  EXPECT_TRUE((base::Time::Now() - cookie->LastUpdateDate()).magnitude() <
+              base::Seconds(1));
+
+  // Creating an unsafe cookie allows us to set the last update date.
+  cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
+      "A", "1", url.host(), url.path(), creation_time, base::Time(),
+      base::Time(), last_update_time, /*secure=*/true,
+      /*httponly=*/false, CookieSameSite::NO_RESTRICTION,
+      COOKIE_PRIORITY_DEFAULT, /*same_party=*/false,
+      /*partition_key=*/absl::nullopt, CookieSourceScheme::kSecure,
+      /*source_port=*/443);
+  ASSERT_TRUE(cookie.get());
+  EXPECT_EQ(last_update_time, cookie->LastUpdateDate());
+
+  // Loading a cookie from storage allows us to set the last update date.
+  cookie = CanonicalCookie::FromStorage(
+      "A", "1", url.host(), url.path(), creation_time, base::Time(),
+      base::Time(), last_update_time, /*secure=*/true,
+      /*httponly=*/false, CookieSameSite::NO_RESTRICTION,
+      COOKIE_PRIORITY_DEFAULT, /*same_party=*/false,
+      /*partition_key=*/absl::nullopt, CookieSourceScheme::kSecure,
+      /*source_port=*/443);
+  ASSERT_TRUE(cookie.get());
+  EXPECT_EQ(last_update_time, cookie->LastUpdateDate());
+}
+
 TEST(CanonicalCookieTest, IsEquivalent) {
   GURL url("https://www.example.com/");
   std::string cookie_name = "A";
@@ -860,6 +965,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   std::string cookie_path = "/path";
   base::Time creation_time = base::Time::Now();
   base::Time expiration_time = creation_time + base::Days(2);
+  base::Time update_time = creation_time + base::Days(1);
   bool secure = false;
   bool httponly = false;
   CookieSameSite same_site = CookieSameSite::NO_RESTRICTION;
@@ -868,7 +974,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // Test that a cookie is equivalent to itself.
   auto cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*cookie));
@@ -876,7 +982,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // Test that two identical cookies are equivalent.
   auto other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(other_cookie->IsEquivalentForSecureCookieMatching(*cookie));
@@ -885,7 +991,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // DON'T affect cookie equivalence.
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, "2", cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_HIGH, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -894,7 +1000,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   base::Time other_creation_time = creation_time + base::Minutes(2);
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, "2", cookie_domain, cookie_path, other_creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -902,7 +1008,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
 
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_name, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), true, httponly, same_site,
+      expiration_time, base::Time(), update_time, true, httponly, same_site,
       COOKIE_PRIORITY_LOW, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -910,7 +1016,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
 
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_name, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, true, same_site,
+      expiration_time, base::Time(), update_time, secure, true, same_site,
       COOKIE_PRIORITY_LOW, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -918,16 +1024,26 @@ TEST(CanonicalCookieTest, IsEquivalent) {
 
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_name, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly,
+      expiration_time, base::Time(), update_time, secure, httponly,
       CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_LOW, same_party);
   EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
   EXPECT_TRUE(other_cookie->IsEquivalentForSecureCookieMatching(*cookie));
 
+  // Test the effect of a differing last_update_time on equivalency.
+  other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
+      cookie_name, cookie_name, cookie_domain, cookie_path, creation_time,
+      expiration_time, base::Time(), base::Time(), secure, httponly, same_site,
+      COOKIE_PRIORITY_LOW, same_party);
+  EXPECT_TRUE(cookie->IsEquivalent(*other_cookie));
+  EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
+  EXPECT_TRUE(other_cookie->IsEquivalentForSecureCookieMatching(*cookie));
+  EXPECT_FALSE(cookie->HasEquivalentDataMembers(*other_cookie));
+
   // Cookies whose names mismatch are not equivalent.
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       "B", cookie_value, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_FALSE(cookie->IsEquivalent(*other_cookie));
   EXPECT_FALSE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -938,7 +1054,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // rules of 'IsEquivalentForSecureCookieMatching'.
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, "www.example.com", cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_TRUE(cookie->IsDomainCookie());
   EXPECT_FALSE(other_cookie->IsDomainCookie());
@@ -950,7 +1066,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // 'www.example.com', but they are equivalent for secure cookie matching.
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, ".example.com", cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_FALSE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -963,7 +1079,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // equivalent for secure cookie matching to |other_cookie| set on '/'.
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, "/test", creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_FALSE(cookie->IsEquivalent(*other_cookie));
   EXPECT_FALSE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -971,8 +1087,8 @@ TEST(CanonicalCookieTest, IsEquivalent) {
 
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, cookie_path + "/subpath",
-      creation_time, expiration_time, base::Time(), secure, httponly, same_site,
-      COOKIE_PRIORITY_MEDIUM, same_party);
+      creation_time, expiration_time, base::Time(), update_time, secure,
+      httponly, same_site, COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_FALSE(cookie->IsEquivalent(*other_cookie));
   // The path comparison is asymmetric
   EXPECT_FALSE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -980,7 +1096,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
 
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, "/", creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party);
   EXPECT_FALSE(cookie->IsEquivalent(*other_cookie));
   EXPECT_TRUE(cookie->IsEquivalentForSecureCookieMatching(*other_cookie));
@@ -989,7 +1105,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // Partitioned cookies are not equivalent to unpartitioned cookies.
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party,
       CookiePartitionKey::FromURLForTesting(GURL("https://foo.com")));
   EXPECT_FALSE(cookie->IsEquivalent(*other_cookie));
@@ -998,7 +1114,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // Partitioned cookies are equal if they have the same partition key.
   auto paritioned_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party,
       CookiePartitionKey::FromURLForTesting(GURL("https://foo.com")));
   EXPECT_TRUE(paritioned_cookie->IsEquivalent(*other_cookie));
@@ -1008,7 +1124,7 @@ TEST(CanonicalCookieTest, IsEquivalent) {
   // Partitioned cookies with different partition keys are not equal
   other_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
       cookie_name, cookie_value, cookie_domain, cookie_path, creation_time,
-      expiration_time, base::Time(), secure, httponly, same_site,
+      expiration_time, base::Time(), update_time, secure, httponly, same_site,
       COOKIE_PRIORITY_MEDIUM, same_party,
       CookiePartitionKey::FromURLForTesting(GURL("https://bar.com")));
   EXPECT_FALSE(paritioned_cookie->IsEquivalent(*other_cookie));
@@ -1073,14 +1189,15 @@ TEST(CanonicalCookieTest, IsEquivalentForSecureCookieMatching) {
   for (auto test : kTests) {
     auto cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
         test.cookie.name, "value1", test.cookie.domain, test.cookie.path,
-        base::Time(), base::Time(), base::Time(), false /* secure */,
-        false /* httponly */, CookieSameSite::LAX_MODE, COOKIE_PRIORITY_MEDIUM,
-        false /* sameparty */, test.cookie.cookie_partition_key);
+        base::Time(), base::Time(), base::Time(), base::Time(),
+        false /* secure */, false /* httponly */, CookieSameSite::LAX_MODE,
+        COOKIE_PRIORITY_MEDIUM, false /* sameparty */,
+        test.cookie.cookie_partition_key);
     auto secure_cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
         test.secure_cookie.name, "value2", test.secure_cookie.domain,
         test.secure_cookie.path, base::Time(), base::Time(), base::Time(),
-        true /* secure */, false /* httponly */, CookieSameSite::LAX_MODE,
-        COOKIE_PRIORITY_MEDIUM, false /* sameparty */,
+        base::Time(), true /* secure */, false /* httponly */,
+        CookieSameSite::LAX_MODE, COOKIE_PRIORITY_MEDIUM, false /* sameparty */,
         test.secure_cookie.cookie_partition_key);
 
     EXPECT_EQ(test.equivalent,
@@ -1194,25 +1311,25 @@ TEST(CanonicalCookieTest, GetEffectiveSameSite) {
       // Recent session cookie.
       cookies.push_back(CanonicalCookie::CreateUnsafeCookieForTesting(
           "A", "2", "example.test", "/", recent_creation_time, base::Time(),
-          base::Time(), true /* secure */, false /* httponly */, test.same_site,
-          COOKIE_PRIORITY_DEFAULT, false));
+          base::Time(), base::Time(), true /* secure */, false /* httponly */,
+          test.same_site, COOKIE_PRIORITY_DEFAULT, false));
       // Recent persistent cookie.
       cookies.push_back(CanonicalCookie::CreateUnsafeCookieForTesting(
           "A", "2", "example.test", "/", recent_creation_time, expiry_time,
-          base::Time(), true /* secure */, false /* httponly */, test.same_site,
-          COOKIE_PRIORITY_DEFAULT, false));
+          base::Time(), base::Time(), true /* secure */, false /* httponly */,
+          test.same_site, COOKIE_PRIORITY_DEFAULT, false));
     }
     if (!test.is_cookie_recent.has_value() || !(*test.is_cookie_recent)) {
       // Not-recent session cookie.
       cookies.push_back(CanonicalCookie::CreateUnsafeCookieForTesting(
           "A", "2", "example.test", "/", not_recent_creation_time, base::Time(),
-          base::Time(), true /* secure */, false /* httponly */, test.same_site,
-          COOKIE_PRIORITY_DEFAULT, false));
+          base::Time(), base::Time(), true /* secure */, false /* httponly */,
+          test.same_site, COOKIE_PRIORITY_DEFAULT, false));
       // Not-recent persistent cookie.
       cookies.push_back(CanonicalCookie::CreateUnsafeCookieForTesting(
           "A", "2", "example.test", "/", not_recent_creation_time, expiry_time,
-          base::Time(), true /* secure */, false /* httponly */, test.same_site,
-          COOKIE_PRIORITY_DEFAULT, false));
+          base::Time(), base::Time(), true /* secure */, false /* httponly */,
+          test.same_site, COOKIE_PRIORITY_DEFAULT, false));
     }
 
     std::vector<CookieAccessSemantics> access_semantics = {
@@ -1502,25 +1619,21 @@ TEST(CanonicalCookieTest, IncludeForRequestURLSameSite) {
       {"Common=10;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(SameSiteCookieContext::ContextType::CROSS_SITE),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=11;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(
            SameSiteCookieContext::ContextType::SAME_SITE_LAX_METHOD_UNSAFE),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=12;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(SameSiteCookieContext::ContextType::SAME_SITE_LAX),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=13;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(
            SameSiteCookieContext::ContextType::SAME_SITE_STRICT),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       // Because NO_RESTRICTION cookies are always sent, the schemeful context
       // downgrades shouldn't matter.
       {"Common=14;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
@@ -1528,35 +1641,30 @@ TEST(CanonicalCookieTest, IncludeForRequestURLSameSite) {
        SameSiteCookieContext(
            SameSiteCookieContext::ContextType::SAME_SITE_STRICT,
            SameSiteCookieContext::ContextType::SAME_SITE_LAX),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=15;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(
            SameSiteCookieContext::ContextType::SAME_SITE_STRICT,
            SameSiteCookieContext::ContextType::SAME_SITE_LAX_METHOD_UNSAFE),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=16;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(
            SameSiteCookieContext::ContextType::SAME_SITE_STRICT,
            SameSiteCookieContext::ContextType::CROSS_SITE),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=17;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(SameSiteCookieContext::ContextType::SAME_SITE_LAX,
                              SameSiteCookieContext::ContextType::CROSS_SITE),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
       {"Common=18;SameSite=None;Secure", CookieSameSite::NO_RESTRICTION,
        CookieEffectiveSameSite::NO_RESTRICTION,
        SameSiteCookieContext(
            SameSiteCookieContext::ContextType::SAME_SITE_LAX_METHOD_UNSAFE,
            SameSiteCookieContext::ContextType::CROSS_SITE),
-       CookieInclusionStatus(
-           CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED)},
+       CookieInclusionStatus()},
   };
 
   // Test cases where the unspecified-SameSite cookie defaults to SameSite=None
@@ -1930,7 +2038,7 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_SameSiteNone_Metrics) {
   const auto make_cookie = [now](CookieSameSite same_site, bool same_party) {
     return CanonicalCookie::CreateUnsafeCookieForTesting(
         "A", "1", "www.example.com", "/test", now, base::Time(), base::Time(),
-        true /* secure */, false /*httponly*/, same_site,
+        base::Time(), true /* secure */, false /*httponly*/, same_site,
         COOKIE_PRIORITY_DEFAULT, same_party);
   };
   GURL url("https://www.example.com/test");
@@ -1957,10 +2065,7 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_SameSiteNone_Metrics) {
           CookieAccessParams(CookieAccessSemantics::LEGACY,
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement)),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_party_cookie->IncludeForRequestURL(
           url, options,
@@ -1975,20 +2080,15 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_SameSiteNone_Metrics) {
   // though they would differ unless we changed the real definition.) Then
   // check that if we modify the cookie as indicated, the set would be allowed,
   // but the next-most-restrictive variation would still be blocked.
-  options.set_same_party_context(SamePartyContext(
-      SamePartyContextType::kSameParty, SamePartyContextType::kCrossParty,
-      SamePartyContextType::kSameParty));
+  options.set_same_party_context(
+      SamePartyContext(SamePartyContextType::kSameParty));
   EXPECT_THAT(
       same_site_none_cookie->IncludeForRequestURL(
           url, options,
           CookieAccessParams(CookieAccessSemantics::LEGACY,
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement)),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMEPARTY_TOP_RESOURCE}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_party_cookie->IncludeForRequestURL(
           url, options,
@@ -2012,11 +2112,7 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_SameSiteNone_Metrics) {
           CookieAccessParams(CookieAccessSemantics::LEGACY,
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement)),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMEPARTY_ANCESTORS}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_party_cookie->IncludeForRequestURL(
           url, options,
@@ -2041,11 +2137,7 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_SameSiteNone_Metrics) {
           CookieAccessParams(CookieAccessSemantics::LEGACY,
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement)),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMESITE_LAX}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_site_lax_cookie->IncludeForRequestURL(
           url, options,
@@ -2070,11 +2162,7 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_SameSiteNone_Metrics) {
           CookieAccessParams(CookieAccessSemantics::LEGACY,
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement)),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMESITE_STRICT}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_site_strict_cookie->IncludeForRequestURL(
           url, options,
@@ -2153,7 +2241,7 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_RedirectDowngradeWarning) {
           std::unique_ptr<CanonicalCookie> cookie =
               CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "1", "www.example.test", "/test", base::Time::Now(),
-                  base::Time(), base::Time(), /*secure=*/true,
+                  base::Time(), base::Time(), base::Time(), /*secure=*/true,
                   /*httponly=*/false, samesite, COOKIE_PRIORITY_DEFAULT,
                   /*same_party=*/false);
 
@@ -2178,8 +2266,9 @@ TEST(CanonicalCookieTest, IncludeForRequestURL_RedirectDowngradeWarning) {
         std::unique_ptr<CanonicalCookie> cookie =
             CanonicalCookie::CreateUnsafeCookieForTesting(
                 "A", "1", "www.example.test", "/test", base::Time::Now(),
-                base::Time(), base::Time(), /*secure=*/true, /*httponly=*/false,
-                test.samesite, COOKIE_PRIORITY_DEFAULT, /*same_party=*/false);
+                base::Time(), base::Time(), base::Time(), /*secure=*/true,
+                /*httponly=*/false, test.samesite, COOKIE_PRIORITY_DEFAULT,
+                /*same_party=*/false);
 
         CookieOptions options;
         options.set_same_site_cookie_context(
@@ -2230,7 +2319,7 @@ TEST(CanonicalCookieTest, MultipleExclusionReasons) {
   // would weed it out.
   auto cookie1 = CanonicalCookie::CreateUnsafeCookieForTesting(
       "name", "value", "other-domain.com", "/bar", creation_time, base::Time(),
-      base::Time(), true /* secure */, true /* httponly */,
+      base::Time(), base::Time(), true /* secure */, true /* httponly */,
       CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false);
   EXPECT_THAT(
       cookie1->IncludeForRequestURL(
@@ -2328,18 +2417,51 @@ TEST(CanonicalCookieTest, SecureCookiePrefix) {
   EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
 
-  // A typoed prefix does not have to be Secure.
-  EXPECT_TRUE(CanonicalCookie::Create(
-      https_url, "__secure-A=B; Secure", creation_time, server_time,
-      absl::nullopt /* cookie_partition_key */));
-  EXPECT_TRUE(CanonicalCookie::Create(
+  // Prefixes are case insensitive.
+  EXPECT_FALSE(CanonicalCookie::Create(
       https_url, "__secure-A=C;", creation_time, server_time,
       absl::nullopt /* cookie_partition_key */));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+  EXPECT_FALSE(CanonicalCookie::Create(
+      https_url, "__SECURE-A=C;", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+  EXPECT_FALSE(CanonicalCookie::Create(
+      https_url, "__SeCuRe-A=C;", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+
+  {
+    base::test::ScopedFeatureList scope_feature_list;
+    scope_feature_list.InitAndDisableFeature(
+        features::kCaseInsensitiveCookiePrefix);
+
+    EXPECT_TRUE(CanonicalCookie::Create(
+        https_url, "__secure-A=C;", creation_time, server_time,
+        absl::nullopt /* cookie_partition_key */));
+    EXPECT_TRUE(CanonicalCookie::Create(
+        https_url, "__SECURE-A=C;", creation_time, server_time,
+        absl::nullopt /* cookie_partition_key */));
+    EXPECT_TRUE(CanonicalCookie::Create(
+        https_url, "__SeCuRe-A=C;", creation_time, server_time,
+        absl::nullopt /* cookie_partition_key */));
+  }
+
+  // A typoed prefix does not have to be Secure.
   EXPECT_TRUE(CanonicalCookie::Create(
       https_url, "__SecureA=B; Secure", creation_time, server_time,
       absl::nullopt /* cookie_partition_key */));
   EXPECT_TRUE(CanonicalCookie::Create(
       https_url, "__SecureA=C;", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+  EXPECT_TRUE(CanonicalCookie::Create(
+      https_url, "_Secure-A=C;", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+  EXPECT_TRUE(CanonicalCookie::Create(
+      https_url, "Secure-A=C;", creation_time, server_time,
       absl::nullopt /* cookie_partition_key */));
 
   // A __Secure- cookie can't be set on a non-secure origin.
@@ -2352,6 +2474,11 @@ TEST(CanonicalCookieTest, SecureCookiePrefix) {
   // Hidden __Secure- prefixes should be rejected.
   EXPECT_FALSE(CanonicalCookie::Create(
       https_url, "=__Secure-A=B; Secure", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+  EXPECT_FALSE(CanonicalCookie::Create(
+      https_url, "=__Secure-A; Secure", creation_time, server_time,
       absl::nullopt /* cookie_partition_key */, &status));
   EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
@@ -2437,17 +2564,64 @@ TEST(CanonicalCookieTest, HostCookiePrefix) {
       https_url, "__Host-A=B; Secure; Path=/;", creation_time, server_time,
       absl::nullopt /* cookie_partition_key */));
 
+  // Prefixes are case insensitive.
+  EXPECT_FALSE(CanonicalCookie::Create(
+      http_url, "__host-A=B; Domain=" + domain + "; Path=/;", creation_time,
+      server_time, absl::nullopt /* cookie_partition_key */, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+
+  EXPECT_FALSE(CanonicalCookie::Create(
+      http_url, "__HOST-A=B; Domain=" + domain + "; Path=/;", creation_time,
+      server_time, absl::nullopt /* cookie_partition_key */, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+
+  EXPECT_FALSE(CanonicalCookie::Create(
+      http_url, "__HoSt-A=B; Domain=" + domain + "; Path=/;", creation_time,
+      server_time, absl::nullopt /* cookie_partition_key */, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+
+  {
+    base::test::ScopedFeatureList scope_feature_list;
+    scope_feature_list.InitAndDisableFeature(
+        features::kCaseInsensitiveCookiePrefix);
+
+    EXPECT_TRUE(CanonicalCookie::Create(
+        http_url, "__host-A=B; Domain=" + domain + "; Path=/;", creation_time,
+        server_time, absl::nullopt /* cookie_partition_key */, &status));
+
+    EXPECT_TRUE(CanonicalCookie::Create(
+        http_url, "__HOST-A=B; Domain=" + domain + "; Path=/;", creation_time,
+        server_time, absl::nullopt /* cookie_partition_key */, &status));
+
+    EXPECT_TRUE(CanonicalCookie::Create(
+        http_url, "__HoSt-A=B; Domain=" + domain + "; Path=/;", creation_time,
+        server_time, absl::nullopt /* cookie_partition_key */, &status));
+  }
+
   // Rules don't apply for a typoed prefix.
   EXPECT_TRUE(CanonicalCookie::Create(
-      http_url, "__host-A=B; Domain=" + domain + "; Path=/;", creation_time,
-      server_time, absl::nullopt /* cookie_partition_key */));
-  EXPECT_TRUE(CanonicalCookie::Create(
       https_url, "__HostA=B; Domain=" + domain + "; Secure;", creation_time,
+      server_time, absl::nullopt /* cookie_partition_key */));
+
+  EXPECT_TRUE(CanonicalCookie::Create(
+      https_url, "_Host-A=B; Domain=" + domain + "; Secure;", creation_time,
+      server_time, absl::nullopt /* cookie_partition_key */));
+
+  EXPECT_TRUE(CanonicalCookie::Create(
+      https_url, "Host-A=B; Domain=" + domain + "; Secure;", creation_time,
       server_time, absl::nullopt /* cookie_partition_key */));
 
   // Hidden __Host- prefixes should be rejected.
   EXPECT_FALSE(CanonicalCookie::Create(
       https_url, "=__Host-A=B; Path=/; Secure;", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+  EXPECT_FALSE(CanonicalCookie::Create(
+      https_url, "=__Host-A; Path=/; Secure;", creation_time, server_time,
       absl::nullopt /* cookie_partition_key */, &status));
   EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
       {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
@@ -2487,228 +2661,242 @@ TEST(CanonicalCookieTest, IsCanonical) {
   // Base correct template.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "x.y", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Newline in name.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A\n", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Carriage return in name.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A\r", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Null character in name.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    std::string("A\0Z", 3), "B", "x.y", "/path", base::Time(),
-                   base::Time(), base::Time(), false, false,
+                   base::Time(), base::Time(), base::Time(), false, false,
                    CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Name begins with whitespace.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    " A", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Name ends with whitespace.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A ", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Empty name.  (Note this is against the spec but compatible with other
   // browsers.)
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "", "B", "x.y", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Space in name
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A C", "B", "x.y", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Extra space suffixing name.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A ", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // '=' character in name.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A=", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Separator in name.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A;", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // '=' character in value.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B=", "x.y", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Separator in value.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B;", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Separator in domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", ";x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Garbage in domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "@:&", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Space in domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "x.y ", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Empty domain.  (This is against cookie spec, but needed for Chrome's
   // out-of-spec use of cookies for extensions; see http://crbug.com/730633.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Path does not start with a "/".
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "x.y", "path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Empty path.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "x.y", "", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // "localhost" as domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "localhost", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
+                  ->IsCanonical());
+
+  // non-ASCII domain.
+  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
+                   "A", "B", "\xC3\xA9xample.com", "/path", base::Time(),
+                   base::Time(), base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
+                   ->IsCanonical());
+
+  // punycode domain.
+  EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
+                  "A", "B", "xn--xample-9ua.com", "/path", base::Time(),
+                  base::Time(), base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Localhost IPv4 address as domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "127.0.0.1", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Simple IPv4 address as domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "1.2.3.4", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // period-prefixed IPv4 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", ".1.3.2.4", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // period-prefixed truncated IPv4 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", ".3.2.4", "/path", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // truncated IPv4 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "3.2.4", "/path", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Non-canonical IPv4 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "01.2.03.4", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Non-canonical IPv4 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "16843009", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Non-canonical IPv4 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "0x1010101", "/path", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Null IPv6 address as domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "[::]", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Localhost IPv6 address as domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "[::1]", "/path", base::Time(), base::Time(),
-                  base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), false, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Fully speced IPv6 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "[2001:0DB8:AC10:FE01:0000:0000:0000:0000]",
-                   "/path", base::Time(), base::Time(), base::Time(), false,
-                   false, CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW,
-                   false)
+                   "/path", base::Time(), base::Time(), base::Time(),
+                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
+                   COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Zero abbreviated IPv6 address as domain.  Not canonical because of leading
   // zeros & uppercase hex letters.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "[2001:0DB8:AC10:FE01::]", "/path", base::Time(),
-                   base::Time(), base::Time(), false, false,
+                   base::Time(), base::Time(), base::Time(), false, false,
                    CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
@@ -2716,123 +2904,125 @@ TEST(CanonicalCookieTest, IsCanonical) {
   // uppercase hex letters.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "[2001:DB8:AC10:FE01::]", "/path", base::Time(),
-                   base::Time(), base::Time(), false, false,
+                   base::Time(), base::Time(), base::Time(), false, false,
                    CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Lowercased hex IPv6 address as domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "[2001:db8:ac10:fe01::]", "/path", base::Time(),
-                  base::Time(), base::Time(), false, false,
+                  base::Time(), base::Time(), base::Time(), false, false,
                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Lowercased hex IPv6 address as domain for domain cookie.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", ".[2001:db8:ac10:fe01::]", "/path", base::Time(),
-                   base::Time(), base::Time(), false, false,
+                   base::Time(), base::Time(), base::Time(), false, false,
                    CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Incomplete lowercased hex IPv6 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "[2001:db8:ac10:fe01:]", "/path", base::Time(),
-                   base::Time(), base::Time(), false, false,
+                   base::Time(), base::Time(), base::Time(), false, false,
                    CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Missing square brackets in IPv6 address as domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "2606:2800:220:1:248:1893:25c8:1946", "/path",
-                   base::Time(), base::Time(), base::Time(), false, false,
-                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), base::Time(), base::Time(),
+                   false, false, CookieSameSite::NO_RESTRICTION,
+                   COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Properly formatted host cookie.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "__Host-A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Insecure host cookie.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "__Host-A", "B", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Host cookie with non-null path.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "__Host-A", "B", "x.y", "/path", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Host cookie with empty domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "__Host-A", "B", "", "/", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Host cookie with period prefixed domain.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "__Host-A", "B", ".x.y", "/", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // Properly formatted secure cookie.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "__Secure-A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   // Insecure secure cookie.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "__Secure-A", "B", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   // SameParty attribute used correctly (with Secure and non-Strict SameSite).
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, true)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, true)
                   ->IsCanonical());
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::UNSPECIFIED,
-                  COOKIE_PRIORITY_LOW, true)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW, true)
                   ->IsCanonical());
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::LAX_MODE,
-                  COOKIE_PRIORITY_LOW, true)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::LAX_MODE, COOKIE_PRIORITY_LOW, true)
                   ->IsCanonical());
 
   // SameParty without Secure is not canonical.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), false, false, CookieSameSite::LAX_MODE,
-                   COOKIE_PRIORITY_LOW, true)
+                   base::Time(), base::Time(), false, false,
+                   CookieSameSite::LAX_MODE, COOKIE_PRIORITY_LOW, true)
                    ->IsCanonical());
 
   // SameParty with SameSite=Strict is not canonical.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::STRICT_MODE,
-                   COOKIE_PRIORITY_LOW, true)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_LOW, true)
                    ->IsCanonical());
 
   // Partitioned attribute used correctly (__Host- prefix, no SameParty).
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "__Host-A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), /*secure=*/true, /*httponly=*/false,
-                  CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
+                  base::Time(), base::Time(), /*secure=*/true,
+                  /*httponly=*/false, CookieSameSite::UNSPECIFIED,
+                  COOKIE_PRIORITY_LOW,
                   /*same_party=*/false,
                   CookiePartitionKey::FromURLForTesting(
                       GURL("https://toplevelsite.com")))
@@ -2842,8 +3032,9 @@ TEST(CanonicalCookieTest, IsCanonical) {
   // Secure, Path=/, and no Domain.
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "B", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), /*secure=*/true, /*httponly=*/false,
-                  CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
+                  base::Time(), base::Time(), /*secure=*/true,
+                  /*httponly=*/false, CookieSameSite::UNSPECIFIED,
+                  COOKIE_PRIORITY_LOW,
                   /*same_party=*/false,
                   CookiePartitionKey::FromURLForTesting(
                       GURL("https://toplevelsite.com")))
@@ -2852,83 +3043,79 @@ TEST(CanonicalCookieTest, IsCanonical) {
   // Partitioned attribute invalid, not Secure.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "A", "B", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), /*secure=*/false, /*httponly=*/false,
-                   CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
+                   base::Time(), base::Time(), /*secure=*/false,
+                   /*httponly=*/false, CookieSameSite::UNSPECIFIED,
+                   COOKIE_PRIORITY_LOW,
                    /*same_party=*/false,
                    CookiePartitionKey::FromURLForTesting(
                        GURL("https://toplevelsite.com")))
                    ->IsCanonical());
 
-  // Partitioned attribute invalid, no Path.
-  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
-                   "A", "B", "x.y", "", base::Time(), base::Time(),
-                   base::Time(), /*secure=*/true, /*httponly=*/false,
-                   CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
-                   /*same_party=*/false,
-                   CookiePartitionKey::FromURLForTesting(
-                       GURL("https://toplevelsite.com")))
-                   ->IsCanonical());
+  // Partitioned attribute is valid when Path != "/".
+  EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
+                  "A", "B", "x.y", "/foo/bar", base::Time(), base::Time(),
+                  base::Time(), base::Time(), /*secure=*/true,
+                  /*httponly=*/false, CookieSameSite::UNSPECIFIED,
+                  COOKIE_PRIORITY_LOW,
+                  /*same_party=*/false,
+                  CookiePartitionKey::FromURLForTesting(
+                      GURL("https://toplevelsite.com")))
+                  ->IsCanonical());
 
-  // Partitioned attribute invalid, invalid Path.
-  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
-                   "A", "B", "x.y", "/foobar", base::Time(), base::Time(),
-                   base::Time(), /*secure=*/true, /*httponly=*/false,
-                   CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
-                   /*same_party=*/false,
-                   CookiePartitionKey::FromURLForTesting(
-                       GURL("https://toplevelsite.com")))
-                   ->IsCanonical());
-
-  // Partitioned attribute invalid, Domain attribute also included.
-  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
-                   "A", "B", ".x.y", "/", base::Time(), base::Time(),
-                   base::Time(), /*secure=*/true, /*httponly=*/false,
-                   CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
-                   /*same_party=*/false,
-                   CookiePartitionKey::FromURLForTesting(
-                       GURL("https://toplevelsite.com")))
-                   ->IsCanonical());
-
-  // Partitioned attribute invalid, SameParty attribute also included.
-  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
-                   "__Host-A", "B", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), /*secure=*/true, /*httponly=*/false,
-                   CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_LOW,
-                   /*same_party=*/true,
-                   CookiePartitionKey::FromURLForTesting(
-                       GURL("https://toplevelsite.com")))
-                   ->IsCanonical());
+  // Partitioned attribute is valid when Domain attribute also included.
+  EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
+                  "A", "B", ".x.y", "/", base::Time(), base::Time(),
+                  base::Time(), base::Time(), /*secure=*/true,
+                  /*httponly=*/false, CookieSameSite::UNSPECIFIED,
+                  COOKIE_PRIORITY_LOW,
+                  /*same_party=*/false,
+                  CookiePartitionKey::FromURLForTesting(
+                      GURL("https://toplevelsite.com")))
+                  ->IsCanonical());
 
   // Hidden cookie prefixes.
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "", "__Secure-a=b", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
+                   ->IsCanonical());
+
+  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
+                   "", "__Secure-a", "x.y", "/", base::Time(), base::Time(),
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
                    "", "__Host-a=b", "x.y", "/", base::Time(), base::Time(),
-                   base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                   COOKIE_PRIORITY_LOW, false)
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
+                   ->IsCanonical());
+
+  EXPECT_FALSE(CanonicalCookie::CreateUnsafeCookieForTesting(
+                   "", "__Host-a", "x.y", "/", base::Time(), base::Time(),
+                   base::Time(), base::Time(), true, false,
+                   CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                    ->IsCanonical());
 
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "a", "__Secure-a=b", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 
   EXPECT_TRUE(CanonicalCookie::CreateUnsafeCookieForTesting(
                   "a", "__Host-a=b", "x.y", "/", base::Time(), base::Time(),
-                  base::Time(), true, false, CookieSameSite::NO_RESTRICTION,
-                  COOKIE_PRIORITY_LOW, false)
+                  base::Time(), base::Time(), true, false,
+                  CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false)
                   ->IsCanonical());
 }
 
 TEST(CanonicalCookieTest, TestSetCreationDate) {
   auto cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
-      "A", "B", "x.y", "/path", base::Time(), base::Time(), base::Time(), false,
-      false, CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_LOW, false);
+      "A", "B", "x.y", "/path", base::Time(), base::Time(), base::Time(),
+      base::Time(), false, false, CookieSameSite::NO_RESTRICTION,
+      COOKIE_PRIORITY_LOW, false);
   EXPECT_TRUE(cookie->CreationDate().is_null());
 
   base::Time now(base::Time::Now());
@@ -2936,9 +3123,14 @@ TEST(CanonicalCookieTest, TestSetCreationDate) {
   EXPECT_EQ(now, cookie->CreationDate());
 }
 
+// TODO(bingler) Expand this
 TEST(CanonicalCookieTest, TestPrefixHistograms) {
   base::HistogramTester histograms;
   const char kCookiePrefixHistogram[] = "Cookie.CookiePrefix";
+  const char kCookiePrefixVariantHistogram[] =
+      "Cookie.CookiePrefix.CaseVariant";
+  const char kVariantValidHistogram[] = "Cookie.CookiePrefix.CaseVariantValid";
+  const char kVariantCountHistogram[] = "Cookie.CookiePrefix.CaseVariantCount";
   GURL https_url("https://www.example.test");
   base::Time creation_time = base::Time::Now();
   absl::optional<base::Time> server_time = absl::nullopt;
@@ -2977,6 +3169,46 @@ TEST(CanonicalCookieTest, TestPrefixHistograms) {
       absl::nullopt /* cookie_partition_key */));
   histograms.ExpectBucketCount(kCookiePrefixHistogram,
                                CanonicalCookie::COOKIE_PREFIX_SECURE, 2);
+
+  // Test prefix case variants
+  const int sensitive_value_host = histograms.GetBucketCount(
+      kCookiePrefixHistogram, CanonicalCookie::COOKIE_PREFIX_HOST);
+  const int sensitive_value_secure = histograms.GetBucketCount(
+      kCookiePrefixHistogram, CanonicalCookie::COOKIE_PREFIX_SECURE);
+
+  EXPECT_TRUE(CanonicalCookie::Create(
+      https_url, "__SECURE-A=B; Path=/; Secure", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+  histograms.ExpectBucketCount(kCookiePrefixVariantHistogram,
+                               CanonicalCookie::COOKIE_PREFIX_SECURE, 1);
+  histograms.ExpectBucketCount(kCookiePrefixHistogram,
+                               CanonicalCookie::COOKIE_PREFIX_SECURE,
+                               sensitive_value_secure);
+
+  EXPECT_TRUE(CanonicalCookie::Create(
+      https_url, "__HOST-A=B; Path=/; Secure", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+  histograms.ExpectBucketCount(kCookiePrefixVariantHistogram,
+                               CanonicalCookie::COOKIE_PREFIX_HOST, 1);
+  histograms.ExpectBucketCount(kCookiePrefixHistogram,
+                               CanonicalCookie::COOKIE_PREFIX_HOST,
+                               sensitive_value_host);
+
+  // True indicates a variant
+  histograms.ExpectBucketCount(kVariantCountHistogram, true, 2);
+  histograms.ExpectBucketCount(kVariantCountHistogram, false, 4);
+
+  // Invalid variants
+  EXPECT_FALSE(CanonicalCookie::Create(
+      https_url, "__SECURE-A=B", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+
+  EXPECT_FALSE(CanonicalCookie::Create(
+      https_url, "__HOST-A=B;", creation_time, server_time,
+      absl::nullopt /* cookie_partition_key */));
+
+  histograms.ExpectBucketCount(kVariantValidHistogram, true, 2);
+  histograms.ExpectBucketCount(kVariantValidHistogram, false, 2);
 }
 
 TEST(CanonicalCookieTest, BuildCookieLine) {
@@ -3013,6 +3245,36 @@ TEST(CanonicalCookieTest, BuildCookieLine) {
   cookies.push_back(CanonicalCookie::Create(
       url, "=H=I", now, server_time, absl::nullopt /* cookie_partition_key */));
   MatchCookieLineToVector("A=B; C; D=E; F=G; D=E; H=I", cookies);
+}
+
+TEST(CanonicalCookieTest, BuildCookieAttributesLine) {
+  std::unique_ptr<CanonicalCookie> cookie;
+  GURL url("https://example.com/");
+  base::Time now = base::Time::Now();
+  absl::optional<base::Time> server_time = absl::nullopt;
+
+  cookie = CanonicalCookie::Create(url, "A=B", now, server_time,
+                                   absl::nullopt /* cookie_partition_key */);
+  EXPECT_EQ("A=B; domain=example.com; path=/",
+            CanonicalCookie::BuildCookieAttributesLine(*cookie));
+  // Nameless cookies are sent back without a prefixed '='.
+  cookie = CanonicalCookie::Create(url, "C", now, server_time,
+                                   absl::nullopt /* cookie_partition_key */);
+  EXPECT_EQ("C; domain=example.com; path=/",
+            CanonicalCookie::BuildCookieAttributesLine(*cookie));
+  // BuildCookieAttributesLine should match the spec in the case of an empty
+  // name with a value containing an equal sign (even if it currently produces
+  // "invalid" cookie lines).
+  cookie = CanonicalCookie::Create(url, "=H=I", now, server_time,
+                                   absl::nullopt /* cookie_partition_key */);
+  EXPECT_EQ("H=I; domain=example.com; path=/",
+            CanonicalCookie::BuildCookieAttributesLine(*cookie));
+  // BuildCookieAttributesLine should include all attributes.
+  cookie = CanonicalCookie::Create(
+      url, "A=B; domain=.example.com; path=/; secure; httponly; samesite=lax",
+      now, server_time, absl::nullopt /* cookie_partition_key */);
+  EXPECT_EQ("A=B; domain=.example.com; path=/; secure; httponly; samesite=lax",
+            CanonicalCookie::BuildCookieAttributesLine(*cookie));
 }
 
 // Confirm that input arguments are reflected in the output cookie.
@@ -3585,7 +3847,23 @@ TEST(CanonicalCookieTest, CreateSanitizedCookie_Logic) {
       {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
 
   EXPECT_FALSE(CanonicalCookie::CreateSanitizedCookie(
+      GURL("https://www.foo.com"), "", "__Host-A", "", "/", two_hours_ago,
+      one_hour_from_now, one_hour_ago, true, false,
+      CookieSameSite::NO_RESTRICTION, CookiePriority::COOKIE_PRIORITY_DEFAULT,
+      false /*same_party*/, absl::nullopt /*partition_key*/, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+
+  EXPECT_FALSE(CanonicalCookie::CreateSanitizedCookie(
       GURL("https://www.foo.com"), "", "__Secure-A=B", "", "/", two_hours_ago,
+      one_hour_from_now, one_hour_ago, true, false,
+      CookieSameSite::NO_RESTRICTION, CookiePriority::COOKIE_PRIORITY_DEFAULT,
+      false /*same_party*/, absl::nullopt /*partition_key*/, &status));
+  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
+      {CookieInclusionStatus::EXCLUDE_INVALID_PREFIX}));
+
+  EXPECT_FALSE(CanonicalCookie::CreateSanitizedCookie(
+      GURL("https://www.foo.com"), "", "__Secure-A", "", "/", two_hours_ago,
       one_hour_from_now, one_hour_ago, true, false,
       CookieSameSite::NO_RESTRICTION, CookiePriority::COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/, &status));
@@ -3673,7 +3951,7 @@ TEST(CanonicalCookieTest, CreateSanitizedCookie_Logic) {
       {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
   // Invalid: invalid Path.
   status = CookieInclusionStatus();
-  EXPECT_FALSE(CanonicalCookie::CreateSanitizedCookie(
+  EXPECT_TRUE(CanonicalCookie::CreateSanitizedCookie(
       GURL("https://www.foo.com"), "A", "B", std::string(), "/foobar",
       two_hours_ago, one_hour_from_now, one_hour_ago, /*secure=*/true,
       /*http_only=*/false, CookieSameSite::NO_RESTRICTION,
@@ -3682,11 +3960,10 @@ TEST(CanonicalCookieTest, CreateSanitizedCookie_Logic) {
       absl::optional<CookiePartitionKey>(CookiePartitionKey::FromURLForTesting(
           GURL("https://toplevelsite.com"))),
       &status));
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
-  // Invalid: Domain attribute present.
+  EXPECT_TRUE(status.IsInclude());
+  // Domain attribute present is still valid.
   status = CookieInclusionStatus();
-  EXPECT_FALSE(CanonicalCookie::CreateSanitizedCookie(
+  EXPECT_TRUE(CanonicalCookie::CreateSanitizedCookie(
       GURL("https://www.foo.com"), "A", "B", ".foo.com", "/", two_hours_ago,
       one_hour_from_now, one_hour_ago, /*secure=*/true, /*http_only=*/false,
       CookieSameSite::NO_RESTRICTION, CookiePriority::COOKIE_PRIORITY_DEFAULT,
@@ -3694,20 +3971,7 @@ TEST(CanonicalCookieTest, CreateSanitizedCookie_Logic) {
       absl::optional<CookiePartitionKey>(CookiePartitionKey::FromURLForTesting(
           GURL("https://toplevelsite.com"))),
       &status));
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
-  // Invalid: SameParty attribute present.
-  status = CookieInclusionStatus();
-  EXPECT_FALSE(CanonicalCookie::CreateSanitizedCookie(
-      GURL("https://www.foo.com"), "A", "B", std::string(), "/", two_hours_ago,
-      one_hour_from_now, one_hour_ago, /*secure=*/true, /*http_only=*/false,
-      CookieSameSite::NO_RESTRICTION, CookiePriority::COOKIE_PRIORITY_DEFAULT,
-      /*same_party=*/true,
-      absl::optional<CookiePartitionKey>(CookiePartitionKey::FromURLForTesting(
-          GURL("https://toplevelsite.com"))),
-      &status));
-  EXPECT_TRUE(status.HasExactlyExclusionReasonsForTesting(
-      {CookieInclusionStatus::EXCLUDE_INVALID_PARTITIONED}));
+  EXPECT_TRUE(status.IsInclude());
 
   status = CookieInclusionStatus();
 
@@ -3971,7 +4235,7 @@ TEST(CanonicalCookieTest, FromStorage) {
 
   std::unique_ptr<CanonicalCookie> cc = CanonicalCookie::FromStorage(
       "A", "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 87);
@@ -3983,6 +4247,7 @@ TEST(CanonicalCookieTest, FromStorage) {
   EXPECT_EQ(two_hours_ago, cc->CreationDate());
   EXPECT_EQ(one_hour_ago, cc->LastAccessDate());
   EXPECT_EQ(one_hour_from_now, cc->ExpiryDate());
+  EXPECT_EQ(one_hour_ago, cc->LastUpdateDate());
   EXPECT_FALSE(cc->IsSecure());
   EXPECT_FALSE(cc->IsHttpOnly());
   EXPECT_EQ(CookieSameSite::NO_RESTRICTION, cc->SameSite());
@@ -3996,7 +4261,7 @@ TEST(CanonicalCookieTest, FromStorage) {
   // contains a newline character.
   EXPECT_FALSE(CanonicalCookie::FromStorage(
       "A\n", "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 80));
@@ -4005,7 +4270,7 @@ TEST(CanonicalCookieTest, FromStorage) {
   // FromStorage() should result in a PORT_INVALID.
   std::unique_ptr<CanonicalCookie> cc2 = CanonicalCookie::FromStorage(
       "A", "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 80000);
@@ -4015,7 +4280,7 @@ TEST(CanonicalCookieTest, FromStorage) {
   // Test port edge cases: unspecified.
   std::unique_ptr<CanonicalCookie> cc3 = CanonicalCookie::FromStorage(
       "A", "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, url::PORT_UNSPECIFIED);
@@ -4024,7 +4289,7 @@ TEST(CanonicalCookieTest, FromStorage) {
   // Test port edge cases: invalid.
   std::unique_ptr<CanonicalCookie> cc4 = CanonicalCookie::FromStorage(
       "A", "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, url::PORT_INVALID);
@@ -4038,11 +4303,11 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext) {
 
   auto cookie_scriptable = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), true /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
   auto cookie_httponly = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), true /*secure*/, true /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, true /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
 
   CookieOptions context_script;
@@ -4143,7 +4408,7 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext) {
     auto cookie_same_site_unrestricted =
         CanonicalCookie::CreateUnsafeCookieForTesting(
             "A", "2", "www.example.com", "/test", current_time, base::Time(),
-            base::Time(), true /*secure*/, false /*httponly*/,
+            base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
             CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
 
     EXPECT_THAT(
@@ -4248,7 +4513,7 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext) {
   {
     auto cookie_same_site_lax = CanonicalCookie::CreateUnsafeCookieForTesting(
         "A", "2", "www.example.com", "/test", current_time, base::Time(),
-        base::Time(), true /*secure*/, false /*httponly*/,
+        base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
         CookieSameSite::LAX_MODE, COOKIE_PRIORITY_DEFAULT, false);
 
     EXPECT_THAT(
@@ -4373,7 +4638,7 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext) {
     auto cookie_same_site_strict =
         CanonicalCookie::CreateUnsafeCookieForTesting(
             "A", "2", "www.example.com", "/test", current_time, base::Time(),
-            base::Time(), true /*secure*/, false /*httponly*/,
+            base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
             CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false);
 
     // TODO(morlovich): Do compatibility testing on whether set of strict in lax
@@ -4537,7 +4802,7 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext) {
   auto cookie_same_site_unspecified =
       CanonicalCookie::CreateUnsafeCookieForTesting(
           "A", "2", "www.example.com", "/test", current_time, base::Time(),
-          base::Time(), true /*secure*/, false /*httponly*/,
+          base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
           CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_DEFAULT, false);
 
   EXPECT_THAT(
@@ -4656,7 +4921,7 @@ TEST(CanonicalCookieTest, IsSetPermittedEffectiveSameSite) {
   // CanonicalCookie with CookieSameSite::NO_RESTRICTION.
   auto cookie_no_restriction = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), true /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT, false);
 
   EXPECT_THAT(
@@ -4673,7 +4938,7 @@ TEST(CanonicalCookieTest, IsSetPermittedEffectiveSameSite) {
   // CanonicalCookie with CookieSameSite::LAX_MODE.
   auto cookie_lax = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), true /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
       CookieSameSite::LAX_MODE, COOKIE_PRIORITY_DEFAULT, false);
 
   EXPECT_THAT(
@@ -4690,7 +4955,7 @@ TEST(CanonicalCookieTest, IsSetPermittedEffectiveSameSite) {
   // CanonicalCookie with CookieSameSite::STRICT_MODE.
   auto cookie_strict = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), true /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
       CookieSameSite::STRICT_MODE, COOKIE_PRIORITY_DEFAULT, false);
 
   EXPECT_THAT(
@@ -4708,11 +4973,11 @@ TEST(CanonicalCookieTest, IsSetPermittedEffectiveSameSite) {
   base::Time creation_time = base::Time::Now() - (kLaxAllowUnsafeMaxAge * 4);
   auto cookie_old_unspecified = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", creation_time, base::Time(),
-      base::Time(), true /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
       CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_DEFAULT, false);
   auto cookie_unspecified = CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "2", "www.example.com", "/test", current_time, base::Time(),
-      base::Time(), true /*secure*/, false /*httponly*/,
+      base::Time(), base::Time(), true /*secure*/, false /*httponly*/,
       CookieSameSite::UNSPECIFIED, COOKIE_PRIORITY_DEFAULT, false);
 
   EXPECT_THAT(
@@ -4776,7 +5041,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_AllowedToAccessSecureCookies) {
           continue;
         auto cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
             "A", "2", "www.example.com", "/test", current_time, base::Time(),
-            base::Time(), secure, false /*httponly*/, same_site,
+            base::Time(), base::Time(), secure, false /*httponly*/, same_site,
             COOKIE_PRIORITY_DEFAULT, same_party);
 
         for (bool delegate_treats_url_as_trustworthy : {false, true}) {
@@ -4839,7 +5104,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameSiteNone_Metrics) {
   const auto make_cookie = [now](CookieSameSite same_site, bool same_party) {
     return CanonicalCookie::CreateUnsafeCookieForTesting(
         "A", "1", "www.example.com", "/test", now, base::Time(), base::Time(),
-        true /* secure */, false /*httponly*/, same_site,
+        base::Time(), true /* secure */, false /*httponly*/, same_site,
         COOKIE_PRIORITY_DEFAULT, same_party);
   };
   GURL url("https://www.example.com/test");
@@ -4866,10 +5131,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameSiteNone_Metrics) {
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement),
           kCookieableSchemes),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::WARN_SAMESITE_NONE_REQUIRED}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_party_cookie->IsSetPermittedInContext(
           url, options,
@@ -4884,9 +5146,8 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameSiteNone_Metrics) {
   // "real" same-partyness value match the value computed for the metric, even
   // though they would differ unless we changed the real definition.) Then
   // check that if we modify the cookie as indicated, the set would be allowed.
-  options.set_same_party_context(SamePartyContext(
-      SamePartyContextType::kSameParty, SamePartyContextType::kCrossParty,
-      SamePartyContextType::kSameParty));
+  options.set_same_party_context(
+      SamePartyContext(SamePartyContextType::kSameParty));
   EXPECT_THAT(
       same_site_none_cookie->IsSetPermittedInContext(
           url, options,
@@ -4894,11 +5155,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameSiteNone_Metrics) {
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement),
           kCookieableSchemes),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMEPARTY_TOP_RESOURCE}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_party_cookie->IsSetPermittedInContext(
           url, options,
@@ -4925,11 +5182,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameSiteNone_Metrics) {
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement),
           kCookieableSchemes),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMEPARTY_ANCESTORS}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_party_cookie->IsSetPermittedInContext(
           url, options,
@@ -4957,11 +5210,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameSiteNone_Metrics) {
                              delegate_treats_url_as_trustworthy,
                              CookieSamePartyStatus::kNoSamePartyEnforcement),
           kCookieableSchemes),
-      MatchesCookieAccessResult(
-          CookieInclusionStatus::MakeFromReasonsForTesting(
-              {}, {CookieInclusionStatus::
-                       WARN_SAMESITE_NONE_INCLUDED_BY_SAMESITE_STRICT}),
-          _, _, true));
+      MatchesCookieAccessResult(CookieInclusionStatus(), _, _, true));
   EXPECT_THAT(
       same_site_lax_cookie->IsSetPermittedInContext(
           url, options,
@@ -4993,7 +5242,7 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameParty) {
     bool delegate_treats_url_as_trustworthy = false;
     auto cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
         "A", "2", "www.example.com", "/test", current_time, base::Time(),
-        base::Time(), true /* secure */, false /*httponly*/,
+        base::Time(), base::Time(), true /* secure */, false /*httponly*/,
         CookieSameSite::LAX_MODE, COOKIE_PRIORITY_DEFAULT,
         true /* same_party */);
 
@@ -5020,8 +5269,8 @@ TEST(CanonicalCookieTest, IsSetPermitted_SameParty) {
        }) {
     auto cookie = CanonicalCookie::CreateUnsafeCookieForTesting(
         "A", "2", "www.example.com", "/test", current_time, base::Time(),
-        base::Time(), true /* secure */, false /*httponly*/, same_site,
-        COOKIE_PRIORITY_DEFAULT, true /* same_party */);
+        base::Time(), base::Time(), true /* secure */, false /*httponly*/,
+        same_site, COOKIE_PRIORITY_DEFAULT, true /* same_party */);
 
     for (bool delegate_treats_url_as_trustworthy : {false, true}) {
       for (CookieAccessSemantics access_semantics : {
@@ -5082,7 +5331,7 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext_RedirectDowngradeWarning) {
           std::unique_ptr<CanonicalCookie> cookie =
               CanonicalCookie::CreateUnsafeCookieForTesting(
                   "A", "1", "www.example.test", "/test", base::Time::Now(),
-                  base::Time(), base::Time(), /*secure=*/true,
+                  base::Time(), base::Time(), base::Time(), /*secure=*/true,
                   /*httponly=*/false, samesite, COOKIE_PRIORITY_DEFAULT,
                   /*same_party=*/false);
 
@@ -5108,8 +5357,9 @@ TEST(CanonicalCookieTest, IsSetPermittedInContext_RedirectDowngradeWarning) {
         std::unique_ptr<CanonicalCookie> cookie =
             CanonicalCookie::CreateUnsafeCookieForTesting(
                 "A", "1", "www.example.test", "/test", base::Time::Now(),
-                base::Time(), base::Time(), /*secure=*/true, /*httponly=*/false,
-                test.samesite, COOKIE_PRIORITY_DEFAULT, /*same_party=*/false);
+                base::Time(), base::Time(), base::Time(), /*secure=*/true,
+                /*httponly=*/false, test.samesite, COOKIE_PRIORITY_DEFAULT,
+                /*same_party=*/false);
 
         Context::ContextMetadata lax_cross_downgrade_metadata;
         lax_cross_downgrade_metadata.cross_site_redirect_downgrade =
@@ -5166,7 +5416,7 @@ TEST(CanonicalCookieTest, TestIsCanonicalWithInvalidSizeHistograms) {
   // Test a cookie that is canonical and valid size
   EXPECT_TRUE(CanonicalCookie::FromStorage(
       "A", "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 87));
@@ -5180,13 +5430,13 @@ TEST(CanonicalCookieTest, TestIsCanonicalWithInvalidSizeHistograms) {
   const std::string kCookieBig(4096, 'a');
   EXPECT_TRUE(CanonicalCookie::FromStorage(
       kCookieBig, "B", "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 87));
   EXPECT_TRUE(CanonicalCookie::FromStorage(
       "A", kCookieBig, "www.foo.com", "/bar", two_hours_ago, one_hour_from_now,
-      one_hour_ago, false /*secure*/, false /*httponly*/,
+      one_hour_ago, one_hour_ago, false /*secure*/, false /*httponly*/,
       CookieSameSite::NO_RESTRICTION, COOKIE_PRIORITY_DEFAULT,
       false /*same_party*/, absl::nullopt /*partition_key*/,
       CookieSourceScheme::kSecure, 87));
@@ -5207,22 +5457,36 @@ TEST(CanonicalCookieTest, TestHasHiddenPrefixName) {
       {"foo=bar", false},
       {" \t ", false},
       {"\t", false},
-      {"__Secure-abc", false},
+      {"__Secure=-", false},
+      {"__Secure=-abc", false},
       {"__Secur=e-abc", false},
       {"__Secureabc", false},
-      {"__Host-abc", false},
+      {"__Host=-", false},
+      {"__Host=-abc", false},
       {"__Hos=t-abc", false},
       {"_Host", false},
-      {"   __Secure-abc", false},
-      {"\t__Host-", false},
       {"a__Host-abc=123", false},
       {"a__Secure-abc=123", false},
+      {"__Secure-abc", true},
+      {"__Host-abc", true},
+      {"   __Secure-abc", true},
+      {"\t__Host-", true},
+      {"__Host-=", true},
+      {"__Host-=123", true},
+      {"__host-=123", true},
+      {"__HOST-=123", true},
+      {"__HoSt-=123", true},
       {"__Host-abc=", true},
       {"__Host-abc=123", true},
       {" __Host-abc=123", true},
       {"    __Host-abc=", true},
       {"\t\t\t\t\t__Host-abc=123", true},
       {"\t __Host-abc=", true},
+      {"__Secure-=", true},
+      {"__Secure-=123", true},
+      {"__secure-=123", true},
+      {"__SECURE-=123", true},
+      {"__SeCuRe-=123", true},
       {"__Secure-abc=", true},
       {"__Secure-abc=123", true},
       {" __Secure-abc=123", true},

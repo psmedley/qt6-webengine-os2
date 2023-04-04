@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,8 +71,8 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   // TaskSource:
   ExecutionEnvironment GetExecutionEnvironment() override;
   size_t GetRemainingConcurrency() const override;
-  TaskSourceSortKey GetSortKey(
-      bool disable_fair_scheduling = false) const override;
+  TaskSourceSortKey GetSortKey() const override;
+  TimeTicks GetDelayedSortKey() const override;
 
   bool IsActive() const;
   size_t GetWorkerCount() const;
@@ -103,7 +103,9 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
                                                       << kWorkerCountBitOffset;
 
     struct Value {
-      size_t worker_count() const { return value >> kWorkerCountBitOffset; }
+      uint8_t worker_count() const {
+        return static_cast<uint8_t>(value >> kWorkerCountBitOffset);
+      }
       // Returns true if canceled.
       bool is_canceled() const { return value & kCanceledMask; }
 
@@ -191,6 +193,9 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   Task TakeTask(TaskSource::Transaction* transaction) override;
   Task Clear(TaskSource::Transaction* transaction) override;
   bool DidProcessTask(TaskSource::Transaction* transaction) override;
+  bool WillReEnqueue(TimeTicks now,
+                     TaskSource::Transaction* transaction) override;
+  void OnBecomeReady() override;
 
   // Synchronizes access to workers state.
   mutable CheckedLock worker_lock_{UniversalSuccessor()};

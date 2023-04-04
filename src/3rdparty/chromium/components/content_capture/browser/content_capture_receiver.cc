@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -222,12 +222,11 @@ void ContentCaptureReceiver::UpdateFaviconURL(
 }
 
 void ContentCaptureReceiver::RetrieveFaviconURL() {
-  if (!rfh()->IsActive() || rfh()->GetMainFrame() != rfh() ||
+  if (!rfh()->IsActive() || !rfh()->IsInPrimaryMainFrame() ||
       disable_get_favicon_from_web_contents_for_testing()) {
     frame_content_capture_data_.favicon = std::string();
   } else {
-    frame_content_capture_data_.favicon = ToJSON(
-        content::WebContents::FromRenderFrameHost(rfh())->GetFaviconURLs());
+    frame_content_capture_data_.favicon = ToJSON(rfh()->FaviconURLs());
   }
 }
 

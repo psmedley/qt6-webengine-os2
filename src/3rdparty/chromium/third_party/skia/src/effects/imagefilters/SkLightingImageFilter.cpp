@@ -5,35 +5,68 @@
  * found in the LICENSE file.
  */
 
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkBitmap.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkColorPriv.h"
+#include "include/core/SkColorType.h"
+#include "include/core/SkFlattenable.h"
+#include "include/core/SkImageFilter.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPoint.h"
 #include "include/core/SkPoint3.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
 #include "include/effects/SkImageFilters.h"
-#include "include/private/SkColorData.h"
+#include "include/private/SkFloatingPoint.h"
 #include "include/private/SkTPin.h"
 #include "src/core/SkImageFilter_Base.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkSpecialImage.h"
 #include "src/core/SkWriteBuffer.h"
 
+#include <array>
+#include <cstdint>
+#include <memory>
+#include <utility>
+
 #if SK_SUPPORT_GPU
 #include "include/gpu/GrRecordingContext.h"
+#include "include/gpu/GrTypes.h"
+#include "include/private/SkSLSampleUsage.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkSLTypeShared.h"
 #include "src/gpu/KeyBuilder.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
-#include "src/gpu/ganesh/GrPaint.h"
+#include "src/gpu/ganesh/GrImageInfo.h"
+#include "src/gpu/ganesh/GrProcessor.h"
+#include "src/gpu/ganesh/GrProcessorUnitTest.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
-#include "src/gpu/ganesh/GrTexture.h"
-#include "src/gpu/ganesh/GrTextureProxy.h"
-#include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+#include "src/gpu/ganesh/GrShaderVar.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"
 #include "src/gpu/ganesh/SurfaceFillContext.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
 #include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
 #include "src/gpu/ganesh/glsl/GrGLSLUniformHandler.h"
 
+struct GrShaderCaps;
+
 // For brevity
 typedef GrGLSLProgramDataManager::UniformHandle UniformHandle;
+#endif
+
+#if GR_TEST_UTILS
+#include "include/utils/SkRandom.h"
+
+#include <tuple>
 #endif
 
 const SkScalar gOneThird = SkIntToScalar(1) / 3;
@@ -439,7 +472,7 @@ protected:
 
 private:
 #if SK_SUPPORT_GPU
-    void drawRect(skgpu::SurfaceFillContext*,
+    void drawRect(skgpu::v1::SurfaceFillContext*,
                   GrSurfaceProxyView srcView,
                   const SkMatrix& matrix,
                   const SkIRect& dstRect,
@@ -456,7 +489,7 @@ private:
 }  // anonymous namespace
 
 #if SK_SUPPORT_GPU
-void SkLightingImageFilterInternal::drawRect(skgpu::SurfaceFillContext* sfc,
+void SkLightingImageFilterInternal::drawRect(skgpu::v1::SurfaceFillContext* sfc,
                                              GrSurfaceProxyView srcView,
                                              const SkMatrix& matrix,
                                              const SkIRect& dstRect,
@@ -486,6 +519,7 @@ sk_sp<SkSpecialImage> SkLightingImageFilterInternal::filterImageGPU(
                      ctx.refColorSpace(),
                      offsetBounds.size());
     auto sfc = rContext->priv().makeSFC(info,
+                                        "LightingImageFilterInternal_FilterImageGPU",
                                         SkBackingFit::kApprox,
                                         1,
                                         GrMipmapped::kNo,
@@ -533,8 +567,7 @@ sk_sp<SkSpecialImage> SkLightingImageFilterInternal::filterImageGPU(
             SkIRect::MakeWH(offsetBounds.width(), offsetBounds.height()),
             kNeedNewImageUniqueID_SpecialImage,
             sfc->readSurfaceView(),
-            sfc->colorInfo().colorType(),
-            sfc->colorInfo().refColorSpace(),
+            sfc->colorInfo(),
             ctx.surfaceProps());
 }
 #endif
@@ -1785,7 +1818,7 @@ void LightingEffect::ImplBase::emitCode(EmitArgs& args) {
     SkString sobelFuncName = fragBuilder->getMangledFunctionName("sobel");
     fragBuilder->emitFunction(SkSLType::kHalf,
                               sobelFuncName.c_str(),
-                              {gSobelArgs, SK_ARRAY_COUNT(gSobelArgs)},
+                              {gSobelArgs, std::size(gSobelArgs)},
                               "return (-a + b - 2.0 * c + 2.0 * d -e + f) * scale;");
     const GrShaderVar gPointToNormalArgs[] = {
         GrShaderVar("x", SkSLType::kHalf),
@@ -1795,7 +1828,7 @@ void LightingEffect::ImplBase::emitCode(EmitArgs& args) {
     SkString pointToNormalName = fragBuilder->getMangledFunctionName("pointToNormal");
     fragBuilder->emitFunction(SkSLType::kHalf3,
                               pointToNormalName.c_str(),
-                              {gPointToNormalArgs, SK_ARRAY_COUNT(gPointToNormalArgs)},
+                              {gPointToNormalArgs, std::size(gPointToNormalArgs)},
                               "return normalize(half3(-x * scale, -y * scale, 1));");
 
     const GrShaderVar gInteriorNormalArgs[] = {
@@ -1808,7 +1841,7 @@ void LightingEffect::ImplBase::emitCode(EmitArgs& args) {
     SkString normalName = fragBuilder->getMangledFunctionName("normal");
     fragBuilder->emitFunction(SkSLType::kHalf3,
                               normalName.c_str(),
-                              {gInteriorNormalArgs, SK_ARRAY_COUNT(gInteriorNormalArgs)},
+                              {gInteriorNormalArgs, std::size(gInteriorNormalArgs)},
                               normalBody.c_str());
 
     fragBuilder->codeAppendf("float2 coord = %s;", args.fSampleCoord);
@@ -1872,7 +1905,7 @@ void DiffuseLightingEffect::Impl::emitLightFunc(const GrFragmentProcessor* owner
     *funcName = fragBuilder->getMangledFunctionName("light");
     fragBuilder->emitFunction(SkSLType::kHalf4,
                               funcName->c_str(),
-                              {gLightArgs, SK_ARRAY_COUNT(gLightArgs)},
+                              {gLightArgs, std::size(gLightArgs)},
                               lightBody.c_str());
 }
 
@@ -1979,7 +2012,7 @@ void SpecularLightingEffect::Impl::emitLightFunc(const GrFragmentProcessor* owne
     *funcName = fragBuilder->getMangledFunctionName("light");
     fragBuilder->emitFunction(SkSLType::kHalf4,
                               funcName->c_str(),
-                              {gLightArgs, SK_ARRAY_COUNT(gLightArgs)},
+                              {gLightArgs, std::size(gLightArgs)},
                               lightBody.c_str());
 }
 
@@ -2119,7 +2152,7 @@ void GpuSpotLight::emitLightColor(const GrFragmentProcessor* owner,
     fLightColorFunc = fragBuilder->getMangledFunctionName("lightColor");
     fragBuilder->emitFunction(SkSLType::kHalf3,
                               fLightColorFunc.c_str(),
-                              {gLightColorArgs, SK_ARRAY_COUNT(gLightColorArgs)},
+                              {gLightColorArgs, std::size(gLightColorArgs)},
                               lightColorBody.c_str());
 
     fragBuilder->codeAppendf("%s(%s)", fLightColorFunc.c_str(), surfaceToLight);

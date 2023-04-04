@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -182,14 +182,15 @@ void EffectNode::AsValueInto(base::trace_event::TracedValue* value) const {
                                value);
     if (mask_filter_info.HasRoundedCorners()) {
       MathUtil::AddCornerRadiiToTracedValue(
-          "mask_filter_rounded_corner_raii",
+          "mask_filter_rounded_corners_radii",
           mask_filter_info.rounded_corner_bounds(), value);
       value->SetBoolean("mask_filter_is_fast_rounded_corner",
                         is_fast_rounded_corner);
     }
     if (mask_filter_info.HasGradientMask()) {
       MathUtil::AddToTracedValue("mask_filter_gradient_mask",
-                                 mask_filter_info.gradient_mask(), value);
+                                 mask_filter_info.gradient_mask().value(),
+                                 value);
     }
   }
   value->SetString("blend_mode", SkBlendMode_Name(blend_mode));

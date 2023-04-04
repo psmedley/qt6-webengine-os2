@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,9 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/unguessable_token.h"
+#include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/tts_utterance.h"
 
@@ -26,6 +29,9 @@ class WebContents;
 class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance {
  public:
   TtsUtteranceImpl(BrowserContext* browser_context, WebContents* web_contents);
+  TtsUtteranceImpl(content::BrowserContext* browser_context,
+                   bool should_always_be_spoken);
+
   ~TtsUtteranceImpl() override;
 
   bool was_created_with_web_contents() const {
@@ -43,8 +49,8 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance {
   void SetText(const std::string& text) override;
   const std::string& GetText() override;
 
-  void SetOptions(const base::Value* options) override;
-  const base::Value* GetOptions() override;
+  void SetOptions(base::Value::Dict options) override;
+  const base::Value::Dict* GetOptions() override;
 
   void SetSrcId(int src_id) override;
   int GetSrcId() override;
@@ -85,7 +91,9 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance {
   bool IsFinished() override;
 
   // Returns the associated WebContents, may be null.
-  WebContents* GetWebContents();
+  WebContents* GetWebContents() override;
+
+  bool ShouldAlwaysBeSpoken() override;
 
  private:
   // The BrowserContext that initiated this utterance.
@@ -112,7 +120,7 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance {
 
   // The full options arg passed to tts.speak, which may include fields
   // other than the ones we explicitly parse, below.
-  std::unique_ptr<base::Value> options_;
+  base::Value::Dict options_;
 
   // The source engine's ID of this utterance, so that it can associate
   // events with the appropriate callback.
@@ -137,6 +145,9 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance {
 
   // True if this utterance received an event indicating it's done.
   bool finished_;
+
+  // True if this utterance should always be spoken.
+  bool should_always_be_spoken_ = false;
 };
 
 }  // namespace content

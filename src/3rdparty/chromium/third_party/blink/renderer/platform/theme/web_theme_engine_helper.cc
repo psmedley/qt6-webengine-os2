@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,12 +28,23 @@ std::unique_ptr<WebThemeEngine> CreateWebThemeEngine() {
 #endif
 }
 
+std::unique_ptr<WebThemeEngine>& ThemeEngine() {
+  DEFINE_STATIC_LOCAL(std::unique_ptr<WebThemeEngine>, theme_engine,
+                      {CreateWebThemeEngine()});
+  return theme_engine;
+}
+
 }  // namespace
 
 WebThemeEngine* WebThemeEngineHelper::GetNativeThemeEngine() {
-  DEFINE_STATIC_LOCAL(std::unique_ptr<WebThemeEngine>, theme_engine,
-                      {CreateWebThemeEngine()});
-  return theme_engine.get();
+  return ThemeEngine().get();
+}
+
+std::unique_ptr<WebThemeEngine>
+WebThemeEngineHelper::SwapNativeThemeEngineForTesting(
+    std::unique_ptr<WebThemeEngine> new_theme) {
+  ThemeEngine().swap(new_theme);
+  return new_theme;
 }
 
 void WebThemeEngineHelper::DidUpdateRendererPreferences(

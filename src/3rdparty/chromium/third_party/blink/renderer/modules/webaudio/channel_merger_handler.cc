@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,18 @@
 
 namespace blink {
 
+namespace {
+
+constexpr unsigned kNumberOfInputChannels = 1;
+
+}  // namespace
+
 ChannelMergerHandler::ChannelMergerHandler(AudioNode& node,
                                            float sample_rate,
                                            unsigned number_of_inputs)
     : AudioHandler(kNodeTypeChannelMerger, node, sample_rate) {
   // These properties are fixed for the node and cannot be changed by user.
-  channel_count_ = 1;
+  channel_count_ = kNumberOfInputChannels;
   SetInternalChannelCountMode(kExplicit);
 
   // Create the requested number of inputs.

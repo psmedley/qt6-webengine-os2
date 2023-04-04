@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,12 +67,12 @@ blink::WebPlugin* CreateInternalPlugin(
   CHECK(!delegate->IsAllowedOrigin(frame->GetSecurityOrigin()));
   CHECK(parent_frame->IsWebRemoteFrame());
 
-  mojo::AssociatedRemote<pdf::mojom::PdfService> pdf_service_remote;
+  mojo::AssociatedRemote<pdf::mojom::PdfService> pdf_service;
   render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
-      pdf_service_remote.BindNewEndpointAndPassReceiver());
+      pdf_service.BindNewEndpointAndPassReceiver());
   return new chrome_pdf::PdfViewWebPlugin(
       std::make_unique<PdfViewWebPluginClient>(render_frame),
-      std::move(pdf_service_remote), params);
+      std::move(pdf_service), params);
 }
 
 }  // namespace pdf

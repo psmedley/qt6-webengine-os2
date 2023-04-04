@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 if(QT_CONFIGURE_RUNNING)
     function(assertTargets)
     endfunction()
@@ -50,6 +53,7 @@ if(PkgConfig_FOUND)
     pkg_check_modules(OPUS opus>=1.3.1)
     pkg_check_modules(VPX vpx>=1.10.0 IMPORTED_TARGET)
     pkg_check_modules(LIBPCI libpci)
+    pkg_check_modules(LIBOPENJP2 libopenjp2)
 endif()
 
 if(Python3_EXECUTABLE)
@@ -325,6 +329,10 @@ qt_feature("webengine-system-icu" PRIVATE
 qt_feature("webengine-system-libwebp" PRIVATE
     LABEL "libwebp, libwebpmux and libwebpdemux"
     CONDITION (UNIX OR OS2) AND WEBP_FOUND
+)
+qt_feature("webengine-system-libopenjpeg2" PRIVATE
+    LABEL "libopenjpeg2"
+    CONDITION UNIX AND LIBOPENJP2_FOUND
 )
 qt_feature("webengine-system-opus" PRIVATE
     LABEL "opus"
@@ -635,6 +643,7 @@ if(UNIX OR OS2)
     qt_configure_add_summary_entry(ARGS "webengine-system-lcms2")
     qt_configure_add_summary_entry(ARGS "webengine-system-libpng")
     qt_configure_add_summary_entry(ARGS "webengine-system-libjpeg")
+    qt_configure_add_summary_entry(ARGS "webengine-system-libopenjpeg2")
     qt_configure_add_summary_entry(ARGS "webengine-system-harfbuzz")
     qt_configure_add_summary_entry(ARGS "webengine-system-freetype")
     qt_configure_add_summary_entry(ARGS "webengine-system-libpci")

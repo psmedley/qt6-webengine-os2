@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -223,7 +223,7 @@ Surface* GetTargetSurfaceForLocatedEvent(
 
   // Create a clone of the event as targeter may update it during the
   // search.
-  auto cloned = ui::Event::Clone(*original_event);
+  auto cloned = original_event->Clone();
   ui::LocatedEvent* event = cloned->AsLocatedEvent();
 
   while (true) {

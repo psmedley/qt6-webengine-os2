@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,7 @@
 
 #include "base/scoped_generic.h"
 
-namespace net {
-namespace internal {
+namespace net::internal {
 
 namespace {
 
@@ -238,7 +237,6 @@ void Freeifaddrs(struct ifaddrs* addrs) {
   }
 }
 
-}  // namespace internal
-}  // namespace net
+}  // namespace net::internal
 
 #endif  // BUILDFLAG(IS_ANDROID)

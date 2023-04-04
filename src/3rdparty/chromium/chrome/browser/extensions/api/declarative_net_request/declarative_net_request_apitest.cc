@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,9 @@
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/prerender_test_util.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "third_party/blink/public/common/features.h"
 
 namespace {
@@ -109,6 +111,10 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyApiTest, IsRegexSupported) {
   ASSERT_TRUE(RunExtensionTest("is_regex_supported")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyApiTest, TestMatchOutcome) {
+  ASSERT_TRUE(RunExtensionTest("test_match_outcome")) << message_;
+}
+
 class DeclarativeNetRequestApiFencedFrameTest
     : public DeclarativeNetRequestApiTest,
       public testing::WithParamInterface<bool /* shadow_dom_fenced_frame */> {
@@ -146,5 +152,30 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestApiFencedFrameTest, Load) {
 INSTANTIATE_TEST_SUITE_P(DeclarativeNetRequestApiFencedFrameTest,
                          DeclarativeNetRequestApiFencedFrameTest,
                          testing::Bool());
+
+class DeclarativeNetRequestApiPrerenderingTest
+    : public DeclarativeNetRequestLazyApiTest {
+ public:
+  DeclarativeNetRequestApiPrerenderingTest() = default;
+  ~DeclarativeNetRequestApiPrerenderingTest() override = default;
+
+ private:
+  content::test::ScopedPrerenderFeatureList scoped_feature_list_;
+};
+
+INSTANTIATE_TEST_SUITE_P(PersistentBackground,
+                         DeclarativeNetRequestApiPrerenderingTest,
+                         ::testing::Values(ContextType::kPersistentBackground));
+INSTANTIATE_TEST_SUITE_P(EventPage,
+                         DeclarativeNetRequestApiPrerenderingTest,
+                         ::testing::Values(ContextType::kEventPage));
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         DeclarativeNetRequestApiPrerenderingTest,
+                         ::testing::Values(ContextType::kServiceWorker));
+
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestApiPrerenderingTest,
+                       PrerenderedPageInterception) {
+  ASSERT_TRUE(RunExtensionTest("prerendering")) << message_;
+}
 
 }  // namespace

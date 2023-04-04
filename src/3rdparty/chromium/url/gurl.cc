@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -444,12 +444,16 @@ base::StringPiece GURL::HostNoBracketsPiece() const {
 }
 
 std::string GURL::GetContent() const {
+  return std::string(GetContentPiece());
+}
+
+base::StringPiece GURL::GetContentPiece() const {
   if (!is_valid_)
-    return std::string();
-  std::string content = ComponentString(parsed_.GetContent());
+    return base::StringPiece();
+  url::Component content_component = parsed_.GetContent();
   if (!SchemeIs(url::kJavaScriptScheme) && parsed_.ref.len >= 0)
-    content.erase(content.size() - parsed_.ref.len - 1);
-  return content;
+    content_component.len -= parsed_.ref.len + 1;
+  return ComponentStringPiece(content_component);
 }
 
 bool GURL::HostIsIPAddress() const {

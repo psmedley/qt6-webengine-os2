@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@
 #include "media/gpu/macros.h"
 #include "media/gpu/vaapi/vaapi_common.h"
 #include "media/gpu/vaapi/vaapi_wrapper.h"
+#include "media/gpu/video_rate_control.h"
 #include "media/gpu/vp9_svc_layers.h"
-#include "media/gpu/vpx_rate_control.h"
 #include "third_party/libvpx/source/libvpx/vp9/ratectrl_rtc.h"
 
 namespace media {
@@ -185,15 +185,10 @@ bool VP9VaapiVideoEncoderDelegate::Initialize(
     return false;
   }
 
-  // Even though VP9VaapiVideoEncoderDelegate might support other bitrate
-  // control modes, only the kConstantQuantizationParameter is used.
-  if (ave_config.bitrate_control != VaapiVideoEncoderDelegate::BitrateControl::
-                                        kConstantQuantizationParameter) {
-    DVLOGF(1) << "Only CQ bitrate control is supported";
+  if (config.bitrate.mode() == Bitrate::Mode::kVariable) {
+    DVLOGF(1) << "Invalid configuraiton. VBR is not supported for VP9.";
     return false;
   }
-
-  native_input_mode_ = ave_config.native_input_mode;
 
   visible_size_ = config.input_visible_size;
   coded_size_ = gfx::Size(base::bits::AlignUp(visible_size_.width(), 16),
@@ -397,6 +392,11 @@ bool VP9VaapiVideoEncoderDelegate::UpdateRates(
     uint32_t framerate) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  if (bitrate_allocation.GetMode() != Bitrate::Mode::kConstant) {
+    DLOG(ERROR) << "VBR is not supported for VP9 but was requested.";
+    return false;
+  }
+
   if (bitrate_allocation.GetSumBps() == 0u || framerate == 0)
     return false;
 
@@ -577,10 +577,9 @@ bool VP9VaapiVideoEncoderDelegate::SubmitFrameParameters(
   pic_param.log2_tile_rows = frame_header->tile_rows_log2;
   pic_param.log2_tile_columns = frame_header->tile_cols_log2;
 
-  return vaapi_wrapper_->SubmitBuffer(VAEncSequenceParameterBufferType,
-                                      &seq_param) &&
-         vaapi_wrapper_->SubmitBuffer(VAEncPictureParameterBufferType,
-                                      &pic_param);
+  return vaapi_wrapper_->SubmitBuffers(
+      {{VAEncSequenceParameterBufferType, sizeof(seq_param), &seq_param},
+       {VAEncPictureParameterBufferType, sizeof(pic_param), &pic_param}});
 }
 
 }  // namespace media

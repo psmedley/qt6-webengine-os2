@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "components/feed/core/v2/feedstore_util.h"
 #include "components/feed/core/v2/metrics_reporter.h"
 #include "components/feed/core/v2/proto_util.h"
+#include "components/feed/feed_feature_list.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace feed {
@@ -337,8 +338,12 @@ RefreshResponseData TranslateWireResponse(
       chrome_response_metadata.logging_enabled());
   result->stream_data.set_privacy_notice_fulfilled(
       chrome_response_metadata.privacy_notice_fulfilled());
+
   for (const feedstore::Content& content : result->content) {
-    result->stream_data.add_content_ids(content.content_id().id());
+    for (auto& metadata : content.prefetch_metadata()) {
+      result->stream_data.add_content_hashes(
+          feedstore::ContentHashFromPrefetchMetadata(metadata));
+    }
   }
 
   absl::optional<std::string> session_id = absl::nullopt;
@@ -355,11 +360,33 @@ RefreshResponseData TranslateWireResponse(
 
   absl::optional<Experiments> experiments = absl::nullopt;
   if (chrome_response_metadata.experiments_size() > 0) {
+    // Set up the Experiments map that contains the trial -> list of groups.
     Experiments e;
     for (feedwire::Experiment exp : chrome_response_metadata.experiments()) {
-      e[exp.trial_name()] = exp.group_name();
+      if (exp.has_trial_name() && exp.has_group_name()) {
+        // Extract experiment in response that contains both trial and
+        // group names.
+        if (e.find(exp.trial_name()) != e.end()) {
+          e[exp.trial_name()].push_back(exp.group_name());
+        } else {
+          std::vector<std::string> v{exp.group_name()};
+          e[exp.trial_name()] = v;
+        }
+      } else if (exp.has_experiment_id() &&
+                 base::FeatureList::IsEnabled(kFeedExperimentIDTagging)) {
+        // Extract experiment in response that contains an experiment ID.
+        std::string trial_name =
+            exp.has_trial_name() ? exp.trial_name() : kDiscoverFeedExperiments;
+        if (e.find(trial_name) != e.end()) {
+          e[trial_name].push_back(exp.experiment_id());
+        } else {
+          std::vector<std::string> v{exp.experiment_id()};
+          e[trial_name] = v;
+        }
+      }
     }
-    experiments = std::move(e);
+    if (!e.empty())
+      experiments = std::move(e);
   }
 
   MetricsReporter::ActivityLoggingEnabled(
@@ -373,10 +400,12 @@ RefreshResponseData TranslateWireResponse(
   response_data.content_lifetime = std::move(content_lifetime);
   response_data.session_id = std::move(session_id);
   response_data.experiments = std::move(experiments);
-  response_data.server_request_received_timestamp_ns =
-      feed_response->feed_response_metadata().event_id().time_usec() * 1'000;
-  response_data.server_response_sent_timestamp_ns =
-      feed_response->feed_response_metadata().response_time_ms() * 1'000'000;
+  response_data.server_request_received_timestamp =
+      feedstore::FromTimestampMicros(
+          feed_response->feed_response_metadata().event_id().time_usec());
+  response_data.server_response_sent_timestamp = feedstore::FromTimestampMillis(
+      feed_response->feed_response_metadata().response_time_ms());
+  response_data.last_fetch_timestamp = current_time;
   response_data.web_and_app_activity_enabled =
       chrome_response_metadata.web_and_app_activity_enabled();
   response_data.discover_personalization_enabled =

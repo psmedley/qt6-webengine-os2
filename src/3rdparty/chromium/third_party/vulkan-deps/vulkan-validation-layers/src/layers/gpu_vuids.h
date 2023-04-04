@@ -1,6 +1,6 @@
-/* Copyright (c) 2021 The Khronos Group Inc.
+/* Copyright (c) 2021-2022 The Khronos Group Inc.
  * Copyright (c) 2021 Valve Corporation
- * Copyright (c) 2021 LunarG, Inc.
+ * Copyright (c) 2021-2022 LunarG, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ struct GpuVuidsCmdDrawIndirect : GpuVuid {
     GpuVuidsCmdDrawIndirect() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndirect-None-02705";
         storage_access_oob = "VUID-vkCmdDrawIndirect-None-02706";
-        first_instance_not_zero = "VUID-vkCmdDrawIndirect-firstInstance-00478";
+        first_instance_not_zero = "VUID-VkDrawIndirectCommand-firstInstance-00501";
     }
 };
 
@@ -61,7 +61,7 @@ struct GpuVuidsCmdDrawIndexedIndirect : GpuVuid {
     GpuVuidsCmdDrawIndexedIndirect() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDrawIndexedIndirect-None-02705";
         storage_access_oob = "VUID-vkCmdDrawIndexedIndirect-None-02706";
-        first_instance_not_zero = "VUID-vkCmdDrawIndexedIndirect-firstInstance-00530";
+        first_instance_not_zero = "VUID-VkDrawIndexedIndirectCommand-firstInstance-00554";
     }
 };
 
@@ -76,6 +76,10 @@ struct GpuVuidsCmdDispatchIndirect : GpuVuid {
     GpuVuidsCmdDispatchIndirect() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdDispatchIndirect-None-02705";
         storage_access_oob = "VUID-vkCmdDispatchIndirect-None-02706";
+        group_exceeds_device_limit_x = "VUID-VkDispatchIndirectCommand-x-00417";
+        group_exceeds_device_limit_y = "VUID-VkDispatchIndirectCommand-y-00418";
+        group_exceeds_device_limit_z = "VUID-VkDispatchIndirectCommand-z-00419";
+
     }
 };
 
@@ -117,6 +121,13 @@ struct GpuVuidsCmdTraceRaysIndirectKHR : GpuVuid {
     GpuVuidsCmdTraceRaysIndirectKHR() : GpuVuid() {
         uniform_access_oob = "VUID-vkCmdTraceRaysIndirectKHR-None-02705";
         storage_access_oob = "VUID-vkCmdTraceRaysIndirectKHR-None-02706";
+    }
+};
+
+struct GpuVuidsCmdTraceRaysIndirect2KHR : GpuVuid {
+    GpuVuidsCmdTraceRaysIndirect2KHR() : GpuVuid() {
+        uniform_access_oob = "VUID-vkCmdTraceRaysIndirect2KHR-None-02705";
+        storage_access_oob = "VUID-vkCmdTraceRaysIndirect2KHR-None-02706";
     }
 };
 
@@ -172,6 +183,7 @@ static const std::map<CMD_TYPE, GpuVuid> gpu_vuid = {
     {CMD_TRACERAYSNV, GpuVuidsCmdTraceRaysNV()},
     {CMD_TRACERAYSKHR, GpuVuidsCmdTraceRaysKHR()},
     {CMD_TRACERAYSINDIRECTKHR, GpuVuidsCmdTraceRaysIndirectKHR()},
+    {CMD_TRACERAYSINDIRECT2KHR, GpuVuidsCmdTraceRaysIndirect2KHR()},
     {CMD_DRAWMESHTASKSNV, GpuVuidsCmdDrawMeshTasksNV()},
     {CMD_DRAWMESHTASKSINDIRECTNV, GpuVuidsCmdDrawMeshTasksIndirectNV()},
     {CMD_DRAWMESHTASKSINDIRECTCOUNTNV, GpuVuidsCmdDrawMeshTasksIndirectCountNV()},

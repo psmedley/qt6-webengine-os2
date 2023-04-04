@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "components/viz/service/frame_sinks/gpu_vsync_begin_frame_source.h"
 #include "components/viz/service/hit_test/hit_test_aggregator.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "components/viz/service/frame_sinks/external_begin_frame_source_android.h"
@@ -81,7 +82,7 @@ RootCompositorFrameSinkImpl::Create(
   mojo::Remote<mojom::DisplayClient> display_client(
       std::move(params->display_client));
   auto display_controller = output_surface_provider->CreateGpuDependency(
-      params->gpu_compositing, params->widget, params->renderer_settings);
+      params->gpu_compositing, params->widget);
   auto output_surface = output_surface_provider->CreateOutputSurface(
       params->widget, params->gpu_compositing, display_client.get(),
       display_controller.get(), params->renderer_settings, debug_settings);
@@ -144,7 +145,7 @@ RootCompositorFrameSinkImpl::Create(
       // Vsync updates are required to update the FrameRateDecider with
       // supported refresh rates.
 #if !BUILDFLAG(IS_APPLE)
-      wants_vsync_updates = params->use_preferred_interval_for_video;
+      wants_vsync_updates = true;
 #endif
       external_begin_frame_source = std::make_unique<GpuVSyncBeginFrameSource>(
           restart_id, output_surface.get());
@@ -175,9 +176,7 @@ RootCompositorFrameSinkImpl::Create(
   auto* output_surface_ptr = output_surface.get();
 #endif
   gpu::SharedImageInterface* sii = nullptr;
-  if (output_surface->context_provider())
-    sii = output_surface->context_provider()->SharedImageInterface();
-  else if (display_controller)
+  if (display_controller)
     sii = display_controller->shared_image_interface();
 
   auto overlay_processor = OverlayProcessorInterface::CreateOverlayProcessor(
@@ -202,7 +201,6 @@ RootCompositorFrameSinkImpl::Create(
       std::move(params->display_private), std::move(display_client),
       std::move(synthetic_begin_frame_source),
       std::move(external_begin_frame_source), std::move(display),
-      params->use_preferred_interval_for_video,
       hw_support_for_multiple_refresh_rates,
       params->renderer_settings.apply_simple_frame_rate_throttling));
 
@@ -260,7 +258,7 @@ void RootCompositorFrameSinkImpl::Resize(const gfx::Size& size) {
 
 void RootCompositorFrameSinkImpl::SetDisplayColorMatrix(
     const gfx::Transform& color_matrix) {
-  display_->SetColorMatrix(color_matrix.GetMatrixAsSkM44());
+  display_->SetColorMatrix(gfx::TransformToSkM44(color_matrix));
 }
 
 void RootCompositorFrameSinkImpl::SetDisplayColorSpaces(
@@ -498,7 +496,6 @@ RootCompositorFrameSinkImpl::RootCompositorFrameSinkImpl(
     std::unique_ptr<SyntheticBeginFrameSource> synthetic_begin_frame_source,
     std::unique_ptr<ExternalBeginFrameSource> external_begin_frame_source,
     std::unique_ptr<Display> display,
-    bool use_preferred_interval_for_video,
     bool hw_support_for_multiple_refresh_rates,
     bool apply_simple_frame_rate_throttling)
     : compositor_frame_sink_client_(std::move(frame_sink_client)),
@@ -522,8 +519,7 @@ RootCompositorFrameSinkImpl::RootCompositorFrameSinkImpl(
                        Display::kEnableSharedImages,
                        hw_support_for_multiple_refresh_rates);
   support_->SetUpHitTest(display_.get());
-  if (use_preferred_interval_for_video &&
-      !hw_support_for_multiple_refresh_rates) {
+  if (!hw_support_for_multiple_refresh_rates) {
     display_->SetSupportedFrameIntervals(
         {display_frame_interval_, display_frame_interval_ * 2});
     use_preferred_interval_ = true;

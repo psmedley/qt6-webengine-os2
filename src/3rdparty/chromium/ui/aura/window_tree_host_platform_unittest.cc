@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,7 +83,7 @@ class TestWindowTreeHostObserver : public WindowTreeHostObserver {
       return;
 
     should_change_bounds_in_on_resized_ = false;
-    gfx::Rect bounds = platform_window_->GetBounds();
+    gfx::Rect bounds = platform_window_->GetBoundsInPixels();
     bounds.set_x(bounds.x() + 1);
     host_->SetBoundsInPixels(bounds);
   }
@@ -135,8 +135,7 @@ class DeleteHostWindowTreeHostObserver : public WindowTreeHostObserver {
   TestWindowTreeHost* host() { return host_.get(); }
 
   // WindowTreeHostObserver:
-  void OnHostMovedInPixels(WindowTreeHost* host,
-                           const gfx::Point& new_origin_in_pixels) override {
+  void OnHostMovedInPixels(WindowTreeHost* host) override {
     host_->RemoveObserver(this);
     host_.reset();
   }

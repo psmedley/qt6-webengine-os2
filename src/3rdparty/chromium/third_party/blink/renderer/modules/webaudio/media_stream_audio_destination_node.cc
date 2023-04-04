@@ -32,28 +32,21 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_destination_handler.h"
 #include "third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
 
 namespace {
 
-void DidCreateMediaStreamAndTracks(MediaStreamDescriptor* stream) {
-  for (uint32_t i = 0; i < stream->NumberOfAudioComponents(); ++i) {
-    MediaStreamUtils::DidCreateMediaStreamTrack(stream->AudioComponent(i));
-  }
+// Default to stereo; `options` will update it appropriately if needed.
+constexpr uint32_t kDefaultNumberOfChannels = 2;
 
-  for (uint32_t i = 0; i < stream->NumberOfVideoComponents(); ++i) {
-    MediaStreamUtils::DidCreateMediaStreamTrack(stream->VideoComponent(i));
-  }
-}
-
-MediaStreamSource* CreateMediaStreamSource() {
+MediaStreamSource* CreateMediaStreamSource(
+    ExecutionContext* execution_context) {
   DVLOG(1) << "Creating WebAudio media stream source.";
-  // TODO(crbug.com/704136) Use executionContext::GetTaskRunner() instead.
   auto audio_source = std::make_unique<WebAudioMediaStreamSource>(
-      Thread::MainThread()->GetTaskRunner());
+      execution_context->GetTaskRunner(TaskType::kInternalMedia));
   WebAudioMediaStreamSource* audio_source_ptr = audio_source.get();
 
   String source_id = "WebAudio-" + WTF::CreateCanonicalUUIDString();
@@ -83,12 +76,12 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(
     AudioContext& context,
     uint32_t number_of_channels)
     : AudioBasicInspectorNode(context),
-      source_(CreateMediaStreamSource()),
-      stream_(MediaStream::Create(context.GetExecutionContext(),
-                                  MakeGarbageCollected<MediaStreamDescriptor>(
-                                      MediaStreamSourceVector({source_.Get()}),
-                                      MediaStreamSourceVector()))) {
-  DidCreateMediaStreamAndTracks(stream_->Descriptor());
+      source_(CreateMediaStreamSource(context.GetExecutionContext())),
+      stream_(MediaStream::Create(
+          context.GetExecutionContext(),
+          MediaStreamTrackVector({MediaStreamUtils::CreateLocalAudioTrack(
+              context.GetExecutionContext(),
+              source_)}))) {
   SetHandler(
       MediaStreamAudioDestinationHandler::Create(*this, number_of_channels));
   WebRtcLogMessage(
@@ -127,9 +120,9 @@ MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::Create(
   if (!context->CheckExecutionContextAndThrowIfNecessary(exception_state)) {
     return nullptr;
   }
-  // Default to stereo; |options| will update it appropriately if needed.
   MediaStreamAudioDestinationNode* node =
-      MakeGarbageCollected<MediaStreamAudioDestinationNode>(*context, 2);
+      MakeGarbageCollected<MediaStreamAudioDestinationNode>(
+          *context, kDefaultNumberOfChannels);
 
   // Need to handle channelCount here ourselves because the upper
   // limit is different from the normal AudioNode::setChannelCount

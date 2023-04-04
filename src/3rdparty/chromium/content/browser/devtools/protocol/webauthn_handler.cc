@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,12 +155,13 @@ void WebAuthnHandler::Wire(UberDispatcher* dispatcher) {
   WebAuthn::Dispatcher::wire(dispatcher, this);
 }
 
-Response WebAuthnHandler::Enable() {
+Response WebAuthnHandler::Enable(Maybe<bool> enable_ui) {
   if (!frame_host_)
     return Response::ServerError(kDevToolsNotAttached);
 
   AuthenticatorEnvironmentImpl::GetInstance()->EnableVirtualAuthenticatorFor(
-      frame_host_->frame_tree_node());
+      frame_host_->frame_tree_node(),
+      enable_ui.fromMaybe(/*default_value=*/false));
   return Response::Success();
 }
 

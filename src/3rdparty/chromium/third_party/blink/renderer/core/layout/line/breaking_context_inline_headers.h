@@ -25,6 +25,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LINE_BREAKING_CONTEXT_INLINE_HEADERS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LINE_BREAKING_CONTEXT_INLINE_HEADERS_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_box.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_list_marker.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_ruby_run.h"
@@ -1670,19 +1671,8 @@ inline void BreakingContext::CommitAndUpdateLineBreakIfNeeded() {
   }
 }
 
-inline IndentTextOrNot RequiresIndent(bool is_first_line,
-                                      bool is_after_hard_line_break,
-                                      const ComputedStyle& style) {
-  IndentTextOrNot indent_text = kDoNotIndentText;
-  if (is_first_line ||
-      (is_after_hard_line_break &&
-       style.GetTextIndentLine() != TextIndentLine::kFirstLine))
-    indent_text = kIndentText;
-
-  if (style.GetTextIndentType() == TextIndentType::kHanging)
-    indent_text = indent_text == kIndentText ? kDoNotIndentText : kIndentText;
-
-  return indent_text;
+inline IndentTextOrNot RequiresIndent(bool is_first_line) {
+  return is_first_line ? kIndentText : kDoNotIndentText;
 }
 
 }  // namespace blink

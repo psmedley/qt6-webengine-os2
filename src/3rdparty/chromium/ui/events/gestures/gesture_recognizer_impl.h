@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@
 namespace aura::test {
 FORWARD_DECLARE_TEST(GestureRecognizerTest,
                      DestroyGestureProviderAuraBeforeAck);
+FORWARD_DECLARE_TEST(GestureRecognizerTest,
+                     ResetGestureRecognizerWithGestureProvider);
 }  // namespace aura::test
 
 namespace ui {
@@ -83,6 +85,8 @@ class EVENTS_EXPORT GestureRecognizerImpl : public GestureRecognizer,
  private:
   FRIEND_TEST_ALL_PREFIXES(aura::test::GestureRecognizerTest,
                            DestroyGestureProviderAuraBeforeAck);
+  FRIEND_TEST_ALL_PREFIXES(aura::test::GestureRecognizerTest,
+                           ResetGestureRecognizerWithGestureProvider);
 
   // Sets up the target consumer for gestures based on the touch-event.
   void SetupTargets(const TouchEvent& event, GestureConsumer* consumer);

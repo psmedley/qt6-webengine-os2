@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,7 @@ ScopedSampleMetadata::~ScopedSampleMetadata() {
 void ApplyMetadataToPastSamplesImpl(
     TimeTicks period_start,
     TimeTicks period_end,
-    int64_t name_hash,
+    uint64_t name_hash,
     absl::optional<int64_t> key,
     int64_t value,
     absl::optional<PlatformThreadId> thread_id) {

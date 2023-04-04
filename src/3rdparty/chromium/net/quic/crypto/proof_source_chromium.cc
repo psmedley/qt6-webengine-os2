@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,9 @@ using std::string;
 
 namespace net {
 
-ProofSourceChromium::ProofSourceChromium() {}
+ProofSourceChromium::ProofSourceChromium() = default;
 
-ProofSourceChromium::~ProofSourceChromium() {}
+ProofSourceChromium::~ProofSourceChromium() = default;
 
 bool ProofSourceChromium::Initialize(const base::FilePath& cert_path,
                                      const base::FilePath& key_path,

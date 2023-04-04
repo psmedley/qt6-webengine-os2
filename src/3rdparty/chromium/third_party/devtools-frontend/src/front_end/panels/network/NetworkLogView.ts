@@ -36,14 +36,17 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
+import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as Bindings from '../../models/bindings/bindings.js';
 import * as HAR from '../../models/har/har.js';
 import * as IssuesManager from '../../models/issues_manager/issues_manager.js';
 import * as Logs from '../../models/logs/logs.js';
+import * as Persistence from '../../models/persistence/persistence.js';
 import * as TextUtils from '../../models/text_utils/text_utils.js';
 import * as NetworkForward from '../../panels/network/forward/forward.js';
+import * as Sources from '../../panels/sources/sources.js';
 import * as DataGrid from '../../ui/legacy/components/data_grid/data_grid.js';
 import * as PerfUI from '../../ui/legacy/components/perf_ui/perf_ui.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
@@ -52,12 +55,23 @@ import * as ThemeSupport from '../../ui/legacy/theme_support/theme_support.js';
 
 import networkLogViewStyles from './networkLogView.css.js';
 
-import type {NetworkLogViewInterface, NetworkNode, EventTypes} from './NetworkDataGridNode.js';
-import {Events, NetworkGroupNode, NetworkRequestNode} from './NetworkDataGridNode.js';
+import {
+  Events,
+  NetworkGroupNode,
+  NetworkRequestNode,
+  type NetworkLogViewInterface,
+  type NetworkNode,
+  type EventTypes,
+} from './NetworkDataGridNode.js';
 import {NetworkFrameGrouper} from './NetworkFrameGrouper.js';
 import {NetworkLogViewColumns} from './NetworkLogViewColumns.js';
-import type {NetworkTimeCalculator} from './NetworkTimeCalculator.js';
-import {NetworkTimeBoundary, NetworkTransferDurationCalculator, NetworkTransferTimeCalculator} from './NetworkTimeCalculator.js';
+
+import {
+  NetworkTimeBoundary,
+  NetworkTransferDurationCalculator,
+  NetworkTransferTimeCalculator,
+  type NetworkTimeCalculator,
+} from './NetworkTimeCalculator.js';
 
 const UIStrings = {
   /**
@@ -342,6 +356,11 @@ const UIStrings = {
   *@description Text in Network Log View of the Network panel
   */
   areYouSureYouWantToClearBrowserCookies: 'Are you sure you want to clear browser cookies?',
+  /**
+  *@description A context menu item in the Network Log View of the Network panel
+  * for creating a header override
+  */
+  createResponseHeaderOverride: 'Create response header override',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/network/NetworkLogView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -366,7 +385,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   private readonly timeCalculatorInternal: NetworkTransferTimeCalculator;
   private readonly durationCalculator: NetworkTransferDurationCalculator;
   private calculatorInternal: NetworkTransferTimeCalculator;
-  private readonly columns: NetworkLogViewColumns;
+  private readonly columnsInternal: NetworkLogViewColumns;
   private staleRequests: Set<SDK.NetworkRequest.NetworkRequest>;
   private mainRequestLoadTime: number;
   private mainRequestDOMContentLoadedTime: number;
@@ -433,9 +452,9 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     this.durationCalculator = new NetworkTransferDurationCalculator();
     this.calculatorInternal = this.timeCalculatorInternal;
 
-    this.columns = new NetworkLogViewColumns(
+    this.columnsInternal = new NetworkLogViewColumns(
         this, this.timeCalculatorInternal, this.durationCalculator, networkLogLargeRowsSetting);
-    this.columns.show(this.element);
+    this.columnsInternal.show(this.element);
 
     this.staleRequests = new Set();
     this.mainRequestLoadTime = -1;
@@ -518,9 +537,9 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
         new UI.FilterSuggestionBuilder.FilterSuggestionBuilder(searchKeys, NetworkLogView.sortSearchValues);
     this.resetSuggestionBuilder();
 
-    this.dataGrid = this.columns.dataGrid();
+    this.dataGrid = this.columnsInternal.dataGrid();
     this.setupDataGrid();
-    this.columns.sortByCurrentColumn();
+    this.columnsInternal.sortByCurrentColumn();
     filterBar.filterButton().addEventListener(
         UI.Toolbar.ToolbarButton.Events.Click, this.dataGrid.scheduleUpdate.bind(this.dataGrid, true /* isFromUser */));
 
@@ -806,6 +825,10 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     this.updateSummaryBar();
   }
 
+  columns(): NetworkLogViewColumns {
+    return this.columnsInternal;
+  }
+
   modelAdded(networkManager: SDK.NetworkManager.NetworkManager): void {
     // TODO(allada) Remove dependency on networkManager and instead use NetworkLog and PageLoad for needed data.
     if (networkManager.target().parentTarget()) {
@@ -921,7 +944,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   }
 
   private setHidden(value: boolean): void {
-    this.columns.setHidden(value);
+    this.columnsInternal.setHidden(value);
     UI.ARIAUtils.setHidden(this.summaryToolbar.element, value);
   }
 
@@ -1122,15 +1145,15 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   }
 
   addFilmStripFrames(times: number[]): void {
-    this.columns.addEventDividers(times, 'network-frame-divider');
+    this.columnsInternal.addEventDividers(times, 'network-frame-divider');
   }
 
   selectFilmStripFrame(time: number): void {
-    this.columns.selectFilmStripFrame(time);
+    this.columnsInternal.selectFilmStripFrame(time);
   }
 
   clearFilmStripFrame(): void {
-    this.columns.clearFilmStripFrame();
+    this.columnsInternal.clearFilmStripFrame();
   }
 
   private refreshIfNeeded(): void {
@@ -1163,14 +1186,14 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
 
     if (this.calculatorInternal !== x) {
       this.calculatorInternal = x;
-      this.columns.setCalculator(this.calculatorInternal);
+      this.columnsInternal.setCalculator(this.calculatorInternal);
     }
     this.calculatorInternal.reset();
 
     if (this.calculatorInternal.startAtZero) {
-      this.columns.hideEventDividers();
+      this.columnsInternal.hideEventDividers();
     } else {
-      this.columns.showEventDividers();
+      this.columnsInternal.showEventDividers();
     }
 
     this.invalidateAllItems();
@@ -1186,7 +1209,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     const time = event.data.loadTime;
     if (time) {
       this.mainRequestLoadTime = time;
-      this.columns.addEventDividers([time], 'network-load-divider');
+      this.columnsInternal.addEventDividers([time], 'network-load-divider');
     }
   }
 
@@ -1197,18 +1220,18 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     const {data} = event;
     if (data) {
       this.mainRequestDOMContentLoadedTime = data;
-      this.columns.addEventDividers([data], 'network-dcl-divider');
+      this.columnsInternal.addEventDividers([data], 'network-dcl-divider');
     }
   }
 
   wasShown(): void {
     this.refreshIfNeeded();
     this.registerCSSFiles([networkLogViewStyles]);
-    this.columns.wasShown();
+    this.columnsInternal.wasShown();
   }
 
   willHide(): void {
-    this.columns.willHide();
+    this.columnsInternal.willHide();
   }
 
   onResize(): void {
@@ -1249,7 +1272,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   }
 
   stylesChanged(): void {
-    this.columns.scheduleRefresh();
+    this.columnsInternal.scheduleRefresh();
   }
 
   private refresh(): void {
@@ -1345,7 +1368,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     this.updateSummaryBar();
 
     if (nodesToInsert.size) {
-      this.columns.sortByCurrentColumn();
+      this.columnsInternal.sortByCurrentColumn();
     }
 
     this.dataGrid.updateInstantly();
@@ -1371,7 +1394,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     this.dispatchEventToListeners(Events.RequestActivated, {showPanel: false});
 
     this.setHoveredNode(null);
-    this.columns.reset();
+    this.columnsInternal.reset();
 
     this.timeFilter = null;
     this.calculatorInternal.reset();
@@ -1481,7 +1504,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   }
 
   switchViewMode(gridMode: boolean): void {
-    this.columns.switchViewMode(gridMode);
+    this.columnsInternal.switchViewMode(gridMode);
   }
 
   handleContextMenuForRequest(contextMenu: UI.ContextMenu.ContextMenu, request: SDK.NetworkRequest.NetworkRequest):
@@ -1572,6 +1595,12 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
 
     contextMenu.saveSection().appendItem(i18nString(UIStrings.saveAllAsHarWithContent), this.exportAll.bind(this));
 
+    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.HEADER_OVERRIDES)) {
+      contextMenu.editSection().appendItem(
+          i18nString(UIStrings.createResponseHeaderOverride),
+          this.#handleCreateResponseHeaderOverrideClick.bind(this, request));
+      contextMenu.editSection().appendSeparator();
+    }
     contextMenu.editSection().appendItem(i18nString(UIStrings.clearBrowserCache), this.clearBrowserCache.bind(this));
     contextMenu.editSection().appendItem(
         i18nString(UIStrings.clearBrowserCookies), this.clearBrowserCookies.bind(this));
@@ -1637,7 +1666,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   }
 
   private async copyCurlCommand(request: SDK.NetworkRequest.NetworkRequest, platform: string): Promise<void> {
-    const command = await this.generateCurlCommand(request, platform);
+    const command = await NetworkLogView.generateCurlCommand(request, platform);
     Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(command);
   }
 
@@ -1685,6 +1714,18 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     await HAR.Writer.Writer.write(stream, this.harRequests(), progressIndicator);
     progressIndicator.done();
     void stream.close();
+  }
+
+  async #handleCreateResponseHeaderOverrideClick(request: SDK.NetworkRequest.NetworkRequest): Promise<void> {
+    const networkPersistanceManager = Persistence.NetworkPersistenceManager.NetworkPersistenceManager.instance();
+    if (networkPersistanceManager.project()) {
+      await networkPersistanceManager.getOrCreateHeadersUISourceCodeFromUrl(request.url());
+    } else {  // If folder for local overrides has not been provided yet
+      UI.InspectorView.InspectorView.instance().displaySelectOverrideFolderInfobar(async(): Promise<void> => {
+        await Sources.SourcesNavigator.OverridesNavigatorView.instance().setupNewWorkspace();
+        await networkPersistanceManager.getOrCreateHeadersUISourceCodeFromUrl(request.url());
+      });
+    }
   }
 
   private clearBrowserCache(): void {
@@ -2046,7 +2087,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
     return commands.join(' ;\n');
   }
 
-  private async generateCurlCommand(request: SDK.NetworkRequest.NetworkRequest, platform: string): Promise<string> {
+  static async generateCurlCommand(request: SDK.NetworkRequest.NetworkRequest, platform: string): Promise<string> {
     let command: string[] = [];
     // Most of these headers are derived from the URL and are automatically added by cURL.
     // The |Accept-Encoding| header is ignored to prevent decompression errors. crbug.com/1015321
@@ -2069,7 +2110,7 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
          gets to MS Crt parser safely.
 
          The % character is special because MS Crt parser will try and look for
-         ENV variables and fill them in it's place. We cannot escape them with %
+         ENV variables and fill them in its place. We cannot escape them with %
          and cannot escape them with ^ (because it's cmd.exe's escape not MS Crt
          parser); So we can get cmd.exe parser to escape the character after it,
          if it is followed by a valid beginning character of an ENV variable.
@@ -2145,7 +2186,14 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
       if (ignoredHeaders.has(name.toLowerCase())) {
         continue;
       }
-      command.push('-H ' + escapeString(name + ': ' + header.value));
+      if (header.value.trim()) {
+        command.push('-H ' + escapeString(name + ': ' + header.value));
+      } else {
+        // A header passed with -H with no value or only whitespace as its
+        // value tells curl to not set the header at all. To post an empty
+        // header, you have to terminate it with a semicolon.
+        command.push('-H ' + escapeString(name + ';'));
+      }
     }
     command = command.concat(data);
     command.push('--compressed');
@@ -2159,7 +2207,8 @@ export class NetworkLogView extends Common.ObjectWrapper.eventMixin<EventTypes, 
   private async generateAllCurlCommand(requests: SDK.NetworkRequest.NetworkRequest[], platform: string):
       Promise<string> {
     const nonBlobRequests = this.filterOutBlobRequests(requests);
-    const commands = await Promise.all(nonBlobRequests.map(request => this.generateCurlCommand(request, platform)));
+    const commands =
+        await Promise.all(nonBlobRequests.map(request => NetworkLogView.generateCurlCommand(request, platform)));
     if (platform === 'win') {
       return commands.join(' &\r\n');
     }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/memory/scoped_refptr.h"
@@ -31,6 +32,7 @@
 #include "content/browser/loader/navigation_url_loader_delegate.h"
 #include "content/browser/loader/prefetch_url_loader_service.h"
 #include "content/browser/navigation_subresource_loader_params.h"
+#include "content/browser/preloading/prefetch/prefetch_url_loader_interceptor.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/navigation_request_info.h"
@@ -205,7 +207,7 @@ const net::NetworkTrafficAnnotationTag kNavigationUrlLoaderTrafficAnnotation =
 
 std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
     const NavigationRequestInfo& request_info,
-    int frame_tree_node_id,
+    FrameTreeNode* frame_tree_node,
     mojo::PendingRemote<network::mojom::CookieAccessObserver> cookie_observer,
     mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
         url_loader_network_observer,
@@ -238,8 +240,6 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   new_request->headers.AddHeadersFromString(request_info.begin_params->headers);
   new_request->cors_exempt_headers = request_info.cors_exempt_headers;
   if (request_info.begin_params->web_bundle_token) {
-    FrameTreeNode* frame_tree_node =
-        FrameTreeNode::GloballyFindByID(frame_tree_node_id);
     DCHECK(frame_tree_node->parent());
     int render_process_id = frame_tree_node->parent()->GetProcess()->GetID();
     new_request->web_bundle_token_params =
@@ -292,9 +292,9 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   new_request->upgrade_if_insecure = request_info.upgrade_if_insecure;
   new_request->throttling_profile_id = request_info.devtools_frame_token;
   new_request->transition_type = request_info.common_params->transition;
-  new_request->devtools_request_id =
-      request_info.devtools_navigation_token.ToString();
-  new_request->obey_origin_policy = request_info.obey_origin_policy;
+  devtools_instrumentation::MaybeAssignResourceRequestId(
+      frame_tree_node, request_info.devtools_navigation_token.ToString(),
+      *new_request);
   if (request_info.begin_params->trust_token_params) {
     new_request->trust_token_params =
         *request_info.begin_params->trust_token_params;
@@ -358,6 +358,33 @@ bool IsSameOriginRedirect(const std::vector<GURL>& url_chain) {
   auto previous_origin = url::Origin::Create(url_chain[url_chain.size() - 2]);
   return previous_origin.IsSameOriginWith(url_chain[url_chain.size() - 1]);
 }
+
+#if DCHECK_IS_ON()
+void CheckParsedHeadersEquals(const network::mojom::ParsedHeadersPtr& lhs,
+                              const network::mojom::ParsedHeadersPtr& rhs) {
+  if (mojo::Equals(lhs, rhs))
+    return;
+  DCHECK(
+      mojo::Equals(lhs->content_security_policy, rhs->content_security_policy));
+  DCHECK(mojo::Equals(lhs->allow_csp_from, rhs->allow_csp_from));
+  DCHECK(mojo::Equals(lhs->cross_origin_embedder_policy,
+                      rhs->cross_origin_embedder_policy));
+  DCHECK(mojo::Equals(lhs->cross_origin_opener_policy,
+                      rhs->cross_origin_opener_policy));
+  DCHECK(mojo::Equals(lhs->origin_agent_cluster, rhs->origin_agent_cluster));
+  DCHECK(mojo::Equals(lhs->accept_ch, rhs->accept_ch));
+  DCHECK(mojo::Equals(lhs->critical_ch, rhs->critical_ch));
+  DCHECK_EQ(lhs->xfo, rhs->xfo);
+  DCHECK(mojo::Equals(lhs->link_headers, rhs->link_headers));
+  DCHECK(mojo::Equals(lhs->timing_allow_origin, rhs->timing_allow_origin));
+  DCHECK(mojo::Equals(lhs->reporting_endpoints, rhs->reporting_endpoints));
+  DCHECK(mojo::Equals(lhs->variants_headers, rhs->variants_headers));
+  DCHECK(mojo::Equals(lhs->content_language, rhs->content_language));
+  NOTREACHED() << "The parsed headers don't match, but we don't know which "
+                  "field does not match. Please add a DCHECK before this one "
+                  "checking for the missing field.";
+}
+#endif
 
 }  // namespace
 
@@ -473,12 +500,19 @@ void NavigationURLLoaderImpl::CreateInterceptors(
         std::move(accept_langs)));
   }
 
+  // Set up an interceptor for prefetch.
+  std::unique_ptr<PrefetchURLLoaderInterceptor> prefetch_interceptor =
+      content::PrefetchURLLoaderInterceptor::MaybeCreateInterceptor(
+          frame_tree_node_id_);
+  if (prefetch_interceptor) {
+    interceptors_.push_back(std::move(prefetch_interceptor));
+  }
+
   // See if embedders want to add interceptors.
   std::vector<std::unique_ptr<URLLoaderRequestInterceptor>>
       browser_interceptors =
           GetContentClient()->browser()->WillCreateURLLoaderRequestInterceptors(
-              navigation_ui_data_.get(), frame_tree_node_id_,
-              network_loader_factory_);
+              navigation_ui_data_.get(), frame_tree_node_id_);
   if (!browser_interceptors.empty()) {
     for (auto& browser_interceptor : browser_interceptors) {
       interceptors_.push_back(
@@ -746,6 +780,14 @@ void NavigationURLLoaderImpl::OnReceiveEarlyHints(
   DCHECK_NE(early_hints->ip_address_space,
             network::mojom::IPAddressSpace::kUnknown);
 
+  // Ignore Early Hints for embed and object destination.
+  if (request_info_->common_params->request_destination ==
+          network::mojom::RequestDestination::kEmbed ||
+      request_info_->common_params->request_destination ==
+          network::mojom::RequestDestination::kObject) {
+    return;
+  }
+
   FrameTreeNode* frame_tree_node =
       FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
 
@@ -771,18 +813,21 @@ void NavigationURLLoaderImpl::OnReceiveEarlyHints(
 
 void NavigationURLLoaderImpl::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr head,
-    mojo::ScopedDataPipeConsumerHandle response_body) {
+    mojo::ScopedDataPipeConsumerHandle response_body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
+  DCHECK(!cached_metadata);
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",
                         resource_request_->is_outermost_main_frame);
   head_ = std::move(head);
-  if (response_body)
-    OnStartLoadingResponseBody(std::move(response_body));
-}
 
-void NavigationURLLoaderImpl::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle response_body) {
-  LogQueueTimeHistogram("Navigation.QueueTime.OnStartLoadingResponseBody",
-                        resource_request_->is_outermost_main_frame);
+  // Early Hints preloads should not be committed for PDF.
+  // See https://github.com/whatwg/html/issues/7823
+  if (head_->mime_type == "application/pdf" || head_->mime_type == "text/pdf")
+    early_hints_manager_.reset();
+
+  if (!response_body)
+    return;
+
   response_body_ = std::move(response_body);
   received_response_ = true;
 
@@ -853,7 +898,7 @@ void NavigationURLLoaderImpl::CheckPluginAndContinueOnReceiveResponse(
       frame_tree_node->current_frame_host()->GetProcess()->GetID();
   int routing_id = frame_tree_node->current_frame_host()->GetRoutingID();
   bool has_plugin = PluginService::GetInstance()->GetPluginInfo(
-      render_process_id, routing_id, resource_request_->url, head->mime_type,
+      render_process_id, routing_id, browser_context_, resource_request_->url, head->mime_type,
       /*allow_wildcard=*/false, &stale, &plugin, nullptr);
 
   if (stale) {
@@ -940,11 +985,6 @@ void NavigationURLLoaderImpl::OnUploadProgress(
     int64_t current_position,
     int64_t total_size,
     OnUploadProgressCallback callback) {
-  NOTREACHED();
-}
-
-void NavigationURLLoaderImpl::OnReceiveCachedMetadata(
-    mojo_base::BigBuffer data) {
   NOTREACHED();
 }
 
@@ -1117,8 +1157,8 @@ bool NavigationURLLoaderImpl::MaybeCreateLoaderForResponse(
           if (container_host) {
             container_host->SetControllerRegistration(
                 nullptr, /*notify_controllerchange=*/false);
-            container_host->UpdateUrls(GURL(), net::SiteForCookies(),
-                                       absl::nullopt, blink::StorageKey());
+            container_host->UpdateUrls(GURL(), absl::nullopt,
+                                       blink::StorageKey());
           }
         }
       }
@@ -1177,7 +1217,7 @@ void NavigationURLLoaderImpl::ParseHeaders(
     auto check = [](base::OnceClosure continuation,
                     network::mojom::URLResponseHead* head,
                     network::mojom::ParsedHeadersPtr parsed_headers) {
-      DCHECK(parsed_headers.Equals(head->parsed_headers));
+      CheckParsedHeadersEquals(parsed_headers, head->parsed_headers);
       std::move(continuation).Run();
     };
     GetNetworkService()->ParseHeaders(
@@ -1263,8 +1303,14 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
       accept_ch_frame_observer;
   accept_ch_frame_observers_.Add(
       this, accept_ch_frame_observer.InitWithNewPipeAndPassReceiver());
+
+  FrameTreeNode* frame_tree_node =
+      FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
+  DCHECK(frame_tree_node);
+  DCHECK(frame_tree_node->navigation_request());
+
   resource_request_ = CreateResourceRequest(
-      *request_info_, frame_tree_node_id_, std::move(cookie_observer),
+      *request_info_, frame_tree_node, std::move(cookie_observer),
       std::move(url_loader_network_observer), std::move(devtools_observer),
       std::move(accept_ch_frame_observer));
 
@@ -1272,16 +1318,12 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
       GetContentClient()->browser()->GetAcceptLangs(browser_context_);
 
   // Check if a web UI scheme wants to handle this request.
-  FrameTreeNode* frame_tree_node =
-      FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
   const ukm::SourceIdObj ukm_id = ukm::SourceIdObj::FromInt64(ukm_source_id_);
 
   const auto& schemes = URLDataManagerBackend::GetWebUISchemes();
   std::string scheme = resource_request_->url.scheme();
   mojo::PendingRemote<network::mojom::URLLoaderFactory> factory_for_webui;
   if (base::Contains(schemes, scheme)) {
-    DCHECK(frame_tree_node);
-    DCHECK(frame_tree_node->navigation_request());
     auto factory_receiver = factory_for_webui.InitWithNewPipeAndPassReceiver();
     GetContentClient()->browser()->WillCreateURLLoaderFactory(
         browser_context_, frame_tree_node->current_frame_host(),
@@ -1300,8 +1342,6 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
 
   mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
       header_client;
-  DCHECK(frame_tree_node);
-  DCHECK(frame_tree_node->navigation_request());
 
   // Initialize proxied factory remote/receiver if necessary.
   // This also populates `bypass_redirect_checks_`.
@@ -1333,19 +1373,34 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
     proxied_factory_remote_ = std::move(pending_factory);
   }
 
+  bool is_nav_allowed =
+      base::FeatureList::IsEnabled(
+          blink::features::kFileSystemUrlNavigationForChromeAppsOnly) &&
+      content::GetContentClient()->browser()->IsFileSystemURLNavigationAllowed(
+          storage_partition_->browser_context(), url_);
+
   const std::string storage_domain;
-  // TODO(https://crbug.com/1264405): Determine if we should deprecate
-  // navigation in filesystem: URLs entirely or in 3p contexts; alter the
-  // below as necessary. NOTE: while the logic below is appropriate for
-  // browser-initiated navigations, it is likely incorrect to always use
-  // first-party StorageKeys for renderer-initiated navigations.
-  non_network_url_loader_factories_.emplace(
-      url::kFileSystemScheme,
-      CreateFileSystemURLLoaderFactory(
-          ChildProcessHost::kInvalidUniqueID,
-          frame_tree_node->frame_tree_node_id(),
-          storage_partition_->GetFileSystemContext(), storage_domain,
-          blink::StorageKey(url::Origin::Create(url_))));
+  if (is_nav_allowed ||
+      base::FeatureList::IsEnabled(blink::features::kFileSystemUrlNavigation) ||
+      !frame_tree_node->navigation_request()->IsRendererInitiated()) {
+    // TODO(https://crbug.com/256067): Once DevTools has support for sandboxed
+    // file system inspection there isn't much reason anymore to support browser
+    // initiated filesystem: navigations, so remove this entirely at that point.
+
+    // Navigations in to filesystem: URLs are deprecated entirely for
+    // renderer-initiated navigations except for those explicitly allowed by the
+    // embedder. The logic below is appropriate for
+    // browser-initiated navigations, but it is incorrect to always use
+    // first-party StorageKeys for renderer-initiated navigations when third
+    // party storage partitioning is enabled.
+    non_network_url_loader_factories_.emplace(
+        url::kFileSystemScheme,
+        CreateFileSystemURLLoaderFactory(
+            ChildProcessHost::kInvalidUniqueID,
+            frame_tree_node->frame_tree_node_id(),
+            storage_partition_->GetFileSystemContext(), storage_domain,
+            blink::StorageKey(url::Origin::Create(url_))));
+  }
 
   non_network_url_loader_factories_.emplace(url::kAboutScheme,
                                             AboutURLLoaderFactory::Create());
@@ -1501,7 +1556,8 @@ void NavigationURLLoaderImpl::NotifyResponseStarted(
       std::move(url_loader_client_endpoints), std::move(response_head),
       std::move(response_body), global_request_id, is_download,
       download_policy_,
-      resource_request_->trusted_params->isolation_info.network_isolation_key(),
+      resource_request_->trusted_params->isolation_info
+          .network_anonymization_key(),
       std::move(subresource_loader_params_), std::move(early_hints));
 }
 
@@ -1511,7 +1567,8 @@ void NavigationURLLoaderImpl::NotifyRequestRedirected(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   delegate_->OnRequestRedirected(
       redirect_info,
-      resource_request_->trusted_params->isolation_info.network_isolation_key(),
+      resource_request_->trusted_params->isolation_info
+          .network_anonymization_key(),
       std::move(response_head));
 }
 

@@ -32,7 +32,7 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include <float.h>
 #include "libavutil/intreadwrite.h"
 #include "libavutil/intfloat.h"
@@ -181,9 +181,9 @@ static int fits_read_header(AVCodecContext *avctx, const uint8_t **ptr, FITSHead
     return 0;
 }
 
-static int fits_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
+static int fits_decode_frame(AVCodecContext *avctx, AVFrame *p,
+                             int *got_frame, AVPacket *avpkt)
 {
-    AVFrame *p=data;
     const uint8_t *ptr8 = avpkt->data, *end;
     uint8_t t8;
     int16_t t16;
@@ -326,8 +326,8 @@ const FFCodec ff_fits_decoder = {
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_FITS,
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Flexible Image Transport System"),
+    CODEC_LONG_NAME("Flexible Image Transport System"),
     .p.priv_class   = &fits_decoder_class,
     .priv_data_size = sizeof(FITSContext),
-    .decode         = fits_decode_frame,
+    FF_CODEC_DECODE_CB(fits_decode_frame),
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,9 +110,18 @@ export class MainView extends WindowView {
     // Redirect deleted pages to #events page, which contains instructions
     // about migrating to using net-export and the external netlog_viewer.
     if ([
-          '#capture', '#import', '#export', '#timeline', '#alt-svc', '#http2',
-          '#quic', '#reporting', '#httpCache', '#modules', '#bandwidth',
-          '#prerender'
+          '#capture',
+          '#import',
+          '#export',
+          '#timeline',
+          '#alt-svc',
+          '#http2',
+          '#quic',
+          '#reporting',
+          '#httpCache',
+          '#modules',
+          '#bandwidth',
+          '#prerender',
         ].includes(parsed.tabHash)) {
       parsed.tabHash = EventsView.TAB_HASH;
     }

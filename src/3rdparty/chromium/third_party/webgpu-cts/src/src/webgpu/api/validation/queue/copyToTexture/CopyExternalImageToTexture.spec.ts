@@ -1,5 +1,8 @@
 export const description = `
 copyExternalImageToTexture Validation Tests in Queue.
+Note that we don't need to add tests on the destination texture dimension as currently we require
+the destination texture should have RENDER_ATTACHMENT usage, which is only allowed to be used on 2D
+textures.
 `;
 
 import { getResourcePath } from '../../../../../common/framework/resources.js';
@@ -58,9 +61,21 @@ function generateCopySizeForSrcOOB({ srcOrigin }: { srcOrigin: Required<GPUOrigi
 
   return [
     justFitCopySize, // correct size, maybe no-op copy.
-    { width: justFitCopySize.width + 1, height: justFitCopySize.height, depthOrArrayLayers: 1 }, // OOB in width
-    { width: justFitCopySize.width, height: justFitCopySize.height + 1, depthOrArrayLayers: 1 }, // OOB in height
-    { width: justFitCopySize.width, height: justFitCopySize.height, depthOrArrayLayers: 2 }, // OOB in depthOrArrayLayers
+    {
+      width: justFitCopySize.width + 1,
+      height: justFitCopySize.height,
+      depthOrArrayLayers: justFitCopySize.depthOrArrayLayers,
+    }, // OOB in width
+    {
+      width: justFitCopySize.width,
+      height: justFitCopySize.height + 1,
+      depthOrArrayLayers: justFitCopySize.depthOrArrayLayers,
+    }, // OOB in height
+    {
+      width: justFitCopySize.width,
+      height: justFitCopySize.height,
+      depthOrArrayLayers: justFitCopySize.depthOrArrayLayers + 1,
+    }, // OOB in depthOrArrayLayers
   ];
 }
 
@@ -615,17 +630,15 @@ g.test('destination_texture,device_mismatch')
     'Tests copyExternalImageToTexture cannot be called with a destination texture created from another device'
   )
   .paramsSubcasesOnly(u => u.combine('mismatched', [true, false]))
+  .beforeAllSubcases(t => {
+    t.selectMismatchedDeviceOrSkipTestCase(undefined);
+  })
   .fn(async t => {
     const { mismatched } = t.params;
-
-    if (mismatched) {
-      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
-    }
-
-    const device = mismatched ? t.mismatchedDevice : t.device;
+    const sourceDevice = mismatched ? t.mismatchedDevice : t.device;
     const copySize = { width: 1, height: 1, depthOrArrayLayers: 1 };
 
-    const texture = device.createTexture({
+    const texture = sourceDevice.createTexture({
       size: copySize,
       format: 'rgba8unorm',
       usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
@@ -634,36 +647,6 @@ g.test('destination_texture,device_mismatch')
     const imageBitmap = await t.createImageBitmap(t.getImageData(1, 1));
 
     t.runTest({ source: imageBitmap }, { texture }, copySize, !mismatched);
-  });
-
-g.test('destination_texture,dimension')
-  .desc(
-    `
-  Test dst texture dimension is [1d, 2d, 3d].
-
-  Check that an error is generated when texture is not '2d' dimension.
-  `
-  )
-  .params(u =>
-    u //
-      .combine('dimension', ['1d', '2d', '3d'] as const)
-      .beginSubcases()
-      .combine('copySize', [
-        { width: 0, height: 0, depthOrArrayLayers: 0 },
-        { width: 1, height: 1, depthOrArrayLayers: 1 },
-      ])
-  )
-  .fn(async t => {
-    const { dimension, copySize } = t.params;
-    const imageBitmap = await t.createImageBitmap(t.getImageData(1, 1));
-    const dstTexture = t.device.createTexture({
-      size: { width: 1, height: 1, depthOrArrayLayers: 1 },
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-      dimension,
-    });
-
-    t.runTest({ source: imageBitmap }, { texture: dstTexture }, copySize, dimension === '2d');
   });
 
 g.test('destination_texture,usage')
@@ -782,9 +765,12 @@ g.test('destination_texture,format')
         { width: 1, height: 1, depthOrArrayLayers: 1 },
       ])
   )
+  .beforeAllSubcases(t => {
+    const { format } = t.params;
+    t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
+  })
   .fn(async t => {
     const { format, copySize } = t.params;
-    await t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
 
     const imageBitmap = await t.createImageBitmap(t.getImageData(1, 1));
 
@@ -796,7 +782,7 @@ g.test('destination_texture,format')
       format,
       usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
-    t.device.popErrorScope();
+    void t.device.popErrorScope();
 
     const success = (kValidTextureFormatsForCopyE2T as readonly string[]).includes(format);
 

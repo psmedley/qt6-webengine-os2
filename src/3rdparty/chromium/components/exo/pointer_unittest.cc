@@ -1,9 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/exo/pointer.h"
 
+#include "ash/constants/app_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/desks/desks_util.h"
@@ -27,11 +28,13 @@
 #include "components/exo/test/exo_test_base.h"
 #include "components/exo/test/exo_test_data_exchange_delegate.h"
 #include "components/exo/test/exo_test_helper.h"
+#include "components/exo/test/mock_security_delegate.h"
 #include "components/exo/test/shell_surface_builder.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
@@ -92,7 +95,7 @@ class MockPointerDelegate : public PointerDelegate {
 class MockRelativePointerDelegate : public RelativePointerDelegate {
  public:
   MockRelativePointerDelegate() = default;
-  ~MockRelativePointerDelegate() = default;
+  ~MockRelativePointerDelegate() override = default;
 
   // Overridden from RelativePointerDelegate:
   MOCK_METHOD1(OnPointerDestroying, void(Pointer*));
@@ -112,7 +115,7 @@ class MockPointerConstraintDelegate : public PointerConstraintDelegate {
       broken_count++;
     });
   }
-  ~MockPointerConstraintDelegate() = default;
+  ~MockPointerConstraintDelegate() override = default;
 
   // Overridden from PointerConstraintDelegate:
   MOCK_METHOD0(OnConstraintActivated, void());
@@ -176,10 +179,7 @@ class PointerTest : public test::ExoTestBase {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 class PointerConstraintTest : public PointerTest {
  public:
-  PointerConstraintTest() {
-    feature_list_.InitAndEnableFeature(chromeos::features::kExoPointerLock);
-  }
-
+  PointerConstraintTest() = default;
   PointerConstraintTest(const PointerConstraintTest&) = delete;
   PointerConstraintTest& operator=(const PointerConstraintTest&) = delete;
 
@@ -222,16 +222,11 @@ class PointerConstraintTest : public PointerTest {
   std::unique_ptr<ShellSurface> BuildShellSurfaceWhichPermitsPointerLock() {
     std::unique_ptr<ShellSurface> shell_surface =
         test::ShellSurfaceBuilder({10, 10}).BuildShellSurface();
-
-    shell_surface->surface_for_testing()
-        ->window()
-        ->GetToplevelWindow()
-        ->SetProperty(chromeos::kUseOverviewToExitPointerLock, true);
-
+    shell_surface->GetWidget()->GetNativeWindow()->SetProperty(
+        chromeos::kUseOverviewToExitPointerLock, true);
     return shell_surface;
   }
 
-  base::test::ScopedFeatureList feature_list_;
   std::unique_ptr<ui::test::EventGenerator> generator_;
   std::unique_ptr<Pointer> pointer_;
   std::unique_ptr<Seat> seat_;
@@ -623,7 +618,7 @@ TEST_F(PointerTest, OnPointerMotion) {
 
   EXPECT_CALL(delegate, CanAcceptPointerEventsForSurface(surface.get()))
       .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(delegate, OnPointerFrame()).Times(6);
+  EXPECT_CALL(delegate, OnPointerFrame()).Times(8);
 
   EXPECT_CALL(delegate, OnPointerEnter(surface.get(), gfx::PointF(), 0));
   generator.MoveMouseTo(surface->window()->GetBoundsInScreen().origin());
@@ -1176,6 +1171,45 @@ TEST_F(PointerTest, DragDropAndPointerEnterLeaveEvents_NoOpOnTouchDrag) {
   pointer.reset();
 }
 
+TEST_F(PointerTest, IgnoresHandledEvents) {
+  // A very dumb handler that simply marks all events as handled. This is needed
+  // allows us to mark a mouse event as handled as it gets processed by the
+  // event processor.
+  class SetHandledHandler : public ui::EventHandler {
+    void OnMouseEvent(ui::MouseEvent* event) override { event->SetHandled(); }
+  };
+  SetHandledHandler handler;
+  ash::Shell::Get()->AddPreTargetHandler(&handler);
+
+  Seat seat(std::make_unique<TestDataExchangeDelegate>());
+  testing::NiceMock<MockPointerDelegate> pointer_delegate;
+  std::unique_ptr<Pointer> pointer(new Pointer(&pointer_delegate, &seat));
+
+  // Make origin into a real window so the touch can click it
+  std::unique_ptr<ShellSurface> shell_surface =
+      test::ShellSurfaceBuilder({10, 10}).BuildShellSurface();
+
+  EXPECT_CALL(pointer_delegate, CanAcceptPointerEventsForSurface(testing::_))
+      .WillRepeatedly(testing::Return(true));
+  ui::test::EventGenerator generator(ash::Shell::GetPrimaryRootWindow());
+
+  // The SetHandlerHandler should have marked the event as processed. Therefore
+  // the event should simply be ignored.
+  EXPECT_CALL(pointer_delegate,
+              OnPointerButton(testing::_, testing::_, testing::_))
+      .Times(0);
+
+  // This event should be ignored because it has already been handled.
+  auto window_point = shell_surface->surface_for_testing()
+                          ->window()
+                          ->GetBoundsInScreen()
+                          .CenterPoint();
+  generator.MoveMouseTo(window_point);
+  generator.ClickLeftButton();
+
+  ash::Shell::Get()->RemovePreTargetHandler(&handler);
+}
+
 namespace {
 
 class PointerDragDropObserver : public WMHelper::DragDropObserver {
@@ -1340,7 +1374,7 @@ TEST_F(PointerTest, OnPointerRelativeMotion) {
 
   EXPECT_CALL(delegate, CanAcceptPointerEventsForSurface(surface.get()))
       .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(delegate, OnPointerFrame()).Times(9);
+  EXPECT_CALL(delegate, OnPointerFrame()).Times(11);
 
   EXPECT_CALL(delegate, OnPointerEnter(surface.get(), gfx::PointF(), 0));
   generator.MoveMouseTo(surface->window()->GetBoundsInScreen().origin());
@@ -1515,7 +1549,7 @@ TEST_F(PointerConstraintTest, ConstrainPointer) {
 
   EXPECT_CALL(delegate_, OnPointerLeave(surface_));
   EXPECT_CALL(delegate_, OnPointerEnter(child_surface, gfx::PointF(), 0));
-  EXPECT_CALL(delegate_, OnPointerFrame());
+  EXPECT_CALL(delegate_, OnPointerFrame()).Times(2);
   // Moving the cursor to a different surface should change the focus when
   // the pointer is unconstrained.
   pointer_->UnconstrainPointerByUserAction();
@@ -1776,6 +1810,106 @@ TEST_F(PointerConstraintTest, UserCanBreakAndActivatePersistentConstraint) {
 
   pointer_->OnPointerConstraintDelegateDestroying(&constraint_delegate_);
   EXPECT_CALL(delegate_, OnPointerDestroying(pointer_.get()));
+  pointer_.reset();
+}
+
+TEST_F(PointerConstraintTest, DefaultSecurityDeletegate) {
+  auto default_security_delegate =
+      SecurityDelegate::GetDefaultSecurityDelegate();
+  auto shell_surface = test::ShellSurfaceBuilder({10, 10})
+                           .SetSecurityDelegate(default_security_delegate.get())
+                           .BuildShellSurface();
+
+  auto* surface = shell_surface->surface_for_testing();
+
+  focus_client_->FocusWindow(surface->window());
+
+  MockPointerConstraintDelegate constraint_delegate;
+
+  EXPECT_CALL(constraint_delegate, GetConstrainedSurface())
+      .WillRepeatedly(testing::Return(surface));
+
+  EXPECT_CALL(constraint_delegate, OnDefunct()).Times(1);
+  EXPECT_FALSE(pointer_->ConstrainPointer(&constraint_delegate));
+  ::testing::Mock::VerifyAndClearExpectations(&constraint_delegate);
+
+  shell_surface->GetWidget()->GetNativeWindow()->SetProperty(
+      aura::client::kAppType, static_cast<int>(ash::AppType::LACROS));
+
+  EXPECT_CALL(constraint_delegate, GetConstrainedSurface())
+      .WillRepeatedly(testing::Return(surface));
+  EXPECT_CALL(constraint_delegate, OnDefunct()).Times(0);
+  EXPECT_TRUE(pointer_->ConstrainPointer(&constraint_delegate));
+
+  ::testing::Mock::VerifyAndClearExpectations(&constraint_delegate);
+
+  EXPECT_CALL(constraint_delegate, GetConstrainedSurface())
+      .WillRepeatedly(testing::Return(surface));
+  shell_surface->GetWidget()->GetNativeWindow()->SetProperty(
+      aura::client::kAppType, static_cast<int>(ash::AppType::ARC_APP));
+  EXPECT_CALL(constraint_delegate, OnDefunct()).Times(0);
+  EXPECT_TRUE(pointer_->ConstrainPointer(&constraint_delegate));
+
+  ::testing::Mock::VerifyAndClearExpectations(&constraint_delegate);
+
+  pointer_->OnPointerConstraintDelegateDestroying(&constraint_delegate);
+  EXPECT_CALL(delegate_, OnPointerDestroying(pointer_.get()));
+
+  pointer_.reset();
+}
+
+TEST_F(PointerConstraintTest, NoPointerMotionEventWhenUnconstrainingPointer) {
+  testing::MockFunction<void(std::string check_point_name)> check;
+  {
+    testing::InSequence s;
+
+    EXPECT_CALL(check, Call("Unconstrain pointer"));
+    EXPECT_CALL(delegate_, OnPointerMotion(testing::_, testing::_)).Times(0);
+  }
+
+  generator_->MoveMouseTo(
+      surface_->window()->GetBoundsInScreen().CenterPoint() +
+      gfx::Vector2d(4, 4));
+
+  EXPECT_TRUE(pointer_->ConstrainPointer(&constraint_delegate_));
+
+  generator_->MoveMouseTo(
+      surface_->window()->GetBoundsInScreen().CenterPoint() +
+      gfx::Vector2d(-4, -4));
+
+  check.Call("Unconstrain pointer");
+
+  pointer_->UnconstrainPointerByUserAction();
+
+  // Ensure the posted task for synthesized mouse move event is run.
+  base::RunLoop().RunUntilIdle();
+
+  pointer_.reset();
+}
+
+TEST_F(PointerConstraintTest, ConstrainPointerWithUncommittedShellSurface) {
+  std::unique_ptr<ShellSurface> uncommitted_shell_surface =
+      test::ShellSurfaceBuilder({10, 10}).SetNoCommit().BuildShellSurface();
+
+  Surface* surface = uncommitted_shell_surface->surface_for_testing();
+  surface->window()->GetToplevelWindow()->SetProperty(
+      chromeos::kUseOverviewToExitPointerLock, true);
+
+  focus_client_->FocusWindow(surface->window());
+  EXPECT_CALL(delegate_, CanAcceptPointerEventsForSurface(surface))
+      .WillRepeatedly(testing::Return(true));
+  testing::NiceMock<MockPointerConstraintDelegate> second_constraint;
+  EXPECT_CALL(second_constraint, GetConstrainedSurface())
+      .WillRepeatedly(testing::Return(surface));
+  ON_CALL(second_constraint, IsPersistent())
+      .WillByDefault(testing::Return(true));
+
+  // Verify that the operation doesn't crash.
+  // The operation fails because the window associated with |surface| (or its
+  // ancestors) cannot be activated before a widget is created in the commit
+  // process, while pointer capture is not allowed on an inactive window.
+  EXPECT_FALSE(pointer_->ConstrainPointer(&second_constraint));
+
   pointer_.reset();
 }
 #endif

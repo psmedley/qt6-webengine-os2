@@ -73,6 +73,7 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_public.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -202,7 +203,6 @@ void WebSharedWorkerImpl::StartWorkerContext(
     const WebString& reduced_user_agent,
     const UserAgentMetadata& ua_metadata,
     const WebVector<WebContentSecurityPolicy>& content_security_policies,
-    network::mojom::IPAddressSpace creation_address_space,
     const WebFetchClientSettingsObject& outside_fetch_client_settings_object,
     const base::UnguessableToken& devtools_worker_token,
     CrossVariantMojoRemote<
@@ -212,6 +212,7 @@ void WebSharedWorkerImpl::StartWorkerContext(
     bool pause_worker_context_on_start,
     std::unique_ptr<WorkerMainScriptLoadParameters>
         worker_main_script_load_params,
+    std::unique_ptr<blink::WebPolicyContainer> policy_container,
     scoped_refptr<WebWorkerFetchContext> web_worker_fetch_context,
     ukm::SourceId ukm_source_id) {
   DCHECK(IsMainThread());
@@ -229,7 +230,6 @@ void WebSharedWorkerImpl::StartWorkerContext(
           outside_fetch_client_settings_object.outgoing_referrer.GetString(),
           CalculateHttpsState(constructor_origin.Get()),
           AllowedByNosniff::MimeTypeCheck::kLaxForWorker,
-          creation_address_space,
           outside_fetch_client_settings_object.insecure_requests_policy ==
                   mojom::blink::InsecureRequestsPolicy::kUpgrade
               ? mojom::blink::InsecureRequestPolicy::kUpgradeInsecureRequests |
@@ -280,7 +280,6 @@ void WebSharedWorkerImpl::StartWorkerContext(
       MakeGarbageCollected<WorkerClients>(),
       std::make_unique<SharedWorkerContentSettingsProxy>(
           std::move(content_settings)),
-      absl::nullopt /* response_address_space */,
       nullptr /* inherited_trial_features */, devtools_worker_token,
       std::move(worker_settings), mojom::blink::V8CacheOptions::kDefault,
       nullptr /* worklet_module_response_map */,
@@ -321,14 +320,14 @@ void WebSharedWorkerImpl::StartWorkerContext(
     case mojom::blink::ScriptType::kClassic:
       GetWorkerThread()->FetchAndRunClassicScript(
           script_request_url, std::move(worker_main_script_load_params),
-          outside_settings_object->CopyData(),
+          std::move(policy_container), outside_settings_object->CopyData(),
           nullptr /* outside_resource_timing_notifier */,
           v8_inspector::V8StackTraceId());
       break;
     case mojom::blink::ScriptType::kModule:
       GetWorkerThread()->FetchAndRunModuleScript(
           script_request_url, std::move(worker_main_script_load_params),
-          outside_settings_object->CopyData(),
+          std::move(policy_container), outside_settings_object->CopyData(),
           nullptr /* outside_resource_timing_notifier */, credentials_mode);
       break;
   }
@@ -356,7 +355,6 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
     const WebString& reduced_user_agent,
     const UserAgentMetadata& ua_metadata,
     const WebVector<WebContentSecurityPolicy>& content_security_policies,
-    network::mojom::IPAddressSpace creation_address_space,
     const WebFetchClientSettingsObject& outside_fetch_client_settings_object,
     const base::UnguessableToken& devtools_worker_token,
     CrossVariantMojoRemote<
@@ -366,6 +364,7 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
     bool pause_worker_context_on_start,
     std::unique_ptr<WorkerMainScriptLoadParameters>
         worker_main_script_load_params,
+    std::unique_ptr<blink::WebPolicyContainer> policy_container,
     scoped_refptr<WebWorkerFetchContext> web_worker_fetch_context,
     CrossVariantMojoRemote<mojom::SharedWorkerHostInterfaceBase> host,
     WebSharedWorkerClient* client,
@@ -376,10 +375,10 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
       script_request_url, script_type, credentials_mode, name,
       constructor_origin, is_constructor_secure_context, user_agent,
       full_user_agent, reduced_user_agent, ua_metadata,
-      content_security_policies, creation_address_space,
-      outside_fetch_client_settings_object, devtools_worker_token,
-      std::move(content_settings), std::move(browser_interface_broker),
-      pause_worker_context_on_start, std::move(worker_main_script_load_params),
+      content_security_policies, outside_fetch_client_settings_object,
+      devtools_worker_token, std::move(content_settings),
+      std::move(browser_interface_broker), pause_worker_context_on_start,
+      std::move(worker_main_script_load_params), std::move(policy_container),
       std::move(web_worker_fetch_context), ukm_source_id);
   return worker;
 }

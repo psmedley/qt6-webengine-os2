@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@ namespace blink {
 const char* kDefaultTransceiverString =
     "getTransceivers()[0]:{\n"
     "  mid:null,\n"
+    "  kind:'audio',\n"
     "  sender:{\n"
     "    track:'senderTrackId',\n"
     "    streams:['senderStreamId'],\n"
@@ -38,21 +39,8 @@ const char* kDefaultTransceiverString =
     "    track:'receiverTrackId',\n"
     "    streams:['receiverStreamId'],\n"
     "  },\n"
-    "  stopped:false,\n"
     "  direction:'sendonly',\n"
     "  currentDirection:null,\n"
-    "}";
-
-const char* kDefaultSenderString =
-    "getSenders()[0]:{\n"
-    "  track:'senderTrackId',\n"
-    "  streams:['senderStreamId'],\n"
-    "}";
-
-const char* kDefaultReceiverString =
-    "getReceivers()[0]:{\n"
-    "  track:'receiverTrackId',\n"
-    "  streams:['receiverStreamId'],\n"
     "}";
 
 class MockPeerConnectionTrackerHost
@@ -86,14 +74,11 @@ class MockPeerConnectionTrackerHost
 };
 
 // Creates a transceiver that is expected to be logged as
-// |kDefaultTransceiverString|, |kDefaultSenderString| or
-// |kDefaultReceiverString| depending on if |implementation_type| refers to a
-// fully implemented, sender-only or receiver-only transceiver.
+// |kDefaultTransceiverString|.
 //
 // This is used in unittests that don't care about the specific attributes of
 // the transceiver.
-std::unique_ptr<RTCRtpTransceiverPlatform> CreateDefaultTransceiver(
-    RTCRtpTransceiverPlatformImplementationType implementation_type) {
+std::unique_ptr<RTCRtpTransceiverPlatform> CreateDefaultTransceiver() {
   std::unique_ptr<RTCRtpTransceiverPlatform> transceiver;
   blink::FakeRTCRtpSenderImpl sender(
       "senderTrackId", {"senderStreamId"},
@@ -101,23 +86,10 @@ std::unique_ptr<RTCRtpTransceiverPlatform> CreateDefaultTransceiver(
   blink::FakeRTCRtpReceiverImpl receiver(
       "receiverTrackId", {"receiverStreamId"},
       blink::scheduler::GetSingleThreadTaskRunnerForTesting());
-  if (implementation_type ==
-      RTCRtpTransceiverPlatformImplementationType::kFullTransceiver) {
-    transceiver = std::make_unique<blink::FakeRTCRtpTransceiverImpl>(
-        absl::nullopt, std::move(sender), std::move(receiver),
-        false /* stopped */,
-        webrtc::RtpTransceiverDirection::kSendOnly /* direction */,
-        absl::nullopt /* current_direction */);
-  } else if (implementation_type ==
-             RTCRtpTransceiverPlatformImplementationType::kPlanBSenderOnly) {
-    transceiver = std::make_unique<blink::RTCRtpSenderOnlyTransceiver>(
-        std::make_unique<blink::FakeRTCRtpSenderImpl>(sender));
-  } else {
-    DCHECK_EQ(implementation_type,
-              RTCRtpTransceiverPlatformImplementationType::kPlanBReceiverOnly);
-    transceiver = std::make_unique<blink::RTCRtpReceiverOnlyTransceiver>(
-        std::make_unique<blink::FakeRTCRtpReceiverImpl>(receiver));
-  }
+  transceiver = std::make_unique<blink::FakeRTCRtpTransceiverImpl>(
+      absl::nullopt, std::move(sender), std::move(receiver),
+      webrtc::RtpTransceiverDirection::kSendOnly /* direction */,
+      absl::nullopt /* current_direction */);
   return transceiver;
 }
 
@@ -140,8 +112,7 @@ class MockPeerConnectionHandler : public RTCPeerConnectionHandler {
             &client_,
             factory,
             blink::scheduler::GetSingleThreadTaskRunnerForTesting(),
-            /*force_encoded_audio_insertable_streams=*/false,
-            /*force_encoded_video_insertable_streams=*/false),
+            /*encoded_insertable_streams=*/false),
         factory_(factory) {}
 
   Persistent<MockPeerConnectionDependencyFactory> factory_;
@@ -170,7 +141,7 @@ class PeerConnectionTrackerTest : public ::testing::Test {
     mock_handler_ = std::make_unique<MockPeerConnectionHandler>();
     EXPECT_CALL(*mock_host_, AddPeerConnection(_));
     tracker_->RegisterPeerConnection(mock_handler_.get(), DefaultConfig(),
-                                     MediaConstraints(), nullptr);
+                                     nullptr);
     base::RunLoop().RunUntilIdle();
   }
 
@@ -253,8 +224,7 @@ TEST_F(PeerConnectionTrackerTest, ReportInitialThermalState) {
   // Nothing is reported by default.
   EXPECT_CALL(handler0, OnThermalStateChange(_)).Times(0);
   EXPECT_CALL(*mock_host_, AddPeerConnection(_)).Times(1);
-  tracker_->RegisterPeerConnection(&handler0, DefaultConfig(),
-                                   MediaConstraints(), nullptr);
+  tracker_->RegisterPeerConnection(&handler0, DefaultConfig(), nullptr);
   base::RunLoop().RunUntilIdle();
 
   // Report a known thermal state.
@@ -268,8 +238,7 @@ TEST_F(PeerConnectionTrackerTest, ReportInitialThermalState) {
               OnThermalStateChange(mojom::blink::DeviceThermalState::kNominal))
       .Times(1);
   EXPECT_CALL(*mock_host_, AddPeerConnection(_)).Times(1);
-  tracker_->RegisterPeerConnection(&handler1, DefaultConfig(),
-                                   MediaConstraints(), nullptr);
+  tracker_->RegisterPeerConnection(&handler1, DefaultConfig(), nullptr);
   base::RunLoop().RunUntilIdle();
 
   // Report the unknown thermal state.
@@ -284,8 +253,7 @@ TEST_F(PeerConnectionTrackerTest, ReportInitialThermalState) {
   // Handlers registered late get no event.
   EXPECT_CALL(handler2, OnThermalStateChange(_)).Times(0);
   EXPECT_CALL(*mock_host_, AddPeerConnection(_)).Times(1);
-  tracker_->RegisterPeerConnection(&handler2, DefaultConfig(),
-                                   MediaConstraints(), nullptr);
+  tracker_->RegisterPeerConnection(&handler2, DefaultConfig(), nullptr);
   base::RunLoop().RunUntilIdle();
 }
 
@@ -300,7 +268,6 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesPresent) {
       blink::FakeRTCRtpReceiverImpl(
           "receiverTrackId", {"streamIdC"},
           blink::scheduler::GetSingleThreadTaskRunnerForTesting()),
-      true /* stopped */,
       webrtc::RtpTransceiverDirection::kSendRecv /* direction */,
       webrtc::RtpTransceiverDirection::kInactive /* current_direction */);
   String update_value;
@@ -317,6 +284,7 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesPresent) {
       "\n"
       "getTransceivers()[0]:{\n"
       "  mid:'midValue',\n"
+      "  kind:'audio',\n"
       "  sender:{\n"
       "    track:'senderTrackId',\n"
       "    streams:['streamIdA','streamIdB'],\n"
@@ -325,7 +293,6 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesPresent) {
       "    track:'receiverTrackId',\n"
       "    streams:['streamIdC'],\n"
       "  },\n"
-      "  stopped:true,\n"
       "  direction:'sendrecv',\n"
       "  currentDirection:'inactive',\n"
       "}");
@@ -343,7 +310,6 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesNull) {
       blink::FakeRTCRtpReceiverImpl(
           "receiverTrackId", {},
           blink::scheduler::GetSingleThreadTaskRunnerForTesting()),
-      false /* stopped */,
       webrtc::RtpTransceiverDirection::kInactive /* direction */,
       absl::nullopt /* current_direction */);
   String update_value;
@@ -360,6 +326,7 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesNull) {
       "\n"
       "getTransceivers()[1]:{\n"
       "  mid:null,\n"
+      "  kind:'audio',\n"
       "  sender:{\n"
       "    track:null,\n"
       "    streams:[],\n"
@@ -368,7 +335,6 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesNull) {
       "    track:'receiverTrackId',\n"
       "    streams:[],\n"
       "  },\n"
-      "  stopped:false,\n"
       "  direction:'inactive',\n"
       "  currentDirection:null,\n"
       "}");
@@ -378,8 +344,7 @@ TEST_F(PeerConnectionTrackerTest, AddTransceiverWithOptionalValuesNull) {
 TEST_F(PeerConnectionTrackerTest, ModifyTransceiver) {
   CreateTrackerWithMocks();
   CreateAndRegisterPeerConnectionHandler();
-  auto transceiver = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kFullTransceiver);
+  auto transceiver = CreateDefaultTransceiver();
   String update_value;
   EXPECT_CALL(*mock_host_,
               UpdatePeerConnection(_, String("transceiverModified"), _))
@@ -394,154 +359,10 @@ TEST_F(PeerConnectionTrackerTest, ModifyTransceiver) {
   EXPECT_EQ(expected_value, update_value);
 }
 
-TEST_F(PeerConnectionTrackerTest, RemoveTransceiver) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto transceiver = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kFullTransceiver);
-  String update_value;
-  EXPECT_CALL(*mock_host_,
-              UpdatePeerConnection(_, String("transceiverRemoved"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackRemoveTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kRemoveTrack,
-      *transceiver, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: removeTrack\n"
-      "\n" +
-      String(kDefaultTransceiverString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
-TEST_F(PeerConnectionTrackerTest, AddSender) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto sender_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBSenderOnly);
-  String update_value;
-  EXPECT_CALL(*mock_host_, UpdatePeerConnection(_, String("senderAdded"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackAddTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kSetLocalDescription,
-      *sender_only, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: setLocalDescription\n"
-      "\n" +
-      String(kDefaultSenderString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
-TEST_F(PeerConnectionTrackerTest, ModifySender) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto sender_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBSenderOnly);
-  String update_value;
-  EXPECT_CALL(*mock_host_, UpdatePeerConnection(_, String("senderModified"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackModifyTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kSetRemoteDescription,
-      *sender_only, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: setRemoteDescription\n"
-      "\n" +
-      String(kDefaultSenderString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
-TEST_F(PeerConnectionTrackerTest, RemoveSender) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto sender_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBSenderOnly);
-  String update_value;
-  EXPECT_CALL(*mock_host_, UpdatePeerConnection(_, String("senderRemoved"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackRemoveTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kSetRemoteDescription,
-      *sender_only, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: setRemoteDescription\n"
-      "\n" +
-      String(kDefaultSenderString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
-TEST_F(PeerConnectionTrackerTest, AddReceiver) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto receiver_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBReceiverOnly);
-  String update_value;
-  EXPECT_CALL(*mock_host_, UpdatePeerConnection(_, String("receiverAdded"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackAddTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kSetRemoteDescription,
-      *receiver_only, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: setRemoteDescription\n"
-      "\n" +
-      String(kDefaultReceiverString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
-TEST_F(PeerConnectionTrackerTest, ModifyReceiver) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto receiver_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBReceiverOnly);
-  String update_value;
-  EXPECT_CALL(*mock_host_,
-              UpdatePeerConnection(_, String("receiverModified"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackModifyTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kSetRemoteDescription,
-      *receiver_only, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: setRemoteDescription\n"
-      "\n" +
-      String(kDefaultReceiverString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
-TEST_F(PeerConnectionTrackerTest, RemoveReceiver) {
-  CreateTrackerWithMocks();
-  CreateAndRegisterPeerConnectionHandler();
-  auto receiver_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBReceiverOnly);
-  String update_value;
-  EXPECT_CALL(*mock_host_,
-              UpdatePeerConnection(_, String("receiverRemoved"), _))
-      .WillOnce(testing::SaveArg<2>(&update_value));
-  tracker_->TrackRemoveTransceiver(
-      mock_handler_.get(),
-      PeerConnectionTracker::TransceiverUpdatedReason::kSetRemoteDescription,
-      *receiver_only, 0u);
-  base::RunLoop().RunUntilIdle();
-  String expected_value(
-      "Caused by: setRemoteDescription\n"
-      "\n" +
-      String(kDefaultReceiverString));
-  EXPECT_EQ(expected_value, update_value);
-}
-
 TEST_F(PeerConnectionTrackerTest, IceCandidateError) {
   CreateTrackerWithMocks();
   CreateAndRegisterPeerConnectionHandler();
-  auto receiver_only = CreateDefaultTransceiver(
-      RTCRtpTransceiverPlatformImplementationType::kPlanBReceiverOnly);
+  auto transceiver = CreateDefaultTransceiver();
   String update_value;
   EXPECT_CALL(*mock_host_,
               UpdatePeerConnection(_, String("icecandidateerror"), _))

@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -34,6 +34,7 @@ config("config") {
     "//ios/third_party/earl_grey2/src/UILib/Additions",
     "//ios/third_party/earl_grey2/src/UILib/Provider",
     "//ios/third_party/earl_grey2/src/UILib/Traversal",
+    "//ios/third_party/earl_grey2/src/UILib/Utils",
     "//ios/third_party/earl_grey2/src/UILib/Visibility",
     "//ios/third_party/earl_grey2/src/TestLib",
     "//ios/third_party/earl_grey2/src/TestLib/AlertHandling",
@@ -89,7 +90,6 @@ source_set("common_lib") {
     "src/CommonLib/Config/GREYConfiguration.h",
     "src/CommonLib/Config/GREYConfiguration.m",
     "src/CommonLib/DistantObject/GREYDistantObjectUtils.h",
-    "src/CommonLib/DistantObject/GREYDistantObjectUtils.m",
     "src/CommonLib/DistantObject/GREYHostApplicationDistantObject.h",
     "src/CommonLib/DistantObject/GREYHostBackgroundDistantObject.h",
     "src/CommonLib/DistantObject/GREYTestApplicationDistantObject+Private.h",
@@ -209,6 +209,8 @@ source_set("ui_lib") {
     "src/UILib/Traversal/GREYTraversalObject.m",
     "src/UILib/Traversal/GREYTraversalProperties.h",
     "src/UILib/Traversal/GREYTraversalProperties.m",
+    "src/UILib/Utils/GREYUILibUtils.h",
+    "src/UILib/Utils/GREYUILibUtils.m",
     "src/UILib/Visibility/GREYQuickVisibilityChecker.h",
     "src/UILib/Visibility/GREYQuickVisibilityChecker.m",
     "src/UILib/Visibility/GREYThoroughVisibilityChecker.h",
@@ -306,6 +308,8 @@ ios_framework_bundle("app_framework") {
     "src/AppFramework/Action/GREYTapAction.m",
     "src/AppFramework/Action/GREYTapper.h",
     "src/AppFramework/Action/GREYTapper.m",
+    "src/AppFramework/Action/GREYTwistAction.h",
+    "src/AppFramework/Action/GREYTwistAction.m",
     "src/AppFramework/Additions/CAAnimation+GREYApp.h",
     "src/AppFramework/Additions/CAAnimation+GREYApp.m",
     "src/AppFramework/Additions/CALayer+GREYApp.h",
@@ -363,6 +367,7 @@ ios_framework_bundle("app_framework") {
     "src/AppFramework/Delegate/GREYSurrogateDelegate.m",
     "src/AppFramework/Delegate/GREYWKWebViewNavigationDelegate.h",
     "src/AppFramework/Delegate/GREYWKWebViewNavigationDelegate.m",
+    "src/AppFramework/DistantObject/GREYDistantObjectUtils.m",
     "src/AppFramework/DistantObject/GREYHostApplicationDistantObject+GREYTestHelper.m",
     "src/AppFramework/DistantObject/GREYHostApplicationDistantObject.m",
     "src/AppFramework/DistantObject/GREYHostBackgroundDistantObject+GREYApp.m",
@@ -480,6 +485,7 @@ source_set("test_lib") {
     "src/TestLib/Condition/GREYCondition.m",
     "src/TestLib/Config/GREYTestConfiguration.h",
     "src/TestLib/Config/GREYTestConfiguration.m",
+    "src/TestLib/DistantObject/GREYDistantObjectUtils.m",
     "src/TestLib/DistantObject/GREYHostStub.m",
     "src/TestLib/DistantObject/GREYTestApplicationDistantObject+GREYLogger.h",
     "src/TestLib/DistantObject/GREYTestApplicationDistantObject+GREYLogger.m",

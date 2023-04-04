@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "ash/constants/ash_features.h"
 #include "base/bind.h"
 #include "base/run_loop.h"
+#include "base/scoped_observation.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/scoped_feature_list.h"
@@ -14,9 +15,7 @@
 #include "chrome/browser/ash/account_manager/account_apps_availability_factory.h"
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
@@ -24,13 +23,9 @@
 #include "chrome/browser/ui/webui/chromeos/edu_coexistence/edu_coexistence_login_handler_chromeos.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/mixin_based_in_process_browser_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "components/account_manager_core/account_manager_facade.h"
 #include "components/account_manager_core/chromeos/account_manager_facade_factory.h"
 #include "components/account_manager_core/mock_account_manager_facade.h"
-#include "components/signin/public/identity_manager/accounts_mutator.h"
-#include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "components/user_manager/scoped_user_manager.h"
@@ -47,8 +42,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
-
 namespace chromeos {
 
 namespace {
@@ -57,9 +50,9 @@ constexpr char kEmailKey[] = "email";
 constexpr char kPasswordKey[] = "password";
 constexpr char kGaiaIdKey[] = "gaiaId";
 constexpr char kIsAvailableInArcKey[] = "isAvailableInArc";
-constexpr char kSecondaryAccount1Email[] = "secondary1@example.com";
-constexpr char kSecondaryAccount2Email[] = "secondary2@example.com";
-constexpr char kSecondaryAccount3Email[] = "secondary3@example.com";
+constexpr char kSecondaryAccount1Email[] = "secondary1@gmail.com";
+constexpr char kSecondaryAccount2Email[] = "secondary2@gmail.com";
+constexpr char kSecondaryAccount3Email[] = "secondary3@gmail.com";
 constexpr char kSecondaryAccountOAuthCode[] = "fake_oauth_code";
 constexpr char kSecondaryAccountRefreshToken[] = "fake_refresh_token";
 constexpr char kCompleteLoginMessage[] = "completeLogin";
@@ -89,8 +82,8 @@ std::ostream& operator<<(std::ostream& stream,
 }
 
 DeviceAccountInfo GetGaiaDeviceAccountInfo() {
-  return {signin::GetTestGaiaIdForEmail("primary@example.com") /*id*/,
-          "primary@example.com" /*email*/,
+  return {signin::GetTestGaiaIdForEmail("primary@gmail.com") /*id*/,
+          "primary@gmail.com" /*email*/,
           user_manager::USER_TYPE_REGULAR /*user_type*/,
           account_manager::AccountType::kGaia /*account_type*/,
           "device-account-token" /*token*/};
@@ -98,7 +91,7 @@ DeviceAccountInfo GetGaiaDeviceAccountInfo() {
 
 DeviceAccountInfo GetChildDeviceAccountInfo() {
   return {supervised_users::kChildAccountSUID /*id*/,
-          "child@example.com" /*email*/,
+          "child@gmail.com" /*email*/,
           user_manager::USER_TYPE_CHILD /*user_type*/,
           account_manager::AccountType::kGaia /*account_type*/,
           "device-account-token" /*token*/};
@@ -272,15 +265,15 @@ class InlineLoginHandlerChromeOSTest
   }
 
   void CompleteConsentLogForChildUser(const std::string& secondary_email) {
-    base::ListValue call_args;
+    base::Value::List call_args;
     call_args.Append(secondary_email);
     call_args.Append(kToSVersion);
 
-    base::ListValue list_args;
+    base::Value::List list_args;
     list_args.Append(kConsentLoggedCallback);
     list_args.Append(std::move(call_args));
 
-    web_ui()->HandleReceivedMessage("consentLogged", &list_args);
+    web_ui()->HandleReceivedMessage("consentLogged", list_args);
   }
 
   ash::FakeChromeUserManager* GetFakeUserManager() const {
@@ -318,13 +311,15 @@ class InlineLoginHandlerChromeOSTest
 IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTest,
                        NewAccountAdditionSuccess) {
   account_manager::MockAccountManagerFacadeObserver observer;
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->AddObserver(&observer);
+  base::ScopedObservation<account_manager::AccountManagerFacade,
+                          account_manager::AccountManagerFacade::Observer>
+      observation{&observer};
+  observation.Observe(::GetAccountManagerFacade(profile()->GetPath().value()));
 
   // Call "completeLogin".
-  base::ListValue args;
+  base::Value::List args;
   args.Append(GetCompleteLoginArgs(kSecondaryAccount1Email));
-  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, &args);
+  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, args);
 
   if (GetDeviceAccountInfo().user_type ==
       user_manager::UserType::USER_TYPE_CHILD) {
@@ -338,21 +333,20 @@ IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTest,
               OnAccountUpserted(AccountEmailEq(kSecondaryAccount1Email)))
       .WillOnce(base::test::RunClosure(run_loop.QuitClosure()));
   run_loop.Run();
-
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->RemoveObserver(&observer);
 }
 
 IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTest,
                        PrimaryReauthenticationSuccess) {
   account_manager::MockAccountManagerFacadeObserver observer;
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->AddObserver(&observer);
+  base::ScopedObservation<account_manager::AccountManagerFacade,
+                          account_manager::AccountManagerFacade::Observer>
+      observation{&observer};
+  observation.Observe(::GetAccountManagerFacade(profile()->GetPath().value()));
 
   // Call "completeLogin".
-  base::ListValue args;
+  base::Value::List args;
   args.Append(GetCompleteLoginArgs(GetDeviceAccountInfo().email));
-  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, &args);
+  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, args);
 
   // Wait until account is added.
   base::RunLoop run_loop;
@@ -360,9 +354,6 @@ IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTest,
               OnAccountUpserted(AccountEmailEq(GetDeviceAccountInfo().email)))
       .WillOnce(base::test::RunClosure(run_loop.QuitClosure()));
   run_loop.Run();
-
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->RemoveObserver(&observer);
 }
 
 INSTANTIATE_TEST_SUITE_P(InlineLoginHandlerChromeOSTestSuite,
@@ -374,10 +365,7 @@ class InlineLoginHandlerChromeOSTestWithArcRestrictions
     : public InlineLoginHandlerChromeOSTest {
  public:
   InlineLoginHandlerChromeOSTestWithArcRestrictions() {
-    feature_list_.InitWithFeatures(
-        /*enabled_features=*/{chromeos::features::kArcAccountRestrictions,
-                              chromeos::features::kLacrosSupport},
-        /*disabled_features=*/{});
+    feature_list_.InitAndEnableFeature(chromeos::features::kLacrosSupport);
   }
 
   ~InlineLoginHandlerChromeOSTestWithArcRestrictions() override = default;
@@ -392,8 +380,11 @@ class InlineLoginHandlerChromeOSTestWithArcRestrictions
 
   void AddAccount(const std::string& email, bool is_available_in_arc) {
     account_manager::MockAccountManagerFacadeObserver observer;
-    ::GetAccountManagerFacade(profile()->GetPath().value())
-        ->AddObserver(&observer);
+    base::ScopedObservation<account_manager::AccountManagerFacade,
+                            account_manager::AccountManagerFacade::Observer>
+        observation{&observer};
+    observation.Observe(
+        ::GetAccountManagerFacade(profile()->GetPath().value()));
     auto* account_apps_availability =
         ash::AccountAppsAvailabilityFactory::GetForProfile(profile());
 
@@ -407,18 +398,15 @@ class InlineLoginHandlerChromeOSTestWithArcRestrictions
           run_loop.Quit();
         });
     identity_test_env()->MakeAccountAvailable(email);
-
-    ::GetAccountManagerFacade(profile()->GetPath().value())
-        ->RemoveObserver(&observer);
   }
 
-  bool ValuesListContainAccount(const base::span<const base::Value> values,
+  bool ValuesListContainAccount(const base::Value::List& values,
                                 const std::string& email) {
     return ValuesListGetAccount(values, email).has_value();
   }
 
   absl::optional<base::Value> ValuesListGetAccount(
-      const base::span<const base::Value> values,
+      const base::Value::List& values,
       const std::string& email) {
     for (const base::Value& value : values) {
       const std::string* email_val = value.FindStringKey("email");
@@ -429,12 +417,11 @@ class InlineLoginHandlerChromeOSTestWithArcRestrictions
     return absl::nullopt;
   }
 
-  const base::span<const base::Value> CallGetAccountsNotAvailableInArc() {
+  const base::Value::List& CallGetAccountsNotAvailableInArc() {
     // Call "getAccountsNotAvailableInArc".
-    base::Value args(base::Value::Type::LIST);
+    base::Value::List args;
     args.Append(kHandleFunctionName);
-    web_ui()->HandleReceivedMessage(kGetAccountsNotAvailableInArcMessage,
-                                    &base::Value::AsListValue(args));
+    web_ui()->HandleReceivedMessage(kGetAccountsNotAvailableInArcMessage, args);
     base::RunLoop().RunUntilIdle();
 
     const content::TestWebUI::CallData& call_data =
@@ -444,7 +431,7 @@ class InlineLoginHandlerChromeOSTestWithArcRestrictions
     EXPECT_TRUE(call_data.arg2()->GetBool());
 
     // Get results from JS callback.
-    return call_data.arg3()->GetListDeprecated();
+    return call_data.arg3()->GetList();
   }
 
  private:
@@ -454,17 +441,23 @@ class InlineLoginHandlerChromeOSTestWithArcRestrictions
 IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
                        NewAccountAdditionSuccess) {
   account_manager::MockAccountManagerFacadeObserver observer;
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->AddObserver(&observer);
+  base::ScopedObservation<account_manager::AccountManagerFacade,
+                          account_manager::AccountManagerFacade::Observer>
+      account_manager_facade_observation{&observer};
+  account_manager_facade_observation.Observe(
+      ::GetAccountManagerFacade(profile()->GetPath().value()));
 
   MockAccountAppsAvailabilityObserver apps_availability_observer;
-  ash::AccountAppsAvailabilityFactory::GetForProfile(profile())->AddObserver(
-      &apps_availability_observer);
+  base::ScopedObservation<ash::AccountAppsAvailability,
+                          ash::AccountAppsAvailability::Observer>
+      apps_availability_observation{&apps_availability_observer};
+  apps_availability_observation.Observe(
+      ash::AccountAppsAvailabilityFactory::GetForProfile(profile()));
 
   // Call "completeLogin".
-  base::ListValue args;
+  base::Value::List args;
   args.Append(GetCompleteLoginArgs(kSecondaryAccount1Email));
-  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, &args);
+  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, args);
 
   if (GetDeviceAccountInfo().user_type ==
       user_manager::UserType::USER_TYPE_CHILD) {
@@ -485,27 +478,28 @@ IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
               OnAccountAvailableInArc(AccountEmailEq(kSecondaryAccount1Email)))
       .WillOnce(base::test::RunClosure(run_loop_1.QuitClosure()));
   run_loop_1.Run();
-
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->RemoveObserver(&observer);
-  ash::AccountAppsAvailabilityFactory::GetForProfile(profile())->RemoveObserver(
-      &apps_availability_observer);
 }
 
 IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
                        PrimaryReauthenticationSuccess) {
   account_manager::MockAccountManagerFacadeObserver observer;
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->AddObserver(&observer);
+  base::ScopedObservation<account_manager::AccountManagerFacade,
+                          account_manager::AccountManagerFacade::Observer>
+      account_manager_facade_observation{&observer};
+  account_manager_facade_observation.Observe(
+      ::GetAccountManagerFacade(profile()->GetPath().value()));
 
   MockAccountAppsAvailabilityObserver apps_availability_observer;
-  ash::AccountAppsAvailabilityFactory::GetForProfile(profile())->AddObserver(
-      &apps_availability_observer);
+  base::ScopedObservation<ash::AccountAppsAvailability,
+                          ash::AccountAppsAvailability::Observer>
+      apps_availability_observation{&apps_availability_observer};
+  apps_availability_observation.Observe(
+      ash::AccountAppsAvailabilityFactory::GetForProfile(profile()));
 
   // Call "completeLogin".
-  base::ListValue args;
+  base::Value::List args;
   args.Append(GetCompleteLoginArgs(GetDeviceAccountInfo().email));
-  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, &args);
+  web_ui()->HandleReceivedMessage(kCompleteLoginMessage, args);
 
   // Wait until account is added.
   base::RunLoop run_loop;
@@ -517,11 +511,6 @@ IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
   // Make sure that ARC availability didn't change for account.
   EXPECT_CALL(apps_availability_observer, OnAccountAvailableInArc).Times(0);
   EXPECT_CALL(apps_availability_observer, OnAccountUnavailableInArc).Times(0);
-
-  ::GetAccountManagerFacade(profile()->GetPath().value())
-      ->RemoveObserver(&observer);
-  ash::AccountAppsAvailabilityFactory::GetForProfile(profile())->RemoveObserver(
-      &apps_availability_observer);
 }
 
 IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
@@ -531,8 +520,7 @@ IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
   AddAccount(kSecondaryAccount3Email, /*is_available_in_arc=*/false);
 
   // Call "getAccountsNotAvailableInArc".
-  const base::span<const base::Value> result =
-      CallGetAccountsNotAvailableInArc();
+  const base::Value::List& result = CallGetAccountsNotAvailableInArc();
   // Two accounts are not available in ARC.
   EXPECT_EQ(2u, result.size());
   EXPECT_FALSE(ValuesListContainAccount(result, kSecondaryAccount1Email));
@@ -546,22 +534,19 @@ IN_PROC_BROWSER_TEST_P(InlineLoginHandlerChromeOSTestWithArcRestrictions,
   AddAccount(kSecondaryAccount2Email, /*is_available_in_arc=*/false);
 
   // Call "getAccountsNotAvailableInArc".
-  const base::span<const base::Value> result =
-      CallGetAccountsNotAvailableInArc();
+  const base::Value::List& result = CallGetAccountsNotAvailableInArc();
   // One account is not available in ARC.
   EXPECT_EQ(1u, result.size());
   EXPECT_FALSE(ValuesListContainAccount(result, kSecondaryAccount1Email));
   EXPECT_TRUE(ValuesListContainAccount(result, kSecondaryAccount2Email));
 
   // Call "makeAvailableInArc".
-  base::Value args_1(base::Value::Type::LIST);
+  base::Value::List args_1;
   args_1.Append(ValuesListGetAccount(result, kSecondaryAccount2Email).value());
-  web_ui()->HandleReceivedMessage(kMakeAvailableInArcMessage,
-                                  &base::Value::AsListValue(args_1));
+  web_ui()->HandleReceivedMessage(kMakeAvailableInArcMessage, args_1);
 
   // Call "getAccountsNotAvailableInArc".
-  const base::span<const base::Value> result_1 =
-      CallGetAccountsNotAvailableInArc();
+  const base::Value::List& result_1 = CallGetAccountsNotAvailableInArc();
   // Zero accounts are not available in ARC.
   EXPECT_EQ(0u, result_1.size());
 }

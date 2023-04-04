@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,9 +22,9 @@
 #include "net/cert/cert_net_fetcher.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verify_result.h"
-#include "net/cert/internal/cert_errors.h"
-#include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/known_roots.h"
+#include "net/cert/pki/cert_errors.h"
+#include "net/cert/pki/parsed_certificate.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "url/gurl.h"
@@ -97,9 +97,9 @@ scoped_refptr<ParsedCertificate> FindLastCertWithUnknownIssuer(
 // successful and the result could be parsed as a certificate, and false
 // otherwise.
 bool PerformAIAFetchAndAddResultToVector(scoped_refptr<CertNetFetcher> fetcher,
-                                         base::StringPiece uri,
+                                         std::string_view uri,
                                          ParsedCertificateList* cert_list) {
-  GURL url(uri);
+  GURL url(base::StringPiece(uri.data(), uri.size()));
   if (!url.is_valid())
     return false;
   std::unique_ptr<CertNetFetcher::Request> request(fetcher->FetchCaIssuers(
@@ -341,7 +341,7 @@ CertVerifyProcAndroid::CertVerifyProcAndroid(
     scoped_refptr<CertNetFetcher> cert_net_fetcher)
     : cert_net_fetcher_(std::move(cert_net_fetcher)) {}
 
-CertVerifyProcAndroid::~CertVerifyProcAndroid() {}
+CertVerifyProcAndroid::~CertVerifyProcAndroid() = default;
 
 bool CertVerifyProcAndroid::SupportsAdditionalTrustAnchors() const {
   return false;

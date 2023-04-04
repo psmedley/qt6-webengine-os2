@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,6 +38,7 @@ WebMediaPlayer* WebMediaPlayerBuilder::Build(
     UrlIndex* url_index,
     std::unique_ptr<VideoFrameCompositor> compositor,
     std::unique_ptr<media::MediaLog> media_log,
+    media::MediaPlayerLoggingID player_id,
     DeferLoadCB defer_load_cb,
     scoped_refptr<media::SwitchableAudioRendererSink> audio_renderer_sink,
     scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
@@ -54,7 +55,7 @@ WebMediaPlayer* WebMediaPlayerBuilder::Build(
     mojo::PendingRemote<media::mojom::MediaMetricsProvider> metrics_provider,
     CreateSurfaceLayerBridgeCB create_bridge_callback,
     scoped_refptr<viz::RasterContextProvider> raster_context_provider,
-    WebMediaPlayer::SurfaceLayerMode surface_layer_mode,
+    bool use_surface_layer,
     bool is_background_suspend_enabled,
     bool is_background_video_playback_enabled,
     bool is_background_video_track_optimization_supported,
@@ -62,7 +63,7 @@ WebMediaPlayer* WebMediaPlayerBuilder::Build(
     scoped_refptr<ThreadSafeBrowserInterfaceBrokerProxy> remote_interfaces) {
   return new WebMediaPlayerImpl(
       frame, client, encrypted_client, delegate, std::move(factory_selector),
-      url_index, std::move(compositor), std::move(media_log),
+      url_index, std::move(compositor), std::move(media_log), player_id,
       std::move(defer_load_cb), std::move(audio_renderer_sink),
       std::move(media_task_runner), std::move(worker_task_runner),
       std::move(compositor_task_runner),
@@ -71,7 +72,7 @@ WebMediaPlayer* WebMediaPlayerBuilder::Build(
       std::move(request_routing_token_cb), std::move(media_observer),
       enable_instant_source_buffer_gc, embedded_media_experience_enabled,
       std::move(metrics_provider), std::move(create_bridge_callback),
-      std::move(raster_context_provider), surface_layer_mode,
+      std::move(raster_context_provider), use_surface_layer,
       is_background_suspend_enabled, is_background_video_playback_enabled,
       is_background_video_track_optimization_supported,
       std::move(demuxer_override), std::move(remote_interfaces));

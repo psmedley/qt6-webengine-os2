@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,6 +59,7 @@ class MockVideoFrameProvider : public cc::VideoFrameProvider {
   MOCK_METHOD0(HasCurrentFrame, bool());
   MOCK_METHOD0(GetCurrentFrame, scoped_refptr<media::VideoFrame>());
   MOCK_METHOD0(PutCurrentFrame, void());
+  MOCK_METHOD0(OnContextLost, void());
 
   base::TimeDelta GetPreferredRenderInterval() override {
     return preferred_interval;
@@ -698,6 +699,7 @@ TEST_F(VideoFrameSubmitterTest, RecreateCompositorFrameSinkAfterContextLost) {
       .Times(0);
   EXPECT_CALL(mock_embedded_frame_sink_provider, CreateCompositorFrameSink_(_))
       .Times(1);
+  EXPECT_CALL(*video_frame_provider_, OnContextLost()).Times(1);
   submitter_->OnContextLost();
   OnReceivedContextProvider(true, context_provider_);
   task_environment_.RunUntilIdle();
@@ -719,6 +721,7 @@ TEST_F(VideoFrameSubmitterTest,
       .Times(0);
   EXPECT_CALL(mock_embedded_frame_sink_provider, CreateCompositorFrameSink_(_))
       .Times(1);
+  EXPECT_CALL(*video_frame_provider_, OnContextLost()).Times(1);
   submitter_->OnContextLost();
   OnReceivedContextProvider(false, nullptr);
   task_environment_.RunUntilIdle();

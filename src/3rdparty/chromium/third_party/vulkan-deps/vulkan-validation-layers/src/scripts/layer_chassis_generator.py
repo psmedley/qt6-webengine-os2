@@ -142,7 +142,6 @@ class LayerChassisOutputGenerator(OutputGenerator):
         # Include functions here to be interecpted w/ manually implemented function bodies
         'vkGetDeviceProcAddr',
         'vkGetInstanceProcAddr',
-        'vkGetPhysicalDeviceProcAddr',
         'vkCreateDevice',
         'vkDestroyDevice',
         'vkCreateInstance',
@@ -222,7 +221,6 @@ class LayerChassisOutputGenerator(OutputGenerator):
 #include <algorithm>
 #include <memory>
 
-#include "vk_loader_platform.h"
 #include "vulkan/vulkan.h"
 #include "vk_layer_settings_ext.h"
 #include "vk_layer_config.h"
@@ -306,7 +304,9 @@ typedef enum ValidationCheckEnables {
     VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ARM,
     VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_AMD,
     VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_IMG,
+    VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_NVIDIA,
     VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ALL,
+    VALIDATION_CHECK_ENABLE_SYNCHRONIZATION_VALIDATION_QUEUE_SUBMIT,
 } ValidationCheckEnables;
 
 typedef enum VkValidationFeatureEnable {
@@ -339,8 +339,10 @@ typedef enum EnableFlags {
     vendor_specific_arm,
     vendor_specific_amd,
     vendor_specific_img,
+    vendor_specific_nvidia,
     debug_printf,
     sync_validation,
+    sync_validation_queue_submit,
     // Insert new enables above this line
     kMaxEnableFlags,
 } EnableFlags;
@@ -367,7 +369,7 @@ class ValidationObject {
         DeviceExtensions device_extensions = {};
         CHECK_DISABLED disabled = {};
         CHECK_ENABLED enabled = {};
-        bool fine_grained_locking{false};
+        bool fine_grained_locking{true};
 
         VkInstance instance = VK_NULL_HANDLE;
         VkPhysicalDevice physical_device = VK_NULL_HANDLE;
@@ -831,9 +833,9 @@ void OutputLayerStatusInfo(ValidationObject *context) {
     context->LogPerformanceWarning(context->instance, kVUID_Core_CreateInstance_Debug_Warning,
         "VALIDATION LAYERS WARNING: Using debug builds of the validation layers *will* adversely affect performance.");
 #endif
-    if (context->fine_grained_locking) {
+    if (!context->fine_grained_locking) {
         context->LogPerformanceWarning(context->instance, kVUID_Core_CreateInstance_Locking_Warning,
-                                       "Fine-grained locking is experimental, crashes or incorrect results are possible.");
+                                       "Fine-grained locking is disabled, this will adversely affect performance of multithreaded applications.");
     }
 }
 
@@ -1182,14 +1184,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const VkDevice
     return result;
 }
 
+// NOTE: Do _not_ skip the dispatch call when destroying a device. Whether or not there was a validation error,
+//       the loader will destroy the device, and know nothing about future references to this device making it
+//       impossible for the caller to use this device handle further. IOW, this is our _only_ chance to (potentially)
+//       dispatch the driver's DestroyDevice function.
 VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator) {
     dispatch_key key = get_dispatch_key(device);
     auto layer_data = GetLayerDataPtr(key, layer_data_map);
-    bool skip = false;
     """ + precallvalidate_loop + """
         auto lock = intercept->ReadLock();
-        skip |= (const_cast<const ValidationObject*>(intercept))->PreCallValidateDestroyDevice(device, pAllocator);
-        if (skip) return;
+        (const_cast<const ValidationObject*>(intercept))->PreCallValidateDestroyDevice(device, pAllocator);
     }
     """ + precallrecord_loop + """
         auto lock = intercept->WriteLock();
@@ -1594,7 +1598,7 @@ static void DeviceExtensionWarnlist(ValidationObject *layer_data, const VkDevice
         // Check for recognized device extensions
         if (white_list(pCreateInfo->ppEnabledExtensionNames[i], kDeviceWarnExtensionNames)) {
             layer_data->LogWarning(layer_data->device, kVUIDUndefined,
-                    "Device Extension %s support is incomplete, incorrect results are possible.",
+                    "Device Extension %s validation support is incomplete, incorrect results are possible.",
                     pCreateInfo->ppEnabledExtensionNames[i]);
         }
     }
@@ -1808,7 +1812,9 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkNegotiateLoaderLayerInterfaceVe
         OutputGenerator.__init__(self, errFile, warnFile, diagFile)
         # Internal state - accumulators for different inner block text
         self.sections = dict([(section, []) for section in self.ALL_SECTIONS])
-        self.intercepts = []
+        # We need to manually add an entry for vk_layerGetPhysicalDeviceProcAddr because it isn't in the xml,
+        # but it must be queryable from vkGetInstanceProcAddr()
+        self.intercepts = [ '    {"%s", {%s, (void*)%s}},' % ("vk_layerGetPhysicalDeviceProcAddr", "kFuncTypeInst", "GetPhysicalDeviceProcAddr") ]
         self.intercept_enums = ''
         self.dispatch_vector_fcns = ''
         self.virtual_fcn_defs = ''

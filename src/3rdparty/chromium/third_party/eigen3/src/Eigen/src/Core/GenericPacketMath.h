@@ -59,6 +59,7 @@ struct default_packet_traits
     HasMax       = 1,
     HasConj      = 1,
     HasSetLinear = 1,
+    HasSign      = 1,
     HasBlend     = 0,
     // This flag is used to indicate whether packet comparison is supported.
     // pcmp_eq, pcmp_lt and pcmp_le should be defined for it to be true.
@@ -101,8 +102,7 @@ struct default_packet_traits
     HasRound  = 0,
     HasRint   = 0,
     HasFloor  = 0,
-    HasCeil   = 0,
-    HasSign   = 0
+    HasCeil   = 0
   };
 };
 
@@ -179,7 +179,7 @@ struct eigen_packet_wrapper
  */
 template<typename Packet>
 struct is_scalar {
-  typedef typename unpacket_traits<Packet>::type Scalar;
+  using Scalar = typename unpacket_traits<Packet>::type;
   enum {
     value = internal::is_same<Packet, Scalar>::value
   };
@@ -219,6 +219,15 @@ padd(const Packet& a, const Packet& b) { return a+b; }
 // Avoid compiler warning for boolean algebra.
 template<> EIGEN_DEVICE_FUNC inline bool
 padd(const bool& a, const bool& b) { return a || b; }
+
+/** \internal \returns a packet version of \a *from, (un-aligned masked add)
+ * There is no generic implementation. We only have implementations for specialized
+ * cases. Generic case should not be called.
+ */
+template<typename Packet> EIGEN_DEVICE_FUNC inline
+std::enable_if_t<unpacket_traits<Packet>::masked_fpops_available, Packet>
+padd(const Packet& a, const Packet& b, typename unpacket_traits<Packet>::mask_t umask);
+
 
 /** \internal \returns a - b (coeff-wise) */
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
@@ -262,7 +271,7 @@ struct ptrue_impl {
 // have another option, since the scalar type requires initialization.
 template<typename T>
 struct ptrue_impl<T, 
-    typename internal::enable_if<is_scalar<T>::value && NumTraits<T>::RequireInitialization>::type > {
+    std::enable_if_t<is_scalar<T>::value && NumTraits<T>::RequireInitialization> > {
   static EIGEN_DEVICE_FUNC inline T run(const T& /*a*/){
     return T(1);
   }
@@ -288,7 +297,7 @@ struct pzero_impl {
 // for zero may not consist of all-zero bits.
 template<typename T>
 struct pzero_impl<T,
-    typename internal::enable_if<is_scalar<T>::value>::type> {
+    std::enable_if_t<is_scalar<T>::value>> {
   static EIGEN_DEVICE_FUNC inline T run(const T& /*a*/) {
     return T(0);
   }
@@ -359,16 +368,16 @@ struct bytewise_bitwise_helper {
   EIGEN_DEVICE_FUNC static inline T bitwise_and(const T& a, const T& b) {
     return binary(a, b, bit_and<unsigned char>());
   }
-  EIGEN_DEVICE_FUNC static inline T bitwise_or(const T& a, const T& b) { 
+  EIGEN_DEVICE_FUNC static inline T bitwise_or(const T& a, const T& b) {
     return binary(a, b, bit_or<unsigned char>());
    }
   EIGEN_DEVICE_FUNC static inline T bitwise_xor(const T& a, const T& b) {
     return binary(a, b, bit_xor<unsigned char>());
   }
-  EIGEN_DEVICE_FUNC static inline T bitwise_not(const T& a) { 
+  EIGEN_DEVICE_FUNC static inline T bitwise_not(const T& a) {
     return unary(a,bit_not<unsigned char>());
    }
-  
+
  private:
   template<typename Op>
   EIGEN_DEVICE_FUNC static inline T unary(const T& a, Op op) {
@@ -401,8 +410,8 @@ struct bitwise_helper : public bytewise_bitwise_helper<T> {};
 // For integers or non-trivial scalars, use binary operators.
 template<typename T>
 struct bitwise_helper<T,
-  typename internal::enable_if<
-    is_scalar<T>::value && (NumTraits<T>::IsInteger || NumTraits<T>::RequireInitialization)>::type
+  typename std::enable_if_t<
+    is_scalar<T>::value && (NumTraits<T>::IsInteger || NumTraits<T>::RequireInitialization)>
   > : public operator_bitwise_helper<T> {};
 
 /** \internal \returns the bitwise and of \a a and \a b */
@@ -444,7 +453,7 @@ struct pselect_impl {
 // For scalars, use ternary select.
 template<typename Packet>
 struct pselect_impl<Packet, 
-    typename internal::enable_if<is_scalar<Packet>::value>::type > {
+    std::enable_if_t<is_scalar<Packet>::value> > {
   static EIGEN_DEVICE_FUNC inline Packet run(const Packet& mask, const Packet& a, const Packet& b) {
     return numext::equal_strict(mask, Packet(0)) ? b : a;
   }
@@ -597,20 +606,52 @@ pldexp(const Packet &a, const Packet &exponent) {
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
 pabsdiff(const Packet& a, const Packet& b) { return pselect(pcmp_lt(a, b), psub(b, a), psub(a, b)); }
 
-/** \internal \returns a packet version of \a *from, from must be 16 bytes aligned */
+/** \internal \returns a packet version of \a *from, from must be properly aligned */
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
 pload(const typename unpacket_traits<Packet>::type* from) { return *from; }
+
+/** \internal \returns n elements of a packet version of \a *from, from must be properly aligned
+  * offset indicates the starting element in which to load and
+  * offset + n <= unpacket_traits::size
+  * All elements before offset and after the last element loaded will initialized with zero */
+template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
+pload_partial(const typename unpacket_traits<Packet>::type* from, const Index n, const Index offset = 0)
+{
+  const Index packet_size = unpacket_traits<Packet>::size;
+  eigen_assert(n + offset <= packet_size && "number of elements plus offset will read past end of packet");
+  typedef typename unpacket_traits<Packet>::type Scalar;
+  EIGEN_ALIGN_MAX Scalar elements[packet_size] = { Scalar(0) };
+  for (Index i = offset; i < numext::mini(n+offset,packet_size); i++) {
+    elements[i] = from[i-offset];
+  }
+  return pload<Packet>(elements);
+}
 
 /** \internal \returns a packet version of \a *from, (un-aligned load) */
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
 ploadu(const typename unpacket_traits<Packet>::type* from) { return *from; }
+
+/** \internal \returns n elements of a packet version of \a *from, (un-aligned load)
+  * All elements after the last element loaded will initialized with zero */
+template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
+ploadu_partial(const typename unpacket_traits<Packet>::type* from, const Index n)
+{
+  const Index packet_size = unpacket_traits<Packet>::size;
+  eigen_assert(n <= packet_size && "number of elements will read past end of packet");
+  typedef typename unpacket_traits<Packet>::type Scalar;
+  EIGEN_ALIGN_MAX Scalar elements[packet_size] = { Scalar(0) };
+  for (Index i = 0; i < numext::mini(n,packet_size); i++) {
+    elements[i] = from[i];
+  }
+  return pload<Packet>(elements);
+}
 
 /** \internal \returns a packet version of \a *from, (un-aligned masked load)
  * There is no generic implementation. We only have implementations for specialized
  * cases. Generic case should not be called.
  */
 template<typename Packet> EIGEN_DEVICE_FUNC inline
-typename enable_if<unpacket_traits<Packet>::masked_load_available, Packet>::type
+std::enable_if_t<unpacket_traits<Packet>::masked_load_available, Packet>
 ploadu(const typename unpacket_traits<Packet>::type* from, typename unpacket_traits<Packet>::mask_t umask);
 
 /** \internal \returns a packet with constant coefficients \a a, e.g.: (a,a,a,a) */
@@ -695,13 +736,39 @@ peven_mask(const Packet& /*a*/) {
 }
 
 
-/** \internal copy the packet \a from to \a *to, \a to must be 16 bytes aligned */
+/** \internal copy the packet \a from to \a *to, \a to must be properly aligned */
 template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstore(Scalar* to, const Packet& from)
 { (*to) = from; }
+
+/** \internal copy n elements of the packet \a from to \a *to, \a to must be properly aligned
+ * offset indicates the starting element in which to store and
+ * offset + n <= unpacket_traits::size */
+template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstore_partial(Scalar* to, const Packet& from, const Index n, const Index offset = 0)
+{
+  const Index packet_size = unpacket_traits<Packet>::size;
+  eigen_assert(n + offset <= packet_size && "number of elements plus offset will write past end of packet");
+  EIGEN_ALIGN_MAX Scalar elements[packet_size];
+  pstore<Scalar>(elements, from);
+  for (Index i = 0; i < numext::mini(n,packet_size-offset); i++) {
+    to[i] = elements[i + offset];
+  }
+}
 
 /** \internal copy the packet \a from to \a *to, (un-aligned store) */
 template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstoreu(Scalar* to, const Packet& from)
 {  (*to) = from; }
+
+/** \internal copy n elements of the packet \a from to \a *to, (un-aligned store) */
+template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstoreu_partial(Scalar* to, const Packet& from, const Index n)
+{
+  const Index packet_size = unpacket_traits<Packet>::size;
+  eigen_assert(n <= packet_size && "number of elements will write past end of packet");
+  EIGEN_ALIGN_MAX Scalar elements[packet_size];
+  pstore<Scalar>(elements, from);
+  for (Index i = 0; i < numext::mini(n,packet_size); i++) {
+    to[i] = elements[i];
+  }
+}
 
 /** \internal copy the packet \a from to \a *to, (un-aligned store with a mask)
  * There is no generic implementation. We only have implementations for specialized
@@ -709,14 +776,34 @@ template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstoreu
  */
 template<typename Scalar, typename Packet>
 EIGEN_DEVICE_FUNC inline
-typename enable_if<unpacket_traits<Packet>::masked_store_available, void>::type
+std::enable_if_t<unpacket_traits<Packet>::masked_store_available, void>
 pstoreu(Scalar* to, const Packet& from, typename unpacket_traits<Packet>::mask_t umask);
 
- template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline Packet pgather(const Scalar* from, Index /*stride*/)
- { return ploadu<Packet>(from); }
+template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline Packet pgather(const Scalar* from, Index /*stride*/)
+{ return ploadu<Packet>(from); }
 
- template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pscatter(Scalar* to, const Packet& from, Index /*stride*/)
- { pstore(to, from); }
+template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline Packet pgather_partial(const Scalar* from, Index stride, const Index n)
+{
+  const Index packet_size = unpacket_traits<Packet>::size;
+  EIGEN_ALIGN_MAX Scalar elements[packet_size] = { Scalar(0) };
+  for (Index i = 0; i < numext::mini(n,packet_size); i++) {
+    elements[i] = from[i*stride];
+  }
+  return pload<Packet>(elements);
+}
+
+template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pscatter(Scalar* to, const Packet& from, Index /*stride*/)
+{ pstore(to, from); }
+
+template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pscatter_partial(Scalar* to, const Packet& from, Index stride, const Index n)
+{
+  const Index packet_size = unpacket_traits<Packet>::size;
+  EIGEN_ALIGN_MAX Scalar elements[packet_size];
+  pstore<Scalar>(elements, from);
+  for (Index i = 0; i < numext::mini(n,packet_size); i++) {
+    to[i*stride] = elements[i];
+  }
+}
 
 /** \internal tries to do cache prefetching of \a addr */
 template<typename Scalar> EIGEN_DEVICE_FUNC inline void prefetch(const Scalar* addr)
@@ -810,7 +897,7 @@ Packet plog10(const Packet& a) { EIGEN_USING_STD(log10); return log10(a); }
 template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
 Packet plog2(const Packet& a) {
   typedef typename internal::unpacket_traits<Packet>::type Scalar;
-  return pmul(pset1<Packet>(Scalar(EIGEN_LOG2E)), plog(a)); 
+  return pmul(pset1<Packet>(Scalar(EIGEN_LOG2E)), plog(a));
 }
 
 /** \internal \returns the square-root of \a a (coeff-wise) */
@@ -834,6 +921,24 @@ Packet print(const Packet& a) { using numext::rint; return rint(a); }
 template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
 Packet pceil(const Packet& a) { using numext::ceil; return ceil(a); }
 
+template<typename Packet, typename EnableIf = void>
+struct psign_impl {
+  static EIGEN_DEVICE_FUNC inline Packet run(const Packet& a) {
+    return numext::sign(a);
+  }
+};
+
+/** \internal \returns the sign of \a a (coeff-wise) */
+template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
+psign(const Packet& a) {
+  return psign_impl<Packet>::run(a);
+}
+
+template<> EIGEN_DEVICE_FUNC inline bool
+psign(const bool& a) {
+  return a;
+}
+
 /** \internal \returns the first element of a packet */
 template<typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type
@@ -845,7 +950,7 @@ pfirst(const Packet& a)
   * For packet-size smaller or equal to 4, this boils down to a noop.
   */
 template<typename Packet>
-EIGEN_DEVICE_FUNC inline typename conditional<(unpacket_traits<Packet>::size%8)==0,typename unpacket_traits<Packet>::half,Packet>::type
+EIGEN_DEVICE_FUNC inline std::conditional_t<(unpacket_traits<Packet>::size%8)==0,typename unpacket_traits<Packet>::half,Packet>
 predux_half_dowto4(const Packet& a)
 { return a; }
 
@@ -877,7 +982,7 @@ predux(const Packet& a)
 template <typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_mul(
     const Packet& a) {
-  typedef typename unpacket_traits<Packet>::type Scalar; 
+  typedef typename unpacket_traits<Packet>::type Scalar;
   return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmul<Scalar>)));
 }
 
@@ -885,14 +990,14 @@ EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_mul(
 template <typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_min(
     const Packet &a) {
-  typedef typename unpacket_traits<Packet>::type Scalar; 
+  typedef typename unpacket_traits<Packet>::type Scalar;
   return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmin<PropagateFast, Scalar>)));
 }
 
 template <int NaNPropagation, typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_min(
     const Packet& a) {
-  typedef typename unpacket_traits<Packet>::type Scalar; 
+  typedef typename unpacket_traits<Packet>::type Scalar;
   return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmin<NaNPropagation, Scalar>)));
 }
 
@@ -900,14 +1005,14 @@ EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_min(
 template <typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_max(
     const Packet &a) {
-  typedef typename unpacket_traits<Packet>::type Scalar; 
+  typedef typename unpacket_traits<Packet>::type Scalar;
   return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmax<PropagateFast, Scalar>)));
 }
 
 template <int NaNPropagation, typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_max(
     const Packet& a) {
-  typedef typename unpacket_traits<Packet>::type Scalar; 
+  typedef typename unpacket_traits<Packet>::type Scalar;
   return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmax<NaNPropagation, Scalar>)));
 }
 
@@ -987,6 +1092,17 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE Packet ploadt(const typename unpacket_trai
     return ploadu<Packet>(from);
 }
 
+/** \internal \returns n elements of a packet version of \a *from.
+  * The pointer \a from must be aligned on a \a Alignment bytes boundary. */
+template<typename Packet, int Alignment>
+EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE Packet ploadt_partial(const typename unpacket_traits<Packet>::type* from, const Index n, const Index offset = 0)
+{
+  if(Alignment >= unpacket_traits<Packet>::alignment)
+    return pload_partial<Packet>(from, n, offset);
+  else
+    return ploadu_partial<Packet>(from, n);
+}
+
 /** \internal copy the packet \a from to \a *to.
   * The pointer \a from must be aligned on a \a Alignment bytes boundary. */
 template<typename Scalar, typename Packet, int Alignment>
@@ -996,6 +1112,17 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE void pstoret(Scalar* to, const Packet& fro
     pstore(to, from);
   else
     pstoreu(to, from);
+}
+
+/** \internal copy n elements of the packet \a from to \a *to.
+  * The pointer \a from must be aligned on a \a Alignment bytes boundary. */
+template<typename Scalar, typename Packet, int Alignment>
+EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE void pstoret_partial(Scalar* to, const Packet& from, const Index n, const Index offset = 0)
+{
+  if(Alignment >= unpacket_traits<Packet>::alignment)
+    pstore_partial(to, from, n, offset);
+  else
+    pstoreu_partial(to, from, n);
 }
 
 /** \internal \returns a packet version of \a *from.

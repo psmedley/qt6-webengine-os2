@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -143,7 +143,7 @@ class FidoMakeCredentialHandlerTest : public ::testing::Test {
   TestMakeCredentialRequestCallback cb_;
   base::flat_set<FidoTransportProtocol> supported_transports_ = {
       FidoTransportProtocol::kUsbHumanInterfaceDevice,
-      FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy,
+      FidoTransportProtocol::kHybrid,
       FidoTransportProtocol::kNearFieldCommunication,
       FidoTransportProtocol::kInternal,
   };
@@ -261,7 +261,8 @@ TEST_F(FidoMakeCredentialHandlerTest, CrossPlatformAttachment) {
                                      ResidentKeyRequirement::kDiscouraged,
                                      UserVerificationRequirement::kPreferred));
 
-  // kCloudAssistedBluetoothLowEnergy not yet supported for MakeCredential.
+  // kHybrid is not enabled by default as it needs special setup in the
+  // discovery factory.
   ExpectAllowedTransportsForRequestAre(request_handler.get(), {
     FidoTransportProtocol::kNearFieldCommunication,
 #if BUILDFLAG(IS_CHROMEOS)

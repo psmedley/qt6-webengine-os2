@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,7 +83,8 @@ class SynchronousLayerTreeFrameSink
  public:
   SynchronousLayerTreeFrameSink(
       scoped_refptr<viz::ContextProvider> context_provider,
-      scoped_refptr<viz::RasterContextProvider> worker_context_provider,
+      scoped_refptr<cc::RasterContextProviderWrapper>
+          worker_context_provider_wrapper,
       scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       uint32_t layer_tree_frame_sink_id,
@@ -133,6 +134,9 @@ class SynchronousLayerTreeFrameSink
   void SetMemoryPolicy(size_t bytes_limit);
   void ReclaimResources(uint32_t layer_tree_frame_sink_id,
                         Vector<viz::ReturnedResource> resources);
+  void OnCompositorFrameTransitionDirectiveProcessed(
+      uint32_t layer_tree_frame_sink_id,
+      uint32_t sequence_id);
   void DemandDrawHw(const gfx::Size& viewport_size,
                     const gfx::Rect& viewport_rect_for_tile_priority,
                     const gfx::Transform& transform_for_tile_priority,

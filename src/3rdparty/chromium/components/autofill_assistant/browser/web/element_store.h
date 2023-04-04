@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include "base/memory/raw_ptr.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/web/element.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
 
 namespace content {
 class WebContents;
 }  // namespace content
 
 namespace autofill_assistant {
+class ElementFinderResult;
 
 // Temporary store for elements resolved from a |Selector| by the
 // |ElementFinder|. This store only holds a shallow copy of the element,

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ class ExtensionIconSource : public content::URLDataSource,
 
   // content::URLDataSource implementation.
   std::string GetSource() override;
-  std::string GetMimeType(const std::string&) override;
+  std::string GetMimeType(const GURL&) override;
   void StartDataRequest(
       const GURL& url,
       const content::WebContents::Getter& wc_getter,

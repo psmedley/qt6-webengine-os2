@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,9 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
 
   void SetAnchorView(View* view);
   View* GetAnchorView() const;
+
+  void SetMainImage(ui::ImageModel main_image);
+  const ui::ImageModel& GetMainImage() const { return main_image_; }
 
   // GetAnchorRect() takes into account the presence of an anchor view, while
   // anchor_rect() always returns the configured anchor rect, regardless of
@@ -144,6 +147,17 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
   // Call this method to update view shown time stamp of underneath input
   // protectors.
   void UpdateInputProtectorsTimeStamp();
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Subtitle:
+  //
+  // Bubbles have an optional a Subtitle label under the Title.
+  // This subtitle label is represented in BubbleFrameView.
+
+  // This method is virtual for BubbleFrameViewUnitTest purposes.
+  // Not intended to be overridden in production.
+  virtual std::u16string GetSubtitle() const;
+  void SetSubtitle(const std::u16string& subtitle);
 
   //////////////////////////////////////////////////////////////////////////////
   // Miscellaneous bubble behaviors:
@@ -246,6 +260,11 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
     color_explicitly_set_ = true;
   }
 
+  void set_force_create_contents_background(
+      bool force_create_contents_background) {
+    force_create_contents_background_ = force_create_contents_background;
+  }
+
   void set_title_margins(const gfx::Insets& title_margins) {
     title_margins_ = title_margins;
   }
@@ -291,15 +310,6 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
   // Override this method if you want to position the bubble regardless of its
   // anchor, while retaining the other anchor view logic.
   virtual gfx::Rect GetBubbleBounds();
-
-  // Update the button highlight, which may be the anchor view or an explicit
-  // view set in |highlighted_button_tracker_|. This can be overridden to
-  // provide different highlight effects.
-  //
-  // TODO(ellyjones): Remove this; it is only used in one place, to disable
-  // highlighting the button, but this is trivial to achieve using other
-  // methods.
-  virtual void UpdateHighlightedButton(bool highlight);
 
   // Override this to perform initialization after the Widget is created but
   // before it is shown.
@@ -375,6 +385,8 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
   // after losing it.
   void NotifyAnchoredBubbleIsPrimary();
 
+  void UpdateHighlightedButton(bool highlight);
+
   void SetAnchoredDialogKey();
 
   gfx::Insets title_margins_;
@@ -382,7 +394,7 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
   BubbleBorder::Shadow shadow_;
   SkColor color_ = gfx::kPlaceholderColor;
   bool color_explicitly_set_ = false;
-  raw_ptr<Widget> anchor_widget_ = nullptr;
+  raw_ptr<Widget, DanglingUntriaged> anchor_widget_ = nullptr;
   std::unique_ptr<AnchorViewObserver> anchor_view_observer_;
   std::unique_ptr<AnchorWidgetObserver> anchor_widget_observer_;
   std::unique_ptr<BubbleWidgetObserver> bubble_widget_observer_;
@@ -390,6 +402,8 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
   bool adjust_if_offscreen_ = true;
   bool focus_traversable_from_anchor_view_ = true;
   ViewTracker highlighted_button_tracker_;
+  ui::ImageModel main_image_;
+  std::u16string subtitle_;
 
   // A flag controlling bubble closure on deactivation.
   bool close_on_deactivate_ = true;
@@ -420,6 +434,10 @@ class VIEWS_EXPORT BubbleDialogDelegate : public DialogDelegate {
   // ClientViews always paint to a layer.
   // TODO(tluk): Flip this to true for all bubbles.
   bool paint_client_to_layer_ = false;
+
+  // If true, contents view will be forced to create a solid color background in
+  // UpdateColorsFromTheme().
+  bool force_create_contents_background_ = false;
 
 #if BUILDFLAG(IS_MAC)
   // Special handler for close_on_deactivate() on Mac. Window (de)activation is
@@ -488,6 +506,7 @@ VIEW_BUILDER_VIEW_TYPE_PROPERTY(views::View, FootnoteView)
 VIEW_BUILDER_PROPERTY(bool, FocusTraversesOut)
 VIEW_BUILDER_PROPERTY(bool, EnableArrowKeyTraversal)
 VIEW_BUILDER_PROPERTY(gfx::ImageSkia, Icon)
+VIEW_BUILDER_PROPERTY(gfx::ImageSkia, MainImage)
 VIEW_BUILDER_PROPERTY(gfx::ImageSkia, AppIcon)
 VIEW_BUILDER_PROPERTY(ui::ModalType, ModalType)
 VIEW_BUILDER_PROPERTY(bool, OwnedByWidget)

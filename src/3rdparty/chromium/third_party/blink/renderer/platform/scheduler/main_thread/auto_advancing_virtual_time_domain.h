@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,7 @@ class PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
 
   int task_starvation_count() const { return task_starvation_count_; }
 
+  base::TimeTicks InitialTicks() const { return initial_time_ticks_; }
   // TickClock implementation:
   base::TimeTicks NowTicks() const override;
 

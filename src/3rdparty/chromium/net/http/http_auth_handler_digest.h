@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,28 +74,32 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
     ~Factory() override;
 
     // This factory owns the passed in |nonce_generator|.
-    void set_nonce_generator(const NonceGenerator* nonce_generator);
+    void set_nonce_generator(
+        std::unique_ptr<const NonceGenerator> nonce_generator);
 
-    int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
-                          HttpAuth::Target target,
-                          const SSLInfo& ssl_info,
-                          const NetworkIsolationKey& network_isolation_key,
-                          const url::SchemeHostPort& scheme_host_port,
-                          CreateReason reason,
-                          int digest_nonce_count,
-                          const NetLogWithSource& net_log,
-                          HostResolver* host_resolver,
-                          std::unique_ptr<HttpAuthHandler>* handler) override;
+    int CreateAuthHandler(
+        HttpAuthChallengeTokenizer* challenge,
+        HttpAuth::Target target,
+        const SSLInfo& ssl_info,
+        const NetworkAnonymizationKey& network_anonymization_key,
+        const url::SchemeHostPort& scheme_host_port,
+        CreateReason reason,
+        int digest_nonce_count,
+        const NetLogWithSource& net_log,
+        HostResolver* host_resolver,
+        std::unique_ptr<HttpAuthHandler>* handler) override;
 
    private:
     std::unique_ptr<const NonceGenerator> nonce_generator_;
   };
 
+  ~HttpAuthHandlerDigest() override;
+
  private:
   // HttpAuthHandler
   bool Init(HttpAuthChallengeTokenizer* challenge,
             const SSLInfo& ssl_info,
-            const NetworkIsolationKey& network_isolation_key) override;
+            const NetworkAnonymizationKey& network_anonymization_key) override;
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
                             CompletionOnceCallback callback,
@@ -134,7 +138,6 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   // the handler. The lifetime of the |nonce_generator| must exceed that of this
   // handler.
   HttpAuthHandlerDigest(int nonce_count, const NonceGenerator* nonce_generator);
-  ~HttpAuthHandlerDigest() override;
 
   // Parse the challenge, saving the results into this instance.
   // Returns true on success.
@@ -174,9 +177,9 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   std::string nonce_;
   std::string domain_;
   std::string opaque_;
-  bool stale_;
-  DigestAlgorithm algorithm_;
-  QualityOfProtection qop_;
+  bool stale_ = false;
+  DigestAlgorithm algorithm_ = ALGORITHM_UNSPECIFIED;
+  QualityOfProtection qop_ = QOP_UNSPECIFIED;
 
   // The realm as initially encoded over-the-wire. This is used in the
   // challenge text, rather than |realm_| which has been converted to

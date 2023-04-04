@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,13 +28,16 @@ WaitForDomOperation::WaitForDomOperation(
       allow_interrupt_(allow_interrupt),
       use_observers_(allow_observers && delegate->GetTriggerContext()
                                             ->GetScriptParameters()
-                                            .GetEnableObserverWaitForDom()
-                                            .value_or(false)),
-      observer_(observer),
+                                            .GetEnableObserverWaitForDom()),
       check_elements_(std::move(check_elements)),
       callback_(std::move(callback)),
       timeout_warning_delay_(delegate_->GetSettings().warning_delay),
-      retry_timer_(delegate_->GetSettings().periodic_element_check_interval) {}
+      retry_timer_(delegate_->GetSettings().periodic_element_check_interval) {
+  if (observer) {
+    observers_.emplace_back(observer);
+  }
+  observers_.emplace_back(ui_delegate_);
+}
 
 WaitForDomOperation::~WaitForDomOperation() {
   delegate_->RemoveNavigationListener(this);
@@ -165,12 +168,14 @@ void WaitForDomOperation::RunChecks(
                      base::Unretained(this), std::move(report_attempt_result)));
   if (use_observers_) {
     batch_element_checker_->EnableObserver(
-        /* max_wait_time= */ max_wait_time_ -
-            wait_time_stopwatch_.TotalElapsed(),
-        /* periodic_check_interval= */
-        delegate_->GetSettings().periodic_element_check_interval,
-        /* extra_timeout= */
-        delegate_->GetSettings().selector_observer_extra_timeout);
+        {/* max_wait_time= */ max_wait_time_ -
+             wait_time_stopwatch_.TotalElapsed(),
+         /* min_check_interval= */
+         delegate_->GetSettings().periodic_element_check_interval,
+         /* extra_timeout= */
+         delegate_->GetSettings().selector_observer_extra_timeout,
+         /* debounce_interval */
+         delegate_->GetSettings().selector_observer_debounce_interval});
   }
   batch_element_checker_->Run(delegate_->GetWebController());
 }
@@ -218,8 +223,9 @@ void WaitForDomOperation::OnAllChecksDone(
 
 void WaitForDomOperation::RunInterrupt(const std::string& path) {
   batch_element_checker_.reset();
-  if (observer_)
-    observer_->OnInterruptStarted();
+  for (auto* observer : observers_) {
+    observer->OnInterruptStarted();
+  }
 
   SavePreInterruptState();
   ran_interrupts_.insert(path);
@@ -228,7 +234,8 @@ void WaitForDomOperation::RunInterrupt(const std::string& path) {
       std::make_unique<TriggerContext>(std::vector<const TriggerContext*>{
           main_script_->additional_context_.get()}),
       main_script_->last_global_payload_, main_script_->initial_script_payload_,
-      /* listener= */ this, &no_interrupts_, delegate_, ui_delegate_);
+      /* listener= */ this, &no_interrupts_, delegate_, ui_delegate_,
+      /* is_interrupt_executor= */ true);
   delegate_->EnterState(AutofillAssistantState::RUNNING);
   ui_delegate_->SetUserActions(nullptr);
   // Note that we don't clear the touchable area in the delegate here.
@@ -246,8 +253,9 @@ void WaitForDomOperation::OnInterruptDone(
     RunCallbackWithResult(ClientStatus(INTERRUPT_FAILED), &result);
     return;
   }
-  if (observer_)
-    observer_->OnInterruptFinished();
+  for (auto* observer : observers_) {
+    observer->OnInterruptFinished();
+  }
 
   RestorePreInterruptState();
   RestorePreInterruptScroll();

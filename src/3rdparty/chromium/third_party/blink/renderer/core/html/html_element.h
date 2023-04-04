@@ -72,7 +72,7 @@ class CORE_EXPORT HTMLElement : public Element {
   String title() const final;
 
   String innerText();
-  void setInnerText(const String&, ExceptionState&);
+  void setInnerText(const String&);
   V8UnionStringTreatNullAsEmptyStringOrTrustedScript* innerTextForBinding();
   virtual void setInnerTextForBinding(
       const V8UnionStringTreatNullAsEmptyStringOrTrustedScript*
@@ -177,6 +177,9 @@ class CORE_EXPORT HTMLElement : public Element {
   V8UnionBooleanOrStringOrUnrestrictedDouble* hidden() const;
   void setHidden(const V8UnionBooleanOrStringOrUnrestrictedDouble*);
 
+  // https://html.spec.whatwg.org/C/#potentially-render-blocking
+  virtual bool IsPotentiallyRenderBlocking() const { return false; }
+
  protected:
   enum AllowPercentage { kDontAllowPercentageValues, kAllowPercentageValues };
   enum AllowZero { kDontAllowZeroValues, kAllowZeroValues };
@@ -236,8 +239,6 @@ class CORE_EXPORT HTMLElement : public Element {
   bool IsStyledElement() const =
       delete;  // This will catch anyone doing an unnecessary check.
 
-  void MapLanguageAttributeToLocale(const AtomicString&,
-                                    MutableCSSPropertyValueSet*);
   void ApplyAspectRatioToStyle(double width,
                                double height,
                                MutableCSSPropertyValueSet* style);
@@ -261,13 +262,11 @@ class CORE_EXPORT HTMLElement : public Element {
       const QualifiedName& attr_name);
 
   void OnDirAttrChanged(const AttributeModificationParams&);
-  void OnFocusgroupAttrChanged(const AttributeModificationParams&);
   void OnFormAttrChanged(const AttributeModificationParams&);
   void OnLangAttrChanged(const AttributeModificationParams&);
   void OnNonceAttrChanged(const AttributeModificationParams&);
-  void OnTabIndexAttrChanged(const AttributeModificationParams&);
-  void OnXMLLangAttrChanged(const AttributeModificationParams&);
-  void OnPopupAttrChanged(const AttributeModificationParams&);
+
+  void ReparseAttribute(const AttributeModificationParams&);
 };
 
 template <typename T>

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,8 @@ class BASE_EXPORT AtomicFlagSet {
   struct Group;
 
  public:
-  explicit AtomicFlagSet(scoped_refptr<AssociatedThreadId> associated_thread);
+  explicit AtomicFlagSet(
+      scoped_refptr<const AssociatedThreadId> associated_thread);
   AtomicFlagSet(const AtomicFlagSet&) = delete;
   AtomicFlagSet& operator=(const AtomicFlagSet&) = delete;
   // AtomicFlags need to be released (or deleted) before this can be deleted.
@@ -66,7 +67,7 @@ class BASE_EXPORT AtomicFlagSet {
 
     AtomicFlag(AtomicFlagSet* outer, Group* element, size_t flag_bit);
 
-    raw_ptr<AtomicFlagSet> outer_ = nullptr;
+    raw_ptr<AtomicFlagSet, DanglingUntriaged> outer_ = nullptr;
     raw_ptr<Group> group_ = nullptr;  // Null when AtomicFlag is invalid.
     size_t flag_bit_ = 0;  // This is 1 << index of this flag within the group.
   };
@@ -129,7 +130,7 @@ class BASE_EXPORT AtomicFlagSet {
   // This does not delete |element|.
   void RemoveFromPartiallyFreeList(Group* element);
 
-  scoped_refptr<AssociatedThreadId> associated_thread_;
+  const scoped_refptr<const AssociatedThreadId> associated_thread_;
   std::unique_ptr<Group> alloc_list_head_;
   raw_ptr<Group> partially_free_list_head_ = nullptr;
 };

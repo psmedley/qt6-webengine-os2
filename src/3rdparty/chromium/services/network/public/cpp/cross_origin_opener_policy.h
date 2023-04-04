@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,8 +43,7 @@ const char* CoopAccessReportTypeToString(mojom::CoopAccessReportType type);
 
 COMPONENT_EXPORT(NETWORK_CPP_BASE)
 void AugmentCoopWithCoep(CrossOriginOpenerPolicy* coop,
-                         const CrossOriginEmbedderPolicy& coep,
-                         bool is_coop_soap_plus_coep_enabled);
+                         const CrossOriginEmbedderPolicy& coep);
 
 }  // namespace network
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,12 +20,14 @@ class TestAutofillProvider : public AutofillProvider {
   ~TestAutofillProvider() override = default;
 
   // AutofillProvider:
-  void OnAskForValuesToFill(AndroidAutofillManager* manager,
-                            int32_t id,
-                            const FormData& form,
-                            const FormFieldData& field,
-                            const gfx::RectF& bounding_box,
-                            bool autoselect_first_suggestion) override {}
+  void OnAskForValuesToFill(
+      AndroidAutofillManager* manager,
+      const FormData& form,
+      const FormFieldData& field,
+      const gfx::RectF& bounding_box,
+      int32_t query_id,
+      bool autoselect_first_suggestion,
+      FormElementWasClicked form_element_was_clicked) override {}
   void OnTextFieldDidChange(AndroidAutofillManager* manager,
                             const FormData& form,
                             const FormFieldData& field,

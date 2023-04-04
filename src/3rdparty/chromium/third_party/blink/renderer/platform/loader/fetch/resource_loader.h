@@ -54,6 +54,10 @@
 #include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
+namespace base {
+class UnguessableToken;
+}
+
 namespace blink {
 
 class FetchContext;
@@ -149,7 +153,9 @@ class PLATFORM_EXPORT ResourceLoader final
                         int64_t encoded_data_length,
                         int64_t encoded_body_length,
                         int64_t decoded_body_length,
-                        bool should_report_corb_blocking) override;
+                        bool should_report_corb_blocking,
+                        absl::optional<bool> pervasive_payload_requested =
+                            absl::nullopt) override;
   void DidFail(const WebURLError&,
                base::TimeTicks response_end_time,
                int64_t encoded_data_length,
@@ -165,6 +171,9 @@ class PLATFORM_EXPORT ResourceLoader final
 
   scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner();
 
+  void CancelIfWebBundleTokenMatches(
+      const base::UnguessableToken& web_bundle_token);
+
  private:
   friend class SubresourceIntegrityTest;
   friend class ResourceLoaderIsolatedCodeCacheTest;
@@ -177,6 +186,9 @@ class PLATFORM_EXPORT ResourceLoader final
 
   // ResponseBodyLoaderClient implementation.
   void DidReceiveData(base::span<const char> data) override;
+  void DidReceiveDecodedData(
+      const String& data,
+      std::unique_ptr<Resource::DecodedDataInfo> info) override;
   void DidFinishLoadingBody() override;
   void DidFailLoadingBody() override;
   void DidCancelLoadingBody() override;
@@ -279,6 +291,9 @@ class PLATFORM_EXPORT ResourceLoader final
       feature_handle_for_scheduler_;
 
   base::TimeTicks response_end_time_for_error_cases_;
+
+  base::TimeTicks request_start_time_;
+  base::TimeTicks code_cache_arrival_time_;
 };
 
 }  // namespace blink

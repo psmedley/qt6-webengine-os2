@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,6 +65,14 @@ void OverrideWithFinch(Config& config) {
       base::Seconds(base::GetFieldTrialParamByFeatureAsDouble(
           kInterestFeedV2, "content_expiration_threshold_seconds",
           config.content_expiration_threshold.InSecondsF()));
+
+  if (base::FeatureList::IsEnabled(kWebFeedOnboarding)) {
+    config.subscriptionless_content_expiration_threshold =
+        base::Seconds(base::GetFieldTrialParamByFeatureAsDouble(
+            kWebFeedOnboarding,
+            "subscriptionless_content_expiration_threshold_seconds",
+            config.subscriptionless_content_expiration_threshold.InSecondsF()));
+  }
 
   config.background_refresh_window_length =
       base::Seconds(base::GetFieldTrialParamByFeatureAsDouble(
@@ -141,6 +149,15 @@ void OverrideWithFinch(Config& config) {
           kWebFeed, "web_feed_stale_content_threshold_seconds",
           config.web_feed_stale_content_threshold.InSecondsF()));
 
+  if (base::FeatureList::IsEnabled(kWebFeedOnboarding)) {
+    config.subscriptionless_web_feed_stale_content_threshold =
+        base::Seconds(base::GetFieldTrialParamByFeatureAsDouble(
+            kWebFeedOnboarding,
+            "subscriptionless_web_feed_stale_content_threshold_seconds",
+            config.subscriptionless_web_feed_stale_content_threshold
+                .InSecondsF()));
+  }
+
   // Erase any capabilities with "enable_CAPABILITY = false" set.
   base::EraseIf(config.experimental_capabilities, CapabilityDisabled);
 
@@ -154,9 +171,8 @@ void OverrideWithFinch(Config& config) {
 }
 
 void OverrideWithSwitches(Config& config) {
-  config.use_feed_query_requests_for_web_feeds =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          "webfeed-legacy-feedquery");
+  config.use_feed_query_requests =
+      base::CommandLine::ForCurrentProcess()->HasSwitch("use-legacy-feedquery");
 }
 
 }  // namespace
@@ -172,10 +188,9 @@ const Config& GetFeedConfig() {
 }
 
 // This is a dev setting that updates Config, which is supposed to be constant.
-// TODO(crbug/1152592): remove when not needed anymore.
-void SetUseFeedQueryRequestsForWebFeeds(const bool use_legacy) {
+void SetUseFeedQueryRequests(const bool use_legacy) {
   Config& config = const_cast<Config&>(GetFeedConfig());
-  config.use_feed_query_requests_for_web_feeds = use_legacy;
+  config.use_feed_query_requests = use_legacy;
 }
 
 void SetFeedConfigForTesting(const Config& config) {
@@ -190,10 +205,15 @@ Config::Config() = default;
 Config::Config(const Config& other) = default;
 Config::~Config() = default;
 
-base::TimeDelta Config::GetStalenessThreshold(
-    const StreamType& stream_type) const {
-  return stream_type.IsForYou() ? stale_content_threshold
-                                : web_feed_stale_content_threshold;
+base::TimeDelta Config::GetStalenessThreshold(const StreamType& stream_type,
+                                              bool has_subscriptions) const {
+  if (stream_type.IsForYou()) {
+    return stale_content_threshold;
+  }
+  if (has_subscriptions) {
+    return web_feed_stale_content_threshold;
+  }
+  return subscriptionless_web_feed_stale_content_threshold;
 }
 
 }  // namespace feed

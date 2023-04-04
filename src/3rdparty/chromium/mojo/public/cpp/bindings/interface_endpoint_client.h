@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,21 +12,20 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/check_op.h"
-#include "base/compiler_specific.h"
 #include "base/component_export.h"
 #include "base/containers/span.h"
+#include "base/dcheck_is_on.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/strings/string_piece.h"
+#include "base/strings/string_piece_forward.h"
 #include "base/synchronization/lock.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/connection_error_callback.h"
 #include "mojo/public/cpp/bindings/connection_group.h"
 #include "mojo/public/cpp/bindings/disconnect_reason.h"
@@ -62,7 +61,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfaceEndpointClient
                           scoped_refptr<base::SequencedTaskRunner> task_runner,
                           uint32_t interface_version,
                           const char* interface_name,
-                          MessageToStableIPCHashCallback ipc_hash_callback,
+                          MessageToMethodInfoCallback method_info_callback,
                           MessageToMethodNameCallback method_name_callback);
 
   InterfaceEndpointClient(const InterfaceEndpointClient&) = delete;
@@ -195,8 +194,8 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfaceEndpointClient
   void MaybeSendNotifyIdle();
 
   const char* interface_name() const { return interface_name_; }
-  MessageToStableIPCHashCallback ipc_hash_callback() const {
-    return ipc_hash_callback_;
+  MessageToMethodInfoCallback method_info_callback() const {
+    return method_info_callback_;
   }
   MessageToMethodNameCallback method_name_callback() const {
     return method_name_callback_;
@@ -321,11 +320,12 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfaceEndpointClient
   std::unique_ptr<AssociatedGroup> associated_group_;
   // `controller_` is not a raw_ptr<...> for performance reasons (based on
   // analysis of sampling profiler data).
-  InterfaceEndpointController* controller_ = nullptr;
+  RAW_PTR_EXCLUSION InterfaceEndpointController* controller_ = nullptr;
 
   // `incoming_receiver_` is not a raw_ptr<...> for performance reasons (based
   // on analysis of sampling profiler data).
-  MessageReceiverWithResponderStatus* const incoming_receiver_ = nullptr;
+  RAW_PTR_EXCLUSION MessageReceiverWithResponderStatus* const
+      incoming_receiver_ = nullptr;
   HandleIncomingMessageThunk thunk_{this};
   MessageDispatcher dispatcher_;
 
@@ -344,7 +344,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfaceEndpointClient
   internal::ControlMessageProxy control_message_proxy_{this};
   internal::ControlMessageHandler control_message_handler_;
   const char* interface_name_;
-  const MessageToStableIPCHashCallback ipc_hash_callback_;
+  const MessageToMethodInfoCallback method_info_callback_;
   const MessageToMethodNameCallback method_name_callback_;
 
 #if DCHECK_IS_ON()

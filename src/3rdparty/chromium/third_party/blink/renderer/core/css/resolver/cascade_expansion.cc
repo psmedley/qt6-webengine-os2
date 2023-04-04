@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,8 @@ CascadeFilter AddValidPropertiesFilter(
       return filter.Add(CSSProperty::kValidForFirstLine, false);
     case ValidPropertyFilter::kMarker:
       return filter.Add(CSSProperty::kValidForMarker, false);
+    case ValidPropertyFilter::kHighlightLegacy:
+      return filter.Add(CSSProperty::kValidForHighlightLegacy, false);
     case ValidPropertyFilter::kHighlight:
       return filter.Add(CSSProperty::kValidForHighlight, false);
   }
@@ -48,9 +50,10 @@ CascadeFilter AddLinkFilter(CascadeFilter filter,
 }  // anonymous namespace
 
 CORE_EXPORT CascadeFilter
-AmendFilter(CascadeFilter filter, const MatchedProperties& matched_properties) {
-  return AddLinkFilter(AddValidPropertiesFilter(filter, matched_properties),
-                       matched_properties);
+CreateExpansionFilter(const MatchedProperties& matched_properties) {
+  return AddLinkFilter(
+      AddValidPropertiesFilter(CascadeFilter(), matched_properties),
+      matched_properties);
 }
 
 CORE_EXPORT bool IsInAllExpansion(CSSPropertyID id) {

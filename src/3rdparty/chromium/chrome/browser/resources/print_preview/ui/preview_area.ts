@@ -1,15 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
-import './print_preview_vars_css.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import './print_preview_vars.css.js';
 import '../strings.m.js';
 
-import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
-import {hasKeyModifiers} from 'chrome://resources/js/util.m.js';
-import {WebUIListenerMixin} from 'chrome://resources/js/web_ui_listener_mixin.js';
+import {I18nMixin} from 'chrome://resources/cr_elements/i18n_mixin.js';
+import {hasKeyModifiers} from 'chrome://resources/js/util.js';
+import {WebUIListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {DarkModeMixin} from '../dark_mode_mixin.js';
@@ -21,11 +21,10 @@ import {DuplexMode, MediaSizeValue, Ticket} from '../data/model.js';
 import {ScalingType} from '../data/scaling.js';
 import {Size} from '../data/size.js';
 import {Error, State} from '../data/state.js';
-import {MetricsContext, PrintPreviewInitializationEvents} from '../metrics.js';
 import {NativeLayer, NativeLayerImpl} from '../native_layer.js';
 import {areRangesEqual} from '../print_preview_utils.js';
 
-import {MARGIN_KEY_MAP, MarginObject, PrintPreviewMarginControlContainerElement} from './margin_control_container.js';
+import {MARGIN_KEY_MAP, PrintPreviewMarginControlContainerElement} from './margin_control_container.js';
 import {PluginProxy, PluginProxyImpl} from './plugin_proxy.js';
 import {getTemplate} from './preview_area.html.js';
 import {SettingsMixin} from './settings_mixin.js';
@@ -271,16 +270,12 @@ export class PrintPreviewPreviewAreaElement extends
     this.documentReady_ = false;
     this.getPreview_().then(
         previewUid => {
-          MetricsContext.getPreview().record(
-              PrintPreviewInitializationEvents.FUNCTION_SUCCESSFUL);
           if (!this.documentModifiable) {
             this.onPreviewStart_(previewUid, -1);
           }
           this.documentReady_ = true;
         },
         type => {
-          MetricsContext.getPreview().record(
-              PrintPreviewInitializationEvents.FUNCTION_FAILED);
           if (type === 'SETTINGS_INVALID') {
             this.error = Error.INVALID_PRINTER;
             this.previewState = PreviewAreaState.ERROR;
@@ -289,8 +284,6 @@ export class PrintPreviewPreviewAreaElement extends
             this.previewState = PreviewAreaState.ERROR;
           }
         });
-    MetricsContext.getPreview().record(
-        PrintPreviewInitializationEvents.FUNCTION_INITIATED);
   }
 
   // <if expr="is_macosx">
@@ -581,7 +574,7 @@ export class PrintPreviewPreviewAreaElement extends
       const customMarginsChanged =
           Object.values(CustomMarginsOrientation).some(side => {
             return this.margins.get(side) !==
-                (customMargins as MarginObject)[MARGIN_KEY_MAP.get(side)!];
+                customMargins[MARGIN_KEY_MAP.get(side)!];
           });
       if (customMarginsChanged) {
         return true;
@@ -752,7 +745,7 @@ export class PrintPreviewPreviewAreaElement extends
           substitutions: [],
           tags: ['BR'],
         });
-      // <if expr="chromeos_ash or chromeos_lacros">
+      // <if expr="is_chromeos">
       case Error.NO_DESTINATIONS:
         return this.i18n('noDestinationsMessage');
       // </if>

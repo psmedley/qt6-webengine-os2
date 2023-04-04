@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,9 +34,10 @@ void UrlSignalHandler::OnHistoryVisit(const GURL& url) {
   ukm_database_->OnUrlValidated(url);
 }
 
-void UrlSignalHandler::OnUrlsRemovedFromHistory(const std::vector<GURL>& urls) {
+void UrlSignalHandler::OnUrlsRemovedFromHistory(const std::vector<GURL>& urls,
+                                                bool all_urls) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  ukm_database_->RemoveUrls(urls);
+  ukm_database_->RemoveUrls(urls, all_urls);
 }
 
 void UrlSignalHandler::AddHistoryDelegate(HistoryDelegate* history_delegate) {

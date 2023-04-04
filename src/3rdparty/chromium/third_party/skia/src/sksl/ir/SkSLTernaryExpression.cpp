@@ -10,6 +10,7 @@
 #include "include/sksl/SkSLErrorReporter.h"
 #include "include/sksl/SkSLOperator.h"
 #include "src/sksl/SkSLAnalysis.h"
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLConstantFolder.h"
 #include "src/sksl/SkSLContext.h"
 #include "src/sksl/SkSLProgramSettings.h"
@@ -82,13 +83,18 @@ std::unique_ptr<Expression> TernaryExpression::Make(const Context& context,
         }
     }
 
-    // A ternary with matching true- and false-cases can be reduced to `(test, ifTrue)`.
-    // If `test` has no side-effects, it will be optimized away by the constant-folder as well.
+    // A ternary with matching true- and false-cases does not need to branch.
     if (context.fConfig->fSettings.fOptimize) {
         const Expression* ifTrueExpr  = ConstantFolder::GetConstantValueForVariable(*ifTrue);
         const Expression* ifFalseExpr = ConstantFolder::GetConstantValueForVariable(*ifFalse);
 
         if (Analysis::IsSameExpressionTree(*ifTrueExpr, *ifFalseExpr)) {
+            // If `test` has no side-effects, we can eliminate it too, and just return `ifTrue`.
+            if (!Analysis::HasSideEffects(*test)) {
+                ifTrue->fPosition = pos;
+                return ifTrue;
+            }
+            // Return a comma-expression containing `(test, ifTrue)`.
             return BinaryExpression::Make(context, pos, std::move(test),
                                           Operator::Kind::COMMA, std::move(ifTrue));
         }
@@ -96,6 +102,15 @@ std::unique_ptr<Expression> TernaryExpression::Make(const Context& context,
 
     return std::make_unique<TernaryExpression>(pos, std::move(test), std::move(ifTrue),
                                                std::move(ifFalse));
+}
+
+std::string TernaryExpression::description(OperatorPrecedence parentPrecedence) const {
+    bool needsParens = (OperatorPrecedence::kTernary >= parentPrecedence);
+    return std::string(needsParens ? "(" : "") +
+           this->test()->description(OperatorPrecedence::kTernary) + " ? " +
+           this->ifTrue()->description(OperatorPrecedence::kTernary) + " : " +
+           this->ifFalse()->description(OperatorPrecedence::kTernary) +
+           std::string(needsParens ? ")" : "");
 }
 
 }  // namespace SkSL

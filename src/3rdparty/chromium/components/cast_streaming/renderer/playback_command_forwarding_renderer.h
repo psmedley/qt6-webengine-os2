@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,6 +90,7 @@ class PlaybackCommandForwardingRenderer : public media::Renderer,
   // Each of these simply forwards the call to both |remote_renderer_client_|
   // and |upstream_renderer_client_|.
   void OnError(media::PipelineStatus status) override;
+  void OnFallback(media::PipelineStatus status) override;
   void OnEnded() override;
   void OnStatisticsUpdate(const media::PipelineStatistics& stats) override;
   void OnBufferingStateChange(

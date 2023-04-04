@@ -10,6 +10,7 @@
 
 #include "include/private/SkSLDefines.h"
 #include "include/private/SkSLProgramKind.h"
+#include "include/sksl/SkSLVersion.h"
 
 #include <vector>
 
@@ -23,9 +24,6 @@ class ExternalFunction;
 struct ProgramSettings {
     // If true the destination fragment color is read sk_FragColor. It must be declared inout.
     bool fFragColorIsInOut = false;
-    // if true, Setting objects (e.g. sk_Caps.fbFetchSupport) should be replaced with their
-    // constant equivalents during compilation
-    bool fReplaceSettings = true;
     // if true, all halfs are forced to be floats
     bool fForceHighPrecision = false;
     // if true, add -0.5 bias to LOD of all texture lookups
@@ -65,22 +63,22 @@ struct ProgramSettings {
     bool fValidateSPIRV = true;
     // If true, any synthetic uniforms must use push constant syntax
     bool fUsePushConstants = false;
-    // If true, configurations which demand strict ES2 conformance (runtime effects, generic
-    // programs, and SkVM rendering) will fail during compilation if ES2 restrictions are violated.
-    bool fEnforceES2Restrictions = true;
+    // TODO(skia:11209) - Replace this with a "promised" capabilities?
+    // Sets a maximum SkSL version. Compilation will fail if the program uses features that aren't
+    // allowed at the requested version. For instance, a valid program must have fully-unrollable
+    // `for` loops at version 100, but any loop structure is allowed at version 300.
+    SkSL::Version fMaxVersionAllowed = SkSL::Version::k100;
     // If true, SkVM debug traces will contain the `trace_var` opcode. This opcode can cause the
     // generated code to contain a lot of extra computations, because we need to explicitly compute
     // every temporary value, even ones that would otherwise be optimized away entirely. The other
     // debug opcodes are much less invasive on the generated code.
     bool fAllowTraceVarInSkVMDebugTrace = true;
-    // If true, the DSL should automatically mangle symbol names.
-    bool fDSLMangling = true;
-    // If true, the DSL should automatically mark variables declared upon creation.
-    bool fDSLMarkVarsDeclared = false;
-    // If true, the DSL should install a memory pool when possible.
-    bool fDSLUseMemoryPool = true;
-    // If true, DSL objects assert that they were used prior to destruction
-    bool fAssertDSLObjectsReleased = true;
+    // If true, SkSL will use a memory pool for all IR nodes when compiling a program. This is
+    // usually a significant speed increase, but uses more memory, so it is a good idea for programs
+    // that will be freed shortly after compilation. It can also be useful to disable this flag when
+    // investigating memory corruption. (This controls behavior of the SkSL compiler, not the code
+    // we generate.)
+    bool fUseMemoryPool = true;
     // If true, VarDeclaration can be cloned for testing purposes. See VarDeclaration::clone for
     // more information.
     bool fAllowVarDeclarationCloneForTesting = false;
@@ -99,17 +97,53 @@ struct ProgramConfig {
     ProgramKind fKind;
     ProgramSettings fSettings;
 
+    // When enforcesSkSLVersion() is true, this determines the available feature set that will be
+    // enforced. This is set automatically when the `#version` directive is parsed.
+    SkSL::Version fRequiredSkSLVersion = SkSL::Version::k100;
+
+    bool enforcesSkSLVersion() const {
+        return IsRuntimeEffect(fKind) || fKind == ProgramKind::kGeneric;
+    }
+
     bool strictES2Mode() const {
-        return fSettings.fEnforceES2Restrictions &&
-               (IsRuntimeEffect(fKind) || fKind == ProgramKind::kGeneric);
+        // TODO(skia:11209): Remove the first condition - so this is just based on #version.
+        //                   Make it more generic (eg, isVersionLT) checking.
+        return fSettings.fMaxVersionAllowed == Version::k100 &&
+               fRequiredSkSLVersion == Version::k100 &&
+               this->enforcesSkSLVersion();
+    }
+
+    const char* versionDescription() const {
+        if (this->enforcesSkSLVersion()) {
+            switch (fRequiredSkSLVersion) {
+                case Version::k100: return "#version 100\n";
+                case Version::k300: return "#version 300\n";
+            }
+        }
+        return "";
+    }
+
+    static bool IsFragment(ProgramKind kind) {
+        return kind == ProgramKind::kFragment ||
+               kind == ProgramKind::kGraphiteFragment;
+    }
+
+    static bool IsVertex(ProgramKind kind) {
+        return kind == ProgramKind::kVertex ||
+               kind == ProgramKind::kGraphiteVertex;
+    }
+
+    static bool IsCompute(ProgramKind kind) {
+        return kind == ProgramKind::kCompute;
     }
 
     static bool IsRuntimeEffect(ProgramKind kind) {
         return (kind == ProgramKind::kRuntimeColorFilter ||
                 kind == ProgramKind::kRuntimeShader ||
                 kind == ProgramKind::kRuntimeBlender ||
-                kind == ProgramKind::kCustomMeshVertex ||
-                kind == ProgramKind::kCustomMeshFragment);
+                kind == ProgramKind::kPrivateRuntimeShader ||
+                kind == ProgramKind::kMeshVertex ||
+                kind == ProgramKind::kMeshFragment);
     }
 };
 

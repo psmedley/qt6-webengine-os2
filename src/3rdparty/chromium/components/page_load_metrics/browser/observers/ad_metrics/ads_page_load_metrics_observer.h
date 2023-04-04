@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ class HeavyAdService;
 namespace page_load_metrics {
 
 namespace features {
-extern const base::Feature kRestrictedNavigationAdTagging;
+BASE_DECLARE_FEATURE(kRestrictedNavigationAdTagging);
 }
 
 // This observer labels each sub-frame as an ad or not, and keeps track of
@@ -82,9 +82,9 @@ class AdsPageLoadMetricsObserver
       heavy_ad_intervention::HeavyAdService* heavy_ad_service,
       const ApplicationLocaleGetter& application_local_getter);
 
-  // For a given subframe, returns whether or not the subframe's url would be
-  // considering same origin to the main frame's url.
-  static bool IsSubframeSameOriginToMainFrame(
+  // For a given frame, returns whether or not the frame's url would be
+  // considered same origin to the outermost main frame's url.
+  static bool IsFrameSameOriginToOutermostMainFrame(
       content::RenderFrameHost* sub_host);
 
   // |clock| and |blocklist| should be set only by tests. In particular,
@@ -132,18 +132,19 @@ class AdsPageLoadMetricsObserver
   void MediaStartedPlaying(
       const content::WebContentsObserver::MediaPlayerInfo& video_type,
       content::RenderFrameHost* render_frame_host) override;
-  void OnFrameIntersectionUpdate(
+  void OnMainFrameIntersectionRectChanged(
       content::RenderFrameHost* render_frame_host,
-      const mojom::FrameIntersectionUpdate& intersection_update) override;
+      const gfx::Rect& main_frame_intersection_rect) override;
+  void OnMainFrameViewportRectChanged(
+      const gfx::Rect& main_frame_viewport_rect) override;
   void OnSubFrameDeleted(int frame_tree_node_id) override;
+  void OnV8MemoryChanged(
+      const std::vector<MemoryUpdate>& memory_updates) override;
 
   void SetHeavyAdThresholdNoiseProviderForTesting(
       std::unique_ptr<HeavyAdThresholdNoiseProvider> noise_provider) {
     heavy_ad_threshold_noise_provider_ = std::move(noise_provider);
   }
-
-  void OnV8MemoryChanged(
-      const std::vector<MemoryUpdate>& memory_updates) override;
 
   void UpdateAggregateMemoryUsage(int64_t bytes, FrameVisibility visibility);
 

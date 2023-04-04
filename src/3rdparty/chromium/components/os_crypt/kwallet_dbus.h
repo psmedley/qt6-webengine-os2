@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/component_export.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/nix/xdg_util.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -136,7 +137,7 @@ class COMPONENT_EXPORT(OS_CRYPT) KWalletDBus {
   // DBus handle for communication with klauncher and kwalletd.
   scoped_refptr<dbus::Bus> session_bus_;
   // Object proxy for kwalletd. We do not own this.
-  dbus::ObjectProxy* kwallet_proxy_;
+  raw_ptr<dbus::ObjectProxy> kwallet_proxy_;
 
   // KWallet DBus name.
   std::string dbus_service_name_;

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -363,31 +363,6 @@ TEST_F(PaintLayerClipperTest, NestedContainPaintClip) {
   EXPECT_EQ(PhysicalRect(0, 0, 200, 200), foreground_rect.Rect());
   EXPECT_EQ(PhysicalOffset(), layer_offset);
 }
-
-TEST_F(PaintLayerClipperTest, LocalClipRectFixedUnderTransform) {
-  SetBodyInnerHTML(R"HTML(
-    <div id='transformed'
-        style='will-change: transform; width: 100px; height: 100px;
-        overflow: hidden'>
-      <div id='fixed'
-          style='position: fixed; width: 100px; height: 100px;
-          top: -50px'>
-       </div>
-    </div>
-  )HTML");
-
-  PaintLayer* transformed = GetPaintLayerByElementId("transformed");
-  PaintLayer* fixed = GetPaintLayerByElementId("fixed");
-
-  EXPECT_EQ(
-      PhysicalRect(0, 0, 100, 100),
-      transformed->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
-          .LocalClipRect(*transformed));
-  EXPECT_EQ(PhysicalRect(0, 50, 100, 100),
-            fixed->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
-                .LocalClipRect(*transformed));
-}
-
 
 TEST_F(PaintLayerClipperTest, CSSClip) {
   SetBodyInnerHTML(R"HTML(

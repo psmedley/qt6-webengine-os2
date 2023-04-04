@@ -126,7 +126,7 @@
           {
             "builder_id": {
               "bucket": "ci",
-              "builder": "Mac11 Tests",
+              "builder": "Mac12 Tests",
               "project": "chromium"
             },
             "builder_spec": {
@@ -179,7 +179,7 @@
         },
         {
           "bucket": "ci",
-          "builder": "Mac11 Tests",
+          "builder": "Mac12 Tests",
           "project": "chromium"
         }
       ],
@@ -189,7 +189,14 @@
     }
   },
   "$build/code_coverage": {
+    "coverage_test_types": [
+      "overall",
+      "unit"
+    ],
     "use_clang_coverage": true
+  },
+  "$build/flakiness": {
+    "check_for_flakiness": true
   },
   "$recipe_engine/resultdb/test_presentation": {
     "column_keys": [],

@@ -1,19 +1,20 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/remote_cocoa/app_shim/native_widget_ns_window_fullscreen_controller.h"
 
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "ui/base/base_window.h"
+#include "ui/base/cocoa/nswindow_test_util.h"
 
 namespace remote_cocoa {
 
 namespace {
 
 bool IsFakeForTesting() {
-  return ui::BaseWindow::IsFullscreenFakedForTesting();
+  return ui::NSWindowFakedForTesting::IsEnabled();
 }
 
 }  // namespace
@@ -34,10 +35,9 @@ void NativeWidgetNSWindowFullscreenController::EnterFullscreen(
 
       windowed_frame_ = client_->FullscreenControllerGetFrame();
       const gfx::Rect kFakeFullscreenRect(0, 0, 1024, 768);
-      base::TimeDelta animation_time;
       client_->FullscreenControllerSetFrame(kFakeFullscreenRect,
-                                            /*animate=*/false, animation_time);
-
+                                            /*animate=*/false,
+                                            base::DoNothing());
       state_ = State::kFullscreen;
       client_->FullscreenControllerTransitionComplete(true);
     }
@@ -71,11 +71,9 @@ void NativeWidgetNSWindowFullscreenController::ExitFullscreen() {
     if (state_ == State::kFullscreen) {
       state_ = State::kExitFullscreenTransition;
       client_->FullscreenControllerTransitionStart(false);
-
-      base::TimeDelta animation_time;
       client_->FullscreenControllerSetFrame(windowed_frame_.value(),
-                                            /*animate=*/false, animation_time);
-
+                                            /*animate=*/false,
+                                            base::DoNothing());
       state_ = State::kWindowed;
       client_->FullscreenControllerTransitionComplete(false);
     }
@@ -102,42 +100,33 @@ void NativeWidgetNSWindowFullscreenController::
 
   gfx::Rect display_frame =
       client_->FullscreenControllerGetFrameForDisplay(target_display_id);
-  base::TimeDelta animation_time;
   if (!display_frame.IsEmpty()) {
     restore_windowed_frame_ = true;
-    client_->FullscreenControllerSetFrame(display_frame, /*animate=*/true,
-                                          animation_time);
+    SetStateAndCancelPostedTasks(State::kEnterFullscreenTransition);
+    client_->FullscreenControllerSetFrame(
+        display_frame, /*animate=*/true,
+        base::BindOnce(
+            &NativeWidgetNSWindowFullscreenController::ToggleFullscreen,
+            weak_factory_.GetWeakPtr()));
   }
-
-  // Calling toggleFullscreen immediately after calling setFrame causes the
-  // fullscreen toggle to happen on the target display, and does not cause
-  // unexpected focus losses. This is the desired behavior. Were this not
-  // the case, we could consider not posting ToggleFullscreen until after
-  // `animation_time` has completed and we have received the notification
-  // NSWorkspaceActiveDisplayDidChangeNotification.
-  // https://crbug.com/1210548#c27
-  SetStateAndCancelPostedTasks(State::kEnterFullscreenTransition);
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          &NativeWidgetNSWindowFullscreenController::ToggleFullscreen,
-          weak_factory_.GetWeakPtr()));
 }
 
 void NativeWidgetNSWindowFullscreenController::RestoreWindowedFrame() {
   DCHECK_EQ(state_, State::kWindowedRestoringOriginalFrame);
   DCHECK(restore_windowed_frame_);
   DCHECK(windowed_frame_);
+  client_->FullscreenControllerSetFrame(
+      windowed_frame_.value(),
+      /*animate=*/true,
+      base::BindOnce(
+          &NativeWidgetNSWindowFullscreenController::OnWindowedFrameRestored,
+          weak_factory_.GetWeakPtr()));
+}
 
-  base::TimeDelta animation_time;
-  client_->FullscreenControllerSetFrame(windowed_frame_.value(),
-                                        /*animate=*/true, animation_time);
+void NativeWidgetNSWindowFullscreenController::OnWindowedFrameRestored() {
   restore_windowed_frame_ = false;
   windowed_frame_.reset();
 
-  // TODO(https://crbug.com/1302857): Consider not transitioning the state
-  // until `animation_time` has elapsed, and the window has been restored
-  // to its original position.
   SetStateAndCancelPostedTasks(State::kWindowed);
   HandlePendingState();
   if (!IsInFullscreenTransition()) {

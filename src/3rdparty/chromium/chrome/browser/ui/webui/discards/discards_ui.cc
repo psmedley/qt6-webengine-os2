@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/check.h"
 #include "base/containers/flat_map.h"
+#include "base/feature_list.h"
 #include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -31,7 +32,10 @@
 #include "chrome/grit/discards_resources.h"
 #include "chrome/grit/discards_resources_map.h"
 #include "components/favicon_base/favicon_url_parser.h"
+#include "components/performance_manager/public/features.h"
 #include "components/performance_manager/public/performance_manager.h"
+#include "components/performance_manager/public/user_tuning/prefs.h"
+#include "components/prefs/pref_service.h"
 #include "components/site_engagement/content/site_engagement_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -203,6 +207,34 @@ class DiscardsDetailsProviderImpl : public discards::mojom::DetailsProvider {
         g_browser_process->GetTabManager();
     tab_manager->DiscardTab(mojom::LifecycleUnitDiscardReason::URGENT);
     std::move(callback).Run();
+  }
+
+  void ToggleHighEfficiencyMode() override {
+    if (base::FeatureList::IsEnabled(
+            performance_manager::features::kHighEfficiencyModeAvailable)) {
+      bool enabled = g_browser_process->local_state()->GetBoolean(
+          performance_manager::user_tuning::prefs::kHighEfficiencyModeEnabled);
+      g_browser_process->local_state()->SetBoolean(
+          performance_manager::user_tuning::prefs::kHighEfficiencyModeEnabled,
+          !enabled);
+    }
+  }
+
+  void ToggleBatterySaverMode() override {
+    if (base::FeatureList::IsEnabled(
+            performance_manager::features::kBatterySaverModeAvailable)) {
+      performance_manager::user_tuning::prefs::BatterySaverModeState state =
+          performance_manager::user_tuning::prefs::
+              GetCurrentBatterySaverModeState(g_browser_process->local_state());
+      g_browser_process->local_state()->SetInteger(
+          performance_manager::user_tuning::prefs::kBatterySaverModeState,
+          static_cast<int>(state == performance_manager::user_tuning::prefs::
+                                        BatterySaverModeState::kDisabled
+                               ? performance_manager::user_tuning::prefs::
+                                     BatterySaverModeState::kEnabled
+                               : performance_manager::user_tuning::prefs::
+                                     BatterySaverModeState::kDisabled));
+    }
   }
 
  private:

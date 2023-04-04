@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "cc/base/features.h"
 #include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/snap_selection_strategy.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
@@ -107,7 +108,7 @@ Node* ScrollManager::GetScrollEventTarget() {
   // Send the overscroll event to the node that scrolling is latched to which
   // is either previously scrolled node or the last node in the scroll chain.
   Node* scroll_target = previous_gesture_scrolled_node_;
-  if (!scroll_target && !current_scroll_chain_.IsEmpty())
+  if (!scroll_target && !current_scroll_chain_.empty())
     scroll_target = DOMNodeIds::NodeForId(current_scroll_chain_.front());
   return scroll_target;
 }
@@ -177,7 +178,7 @@ void ScrollManager::RecomputeScrollChain(const Node& start_node,
                                          const ScrollState& scroll_state,
                                          Deque<DOMNodeId>& scroll_chain,
                                          bool is_autoscroll) {
-  DCHECK(scroll_chain.IsEmpty());
+  DCHECK(scroll_chain.empty());
   scroll_chain.clear();
 
   DCHECK(start_node.GetLayoutObject());
@@ -267,15 +268,17 @@ bool ScrollManager::CanScroll(const ScrollState& scroll_state,
   if (scrolling_box->IsGlobalRootScroller() && !for_autoscroll)
     return true;
 
-  // If this is the main LayoutView, and it's not the root scroller, that means
-  // we have a non-default root scroller on the page. In this case, attempts to
-  // scroll the LayoutView should cause panning of the visual viewport as well
-  // so ensure it gets added to the scroll chain. See LTHI::ApplyScroll for the
-  // equivalent behavior in CC. Node::NativeApplyScroll contains a special
+  // If this is the main LayoutView of an active viewport (outermost main
+  // frame, portal), and it's not the root scroller, that means we have a
+  // non-default root scroller on the page.  In this case, attempts to scroll
+  // the LayoutView should cause panning of the visual viewport as well so
+  // ensure it gets added to the scroll chain.  See LTHI::ApplyScroll for the
+  // equivalent behavior in CC.  Node::NativeApplyScroll contains a special
   // handler for this case. If autoscrolling, ignore this condition because we
   // latch on to the deepest autoscrollable node.
   if (IsA<LayoutView>(scrolling_box) &&
-      current_node.GetDocument().GetFrame()->IsMainFrame() && !for_autoscroll) {
+      current_node.GetDocument().IsInMainFrame() &&
+      GetPage()->GetVisualViewport().IsActiveViewport() && !for_autoscroll) {
     return true;
   }
 
@@ -342,7 +345,7 @@ bool ScrollManager::LogicalScroll(mojom::blink::ScrollDirection direction,
   RecomputeScrollChain(*node, *scroll_state, scroll_chain,
                        /* is_autoscroll */ false);
 
-  while (!scroll_chain.IsEmpty()) {
+  while (!scroll_chain.empty()) {
     Node* scroll_chain_node = DOMNodeIds::NodeForId(scroll_chain.TakeLast());
     DCHECK(scroll_chain_node);
 
@@ -394,7 +397,7 @@ bool ScrollManager::LogicalScroll(mojom::blink::ScrollDirection direction,
         NOTREACHED();
     }
 
-    ScrollableArea::ScrollCallback callback(WTF::Bind(
+    ScrollableArea::ScrollCallback callback(WTF::BindOnce(
         [](WeakPersistent<ScrollableArea> area) {
           if (area)
             area->OnScrollFinished();
@@ -413,8 +416,6 @@ bool ScrollManager::LogicalScroll(mojom::blink::ScrollDirection direction,
   return false;
 }
 
-// TODO(bokan): This should be merged with logicalScroll assuming
-// defaultSpaceEventHandler's chaining scroll can be done crossing frames.
 bool ScrollManager::BubblingScroll(mojom::blink::ScrollDirection direction,
                                    ui::ScrollGranularity granularity,
                                    Node* starting_node,
@@ -423,16 +424,10 @@ bool ScrollManager::BubblingScroll(mojom::blink::ScrollDirection direction,
   // here because of an onLoad event, in which case the final layout hasn't been
   // performed yet.
   frame_->GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kScroll);
-  // FIXME: enable scroll customization in this case. See crbug.com/410974.
   if (LogicalScroll(direction, granularity, starting_node, mouse_press_node))
     return true;
 
-  Frame* parent_frame = frame_->Tree().Parent();
-  if (!parent_frame)
-    return false;
-
-  return parent_frame->BubbleLogicalScrollFromChildFrame(direction, granularity,
-                                                         frame_);
+  return frame_->BubbleLogicalScrollInParentFrame(direction, granularity);
 }
 
 void ScrollManager::CustomizedScroll(ScrollState& scroll_state) {
@@ -444,7 +439,7 @@ void ScrollManager::CustomizedScroll(ScrollState& scroll_state) {
     frame_->GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kScroll);
   }
 
-  DCHECK(!current_scroll_chain_.IsEmpty());
+  DCHECK(!current_scroll_chain_.empty());
 
   scroll_state.SetScrollChain(current_scroll_chain_);
 
@@ -494,8 +489,8 @@ void ScrollManager::RecordScrollRelatedMetrics(WebGestureDevice device) const {
 WebInputEventResult ScrollManager::HandleGestureScrollBegin(
     const WebGestureEvent& gesture_event) {
   TRACE_EVENT0("input", "ScrollManager::handleGestureScrollBegin");
-  DCHECK(!RuntimeEnabledFeatures::ScrollUnificationEnabled());
-  if (RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+  DCHECK(!base::FeatureList::IsEnabled(::features::kScrollUnification));
+  if (base::FeatureList::IsEnabled(::features::kScrollUnification)) {
     return WebInputEventResult::kNotHandled;
   }
 
@@ -555,7 +550,7 @@ WebInputEventResult ScrollManager::HandleGestureScrollBegin(
                        TRACE_EVENT_SCOPE_THREAD, "length",
                        current_scroll_chain_.size());
 
-  if (current_scroll_chain_.IsEmpty()) {
+  if (current_scroll_chain_.empty()) {
     // If a child has a non-empty scroll chain, we need to consider that instead
     // of simply returning WebInputEventResult::kNotHandled.
     return child_result;
@@ -580,20 +575,17 @@ WebInputEventResult ScrollManager::HandleGestureScrollBegin(
 
 WebInputEventResult ScrollManager::HandleGestureScrollUpdate(
     const WebGestureEvent& gesture_event) {
-  TRACE_EVENT0("input", "ScrollManager::handleGestureScrollUpdate");
+  TRACE_EVENT1("input", "ScrollManager::handleGestureScrollUpdate",
+               "unexpected_unification",
+               base::FeatureList::IsEnabled(::features::kScrollUnification));
   DCHECK_EQ(gesture_event.GetType(), WebInputEvent::Type::kGestureScrollUpdate);
 
-  DCHECK(!RuntimeEnabledFeatures::ScrollUnificationEnabled());
-  if (RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+  // DCHECK temporarily disabled due to crash reports (crbug.com/1342287).
+  // DCHECK(!base::FeatureList::IsEnabled(::features::kScrollUnification));
+  if (base::FeatureList::IsEnabled(::features::kScrollUnification)) {
     return WebInputEventResult::kNotHandled;
   }
 
-  Node* node = scroll_gesture_handling_node_.Get();
-  if (!node || !node->GetLayoutObject()) {
-    TRACE_EVENT_INSTANT0("input", "Lost scroll_gesture_handling_node",
-                         TRACE_EVENT_SCOPE_THREAD);
-    return WebInputEventResult::kNotHandled;
-  }
   if (snap_fling_controller_) {
     if (snap_fling_controller_->HandleGestureScrollUpdate(
             GetGestureScrollUpdateInfo(gesture_event))) {
@@ -614,7 +606,10 @@ WebInputEventResult ScrollManager::HandleGestureScrollUpdate(
   if (delta.IsZero())
     return WebInputEventResult::kNotHandled;
 
-  LayoutObject* layout_object = node->GetLayoutObject();
+  LayoutObject* layout_object =
+      scroll_gesture_handling_node_
+          ? scroll_gesture_handling_node_->GetLayoutObject()
+          : nullptr;
 
   // Try to send the event to the correct view.
   WebInputEventResult result =
@@ -626,7 +621,7 @@ WebInputEventResult ScrollManager::HandleGestureScrollUpdate(
     return result;
   }
 
-  if (current_scroll_chain_.IsEmpty()) {
+  if (current_scroll_chain_.empty()) {
     TRACE_EVENT_INSTANT0("input", "Empty Scroll Chain",
                          TRACE_EVENT_SCOPE_THREAD);
     return WebInputEventResult::kNotHandled;
@@ -751,14 +746,23 @@ void ScrollManager::HandleDeferredGestureScrollEnd(
 
 WebInputEventResult ScrollManager::HandleGestureScrollEnd(
     const WebGestureEvent& gesture_event) {
-  TRACE_EVENT0("input", "ScrollManager::handleGestureScrollEnd");
+  TRACE_EVENT1("input", "ScrollManager::handleGestureScrollEnd",
+               "unexpected_unification",
+               base::FeatureList::IsEnabled(::features::kScrollUnification));
 
-  DCHECK(!RuntimeEnabledFeatures::ScrollUnificationEnabled());
-  if (RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+  // DCHECK temporarily disabled due to crash reports (crbug.com/1342287).
+  // DCHECK(!base::FeatureList::IsEnabled(::features::kScrollUnification));
+  if (base::FeatureList::IsEnabled(::features::kScrollUnification)) {
     return WebInputEventResult::kNotHandled;
   }
 
   GetPage()->GetBrowserControls().ScrollEnd();
+
+  // It's possible to get here due to a deferred scroll end having its waiting
+  // animation "completed" by the document being stopped. In that case we're
+  // about to be destroyed so early return.
+  if (!frame_->GetDocument()->IsActive())
+    return WebInputEventResult::kNotHandled;
 
   Node* node = scroll_gesture_handling_node_;
 
@@ -773,13 +777,13 @@ WebInputEventResult ScrollManager::HandleGestureScrollEnd(
     if (scrollable_area && scrollable_area->ExistingScrollAnimator() &&
         scrollable_area->ExistingScrollAnimator()->HasRunningAnimation()) {
       scrollable_area->RegisterScrollCompleteCallback(
-          WTF::Bind(&ScrollManager::HandleDeferredGestureScrollEnd,
-                    WrapWeakPersistent(this), gesture_event));
+          WTF::BindOnce(&ScrollManager::HandleDeferredGestureScrollEnd,
+                        WrapWeakPersistent(this), gesture_event));
       return WebInputEventResult::kNotHandled;
     }
 
     PassScrollGestureEvent(gesture_event, node->GetLayoutObject());
-    if (current_scroll_chain_.IsEmpty()) {
+    if (current_scroll_chain_.empty()) {
       ClearGestureScrollState();
       return WebInputEventResult::kNotHandled;
     }
@@ -801,7 +805,7 @@ WebInputEventResult ScrollManager::HandleGestureScrollEnd(
     // We add a callback to set the hover state dirty and send a scroll end
     // event when the scroll ends without snap or the snap point is the same as
     // the scroll position.
-    base::ScopedClosureRunner callback(WTF::Bind(
+    base::ScopedClosureRunner callback(WTF::BindOnce(
         [](WeakPersistent<LocalFrame> local_frame,
            WeakPersistent<ScrollManager> scroll_manager) {
           if (local_frame) {
@@ -809,7 +813,7 @@ WebInputEventResult ScrollManager::HandleGestureScrollEnd(
           }
 
           Node* scroll_end_target = scroll_manager->GetScrollEventTarget();
-          if (RuntimeEnabledFeatures::OverscrollCustomizationEnabled() &&
+          if (RuntimeEnabledFeatures::ScrollEndEventsEnabled() &&
               scroll_end_target) {
             scroll_end_target->GetDocument().EnqueueScrollEndEventForNode(
                 scroll_end_target);
@@ -931,13 +935,13 @@ gfx::PointF ScrollManager::ScrollByForSnapFling(const gfx::Vector2dF& delta) {
 }
 
 void ScrollManager::ScrollEndForSnapFling(bool did_finish) {
-  if (RuntimeEnabledFeatures::OverscrollCustomizationEnabled()) {
+  if (RuntimeEnabledFeatures::ScrollEndEventsEnabled()) {
     if (Node* scroll_end_target = GetScrollEventTarget()) {
       scroll_end_target->GetDocument().EnqueueScrollEndEventForNode(
           scroll_end_target);
     }
   }
-  if (current_scroll_chain_.IsEmpty()) {
+  if (current_scroll_chain_.empty()) {
     NotifyScrollPhaseEndForCustomizedScroll();
     ClearGestureScrollState();
     return;
@@ -1079,19 +1083,6 @@ WebInputEventResult ScrollManager::HandleGestureScrollEvent(
   if (event_target) {
     if (HandleScrollGestureOnResizer(event_target, gesture_event))
       return WebInputEventResult::kHandledSuppressed;
-
-    GestureEvent* gesture_dom_event = GestureEvent::Create(
-        event_target->GetDocument().domWindow(), gesture_event);
-    if (gesture_dom_event) {
-      DispatchEventResult gesture_dom_event_result =
-          event_target->DispatchEvent(*gesture_dom_event);
-      if (gesture_dom_event_result != DispatchEventResult::kNotCanceled) {
-        DCHECK(gesture_dom_event_result !=
-               DispatchEventResult::kCanceledByEventHandler);
-        return event_handling_util::ToWebInputEventResult(
-            gesture_dom_event_result);
-      }
-    }
   }
 
   if (snap_fling_controller_) {

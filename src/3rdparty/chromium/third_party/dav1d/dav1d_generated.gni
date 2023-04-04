@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -107,6 +107,11 @@ arm_template_sources = [
   "libdav1d/src/arm/loopfilter_init_tmpl.c",
   "libdav1d/src/arm/looprestoration_init_tmpl.c",
   "libdav1d/src/arm/mc_init_tmpl.c",
+]
+
+ppc64_template_sources = [
+  "libdav1d/src/ppc/cdef_init_tmpl.c",
+  "libdav1d/src/ppc/looprestoration_init_tmpl.c",
 ]
 
 template_sources = [

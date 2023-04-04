@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ namespace sequence_manager {
 namespace internal {
 
 WakeUpQueue::WakeUpQueue(
-    scoped_refptr<internal::AssociatedThreadId> associated_thread)
+    scoped_refptr<const internal::AssociatedThreadId> associated_thread)
     : associated_thread_(std::move(associated_thread)) {}
 
 WakeUpQueue::~WakeUpQueue() {
@@ -131,13 +131,15 @@ absl::optional<WakeUp> WakeUpQueue::GetNextDelayedWakeUp() const {
   return wake_up;
 }
 
-Value WakeUpQueue::AsValue(TimeTicks now) const {
-  Value state(Value::Type::DICTIONARY);
-  state.SetStringKey("name", GetName());
-  state.SetIntKey("registered_delay_count", wake_up_queue_.size());
+Value::Dict WakeUpQueue::AsValue(TimeTicks now) const {
+  Value::Dict state;
+  state.Set("name", GetName());
+  // TODO(crbug.com/1334256): Make base::Value able to store an int64_t and
+  // remove this cast.
+  state.Set("registered_delay_count", checked_cast<int>(wake_up_queue_.size()));
   if (!wake_up_queue_.empty()) {
     TimeDelta delay = wake_up_queue_.top().wake_up.time - now;
-    state.SetDoubleKey("next_delay_ms", delay.InMillisecondsF());
+    state.Set("next_delay_ms", delay.InMillisecondsF());
   }
   return state;
 }

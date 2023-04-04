@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/bookmarks/common/bookmark_metrics.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/prefs/pref_service.h"
@@ -129,11 +130,10 @@ const BookmarkNode* BookmarksFunction::GetBookmarkNodeFromId(
 const BookmarkNode* BookmarksFunction::CreateBookmarkNode(
     BookmarkModel* model,
     const CreateDetails& details,
-    const BookmarkNode::MetaInfoMap* meta_info,
     std::string* error) {
   int64_t parent_id;
 
-  if (!details.parent_id.get()) {
+  if (!details.parent_id) {
     // Optional, default to "other bookmarks".
     parent_id = model->other_node()->id();
   } else if (!base::StringToInt64(*details.parent_id, &parent_id)) {
@@ -145,7 +145,7 @@ const BookmarkNode* BookmarksFunction::CreateBookmarkNode(
     return nullptr;
 
   size_t index;
-  if (!details.index.get()) {  // Optional (defaults to end).
+  if (!details.index) {  // Optional (defaults to end).
     index = parent->children().size();
   } else {
     if (*details.index < 0 ||
@@ -157,11 +157,11 @@ const BookmarkNode* BookmarksFunction::CreateBookmarkNode(
   }
 
   std::u16string title;  // Optional.
-  if (details.title.get())
+  if (details.title)
     title = base::UTF8ToUTF16(*details.title);
 
   std::string url_string;  // Optional.
-  if (details.url.get())
+  if (details.url)
     url_string = *details.url;
 
   GURL url(url_string);
@@ -172,9 +172,9 @@ const BookmarkNode* BookmarksFunction::CreateBookmarkNode(
 
   const BookmarkNode* node;
   if (url_string.length()) {
-    node = model->AddURL(parent, index, title, url, meta_info);
+    node = model->AddNewURL(parent, index, title, url);
   } else {
-    node = model->AddFolder(parent, index, title, meta_info);
+    node = model->AddFolder(parent, index, title);
     model->SetDateFolderModified(parent, base::Time::Now());
   }
 
@@ -248,7 +248,7 @@ BookmarkEventRouter::~BookmarkEventRouter() {
 
 void BookmarkEventRouter::DispatchEvent(events::HistogramValue histogram_value,
                                         const std::string& event_name,
-                                        std::vector<base::Value> event_args) {
+                                        base::Value::List event_args) {
   EventRouter* event_router = EventRouter::Get(browser_context_);
   if (event_router) {
     event_router->BroadcastEvent(std::make_unique<extensions::Event>(
@@ -285,7 +285,8 @@ void BookmarkEventRouter::BookmarkNodeMoved(BookmarkModel* model,
 
 void BookmarkEventRouter::BookmarkNodeAdded(BookmarkModel* model,
                                             const BookmarkNode* parent,
-                                            size_t index) {
+                                            size_t index,
+                                            bool added_by_user) {
   const BookmarkNode* node = parent->children()[index].get();
   BookmarkTreeNode tree_node =
       bookmark_api_helpers::GetBookmarkTreeNode(managed_, node, false, false);
@@ -332,7 +333,7 @@ void BookmarkEventRouter::BookmarkNodeChanged(BookmarkModel* model,
   api::bookmarks::OnChanged::ChangeInfo change_info;
   change_info.title = base::UTF16ToUTF8(node->GetTitle());
   if (node->is_url())
-    change_info.url = std::make_unique<std::string>(node->url().spec());
+    change_info.url = node->url().spec();
 
   DispatchEvent(events::BOOKMARKS_ON_CHANGED,
                 api::bookmarks::OnChanged::kEventName,
@@ -598,7 +599,7 @@ ExtensionFunction::ResponseValue BookmarksCreateFunction::RunOnReady() {
   BookmarkModel* model =
       BookmarkModelFactory::GetForBrowserContext(GetProfile());
   const BookmarkNode* node =
-      CreateBookmarkNode(model, params->bookmark, nullptr, &error);
+      CreateBookmarkNode(model, params->bookmark, &error);
   if (!node)
     return Error(error);
 
@@ -627,7 +628,7 @@ ExtensionFunction::ResponseValue BookmarksMoveFunction::RunOnReady() {
     return Error(bookmark_api_constants::kModifySpecialError);
 
   const BookmarkNode* parent = nullptr;
-  if (!params->destination.parent_id.get()) {
+  if (!params->destination.parent_id) {
     // Optional, defaults to current parent.
     parent = node->parent();
   } else {
@@ -641,7 +642,7 @@ ExtensionFunction::ResponseValue BookmarksMoveFunction::RunOnReady() {
     return Error(error);
 
   size_t index;
-  if (params->destination.index.get()) {  // Optional (defaults to end).
+  if (params->destination.index) {  // Optional (defaults to end).
     if (*params->destination.index < 0 ||
         static_cast<size_t>(*params->destination.index) >
             parent->children().size()) {
@@ -671,14 +672,14 @@ ExtensionFunction::ResponseValue BookmarksUpdateFunction::RunOnReady() {
   // Optional but we need to distinguish non present from an empty title.
   std::u16string title;
   bool has_title = false;
-  if (params->changes.title.get()) {
+  if (params->changes.title) {
     title = base::UTF8ToUTF16(*params->changes.title);
     has_title = true;
   }
 
   // Optional.
   std::string url_string;
-  if (params->changes.url.get())
+  if (params->changes.url)
     url_string = *params->changes.url;
   GURL url(url_string);
   if (!url_string.empty() && !url.is_valid())
@@ -698,9 +699,11 @@ ExtensionFunction::ResponseValue BookmarksUpdateFunction::RunOnReady() {
     return Error(bookmark_api_constants::kCannotSetUrlOfFolderError);
 
   if (has_title)
-    model->SetTitle(node, title);
+    model->SetTitle(node, title,
+                    bookmarks::metrics::BookmarkEditSource::kExtension);
   if (!url.is_empty())
-    model->SetURL(node, url);
+    model->SetURL(node, url,
+                  bookmarks::metrics::BookmarkEditSource::kExtension);
 
   BookmarkTreeNode tree_node = bookmark_api_helpers::GetBookmarkTreeNode(
       GetManagedBookmarkService(), node, false, false);

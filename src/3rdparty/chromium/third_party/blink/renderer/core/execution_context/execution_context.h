@@ -32,7 +32,6 @@
 
 #include "base/notreached.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "services/network/public/mojom/ip_address_space.mojom-blink-forward.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink-forward.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -169,11 +168,21 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   virtual bool IsThreadedWorkletGlobalScope() const { return false; }
   virtual bool IsJSExecutionForbidden() const { return false; }
 
+  // TODO(crbug.com/1335924) Change this method to be pure-virtual and each
+  // derivative explicitly override it.
+  virtual bool IsInFencedFrame() const { return false; }
+
   virtual bool IsContextThread() const { return true; }
 
   virtual bool ShouldInstallV8Extensions() const { return false; }
 
   virtual void CountUseOnlyInCrossSiteIframe(mojom::blink::WebFeature feature) {
+  }
+
+  // Return the associated AgentGroupScheduler's compositor tasl runner.
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+  GetAgentGroupSchedulerCompositorTaskRunner() {
+    return nullptr;
   }
 
   const SecurityOrigin* GetSecurityOrigin() const;
@@ -203,6 +212,7 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   virtual const KURL& BaseURL() const = 0;
   virtual KURL CompleteURL(const String& url) const = 0;
   virtual void DisableEval(const String& error_message) = 0;
+  virtual void SetWasmEvalErrorMessage(const String& error_message) = 0;
   virtual String UserAgent() const = 0;
   virtual UserAgentMetadata GetUserAgentMetadata() const {
     return UserAgentMetadata();
@@ -265,7 +275,6 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
 
   bool IsContextPaused() const;
   LoaderFreezeMode GetLoaderFreezeMode() const;
-  bool IsContextDestroyed() const { return is_context_destroyed_; }
   mojom::FrameLifecycleState ContextPauseState() const {
     return lifecycle_state_;
   }
@@ -313,6 +322,9 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   network::mojom::ReferrerPolicy GetReferrerPolicy() const;
 
   PolicyContainer* GetPolicyContainer() { return policy_container_.get(); }
+  const PolicyContainer* GetPolicyContainer() const {
+    return policy_container_.get();
+  }
   void SetPolicyContainer(std::unique_ptr<PolicyContainer> container);
   std::unique_ptr<PolicyContainer> TakePolicyContainer();
 
@@ -374,9 +386,6 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
       const String& message = g_empty_string,
       const String& source_file = g_empty_string) const {}
 
-  network::mojom::IPAddressSpace AddressSpace() const;
-  void SetAddressSpace(network::mojom::blink::IPAddressSpace ip_address_space);
-
   HeapObserverSet<ContextLifecycleObserver>& ContextLifecycleObserverSet();
   unsigned ContextLifecycleStateObserverCountForTesting() const;
 
@@ -384,10 +393,12 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   // https://html.spec.whatwg.org/C/webappapis.html#concept-settings-object-cross-origin-isolated-capability
   virtual bool CrossOriginIsolatedCapability() const = 0;
 
-  // Reflects the context's potential ability to use Direct Socket APIs.
+  // Returns true if scripts within this ExecutionContext are allowed to use
+  // APIs that require the page to be part of an isolated application.
+  // https://github.com/reillyeon/isolated-web-apps
   //
   // TODO(mkwst): We need a specification for the necessary restrictions.
-  virtual bool DirectSocketCapability() const = 0;
+  virtual bool IsolatedApplicationCapability() const = 0;
 
   // Returns true if SharedArrayBuffers can be transferred via PostMessage,
   // false otherwise. SharedArrayBuffer allows pages to craft high-precision
@@ -402,8 +413,8 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   // Reports first usage of `navigator.userAgent` and related getters
   void ReportNavigatorUserAgentAccess();
 
-  virtual ukm::UkmRecorder* UkmRecorder() { return nullptr; }
-  virtual ukm::SourceId UkmSourceID() const { return ukm::kInvalidSourceId; }
+  virtual ukm::UkmRecorder* UkmRecorder() = 0;
+  virtual ukm::SourceId UkmSourceID() const = 0;
 
   // Returns the token that uniquely identifies this ExecutionContext.
   virtual ExecutionContextToken GetExecutionContextToken() const = 0;
@@ -492,7 +503,6 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   HeapVector<Member<ErrorEvent>> pending_exceptions_;
 
   mojom::FrameLifecycleState lifecycle_state_;
-  bool is_context_destroyed_;
 
   bool is_in_back_forward_cache_ = false;
 

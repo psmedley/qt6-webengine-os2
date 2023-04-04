@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,6 +47,14 @@ class AutofillAssistantAgent : public content::RenderFrameObserver,
                         bool ignore_objective,
                         base::TimeDelta model_timeout,
                         GetSemanticNodesCallback callback) override;
+  void SetElementValue(int32_t backend_node_id,
+                       const std::u16string& value,
+                       bool send_events,
+                       SetElementValueCallback callback) override;
+  void SetElementChecked(int32_t backend_node_id,
+                         bool checked,
+                         bool send_events,
+                         SetElementCheckedCallback callback) override;
 
  private:
   // content::RenderFrameObserver:
@@ -54,9 +62,10 @@ class AutofillAssistantAgent : public content::RenderFrameObserver,
 
   void GetAnnotateDomModel(
       base::TimeDelta model_timeout,
-      base::OnceCallback<void(mojom::ModelStatus, base::File)> callback);
+      base::OnceCallback<
+          void(mojom::ModelStatus, base::File, const std::string&)> callback);
 
-  mojom::AutofillAssistantDriver& GetDriver();
+  mojo::AssociatedRemote<mojom::AutofillAssistantDriver>& GetDriver();
 
   void OnGetModelFile(base::Time start_time,
                       blink::WebLocalFrame* frame,
@@ -65,7 +74,18 @@ class AutofillAssistantAgent : public content::RenderFrameObserver,
                       bool ignore_objective,
                       GetSemanticNodesCallback callback,
                       mojom::ModelStatus model_status,
-                      base::File model);
+                      base::File model,
+                      const std::string& overrides_policy);
+
+  void SetElementAttribute(int32_t backend_node_id,
+                           const std::u16string& attribute_value,
+                           const std::u16string& value,
+                           bool send_events);
+
+  using SemanticPredictionLabelMap = base::flat_map<int, std::string>;
+  using SemanticLabelsPair =
+      std::pair<SemanticPredictionLabelMap, SemanticPredictionLabelMap>;
+  SemanticLabelsPair semantic_labels;
 
   mojo::AssociatedRemote<mojom::AutofillAssistantDriver> driver_;
 

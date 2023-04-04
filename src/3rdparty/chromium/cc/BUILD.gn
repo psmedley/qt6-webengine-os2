@@ -1,5 +1,5 @@
-# Copyright 2014 The Chromium Authors.All rights reserved.
-# Use of this source code is governed by a BSD - style license that can be
+# Copyright 2014 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import("//build/config/sanitizers/sanitizers.gni")
 import("//gpu/vulkan/features.gni")
@@ -43,6 +43,7 @@ cc_component("cc") {
     "input/browser_controls_offset_manager_client.h",
     "input/browser_controls_state.h",
     "input/compositor_input_interfaces.h",
+    "input/input_handler.cc",
     "input/input_handler.h",
     "input/layer_selection_bound.cc",
     "input/layer_selection_bound.h",
@@ -74,8 +75,6 @@ cc_component("cc") {
     "input/snap_fling_curve.h",
     "input/snap_selection_strategy.cc",
     "input/snap_selection_strategy.h",
-    "input/threaded_input_handler.cc",
-    "input/threaded_input_handler.h",
     "input/touch_action.h",
     "layers/append_quads_data.cc",
     "layers/append_quads_data.h",
@@ -178,10 +177,14 @@ cc_component("cc") {
     "metrics/compositor_frame_reporting_controller.h",
     "metrics/compositor_timing_history.cc",
     "metrics/compositor_timing_history.h",
+    "metrics/custom_metrics_recorder.cc",
+    "metrics/custom_metrics_recorder.h",
     "metrics/dropped_frame_counter.cc",
     "metrics/dropped_frame_counter.h",
     "metrics/event_latency_tracing_recorder.cc",
     "metrics/event_latency_tracing_recorder.h",
+    "metrics/event_latency_tracker.cc",
+    "metrics/event_latency_tracker.h",
     "metrics/event_metrics.cc",
     "metrics/event_metrics.h",
     "metrics/events_metrics_manager.cc",
@@ -342,8 +345,6 @@ cc_component("cc") {
     "trees/animation_options.h",
     "trees/browser_controls_params.cc",
     "trees/browser_controls_params.h",
-    "trees/clip_expander.cc",
-    "trees/clip_expander.h",
     "trees/clip_node.cc",
     "trees/clip_node.h",
     "trees/commit_state.cc",
@@ -412,6 +413,8 @@ cc_component("cc") {
     "trees/proxy_impl.h",
     "trees/proxy_main.cc",
     "trees/proxy_main.h",
+    "trees/raster_context_provider_wrapper.cc",
+    "trees/raster_context_provider_wrapper.h",
     "trees/render_frame_metadata.cc",
     "trees/render_frame_metadata.h",
     "trees/render_frame_metadata_observer.h",
@@ -561,8 +564,6 @@ cc_test_static_library("test_support") {
     "test/mock_latency_info_swap_promise_monitor.h",
     "test/mock_layer_tree_mutator.cc",
     "test/mock_layer_tree_mutator.h",
-    "test/mock_mutator_host.cc",
-    "test/mock_mutator_host.h",
     "test/mock_occlusion_tracker.h",
     "test/paint_op_helper.h",
     "test/pixel_comparator.cc",
@@ -735,6 +736,7 @@ cc_test("cc_unittests") {
     "metrics/compositor_frame_reporting_controller_unittest.cc",
     "metrics/compositor_timing_history_unittest.cc",
     "metrics/dropped_frame_counter_unittest.cc",
+    "metrics/event_metrics_unittest.cc",
     "metrics/events_metrics_manager_unittest.cc",
     "metrics/frame_info_unittest.cc",
     "metrics/frame_sequence_metrics_unittest.cc",
@@ -773,7 +775,6 @@ cc_test("cc_unittests") {
     "resources/resource_pool_unittest.cc",
     "scheduler/scheduler_state_machine_unittest.cc",
     "scheduler/scheduler_unittest.cc",
-    "test/mock_mutator_host_unittest.cc",
     "tiles/checker_image_tracker_unittest.cc",
     "tiles/decoded_image_tracker_unittest.cc",
     "tiles/gpu_image_decode_cache_unittest.cc",
@@ -905,14 +906,14 @@ cc_test("cc_unittests") {
   }
 
   if (is_fuchsia) {
-    use_cfv2 = false
+    # TODO(https://crbug.com/1185811): Investigate removing the requirement for
+    # job_policy_ambient_mark_vmo_exec for the sake of V8's allocator in tests.
+    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
+
     additional_manifest_fragments = [
-      "//build/config/fuchsia/test/font_capabilities.test-cmx",
-
-      # TODO(crbug.com/1185811): Figure out why jit_capabilities is needed.
-      "//build/config/fuchsia/test/jit_capabilities.test-cmx",
-
-      "//build/config/fuchsia/test/vulkan_capabilities.test-cmx",
+      "//build/config/fuchsia/test/fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+      "//third_party/fuchsia-sdk/sdk/pkg/vulkan/client.shard.cml",
     ]
   }
 
@@ -993,9 +994,6 @@ if (is_android) {
     # Right now, this only includes the Java switches. But if we need more Java
     # files, they should be added here as necessary.
     srcjar_deps = [ ":cc_android_java_enums_srcjar" ]
-    deps = [
-      "//base:base_java",
-      "//third_party/androidx:androidx_annotation_annotation_java",
-    ]
+    deps = [ "//third_party/androidx:androidx_annotation_annotation_java" ]
   }
 }

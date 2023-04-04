@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,10 @@
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_devtools.h"
 #include "headless/lib/browser/headless_screen.h"
+#include "headless/lib/browser/headless_select_file_dialog_factory.h"
 
 #if defined(HEADLESS_USE_PREFS)
+#include "components/origin_trials/browser/prefservice_persistence_provider.h"  // nogncheck
 #include "components/os_crypt/os_crypt.h"  // nogncheck
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/in_memory_pref_store.h"
@@ -49,10 +51,8 @@ const base::FilePath::CharType kLocalStateFilename[] =
 
 }  // namespace
 
-HeadlessBrowserMainParts::HeadlessBrowserMainParts(
-    content::MainFunctionParams parameters,
-    HeadlessBrowserImpl* browser)
-    : parameters_(std::move(parameters)), browser_(browser) {}
+HeadlessBrowserMainParts::HeadlessBrowserMainParts(HeadlessBrowserImpl* browser)
+    : browser_(browser) {}
 
 HeadlessBrowserMainParts::~HeadlessBrowserMainParts() = default;
 
@@ -63,6 +63,7 @@ int HeadlessBrowserMainParts::PreMainMessageLoopRun() {
   MaybeStartLocalDevToolsHttpHandler();
   browser_->PlatformInitialize();
   browser_->RunOnStartCallback();
+  HeadlessSelectFileDialogFactory::SetUp();
   return content::RESULT_CODE_NORMAL_EXIT;
 }
 
@@ -72,6 +73,10 @@ void HeadlessBrowserMainParts::WillRunMainMessageLoop(
 }
 
 void HeadlessBrowserMainParts::PostMainMessageLoopRun() {
+  // HeadlessBrowserImpl::Shutdown() is supposed to remove all browser contexts
+  // and therefore all associated web contents, however crbug.com/1342152
+  // implies it may not be happening.
+  CHECK_EQ(0U, browser_->GetAllBrowserContexts().size());
   if (devtools_http_handler_started_) {
     StopLocalDevToolsHttpHandler();
     devtools_http_handler_started_ = false;
@@ -168,6 +173,9 @@ void HeadlessBrowserMainParts::CreatePrefService() {
   BrowserContextDependencyManager::GetInstance()
       ->RegisterProfilePrefsForServices(pref_registry.get());
 #endif  // defined(HEADLESS_USE_POLICY)
+
+  origin_trials::PrefServicePersistenceProvider::RegisterProfilePrefs(
+      pref_registry.get());
 
   factory.set_user_prefs(pref_store);
   local_state_ = factory.Create(std::move(pref_registry));

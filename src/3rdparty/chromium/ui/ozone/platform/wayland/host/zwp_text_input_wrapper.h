@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,9 @@
 #include <vector>
 
 #include "base/strings/string_piece.h"
+#include "ui/base/ime/grammar_fragment.h"
+#include "ui/base/ime/text_input_mode.h"
+#include "ui/base/ime/text_input_type.h"
 
 namespace gfx {
 class Rect;
@@ -45,6 +48,11 @@ class ZWPTextInputWrapperClient {
   // result of some composing (pre-edit).
   virtual void OnCommitString(base::StringPiece text) = 0;
 
+  // Called when the cursor position or selection should be modified. The new
+  // cursor position is applied on the next OnCommitString. |index| and |anchor|
+  // are measured in UTF-8 bytes.
+  virtual void OnCursorPosition(int32_t index, int32_t anchor) = 0;
+
   // Called when client needs to delete all or part of the text surrounding
   // the cursor. |index| and |length| are expected to be a byte offset of |text|
   // passed via ZWPTextInputWrapper::SetSurroundingText.
@@ -65,6 +73,23 @@ class ZWPTextInputWrapperClient {
   virtual void OnSetPreeditRegion(int32_t index,
                                   uint32_t length,
                                   const std::vector<SpanStyle>& spans) = 0;
+
+  // Called when client needs to clear all grammar fragments in |range|. All
+  // indices are measured in UTF-8 bytes.
+  virtual void OnClearGrammarFragments(const gfx::Range& range) = 0;
+
+  // Called when client requests to add a new grammar marker. All indices are
+  // measured in UTF-8 bytes.
+  virtual void OnAddGrammarFragment(const ui::GrammarFragment& fragment) = 0;
+
+  // Sets the autocorrect range in the text input client.
+  // |range| is in UTF-16 code range.
+  virtual void OnSetAutocorrectRange(const gfx::Range& range) = 0;
+
+  // Called when the virtual keyboard's occluded bounds is updated.
+  // The bounds are in screen DIP.
+  virtual void OnSetVirtualKeyboardOccludedBounds(
+      const gfx::Rect& screen_bounds) = 0;
 
   // Called when the visibility state of the input panel changed.
   // There's no detailed spec of |state|, and no actual implementor except
@@ -101,8 +126,15 @@ class ZWPTextInputWrapper {
   virtual void SetCursorRect(const gfx::Rect& rect) = 0;
   virtual void SetSurroundingText(const std::string& text,
                                   const gfx::Range& selection_range) = 0;
-  virtual void SetContentType(uint32_t content_hint,
-                              uint32_t content_purpose) = 0;
+  virtual void SetContentType(ui::TextInputType type,
+                              ui::TextInputMode mode,
+                              uint32_t flags,
+                              bool should_do_learning) = 0;
+
+  virtual void SetGrammarFragmentAtCursor(
+      const ui::GrammarFragment& fragment) = 0;
+  virtual void SetAutocorrectInfo(const gfx::Range& autocorrect_range,
+                                  const gfx::Rect& autocorrect_bounds) = 0;
 };
 
 }  // namespace ui

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ class CrashReportDatabase;
 
 namespace crash_reporter {
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
 bool IsCrashpadEnabled();
 #endif
 
@@ -85,7 +85,7 @@ bool InitializeCrashpad(bool initial_client, const std::string& process_type);
 // current executable if |exe_path| is empty with a command line argument of
 // --type=crashpad-handler. If |user_data_dir| is non-empty, it is added to the
 // handler's command line for use by Chrome Crashpad extensions.
-void InitializeCrashpadWithEmbeddedHandler(bool initial_client,
+bool InitializeCrashpadWithEmbeddedHandler(bool initial_client,
                                            const std::string& process_type,
                                            const std::string& user_data_dir,
                                            const base::FilePath& exe_path);
@@ -97,7 +97,7 @@ void InitializeCrashpadWithEmbeddedHandler(bool initial_client,
 // In this situation the exe_path is not sufficient to allow spawning a crash
 // handler through the DLL so |initial_arguments| needs to be passed to
 // specify the DLL entry point.
-void InitializeCrashpadWithDllEmbeddedHandler(
+bool InitializeCrashpadWithDllEmbeddedHandler(
     bool initial_client,
     const std::string& process_type,
     const std::string& user_data_dir,

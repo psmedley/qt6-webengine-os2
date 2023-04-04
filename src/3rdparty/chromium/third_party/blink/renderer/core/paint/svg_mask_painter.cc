@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ void SVGMaskPainter::Paint(GraphicsContext& context,
     content_transformation.Translate(reference_box.x(), reference_box.y());
     content_transformation.ScaleNonUniform(reference_box.width(),
                                            reference_box.height());
-  } else if (layout_object.IsSVGForeignObject()) {
+  } else if (layout_object.IsSVGForeignObjectIncludingNG()) {
     content_transformation.Scale(style.EffectiveZoom());
   }
 

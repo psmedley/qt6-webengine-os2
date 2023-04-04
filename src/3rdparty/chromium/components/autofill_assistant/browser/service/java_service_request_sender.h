@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,6 +38,8 @@ class JavaServiceRequestSender : public ServiceRequestSender {
                   const base::android::JavaParamRef<jobject>& jcaller,
                   jint http_status,
                   const base::android::JavaParamRef<jbyteArray>& jresponse);
+
+  void SetDisableRpcSigning(bool disable_rpc_signing) override;
 
  private:
   ResponseCallback callback_;

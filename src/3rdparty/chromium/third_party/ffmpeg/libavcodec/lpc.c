@@ -38,6 +38,11 @@ static void lpc_apply_welch_window_c(const int32_t *data, int len,
     double w;
     double c;
 
+    if (len == 1) {
+        w_data[0] = 0.0;
+        return;
+    }
+
     n2 = (len >> 1);
     c = 2.0 / (len - 1.0);
 
@@ -314,8 +319,9 @@ av_cold int ff_lpc_init(LPCContext *s, int blocksize, int max_order,
     s->lpc_apply_welch_window = lpc_apply_welch_window_c;
     s->lpc_compute_autocorr   = lpc_compute_autocorr_c;
 
-    if (ARCH_X86)
-        ff_lpc_init_x86(s);
+#if ARCH_X86
+    ff_lpc_init_x86(s);
+#endif
 
     return 0;
 }

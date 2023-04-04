@@ -1,15 +1,20 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/direct_sockets/tcp_writable_stream_wrapper.h"
 
+#include "base/callback_helpers.h"
+#include "base/ranges/algorithm.h"
 #include "base/test/mock_callback.h"
+#include "net/base/net_errors.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/streams/writable_stream.h"
 #include "third_party/blink/renderer/core/streams/writable_stream_default_writer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+#include "third_party/blink/renderer/modules/direct_sockets/stream_wrapper.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -34,7 +39,7 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
 
   // The default value of |capacity| means some sensible value selected by mojo.
   TCPWritableStreamWrapper* Create(const V8TestingScope& scope,
-                                   uint32_t capacity = 0) {
+                                   uint32_t capacity = 1) {
     MojoCreateDataPipeOptions options;
     options.struct_size = sizeof(MojoCreateDataPipeOptions);
     options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
@@ -50,12 +55,11 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
 
     auto* script_state = scope.GetScriptState();
     stream_wrapper_ = MakeGarbageCollected<TCPWritableStreamWrapper>(
-        script_state, WTF::Bind(&StreamCreator::Close, WrapPersistent(this)),
-        std::move(data_pipe_producer));
+        script_state, base::DoNothing(), std::move(data_pipe_producer));
     return stream_wrapper_;
   }
 
-  void ClosePipe() { data_pipe_consumer_.reset(); }
+  void ResetPipe() { data_pipe_consumer_.reset(); }
 
   // Reads everything from |data_pipe_consumer_| and returns it in a vector.
   Vector<uint8_t> ReadAllPendingData() {
@@ -82,7 +86,7 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
     return data;
   }
 
-  void Close(bool error) { stream_wrapper_->CloseStream(error); }
+  void Close(bool error) {}
 
   void Trace(Visitor* visitor) const { visitor->Trace(stream_wrapper_); }
 
@@ -137,7 +141,7 @@ TEST(TCPWritableStreamWrapperTest, WriteArrayBufferView) {
 }
 
 bool IsAllNulls(base::span<const uint8_t> data) {
-  return std::all_of(data.begin(), data.end(), [](uint8_t c) { return !c; });
+  return base::ranges::all_of(data, [](uint8_t c) { return !c; });
 }
 
 TEST(TCPWritableStreamWrapperTest, AsyncWrite) {
@@ -165,7 +169,7 @@ TEST(TCPWritableStreamWrapperTest, AsyncWrite) {
   test::RunPendingTasks();
 
   // Let microtasks run just in case write() returns prematurely.
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
+  scope.PerformMicrotaskCheckpoint();
   ASSERT_FALSE(tester.IsFulfilled());
 
   // Read the first part of the data.
@@ -218,7 +222,7 @@ TEST(TCPWritableStreamWrapperTest, WriteThenClose) {
 
   // Make sure that write() and close() both run before the event loop is
   // serviced.
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
+  scope.PerformMicrotaskCheckpoint();
 
   write_tester.WaitUntilSettled();
   ASSERT_TRUE(write_tester.IsFulfilled());
@@ -228,7 +232,7 @@ TEST(TCPWritableStreamWrapperTest, WriteThenClose) {
   EXPECT_THAT(stream_creator->ReadAllPendingData(), ElementsAre('D'));
 }
 
-TEST(TCPWritableStreamWrapperTest, TriggerHasAborted) {
+TEST(TCPWritableStreamWrapperTest, DISABLED_TriggerHasAborted) {
   V8TestingScope scope;
   auto* stream_creator = MakeGarbageCollected<StreamCreator>();
   auto* tcp_writable_stream_wrapper = stream_creator->Create(scope);
@@ -241,11 +245,91 @@ TEST(TCPWritableStreamWrapperTest, TriggerHasAborted) {
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_tester(script_state, write_promise);
-  // Trigger onAborted() on purpose.
-  stream_creator->ClosePipe();
+
+  tcp_writable_stream_wrapper->ErrorStream(net::ERR_UNEXPECTED);
   write_tester.WaitUntilSettled();
 
+  ASSERT_FALSE(write_tester.IsFulfilled());
+
   EXPECT_EQ(tcp_writable_stream_wrapper->GetState(),
+            StreamWrapper::State::kAborted);
+}
+
+class TCPWritableStreamWrapperCloseTestWithMaybePendingWrite
+    : public testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(/**/,
+                         TCPWritableStreamWrapperCloseTestWithMaybePendingWrite,
+                         testing::Bool());
+
+TEST_P(TCPWritableStreamWrapperCloseTestWithMaybePendingWrite, TriggerClose) {
+  V8TestingScope scope;
+  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  auto* tcp_writable_stream_wrapper = stream_creator->Create(scope);
+
+  bool pending_write = GetParam();
+  absl::optional<ScriptPromiseTester> tester;
+  if (pending_write) {
+    auto* script_state = scope.GetScriptState();
+    auto* chunk = DOMArrayBuffer::Create("D", 2);
+    ScriptPromise write_promise =
+        tcp_writable_stream_wrapper->Writable()
+            ->getWriter(script_state, ASSERT_NO_EXCEPTION)
+            ->write(script_state, ScriptValue::From(script_state, chunk),
+                    ASSERT_NO_EXCEPTION);
+    tester.emplace(script_state, write_promise);
+    test::RunPendingTasks();
+  }
+
+  // 1. OnWriteError(...) is called.
+  tcp_writable_stream_wrapper->ErrorStream(net::ERR_UNEXPECTED);
+
+  // 2. pipe reset event arrives.
+  stream_creator->ResetPipe();
+  test::RunPendingTasks();
+
+  if (pending_write) {
+    tester->WaitUntilSettled();
+    ASSERT_TRUE(tester->IsRejected());
+  }
+
+  ASSERT_EQ(tcp_writable_stream_wrapper->GetState(),
+            StreamWrapper::State::kAborted);
+}
+
+TEST_P(TCPWritableStreamWrapperCloseTestWithMaybePendingWrite,
+       TriggerCloseInReverseOrder) {
+  V8TestingScope scope;
+  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  auto* tcp_writable_stream_wrapper = stream_creator->Create(scope);
+
+  bool pending_write = GetParam();
+  absl::optional<ScriptPromiseTester> tester;
+  if (pending_write) {
+    auto* script_state = scope.GetScriptState();
+    auto* chunk = DOMArrayBuffer::Create("D", 2);
+    ScriptPromise write_promise =
+        tcp_writable_stream_wrapper->Writable()
+            ->getWriter(script_state, ASSERT_NO_EXCEPTION)
+            ->write(script_state, ScriptValue::From(script_state, chunk),
+                    ASSERT_NO_EXCEPTION);
+    tester.emplace(script_state, write_promise);
+    test::RunPendingTasks();
+  }
+
+  // 1. pipe reset event arrives.
+  stream_creator->ResetPipe();
+  test::RunPendingTasks();
+
+  // 2. OnWriteError(...) is called.
+  tcp_writable_stream_wrapper->ErrorStream(net::ERR_UNEXPECTED);
+
+  if (pending_write) {
+    tester->WaitUntilSettled();
+    ASSERT_TRUE(tester->IsRejected());
+  }
+
+  ASSERT_EQ(tcp_writable_stream_wrapper->GetState(),
             StreamWrapper::State::kAborted);
 }
 

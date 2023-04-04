@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -234,7 +234,7 @@
       {
         "id": "AccessibilityFeature",
         "type": "string",
-        "enum": [ "enhancedNetworkVoices", "dictationCommands", "dictationHints" , "googleTtsLanguagePacks"],
+        "enum": [ "enhancedNetworkVoices", "googleTtsLanguagePacks", "dictationPumpkinParsing"],
         "description": "Subset of accessibility features."
       },
       {
@@ -246,7 +246,7 @@
       {
         "id": "SetNativeChromeVoxResponse",
         "type": "string",
-        "enum": [ "success", "talkbackNotInstalled", "windowNotFound", "failure" ],
+        "enum": [ "success", "talkbackNotInstalled", "windowNotFound", "failure" , "needDeprecationConfirmation" ],
         "description": "Response code for onNativeChromeVoxArcSupportResult"
       },
       {
@@ -283,6 +283,70 @@
             "items": { "$ref": "DictationBubbleHintType" },
             "description": "Array of hints to show in the UI.",
             "optional": true
+          }
+        }
+      },
+      {
+        "id": "DlcType",
+        "type": "string",
+        "enum": ["ttsEsUs"],
+        "description": "Types of accessibility-specific DLCs."
+      },
+      {
+        "id": "PumpkinData",
+        "type": "object",
+        "properties": {
+          "js_pumpkin_tagger_bin_js": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "tagger_wasm_main_js": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "tagger_wasm_main_wasm": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "en_us_action_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "en_us_pumpkin_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "fr_fr_action_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "fr_fr_pumpkin_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "it_it_action_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "it_it_pumpkin_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "de_de_action_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "de_de_pumpkin_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "es_es_action_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
+          },
+          "es_es_pumpkin_config_binarypb": {
+            "type": "binary",
+            "description": "The contents of the file as a Uint8Array."
           }
         }
       }
@@ -327,6 +391,22 @@
             {
               "name": "batteryDescription",
               "type": "string"
+            }
+          ]
+        }
+      },
+      {
+        "name": "installPumpkinForDictation",
+        "type": "function",
+        "description": "Called to request an install of the Pumpkin semantic parser for Dictation.",
+        "parameters": [],
+        "returns_async": {
+          "name": "callback",
+          "description": "Runs when Pumpkin download finishes.",
+          "parameters": [
+            {
+              "name": "data",
+              "$ref": "PumpkinData"
             }
           ]
         }
@@ -711,6 +791,35 @@
             "description": "Properties for the updated Dictation bubble UI."
           }
         ]
+      },
+      {
+        "name": "silenceSpokenFeedback",
+        "type": "function",
+        "description": "Cancels the current and queued speech from ChromeVox.",
+        "parameters": []
+      },
+      {
+        "name": "getDlcContents",
+        "type": "function",
+        "description": "Returns the contents of a DLC.",
+        "parameters": [
+          {
+            "name": "dlc",
+            "$ref": "DlcType",
+            "description": "The DLC of interest."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "description": "A callback that is run when the contents are returned.",
+          "parameters": [
+            {
+              "name": "contents",
+              "type": "binary",
+              "description": "The contents of the DLC as a Uint8Array."
+            }
+          ]
+        }
       }
     ],
     "events": [

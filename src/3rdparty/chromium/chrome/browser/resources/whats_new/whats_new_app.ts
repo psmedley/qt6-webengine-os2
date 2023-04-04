@@ -1,33 +1,37 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
 import './strings.m.js';
 
 import {ClickInfo, Command} from 'chrome://resources/js/browser_command/browser_command.mojom-webui.js';
 import {BrowserCommandProxy} from 'chrome://resources/js/browser_command/browser_command_proxy.js';
 import {isChromeOS} from 'chrome://resources/js/cr.m.js';
-import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {getTemplate} from './whats_new_app.html.js';
 import {WhatsNewProxyImpl} from './whats_new_proxy.js';
 
-type CommandData = {
-  commandId: number,
-  clickInfo: ClickInfo,
-};
+interface CommandData {
+  commandId: number;
+  clickInfo: ClickInfo;
+}
 
 // TODO (https://www.crbug.com/1219381): Add some additional parameters so
 // that we can filter the messages a bit better.
-type BrowserCommandMessageData = {
-  data: CommandData,
-};
+interface BrowserCommandMessageData {
+  data: CommandData;
+}
 
 export class WhatsNewAppElement extends PolymerElement {
   static get is() {
     return 'whats-new-app';
+  }
+
+  static get template() {
+    return getTemplate();
   }
 
   static get properties() {
@@ -35,7 +39,7 @@ export class WhatsNewAppElement extends PolymerElement {
       url_: {
         type: String,
         value: '',
-      }
+      },
     };
   }
 
@@ -79,13 +83,12 @@ export class WhatsNewAppElement extends PolymerElement {
     }
 
     const latest = this.isAutoOpen_ && !isChromeOS ? 'true' : 'false';
-    const feedback =
-        loadTimeData.getBoolean('showFeedbackButton') ? 'true' : 'false';
     url += url.includes('?') ? '&' : '?';
-    this.url_ = url.concat(`latest=${latest}&feedback=${feedback}`);
+    this.url_ = url.concat(`latest=${latest}`);
 
     this.eventTracker_.add(
-        window, 'message', event => this.handleMessage_(event as MessageEvent));
+        window, 'message',
+        (event: Event) => this.handleMessage_(event as MessageEvent));
   }
 
   private handleMessage_(event: MessageEvent) {
@@ -116,10 +119,6 @@ export class WhatsNewAppElement extends PolymerElement {
         console.warn('Received invalid command: ' + commandId);
       }
     });
-  }
-
-  static get template() {
-    return html`{__html_template__}`;
   }
 }
 customElements.define(WhatsNewAppElement.is, WhatsNewAppElement);

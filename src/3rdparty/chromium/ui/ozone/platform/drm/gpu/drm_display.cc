@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,6 +154,7 @@ std::unique_ptr<display::DisplaySnapshot> DrmDisplay::Update(
     uint8_t device_index) {
   std::unique_ptr<display::DisplaySnapshot> params = CreateDisplaySnapshot(
       info, drm_->get_fd(), drm_->device_path(), device_index, origin_);
+  base_connector_id_ = params->base_connector_id();
   crtc_ = info->crtc()->crtc_id;
   // TODO(crbug.com/1119499): consider taking ownership of |info->connector()|
   connector_ = ScopedDrmConnectorPtr(

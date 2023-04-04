@@ -51,10 +51,16 @@ inline uint8_t *DecompressBinaryData(const std::vector<uint8_t> &compressedData)
     return uncompressedData.release();
 }
 
+inline void DeleteBinaryData(uint8_t *uncompressedData)
+{
+    delete[] uncompressedData;
+}
+
 using DecompressCallback              = uint8_t *(*)(const std::vector<uint8_t> &);
+using DeleteCallback                  = void (*)(uint8_t *);
 using ValidateSerializedStateCallback = void (*)(const char *, const char *, uint32_t);
 
-using SetBinaryDataDecompressCallbackFunc    = void (*)(DecompressCallback);
+using SetBinaryDataDecompressCallbackFunc    = void (*)(DecompressCallback, DeleteCallback);
 using SetBinaryDataDirFunc                   = void (*)(const char *);
 using SetupReplayFunc                        = void (*)();
 using ReplayFrameFunc                        = void (*)(uint32_t);
@@ -92,9 +98,11 @@ class TraceLibrary
         callFunc<SetBinaryDataDirFunc>("SetBinaryDataDir", dataDir);
     }
 
-    void setBinaryDataDecompressCallback(DecompressCallback callback)
+    void setBinaryDataDecompressCallback(DecompressCallback decompressCallback,
+                                         DeleteCallback deleteCallback)
     {
-        callFunc<SetBinaryDataDecompressCallbackFunc>("SetBinaryDataDecompressCallback", callback);
+        callFunc<SetBinaryDataDecompressCallbackFunc>("SetBinaryDataDecompressCallback",
+                                                      decompressCallback, deleteCallback);
     }
 
     void replayFrame(uint32_t frameIndex) { callFunc<ReplayFrameFunc>("ReplayFrame", frameIndex); }
@@ -118,7 +126,7 @@ class TraceLibrary
 
   private:
     template <typename FuncT, typename... ArgsT>
-    typename std::result_of<FuncT(ArgsT...)>::type callFunc(const char *funcName, ArgsT... args)
+    typename std::invoke_result<FuncT, ArgsT...>::type callFunc(const char *funcName, ArgsT... args)
     {
         void *untypedFunc = mTraceLibrary->getSymbol(funcName);
         if (!untypedFunc)
@@ -138,6 +146,7 @@ static constexpr size_t kTraceInfoMaxNameLen = 128;
 struct TraceInfo
 {
     char name[kTraceInfoMaxNameLen];
+    bool initialized = false;
     uint32_t contextClientMajorVersion;
     uint32_t contextClientMinorVersion;
     uint32_t frameStart;

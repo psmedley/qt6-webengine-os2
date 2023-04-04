@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -324,7 +324,7 @@ To<Longhand>(resolved_property).{{apply_call}};
     return;
 
   CounterDirectiveMap& map = state.Style()->AccessCounterDirectives();
-  DCHECK(!parent_map->IsEmpty());
+  DCHECK(!parent_map->empty());
 
   typedef CounterDirectiveMap::const_iterator Iterator;
   Iterator end = parent_map->end();
@@ -359,7 +359,7 @@ To<Longhand>(resolved_property).{{apply_call}};
     directives.SetSetValue(counter_value);
         {% endif %}
   }
-  DCHECK(!map.IsEmpty());
+  DCHECK(!map.empty());
     {% endcall %}
   {% elif property.style_builder_template == 'grid' %}
     {% set type = property.style_builder_template_args['type'] %}
@@ -374,11 +374,6 @@ To<Longhand>(resolved_property).{{apply_call}};
     {% call(property) apply_value(property) %}
   ComputedGridTrackList computed_grid_track_list;
   StyleBuilderConverter::ConvertGridTrackList(value, computed_grid_track_list, state);
-  const NamedGridAreaMap& named_grid_areas = state.Style()->NamedGridArea();
-  if (!named_grid_areas.IsEmpty()) {
-    StyleBuilderConverter::CreateImplicitNamedGridLinesFromGridArea(
-        named_grid_areas, computed_grid_track_list.named_grid_lines, kFor{{type}}s);
-  }
   state.Style()->SetGridTemplate{{type}}s(computed_grid_track_list);
     {% endcall %}
   {% endif %}

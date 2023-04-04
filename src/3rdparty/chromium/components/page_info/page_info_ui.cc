@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "components/page_info/core/features.h"
 #include "components/page_info/page_info_ui_delegate.h"
 #include "components/permissions/features.h"
+#include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/permissions/permission_manager.h"
 #include "components/permissions/permission_result.h"
 #include "components/permissions/permission_util.h"
@@ -153,7 +154,7 @@ base::span<const PageInfoUI::PermissionUIInfo> GetContentSettingsUIInfo() {
     {ContentSettingsType::BACKGROUND_SYNC,
      IDS_SITE_SETTINGS_TYPE_BACKGROUND_SYNC,
      IDS_SITE_SETTINGS_TYPE_BACKGROUND_SYNC_MID_SENTENCE},
-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
     {ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER,
      IDS_SITE_SETTINGS_TYPE_PROTECTED_MEDIA_ID,
      IDS_SITE_SETTINGS_TYPE_PROTECTED_MEDIA_ID_MID_SENTENCE},
@@ -191,6 +192,9 @@ base::span<const PageInfoUI::PermissionUIInfo> GetContentSettingsUIInfo() {
     {ContentSettingsType::CAMERA_PAN_TILT_ZOOM,
      IDS_SITE_SETTINGS_TYPE_CAMERA_PAN_TILT_ZOOM,
      IDS_SITE_SETTINGS_TYPE_CAMERA_PAN_TILT_ZOOM_MID_SENTENCE},
+    {ContentSettingsType::FEDERATED_IDENTITY_API,
+     IDS_SITE_SETTINGS_TYPE_FEDERATED_IDENTITY_API,
+     IDS_SITE_SETTINGS_TYPE_FEDERATED_IDENTITY_API_MID_SENTENCE},
     {ContentSettingsType::IDLE_DETECTION, IDS_SITE_SETTINGS_TYPE_IDLE_DETECTION,
      IDS_SITE_SETTINGS_TYPE_IDLE_DETECTION_MID_SENTENCE},
 #if !BUILDFLAG(IS_ANDROID)
@@ -206,9 +210,9 @@ base::span<const PageInfoUI::PermissionUIInfo> GetContentSettingsUIInfo() {
      IDS_SITE_SETTINGS_TYPE_IMAGES_MID_SENTENCE},
     {ContentSettingsType::SERIAL_GUARD, IDS_SITE_SETTINGS_TYPE_SERIAL_PORTS,
      IDS_SITE_SETTINGS_TYPE_SERIAL_PORTS_MID_SENTENCE},
-    {ContentSettingsType::WINDOW_PLACEMENT,
-     IDS_SITE_SETTINGS_TYPE_WINDOW_PLACEMENT,
-     IDS_SITE_SETTINGS_TYPE_WINDOW_PLACEMENT_MID_SENTENCE},
+    {ContentSettingsType::WINDOW_MANAGEMENT,
+     IDS_SITE_SETTINGS_TYPE_WINDOW_MANAGEMENT,
+     IDS_SITE_SETTINGS_TYPE_WINDOW_MANAGEMENT_MID_SENTENCE},
 #endif
   };
   return kPermissionUIInfo;
@@ -326,8 +330,8 @@ std::u16string GetPermissionAskStateString(ContentSettingsType type) {
     case ContentSettingsType::AR:
       message_id = IDS_PAGE_INFO_STATE_TEXT_AR_ASK;
       break;
-    case ContentSettingsType::WINDOW_PLACEMENT:
-      message_id = IDS_PAGE_INFO_STATE_TEXT_WINDOW_PLACEMENT_ASK;
+    case ContentSettingsType::WINDOW_MANAGEMENT:
+      message_id = IDS_PAGE_INFO_STATE_TEXT_WINDOW_MANAGEMENT_ASK;
       break;
     case ContentSettingsType::LOCAL_FONTS:
       message_id = IDS_PAGE_INFO_STATE_TEXT_FONT_ACCESS_ASK;
@@ -366,6 +370,15 @@ std::u16string GetPermissionAskStateString(ContentSettingsType type) {
 }  // namespace
 
 PageInfoUI::CookieInfo::CookieInfo() : allowed(-1), blocked(-1) {}
+
+PageInfoUI::CookiesNewInfo::CookiesNewInfo() = default;
+
+PageInfoUI::CookiesNewInfo::~CookiesNewInfo() = default;
+
+PageInfoUI::CookiesFpsInfo::CookiesFpsInfo(const std::u16string& owner_name)
+    : owner_name(owner_name) {}
+
+PageInfoUI::CookiesFpsInfo::~CookiesFpsInfo() = default;
 
 PageInfoUI::ChosenObjectInfo::ChosenObjectInfo(
     const PageInfo::ChooserUIInfo& ui_info,
@@ -746,9 +759,23 @@ std::u16string PageInfoUI::PermissionAutoBlockedToUIString(
   // TODO(crbug.com/1063023): PageInfo::PermissionInfo should be modified
   // to contain all needed information regarding Automatically Blocked flag.
   if (permission.setting == CONTENT_SETTING_BLOCK &&
-      permissions::PermissionUtil::IsPermission(permission.type)) {
-    permissions::PermissionResult permission_result =
-        delegate->GetPermissionStatus(permission.type);
+      permissions::PermissionDecisionAutoBlocker::IsEnabledForContentSetting(
+          permission.type)) {
+    permissions::PermissionResult permission_result(
+        CONTENT_SETTING_DEFAULT,
+        permissions::PermissionStatusSource::UNSPECIFIED);
+    if (permissions::PermissionUtil::IsPermission(permission.type)) {
+      blink::PermissionType permission_type =
+          permissions::PermissionUtil::ContentSettingTypeToPermissionType(
+              permission.type);
+      permission_result = delegate->GetPermissionResult(permission_type);
+    } else if (permission.type == ContentSettingsType::FEDERATED_IDENTITY_API) {
+      absl::optional<permissions::PermissionResult> embargo_result =
+          delegate->GetEmbargoResult(permission.type);
+      if (embargo_result)
+        permission_result = *embargo_result;
+    }
+
     switch (permission_result.source) {
       case permissions::PermissionStatusSource::MULTIPLE_DISMISSALS:
         message_id = IDS_PAGE_INFO_PERMISSION_AUTOMATICALLY_BLOCKED;
@@ -760,33 +787,6 @@ std::u16string PageInfoUI::PermissionAutoBlockedToUIString(
         break;
     }
   }
-  if (message_id == kInvalidResourceID)
-    return std::u16string();
-  return l10n_util::GetStringUTF16(message_id);
-}
-
-// static
-std::u16string PageInfoUI::PermissionDecisionReasonToUIString(
-    PageInfoUiDelegate* delegate,
-    const PageInfo::PermissionInfo& permission) {
-  ContentSetting effective_setting = GetEffectiveSetting(
-      permission.type, permission.setting, permission.default_setting);
-  int message_id = kInvalidResourceID;
-  switch (permission.source) {
-    case content_settings::SettingSource::SETTING_SOURCE_POLICY:
-      message_id = kPermissionButtonTextIDPolicyManaged[effective_setting];
-      break;
-    case content_settings::SettingSource::SETTING_SOURCE_EXTENSION:
-      message_id = kPermissionButtonTextIDExtensionManaged[effective_setting];
-      break;
-    default:
-      break;
-  }
-
-  auto auto_block_text = PermissionAutoBlockedToUIString(delegate, permission);
-  if (!auto_block_text.empty())
-    return auto_block_text;
-
   if (message_id == kInvalidResourceID)
     return std::u16string();
   return l10n_util::GetStringUTF16(message_id);

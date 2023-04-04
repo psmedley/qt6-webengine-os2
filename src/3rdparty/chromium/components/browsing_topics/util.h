@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,18 +66,6 @@ HashedDomain HashContextDomainForStorage(ReadOnlyHmacKey hmac_key,
 // Returns a hash of `main_frame_host` to be stored more efficiently in disk and
 // memory.
 HashedHost HashMainFrameHostForStorage(const std::string& main_frame_host);
-
-// Returns the maximum of |`calculation_time` - history data time range|, and
-// |data_accessible_since|.
-base::Time DeriveHistoryDataStartTime(
-    base::Time calculation_time,
-    base::Time data_accessible_since = base::Time());
-
-// Returns the maximum of |`calculation_time` - api usage data time range|,
-// and |data_accessible_since|.
-base::Time DeriveApiUsageContextDataStartTime(
-    base::Time calculation_time,
-    base::Time data_accessible_since = base::Time());
 
 // Override the key to be returned for subsequent invocations of
 // `GenerateRandomHmacKey()`.

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,6 +43,11 @@ class UiControllerObserver : public base::CheckedObserver {
   virtual void OnCollectUserDataOptionsChanged(
       const CollectUserDataOptions* options) = 0;
 
+  // Report that the state of the User Data UI has changed.
+  virtual void OnCollectUserDataUiStateChanged(
+      bool loading,
+      UserDataEventField event_field) = 0;
+
   // Called when details have changed. Details will be empty if they have been
   // cleared.
   virtual void OnDetailsChanged(const std::vector<Details>& details) = 0;
@@ -79,9 +84,17 @@ class UiControllerObserver : public base::CheckedObserver {
   virtual void OnFormChanged(const FormProto* form,
                              const FormProto::Result* result) = 0;
 
+  // Called when QR Code Scanning is prompted or cleared.
+  virtual void OnQrCodeScanUiChanged(
+      const PromptQrCodeScanProto* qr_code_scan) = 0;
+
   // Called when the generic user interface to show has been changed or cleared.
   virtual void OnGenericUserInterfaceChanged(
       const GenericUserInterfaceProto* generic_ui) = 0;
+
+  // Called when user account screen has been requested.
+  virtual void OnShowAccountScreen(const ShowAccountScreenProto& proto,
+                                   const std::string& email_address) = 0;
 
   // Called when the persistent generic user interface to show has been changed
   // or cleared.

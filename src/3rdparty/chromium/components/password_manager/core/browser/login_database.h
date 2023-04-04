@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,9 @@ class SQLTableBuilder;
 extern const int kCurrentVersionNumber;
 extern const int kCompatibleVersionNumber;
 
+using PrimaryKeyToFormMap =
+    std::map<FormPrimaryKey, std::unique_ptr<PasswordForm>>;
+
 // Interface to the database storage of login information, intended as a helper
 // for PasswordStore on platforms that need internal storage of some or all of
 // the login information.
@@ -74,7 +77,7 @@ class LoginDatabase : public PasswordStoreSync::MetadataStore {
   // case of error, it sets |error| if |error| isn't null.
   [[nodiscard]] PasswordStoreChangeList AddLogin(
       const PasswordForm& form,
-      AddLoginError* error = nullptr);
+      AddCredentialError* error = nullptr);
 
   // Updates existing password form. Returns the list of applied changes ({},
   // {UPDATE}). The password is looked up by the tuple {origin,
@@ -83,7 +86,7 @@ class LoginDatabase : public PasswordStoreSync::MetadataStore {
   // null.
   [[nodiscard]] PasswordStoreChangeList UpdateLogin(
       const PasswordForm& form,
-      UpdateLoginError* error = nullptr);
+      UpdateCredentialError* error = nullptr);
 
   // Removes |form| from the list of remembered password forms. Returns true if
   // |form| was successfully removed from the database. If |changes| is not be
@@ -329,15 +332,15 @@ class LoginDatabase : public PasswordStoreSync::MetadataStore {
       FormPrimaryKey primary_key,
       const base::flat_map<InsecureType, InsecurityMetadata>& password_issues);
 
-  // Reads the `password_notes` table for the note with `primary_key` and fills
-  // the `form->note` field. If there are no notes for `primary_key`, the form
-  // is set to empty note.
-  void PopulateFormWithNote(FormPrimaryKey primary_key,
-                            PasswordForm* form) const;
+  // Reads the `password_notes` table for the notes with `primary_key` and fills
+  // the `form->notes` field. If there are no notes for `primary_key`, the form
+  // is set to empty notes.
+  void PopulateFormWithNotes(FormPrimaryKey primary_key,
+                             PasswordForm* form) const;
 
-  // Updates the `password_notes` table if `note.value` changed for
-  // `primary_key`.
-  void UpdatePasswordNote(FormPrimaryKey primary_key, PasswordNote note);
+  // Updates the `password_notes` table if `notes` changed for `primary_key`.
+  void UpdatePasswordNotes(FormPrimaryKey primary_key,
+                           const std::vector<PasswordNote>& notes);
 
   const base::FilePath db_path_;
   const IsAccountStore is_account_store_;

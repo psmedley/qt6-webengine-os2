@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,9 +59,16 @@ class PasswordScriptsFetcher : public KeyedService {
   // return stale data.
   virtual bool IsScriptAvailable(const url::Origin& origin) const = 0;
 
+  // Returns if the cache is not currently ready and a refresh is needed (and
+  // possibly currently ongoing).
+  virtual bool IsCacheStale() const = 0;
+
   // Return high-level state summary of the PasswordScriptsFetcher in form
   // of a `base::Value::Dict` for display on chrome://apc-internals.
   virtual base::Value::Dict GetDebugInformationForInternals() const = 0;
+
+  // Return a list of all entries currently held in the cache.
+  virtual base::Value::List GetCacheEntries() const = 0;
 };
 
 }  // namespace password_manager

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 
 #include <new>
 
-#include "base/allocator/allocator_shim.h"
 #include "base/allocator/buildflags.h"
+#include "base/allocator/partition_allocator/shim/allocator_shim.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -41,7 +41,7 @@ void EnableTerminationOnOutOfMemory() {
   // malloc and friends and make them die on out of memory.
 
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
-  allocator::SetCallNewHandlerOnMallocFailure(true);
+  allocator_shim::SetCallNewHandlerOnMallocFailure(true);
 #endif
 }
 
@@ -107,9 +107,8 @@ bool AdjustOOMScore(ProcessId process, int score) {
 
 bool UncheckedMalloc(size_t size, void** result) {
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
-  *result = allocator::UncheckedAlloc(size);
-#elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || \
-    defined(TOOLKIT_QT) || !defined(LIBC_GLIBC)
+  *result = allocator_shim::UncheckedAlloc(size);
+#elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || !defined(LIBC_GLIBC) || defined(TOOLKIT_QT)
   *result = malloc(size);
 #elif defined(LIBC_GLIBC)
   *result = __libc_malloc(size);
@@ -119,7 +118,7 @@ bool UncheckedMalloc(size_t size, void** result) {
 
 void UncheckedFree(void* ptr) {
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
-  allocator::UncheckedFree(ptr);
+  allocator_shim::UncheckedFree(ptr);
 #elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || !defined(LIBC_GLIBC) || defined(TOOLKIT_QT)
   free(ptr);
 #elif defined(LIBC_GLIBC)

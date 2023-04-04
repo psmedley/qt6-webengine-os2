@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/component_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/clipboard/clipboard_sequence_number_token.h"
 #include "ui/base/clipboard/file_info.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 
@@ -44,20 +45,27 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
   static std::vector<uint8_t> EncodeBitmapData(const SkBitmap& bitmap);
 
   ClipboardData();
-  explicit ClipboardData(const ClipboardData&);
+  ClipboardData(const ClipboardData&);
   ClipboardData(ClipboardData&&);
   ClipboardData& operator=(const ClipboardData&) = delete;
+  ClipboardData& operator=(ClipboardData&&);
   ~ClipboardData();
 
   bool operator==(const ClipboardData& that) const;
   bool operator!=(const ClipboardData& that) const;
 
+  const ClipboardSequenceNumberToken& sequence_number_token() const {
+    return sequence_number_token_;
+  }
+
   // Bitmask of ClipboardInternalFormat types.
   int format() const { return format_; }
 
-  // Returns the total size of the data in clipboard, or absl::nullopt if it
-  // can't be determined.
-  absl::optional<size_t> size() const;
+  // Returns the size of the data in clipboard of `format`, total size of the
+  // clipboard data if `format` is empty, and absl::nullopt if it can't be
+  // determined.
+  absl::optional<size_t> size(
+      const absl::optional<ClipboardInternalFormat>& format) const;
 
   const std::string& text() const { return text_; }
   void set_text(const std::string& text) {
@@ -163,6 +171,9 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
  private:
+  // Unique identifier for the clipboard state at the time of data creation.
+  ClipboardSequenceNumberToken sequence_number_token_;
+
   // Plain text in UTF8 format.
   std::string text_;
 
@@ -196,7 +207,7 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
   std::string custom_data_data_;
 
   // WebKit smart paste data.
-  bool web_smart_paste_;
+  bool web_smart_paste_ = false;
 
   // Svg data.
   std::string svg_data_;
@@ -204,7 +215,7 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ClipboardData {
   // text/uri-list filenames data.
   std::vector<ui::FileInfo> filenames_;
 
-  int format_;
+  int format_ = 0;
 
   // The source of the data.
   std::unique_ptr<DataTransferEndpoint> src_;

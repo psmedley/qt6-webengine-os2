@@ -1,11 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 module blink.mojom;
 
 import "mojo/public/mojom/base/time.mojom";
-import "url/mojom/origin.mojom";
 import "url/mojom/url.mojom";
 
 // These values represent the `mode` attribute of the fenced frame element. Keep
@@ -27,7 +26,13 @@ interface FencedFrameOwnerHost {
   Navigate(url.mojom.Url url, mojo_base.mojom.TimeTicks navigation_start_time);
 };
 
-enum ReportingDestination { kBuyer, kSeller, kComponentSeller };
+enum ReportingDestination {
+  kBuyer,
+  kSeller,
+  kComponentSeller,
+  kSharedStorageSelectUrl
+};
+
 struct FencedFrameReporting {
   // If this is an "opaque-ads" mode fenced frame, there might be an associated
   // reporting metadata. This is a map from destination type to reporting

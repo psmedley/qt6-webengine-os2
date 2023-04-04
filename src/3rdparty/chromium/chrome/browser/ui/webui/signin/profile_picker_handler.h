@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,6 +61,8 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
   friend class ProfilePickerHandlerTest;
   friend class ProfilePickerHandlerInUserProfileTest;
   friend class ProfilePickerCreationFlowBrowserTest;
+  friend class ProfilePickerEnterpriseCreationFlowBrowserTest;
+  friend class ProfilePickerLocalProfileCreationDialogBrowserTest;
   friend class StartupBrowserCreatorPickerInfobarTest;
   FRIEND_TEST_ALL_PREFIXES(ProfilePickerHandlerInUserProfileTest,
                            HandleExtendedAccountInformation);
@@ -73,29 +75,36 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
       ProfilePickerEnterpriseCreationFlowBrowserTest,
       CreateSignedInProfileSigninAlreadyExists_CancelSwitch);
 
-  void HandleMainViewInitialize(const base::ListValue* args);
+  void HandleMainViewInitialize(const base::Value::List& args);
   void HandleLaunchSelectedProfile(bool open_settings,
-                                   const base::ListValue* args);
-  void HandleLaunchGuestProfile(const base::ListValue* args);
-  void HandleAskOnStartupChanged(const base::ListValue* args);
-  void HandleRemoveProfile(const base::ListValue* args);
-  void HandleGetProfileStatistics(const base::ListValue* args);
-  void HandleSetProfileName(const base::ListValue* args);
+                                   const base::Value::List& args);
+  void HandleLaunchGuestProfile(const base::Value::List& args);
+  void HandleAskOnStartupChanged(const base::Value::List& args);
+  void HandleRemoveProfile(const base::Value::List& args);
+  void HandleGetProfileStatistics(const base::Value::List& args);
+  void HandleSetProfileName(const base::Value::List& args);
 
-  // TODO(crbug.com/1115056): Move to new handler for profile creation.
-  void HandleLoadSignInProfileCreationFlow(const base::ListValue* args);
-  void HandleGetNewProfileSuggestedThemeInfo(const base::ListValue* args);
-  void HandleGetProfileThemeInfo(const base::ListValue* args);
-  void HandleGetAvailableIcons(const base::ListValue* args);
-  void HandleCreateProfile(const base::ListValue* args);
+  void HandleSelectNewAccount(const base::Value::List& args);
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Add an existing account to a Profile.
+  void HandleSelectExistingAccountLacros(const base::Value::List& args);
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+  void HandleGetNewProfileSuggestedThemeInfo(const base::Value::List& args);
+  void HandleGetProfileThemeInfo(const base::Value::List& args);
+  void HandleGetAvailableIcons(const base::Value::List& args);
+  void HandleCreateProfile(const base::Value::List& args);
+  // This function creates a new local profile and opens the profile
+  // customization in a modal dialog.
+  void HandleCreateProfileAndOpenCustomizationDialog(
+      const base::Value::List& args);
 
   // Profile switch screen:
-  void HandleGetSwitchProfile(const base::ListValue* args);
-  void HandleConfirmProfileSwitch(const base::ListValue* args);
-  void HandleCancelProfileSwitch(const base::ListValue* args);
+  void HandleGetSwitchProfile(const base::Value::List& args);
+  void HandleConfirmProfileSwitch(const base::Value::List& args);
+  void HandleCancelProfileSwitch(const base::Value::List& args);
 
   // |args| is unused.
-  void HandleRecordSignInPromoImpression(const base::ListValue* args);
+  void HandleRecordSignInPromoImpression(const base::Value::List& args);
 
   void OnLoadSigninFinished(bool success);
   void GatherProfileStatistics(Profile* profile);
@@ -104,15 +113,14 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
   void OnSwitchToProfileComplete(bool new_profile,
                                  bool open_settings,
                                  Profile* profile);
-  void OnProfileCreated(absl::optional<SkColor> profile_color,
-                        bool create_shortcut,
-                        Profile* profile,
-                        Profile::CreateStatus status);
-  void OnProfileCreationSuccess(absl::optional<SkColor> profile_color,
-                                bool create_shortcut,
-                                Profile* profile);
+  void OnSwitchToProfileCompleteOpenCustomization(Profile* profile);
+  void OnProfileInitialized(absl::optional<SkColor> profile_color,
+                            bool create_shortcut,
+                            Profile* profile);
+  void OnLocalProfileInitialized(absl::optional<SkColor> profile_color,
+                                 Profile* profile);
   void PushProfilesList();
-  base::Value GetProfilesList();
+  base::Value::List GetProfilesList();
   // Adds a profile with `profile_path` to `profiles_order_`.
   void AddProfileToList(const base::FilePath& profile_path);
   // Removes a profile with `profile_path` from `profiles_order_`. Returns
@@ -146,7 +154,7 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
 
   // List of available accounts used by the profile choice and the account
   // selection screens.
-  void HandleGetAvailableAccounts(const base::ListValue* args);
+  void HandleGetAvailableAccounts(const base::Value::List& args);
 
   // Queries accounts available for addition in the profile, and ends up sending
   // them to the WebUI page.
@@ -170,6 +178,11 @@ class ProfilePickerHandler : public content::WebUIMessageHandler,
                          const account_manager::Account& account) override;
   void OnAccountRemoved(const base::FilePath& profile_path,
                         const account_manager::Account& account) override;
+
+  // Adds an existing account (if gaia_id has a value) or initiates the
+  // signin flow to add a new account in a new/existing profile.
+  void SelectAccountLacrosInternal(const std::string& gaia_id,
+                                   absl::optional<SkColor> profile_color);
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
   // Returns the list of profiles in the same order as when the picker

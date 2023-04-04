@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,12 +42,14 @@ class MODULES_EXPORT MediaStreamRemoteVideoSource
   // MediaStreamVideoSource overrides.
   bool SupportsEncodedOutput() const override;
   void RequestRefreshFrame() override;
-  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() const override;
+  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() override;
 
  protected:
   // Implements MediaStreamVideoSource.
-  void StartSourceImpl(VideoCaptureDeliverFrameCB frame_callback,
-                       EncodedVideoFrameCB encoded_frame_callback) override;
+  void StartSourceImpl(
+      VideoCaptureDeliverFrameCB frame_callback,
+      EncodedVideoFrameCB encoded_frame_callback,
+      VideoCaptureCropVersionCB crop_version_callback) override;
   void StopSourceImpl() override;
   void OnEncodedSinkEnabled() override;
   void OnEncodedSinkDisabled() override;

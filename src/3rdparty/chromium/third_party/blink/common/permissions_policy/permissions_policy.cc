@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/no_destructor.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
+#include "third_party/blink/public/common/frame/fenced_frame_permissions_policies.h"
 #include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom.h"
 
@@ -32,48 +33,14 @@ PermissionsPolicy::Allowlist AllowlistFromDeclaration(
 
 }  // namespace
 
-ParsedPermissionsPolicyDeclaration::ParsedPermissionsPolicyDeclaration() =
-    default;
-
-ParsedPermissionsPolicyDeclaration::ParsedPermissionsPolicyDeclaration(
-    mojom::PermissionsPolicyFeature feature)
-    : feature(feature) {}
-
-ParsedPermissionsPolicyDeclaration::ParsedPermissionsPolicyDeclaration(
-    mojom::PermissionsPolicyFeature feature,
-    const std::vector<url::Origin>& allowed_origins,
-    bool matches_all_origins,
-    bool matches_opaque_src)
-    : feature(feature),
-      allowed_origins(allowed_origins),
-      matches_all_origins(matches_all_origins),
-      matches_opaque_src(matches_opaque_src) {}
-
-ParsedPermissionsPolicyDeclaration::ParsedPermissionsPolicyDeclaration(
-    const ParsedPermissionsPolicyDeclaration& rhs) = default;
-
-ParsedPermissionsPolicyDeclaration&
-ParsedPermissionsPolicyDeclaration::operator=(
-    const ParsedPermissionsPolicyDeclaration& rhs) = default;
-
-ParsedPermissionsPolicyDeclaration::~ParsedPermissionsPolicyDeclaration() =
-    default;
-
-bool operator==(const ParsedPermissionsPolicyDeclaration& lhs,
-                const ParsedPermissionsPolicyDeclaration& rhs) {
-  return std::tie(lhs.feature, lhs.matches_all_origins, lhs.matches_opaque_src,
-                  lhs.allowed_origins) ==
-         std::tie(rhs.feature, rhs.matches_all_origins, rhs.matches_opaque_src,
-                  rhs.allowed_origins);
-}
-
 PermissionsPolicy::Allowlist::Allowlist() = default;
 
 PermissionsPolicy::Allowlist::Allowlist(const Allowlist& rhs) = default;
 
 PermissionsPolicy::Allowlist::~Allowlist() = default;
 
-void PermissionsPolicy::Allowlist::Add(const url::Origin& origin) {
+void PermissionsPolicy::Allowlist::Add(
+    const blink::OriginWithPossibleWildcards& origin) {
   allowed_origins_.push_back(origin);
 }
 
@@ -87,7 +54,7 @@ void PermissionsPolicy::Allowlist::AddOpaqueSrc() {
 
 bool PermissionsPolicy::Allowlist::Contains(const url::Origin& origin) const {
   for (const auto& allowed_origin : allowed_origins_) {
-    if (origin == allowed_origin)
+    if (allowed_origin.DoesMatchOrigin(origin))
       return true;
   }
   if (origin.opaque())
@@ -97,6 +64,10 @@ bool PermissionsPolicy::Allowlist::Contains(const url::Origin& origin) const {
 
 bool PermissionsPolicy::Allowlist::MatchesAll() const {
   return matches_all_origins_;
+}
+
+void PermissionsPolicy::Allowlist::RemoveMatchesAll() {
+  matches_all_origins_ = false;
 }
 
 bool PermissionsPolicy::Allowlist::MatchesOpaqueSrc() const {
@@ -249,7 +220,9 @@ const PermissionsPolicy::Allowlist PermissionsPolicy::GetAllowlistForFeature(
   if (default_policy == PermissionsPolicyFeatureDefault::EnableForAll) {
     default_allowlist.AddAll();
   } else if (default_policy == PermissionsPolicyFeatureDefault::EnableForSelf) {
-    default_allowlist.Add(origin_);
+    default_allowlist.Add(
+        blink::OriginWithPossibleWildcards(origin_,
+                                           /*has_subdomain_wildcard=*/false));
   }
 
   return default_allowlist;
@@ -284,6 +257,46 @@ void PermissionsPolicy::SetHeaderPolicy(
   }
 }
 
+void PermissionsPolicy::SetHeaderPolicyForIsolatedApp(
+    const ParsedPermissionsPolicy& parsed_header) {
+  DCHECK(!allowlists_checked_);
+  for (const ParsedPermissionsPolicyDeclaration& parsed_declaration :
+       parsed_header) {
+    mojom::PermissionsPolicyFeature feature = parsed_declaration.feature;
+    DCHECK(feature != mojom::PermissionsPolicyFeature::kNotFound);
+    const auto header_allowlist =
+        AllowlistFromDeclaration(parsed_declaration, feature_list_);
+    auto& isolated_app_allowlist = allowlists_.at(feature);
+
+    // If the header does not specify further restrictions we do not need to
+    // modify the policy.
+    if (header_allowlist.MatchesAll())
+      continue;
+
+    const auto header_allowed_origins = header_allowlist.AllowedOrigins();
+    // If the manifest allows all origins access to this feature, use the more
+    // restrictive header policy.
+    if (isolated_app_allowlist.MatchesAll()) {
+      // TODO(crbug.com/1336275): Refactor to use Allowlist::clone() after
+      // clone() is implemented.
+      isolated_app_allowlist.SetAllowedOrigins(header_allowed_origins);
+      isolated_app_allowlist.RemoveMatchesAll();
+      continue;
+    }
+
+    // Otherwise, we use the intersection of origins in the manifest and the
+    // header.
+    auto manifest_allowed_origins = isolated_app_allowlist.AllowedOrigins();
+    std::vector<blink::OriginWithPossibleWildcards> final_allowed_origins;
+    for (const auto& origin : manifest_allowed_origins) {
+      if (base::Contains(header_allowed_origins, origin)) {
+        final_allowed_origins.push_back(origin);
+      }
+    }
+    isolated_app_allowlist.SetAllowedOrigins(final_allowed_origins);
+  }
+}
+
 void PermissionsPolicy::OverwriteHeaderPolicyForClientHints(
     const ParsedPermissionsPolicy& parsed_header) {
   DCHECK(!allowlists_checked_);
@@ -314,17 +327,29 @@ PermissionsPolicy::~PermissionsPolicy() = default;
 
 // static
 std::unique_ptr<PermissionsPolicy> PermissionsPolicy::CreateForFencedFrame(
-    const url::Origin& origin) {
-  return CreateForFencedFrame(origin, GetPermissionsPolicyFeatureList());
+    const url::Origin& origin,
+    blink::mojom::FencedFrameMode mode) {
+  return CreateForFencedFrame(origin, GetPermissionsPolicyFeatureList(), mode);
 }
 
 std::unique_ptr<PermissionsPolicy> PermissionsPolicy::CreateForFencedFrame(
     const url::Origin& origin,
-    const PermissionsPolicyFeatureList& features) {
+    const PermissionsPolicyFeatureList& features,
+    blink::mojom::FencedFrameMode mode) {
   std::unique_ptr<PermissionsPolicy> new_policy =
       base::WrapUnique(new PermissionsPolicy(origin, features));
   for (const auto& feature : features) {
     new_policy->inherited_policies_[feature.first] = false;
+  }
+  // TODO(crbug.com/1347953): this is a medium-term solution to allow
+  // attribution reporting inside an opaque ad. This will eventually be replaced
+  // by urn:uuid bound attributes as outlined in this document:
+  // https://docs.google.com/document/d/11QaI40IAr12CDFrIUQbugxmS9LfircghHUghW-EDzMk/edit?usp=sharing
+  if (mode == blink::mojom::FencedFrameMode::kOpaqueAds) {
+    for (const blink::mojom::PermissionsPolicyFeature feature :
+         blink::kFencedFrameOpaqueAdsDefaultAllowedFeatures) {
+      new_policy->inherited_policies_[feature] = true;
+    }
   }
   return new_policy;
 }

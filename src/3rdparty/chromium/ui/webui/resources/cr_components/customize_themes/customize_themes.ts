@@ -1,26 +1,27 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import '../managed_dialog/managed_dialog.js';
-import '../../cr_elements/cr_button/cr_button.m.js';
-import '../../cr_elements/cr_icon_button/cr_icon_button.m.js';
-import '../../cr_elements/cr_icons_css.m.js';
+import '../../cr_elements/cr_button/cr_button.js';
+import '../../cr_elements/cr_icon_button/cr_icon_button.js';
+import '../../cr_elements/cr_icons.css.js';
 import '../../cr_elements/cr_grid/cr_grid.js';
-import '../../cr_elements/shared_vars_css.m.js';
-import '../../cr_elements/shared_style_css.m.js';
+import '../../cr_elements/cr_shared_vars.css.js';
+import '../../cr_elements/cr_shared_style.css.js';
 import './theme_icon.js';
 import '//resources/polymer/v3_0/paper-tooltip/paper-tooltip.js';
 
 import {SkColor} from 'chrome://resources/mojo/skia/public/mojom/skcolor.mojom-webui.js';
 import {DomRepeat} from 'chrome://resources/polymer/v3_0/polymer/lib/elements/dom-repeat.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {assert} from '../../js/assert.m.js';
+import {assert} from '../../js/assert.js';
 import {hexColorToSkColor, skColorToRgba} from '../../js/color_utils.js';
-import {I18nMixin} from '../../js/i18n_mixin.js';
+import {I18nMixin} from '../../cr_elements/i18n_mixin.js';
 
 import {CustomizeThemesBrowserProxyImpl} from './browser_proxy.js';
+import {getTemplate} from './customize_themes.html.js';
 import {ChromeTheme, CustomizeThemesClientCallbackRouter, CustomizeThemesHandlerInterface, Theme, ThemeType} from './customize_themes.mojom-webui.js';
 import {ThemeIconElement} from './theme_icon.js';
 
@@ -42,6 +43,10 @@ const CustomizeThemesElementBase = I18nMixin(PolymerElement);
 export class CustomizeThemesElement extends CustomizeThemesElementBase {
   static get is() {
     return 'cr-customize-themes';
+  }
+
+  static get template() {
+    return getTemplate();
   }
 
   static get properties() {
@@ -71,13 +76,13 @@ export class CustomizeThemesElement extends CustomizeThemesElementBase {
       showManagedThemeDialog_: {
         type: Boolean,
         value: false,
-      }
+      },
     };
   }
 
   selectedTheme: Theme|null;
   autoConfirmThemeChanges: boolean;
-  private chromeThemes_: Array<ChromeTheme>;
+  private chromeThemes_: ChromeTheme[];
   private showManagedThemeDialog_: boolean;
 
   private handler_: CustomizeThemesHandlerInterface =
@@ -127,6 +132,7 @@ export class CustomizeThemesElement extends CustomizeThemesElementBase {
       this.showManagedThemeDialog_ = true;
       return;
     }
+    this.$.colorPicker.focus();
     this.$.colorPicker.click();
   }
 
@@ -229,10 +235,6 @@ export class CustomizeThemesElement extends CustomizeThemesElementBase {
 
   private onManagedDialogClosed_() {
     this.showManagedThemeDialog_ = false;
-  }
-
-  static get template() {
-    return html`{__html_template__}`;
   }
 }
 

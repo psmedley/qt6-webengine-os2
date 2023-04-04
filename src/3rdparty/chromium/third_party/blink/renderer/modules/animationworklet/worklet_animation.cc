@@ -1,9 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/animationworklet/worklet_animation.h"
 
+#include "cc/animation/animation_timeline.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
@@ -24,7 +25,6 @@
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/modules/animationworklet/css_animation_worklet.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -38,7 +38,7 @@ bool ConvertAnimationEffects(
     HeapVector<Member<KeyframeEffect>>& keyframe_effects,
     String& error_string) {
   DCHECK(effects);
-  DCHECK(keyframe_effects.IsEmpty());
+  DCHECK(keyframe_effects.empty());
 
   // Currently we only support KeyframeEffect.
   switch (effects->GetContentType()) {
@@ -71,7 +71,7 @@ bool ConvertAnimationEffects(
     }
   }
 
-  if (keyframe_effects.IsEmpty()) {
+  if (keyframe_effects.empty()) {
     error_string = "Effects array must be non-empty";
     return false;
   }
@@ -416,7 +416,8 @@ void WorkletAnimation::cancel() {
   // update the value in the next frame.
   if (IsActive(play_state_)) {
     for (auto& effect : effects_) {
-      effect->UpdateInheritedTime(absl::nullopt, absl::nullopt, false,
+      effect->UpdateInheritedTime(absl::nullopt,
+                                  /* at_scroll_timeline_boundary */ false,
                                   playback_rate_, kTimingUpdateOnDemand);
     }
   }
@@ -503,7 +504,7 @@ void WorkletAnimation::Update(TimingUpdateReason reason) {
         local_times_[i]
             ? absl::make_optional(AnimationTimeDelta(local_times_[i].value()))
             : absl::nullopt,
-        absl::nullopt, false, playback_rate_, reason);
+        /* at_scroll_timeline_boundary */ false, playback_rate_, reason);
   }
 }
 
@@ -550,7 +551,7 @@ void WorkletAnimation::UpdateCompositingState() {
 #if DCHECK_IS_ON()
     String warning_message;
     DCHECK(CheckCanStart(&warning_message));
-    DCHECK(warning_message.IsEmpty());
+    DCHECK(warning_message.empty());
 #endif  // DCHECK_IS_ON()
     if (StartOnCompositor())
       return;
@@ -656,13 +657,16 @@ bool WorkletAnimation::StartOnCompositor() {
 
   // Register ourselves on the compositor timeline. This will cause our cc-side
   // animation animation to be registered.
-  CompositorAnimationTimeline* compositor_timeline =
+  cc::AnimationTimeline* compositor_timeline =
       timeline_ ? timeline_->EnsureCompositorTimeline() : nullptr;
   if (compositor_timeline) {
-    compositor_timeline->AnimationAttached(*this);
+    if (GetCompositorAnimation()) {
+      compositor_timeline->AttachAnimation(
+          GetCompositorAnimation()->CcAnimation());
+    }
     // Note that while we attach here but we don't detach because the
     // |compositor_timeline| is detached in its destructor.
-    if (compositor_timeline->GetAnimationTimeline()->IsScrollTimeline())
+    if (compositor_timeline->IsScrollTimeline())
       document_->AttachCompositorTimeline(compositor_timeline);
   }
 
@@ -709,10 +713,12 @@ void WorkletAnimation::DestroyCompositorAnimation() {
   if (compositor_animation_ && compositor_animation_->IsElementAttached())
     compositor_animation_->DetachElement();
 
-  CompositorAnimationTimeline* compositor_timeline =
+  cc::AnimationTimeline* compositor_timeline =
       timeline_ ? timeline_->CompositorTimeline() : nullptr;
-  if (compositor_timeline)
-    compositor_timeline->AnimationDestroyed(*this);
+  if (compositor_timeline && GetCompositorAnimation()) {
+    compositor_timeline->DetachAnimation(
+        GetCompositorAnimation()->CcAnimation());
+  }
 
   if (compositor_animation_) {
     compositor_animation_->SetAnimationDelegate(nullptr);

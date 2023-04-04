@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "base/time/default_tick_clock.h"
+#include "media/cast/common/encoded_frame.h"
 #include "media/cast/constants.h"
 #include "media/cast/net/cast_transport.h"
 #include "media/cast/test/utility/default_config.h"
@@ -18,6 +19,8 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using Dependency = openscreen::cast::EncodedFrame::Dependency;
 
 namespace mirroring {
 
@@ -91,7 +94,7 @@ class FakeTransport final : public media::cast::CastTransport {
       const media::cast::ReceiverRtcpEventSubscriber::RtcpEvents& e) override {}
   void AddRtpReceiverReport(const media::cast::RtcpReportBlock& b) override {}
   void SendRtcpFromRtpReceiver() override {}
-  void SetOptions(const base::DictionaryValue& options) override {}
+  void SetOptions(const base::Value::Dict& options) override {}
 
  private:
   std::vector<media::cast::EncodedFrame> sent_frames_;
@@ -140,7 +143,8 @@ class RemotingSenderTest : public ::testing::Test {
 
     // Give CastRemotingSender a small RTT measurement to prevent kickstart
     // testing from taking too long.
-    remoting_sender_->OnMeasuredRoundTripTime(base::Milliseconds(1));
+    remoting_sender_->frame_sender_->OnMeasuredRoundTripTime(
+        base::Milliseconds(1));
     RunPendingTasks();
   }
 
@@ -157,11 +161,11 @@ class RemotingSenderTest : public ::testing::Test {
 
  protected:
   media::cast::FrameId latest_acked_frame_id() const {
-    return remoting_sender_->latest_acked_frame_id_;
+    return remoting_sender_->frame_sender_->LatestAckedFrameId();
   }
 
   int NumberOfFramesInFlight() {
-    return remoting_sender_->GetUnacknowledgedFrameCount();
+    return remoting_sender_->frame_sender_->GetUnacknowledgedFrameCount();
   }
 
   size_t GetSizeOfNextFrameData() {
@@ -202,7 +206,7 @@ class RemotingSenderTest : public ::testing::Test {
   void AckUpToAndIncluding(media::cast::FrameId frame_id) {
     media::cast::RtcpCastMessage cast_feedback(receiver_ssrc_);
     cast_feedback.ack_frame_id = frame_id;
-    remoting_sender_->OnReceivedCastFeedback(cast_feedback);
+    remoting_sender_->frame_sender_->OnReceivedCastFeedback(cast_feedback);
   }
 
   void AckOldestInFlightFrames(int count) {
@@ -410,9 +414,9 @@ TEST_F(RemotingSenderTest, CancelsFramesInFlight) {
     const media::cast::EncodedFrame& frame = frames[i];
     EXPECT_EQ(media::cast::FrameId::first() + i, frame.frame_id);
     if (i == 0 || i == 10)
-      EXPECT_EQ(media::cast::EncodedFrame::KEY, frame.dependency);
+      EXPECT_EQ(Dependency::kKeyFrame, frame.dependency);
     else
-      EXPECT_EQ(media::cast::EncodedFrame::DEPENDENT, frame.dependency);
+      EXPECT_EQ(Dependency::kDependent, frame.dependency);
   }
 }
 
@@ -585,10 +589,10 @@ TEST_F(RemotingSenderTest, StopsConsumingWhileTooManyFramesAreInFlight) {
     const media::cast::EncodedFrame& frame = frames[i];
     EXPECT_EQ(media::cast::FrameId::first() + i, frame.frame_id);
     if (i == 0) {
-      EXPECT_EQ(media::cast::EncodedFrame::KEY, frame.dependency);
+      EXPECT_EQ(Dependency::kKeyFrame, frame.dependency);
       EXPECT_EQ(media::cast::FrameId::first() + i, frame.referenced_frame_id);
     } else {
-      EXPECT_EQ(media::cast::EncodedFrame::DEPENDENT, frame.dependency);
+      EXPECT_EQ(Dependency::kDependent, frame.dependency);
       EXPECT_EQ(media::cast::FrameId::first() + i - 1,
                 frame.referenced_frame_id);
     }

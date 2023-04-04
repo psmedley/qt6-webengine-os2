@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,10 @@
 #include "components/autofill_assistant/android/jni_headers/AssistantModel_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantOverlayModel_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantPlaceholdersConfiguration_jni.h"
+#include "components/autofill_assistant/android/jni_headers/AssistantQrCodeUtil_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AutofillAssistantUiController_jni.h"
 #include "components/autofill_assistant/browser/android/client_android.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/android/generic_ui_root_controller_android.h"
 #include "components/autofill_assistant/browser/android/ui_controller_android_utils.h"
 #include "components/autofill_assistant/browser/bottom_sheet_state.h"
@@ -41,7 +42,7 @@
 #include "components/autofill_assistant/browser/event_handler.h"
 #include "components/autofill_assistant/browser/features.h"
 #include "components/autofill_assistant/browser/metrics.h"
-#include "components/autofill_assistant/browser/rectf.h"
+#include "components/autofill_assistant/browser/public/rectf.h"
 #include "components/autofill_assistant/browser/user_data.h"
 #include "components/autofill_assistant/browser/user_data_util.h"
 #include "components/autofill_assistant/browser/user_model.h"
@@ -69,6 +70,7 @@ using ::base::android::ToJavaByteArray;
 namespace autofill_assistant {
 
 namespace {
+
 std::vector<float> ToFloatVector(const std::vector<RectF>& areas) {
   std::vector<float> flattened;
   for (const auto& rect : areas) {
@@ -90,7 +92,8 @@ ScopedJavaLocalRef<jobject> CreateOptionalJavaInfoPopup(
   if (login_choice.info_popup.has_value()) {
     jinfo_popup = CreateJavaInfoPopup(
         env, *login_choice.info_popup, jinfo_page_util,
-        GetDisplayStringUTF8(ClientSettingsProto::CLOSE, client_settings));
+        GetDisplayStringUTF8(ClientSettingsProto::CLOSE, client_settings),
+        /* jdelegate= */ nullptr);
   }
   return jinfo_popup;
 }
@@ -201,6 +204,80 @@ absl::optional<bool> GetPreviousFormSelectionResult(
   return input_result.selection().selected(selection_index);
 }
 
+/*
+ * Sets the QR Code delegate object and the UI strings for java side
+ * AssistantQrCodeImagePickerModelWrapper. It then triggers java util function
+ * to prompt QR Code Scanning via Image Picker.
+ */
+void PromptQrCodeImagePicker(
+    JNIEnv* env,
+    base::android::ScopedJavaGlobalRef<jobject>
+        java_ui_controller_android_object,
+    const PromptQrCodeScanProto_ImagePickerUiStrings* image_picker_ui_strings,
+    const AssistantQrCodeImagePickerModelWrapper&
+        qr_code_image_picker_model_wrapper,
+    base::android::ScopedJavaGlobalRef<jobject> java_qr_code_native_delegate) {
+  // Register delegate for the QR Code Image Picker UI
+  qr_code_image_picker_model_wrapper.SetDelegate(java_qr_code_native_delegate);
+
+  // Set UI strings in model
+  qr_code_image_picker_model_wrapper.SetToolbarTitle(
+      image_picker_ui_strings->title_text());
+  qr_code_image_picker_model_wrapper.SetPermissionText(
+      image_picker_ui_strings->permission_text());
+  qr_code_image_picker_model_wrapper.SetPermissionButtonText(
+      image_picker_ui_strings->permission_button_text());
+  qr_code_image_picker_model_wrapper.SetOpenSettingsText(
+      image_picker_ui_strings->open_settings_text());
+  qr_code_image_picker_model_wrapper.SetOpenSettingsButtonText(
+      image_picker_ui_strings->open_settings_button_text());
+
+  Java_AssistantQrCodeUtil_promptQrCodeImagePicker(
+      env,
+      Java_AutofillAssistantUiController_getDependencies(
+          env, java_ui_controller_android_object),
+      qr_code_image_picker_model_wrapper.GetModel());
+}
+
+/*
+ * Sets the QR Code delegate object and the UI strings for java side
+ * AssistantQrCodeCameraScanModelWrapper. It then triggers java util function
+ * to prompt QR Code Scanning via Camera Preview.
+ */
+void PromptQrCodeCameraScan(
+    JNIEnv* env,
+    base::android::ScopedJavaGlobalRef<jobject>
+        java_ui_controller_android_object,
+    const PromptQrCodeScanProto_CameraScanUiStrings* camera_scan_ui_strings,
+    const AssistantQrCodeCameraScanModelWrapper&
+        qr_code_camera_scan_model_wrapper,
+    base::android::ScopedJavaGlobalRef<jobject> java_qr_code_native_delegate) {
+  // Register delegate for the QR Code Camera Scan UI
+  qr_code_camera_scan_model_wrapper.SetDelegate(java_qr_code_native_delegate);
+
+  // Set UI strings in model
+  qr_code_camera_scan_model_wrapper.SetToolbarTitle(
+      camera_scan_ui_strings->title_text());
+  qr_code_camera_scan_model_wrapper.SetPermissionText(
+      camera_scan_ui_strings->permission_text());
+  qr_code_camera_scan_model_wrapper.SetPermissionButtonText(
+      camera_scan_ui_strings->permission_button_text());
+  qr_code_camera_scan_model_wrapper.SetOpenSettingsText(
+      camera_scan_ui_strings->open_settings_text());
+  qr_code_camera_scan_model_wrapper.SetOpenSettingsButtonText(
+      camera_scan_ui_strings->open_settings_button_text());
+  qr_code_camera_scan_model_wrapper.SetCameraPreviewInstructionText(
+      camera_scan_ui_strings->camera_preview_instruction_text());
+  qr_code_camera_scan_model_wrapper.SetCameraPreviewSecurityText(
+      camera_scan_ui_strings->camera_preview_security_text());
+
+  Java_AssistantQrCodeUtil_promptQrCodeCameraScan(
+      env,
+      Java_AutofillAssistantUiController_getDependencies(
+          env, java_ui_controller_android_object),
+      qr_code_camera_scan_model_wrapper.GetModel());
+}
+
 // Analog to
 // PersonalDataManagerAndroid::GetShippingAddressLabelForPaymentRequest.
 base::android::ScopedJavaLocalRef<jstring> GetShippingAddressLabel(
@@ -246,17 +323,18 @@ std::unique_ptr<UiControllerAndroid> UiControllerAndroid::CreateFromWebContents(
     const base::android::JavaRef<jobject>& jdependencies,
     const base::android::JavaRef<jobject>& joverlay_coordinator) {
   JNIEnv* env = AttachCurrentThread();
-  if (!Java_AutofillAssistantUiController_shouldCreateNewInstance(
+  if (!Java_AutofillAssistantUiController_canAttachUi(
           env, web_contents->GetJavaWebContents(), jdependencies)) {
     return nullptr;
   }
 
-  return std::make_unique<UiControllerAndroid>(env, jdependencies,
+  return std::make_unique<UiControllerAndroid>(env, web_contents, jdependencies,
                                                joverlay_coordinator);
 }
 
 UiControllerAndroid::UiControllerAndroid(
     JNIEnv* env,
+    content::WebContents* web_contents,
     const base::android::JavaRef<jobject>& jdependencies,
     const base::android::JavaRef<jobject>& joverlay_coordinator)
     : overlay_delegate_(this),
@@ -265,9 +343,11 @@ UiControllerAndroid::UiControllerAndroid(
       form_delegate_(this),
       generic_ui_delegate_(this),
       bottom_bar_delegate_(this),
-      dependencies_(Dependencies::CreateFromJavaDependencies(jdependencies)) {
+      dependencies_(
+          DependenciesAndroid::CreateFromJavaDependencies(jdependencies)) {
   java_object_ = Java_AutofillAssistantUiController_Constructor(
-      env, reinterpret_cast<intptr_t>(this), jdependencies,
+      env, reinterpret_cast<intptr_t>(this), web_contents->GetJavaWebContents(),
+      jdependencies,
       /* allowTabSwitching= */
       base::FeatureList::IsEnabled(features::kAutofillAssistantChromeEntry),
       joverlay_coordinator);
@@ -281,8 +361,8 @@ UiControllerAndroid::UiControllerAndroid(
   // Register header_delegate_ as delegate for clicks on header buttons.
   header_model_->SetDelegate(header_delegate_);
 
-  // Register collect_user_data_delegate_ as delegate for the collect user data
-  // UI.
+  // Register collect_user_data_delegate_ as delegate for the collect user
+  // data UI.
   Java_AssistantCollectUserDataModel_setDelegate(
       env, GetCollectUserDataModel(),
       collect_user_data_delegate_.GetJavaObject());
@@ -315,12 +395,11 @@ void UiControllerAndroid::Attach(content::WebContents* web_contents,
 
   JNIEnv* env = AttachCurrentThread();
   auto java_web_contents = web_contents->GetJavaWebContents();
-  Java_AutofillAssistantUiController_setWebContents(env, java_object_,
-                                                    java_web_contents);
   Java_AssistantCollectUserDataModel_setWebContents(
       env, GetCollectUserDataModel(), java_web_contents);
   Java_AssistantOverlayModel_setWebContents(env, GetOverlayModel(),
                                             java_web_contents);
+
   OnClientSettingsChanged(execution_delegate_->GetClientSettings());
   Java_AssistantModel_setPeekModeDisabled(env, GetModel(), false);
 
@@ -380,6 +459,10 @@ void UiControllerAndroid::SetupForState() {
 
   UpdateActions(ui_delegate_->GetUserActions());
   AutofillAssistantState state = execution_delegate_->GetState();
+  Java_AssistantModel_setHandleBackPress(
+      AttachCurrentThread(), GetModel(),
+      state != AutofillAssistantState::BROWSE);
+
   bool should_prompt_action_expand_sheet =
       ui_delegate_->ShouldPromptActionExpandSheet();
   switch (state) {
@@ -532,6 +615,12 @@ void UiControllerAndroid::OnHeaderFeedbackButtonClicked() {
       /* screenshotMode */ 0);
 }
 
+void UiControllerAndroid::OnQrCodeScanFinished(
+    const ClientStatus& status,
+    const absl::optional<ValueProto>& value) {
+  ui_delegate_->OnQrCodeScanFinished(status, value);
+}
+
 void UiControllerAndroid::OnViewEvent(const EventHandler::EventKey& key) {
   ui_delegate_->DispatchEvent(key);
 }
@@ -642,11 +731,14 @@ void UiControllerAndroid::RestoreUi() {
   OnDetailsChanged(ui_delegate_->GetDetails());
   OnUserActionsChanged(ui_delegate_->GetUserActions());
   OnCollectUserDataOptionsChanged(ui_delegate_->GetCollectUserDataOptions());
+  OnCollectUserDataUiStateChanged(/* loading= */ false,
+                                  UserDataEventField::NONE);
   OnUserDataChanged(*execution_delegate_->GetUserData(),
                     UserDataFieldChange::ALL);
   OnPersistentGenericUserInterfaceChanged(
       ui_delegate_->GetPersistentGenericUiProto());
   OnGenericUserInterfaceChanged(ui_delegate_->GetGenericUiProto());
+  OnQrCodeScanUiChanged(ui_delegate_->GetPromptQrCodeScanProto());
 
   std::vector<RectF> area;
   execution_delegate_->GetTouchableArea(&area);
@@ -803,13 +895,13 @@ void UiControllerAndroid::UpdateActions(
       jcancel_chip = Java_AutofillAssistantUiController_createCloseButton(
           env, java_object_, ICON_CLEAR, ConvertUTF8ToJavaString(env, ""),
           /* disabled= */ false, /* sticky= */ true, /* visible=*/true,
-          /* content_description= */ nullptr);
+          /* contentDescription= */ nullptr);
     } else if (execution_delegate_->GetState() !=
                AutofillAssistantState::INACTIVE) {
       jcancel_chip = Java_AutofillAssistantUiController_createCancelButton(
           env, java_object_, ICON_CLEAR, ConvertUTF8ToJavaString(env, ""), -1,
           /* disabled= */ false, /* sticky= */ true, /* visible=*/true,
-          /* content_description= */ nullptr);
+          /* contentDescription= */ nullptr);
     }
     if (jcancel_chip) {
       Java_AutofillAssistantUiController_appendChipToList(env, jchips,
@@ -1177,8 +1269,8 @@ void UiControllerAndroid::OnCollectUserDataOptionsChanged(
 
   Java_AssistantCollectUserDataModel_setShouldStoreUserDataChanges(
       env, jmodel, collect_user_data_options->should_store_data_changes);
-  Java_AssistantCollectUserDataModel_setUseGmsCoreEditDialogs(
-      env, jmodel, collect_user_data_options->use_gms_core_edit_dialogs);
+  Java_AssistantCollectUserDataModel_setUseAlternativeEditDialogs(
+      env, jmodel, collect_user_data_options->use_alternative_edit_dialogs);
   Java_AssistantCollectUserDataModel_setRequestName(
       env, jmodel, collect_user_data_options->request_payer_name);
   Java_AssistantCollectUserDataModel_setRequestEmail(
@@ -1238,24 +1330,12 @@ void UiControllerAndroid::OnCollectUserDataOptionsChanged(
       base::android::ToJavaArrayOfStrings(
           env, collect_user_data_options->supported_basic_card_networks));
   if (collect_user_data_options->data_origin_notice) {
-    Java_AssistantCollectUserDataModel_setDataOriginLinkText(
-        env, jmodel,
-        ConvertUTF8ToJavaString(
-            env, collect_user_data_options->data_origin_notice->link_text()));
-    Java_AssistantCollectUserDataModel_setDataOriginDialogTitle(
-        env, jmodel,
-        ConvertUTF8ToJavaString(
-            env,
-            collect_user_data_options->data_origin_notice->dialog_title()));
-    Java_AssistantCollectUserDataModel_setDataOriginDialogText(
-        env, jmodel,
-        ConvertUTF8ToJavaString(
-            env, collect_user_data_options->data_origin_notice->dialog_text()));
-    Java_AssistantCollectUserDataModel_setDataOriginDialogButtonText(
-        env, jmodel,
-        ConvertUTF8ToJavaString(env,
-                                collect_user_data_options->data_origin_notice
-                                    ->dialog_button_text()));
+    const auto& configuration = *collect_user_data_options->data_origin_notice;
+    Java_AssistantCollectUserDataModel_setDataOriginNoticeConfiguration(
+        env, jmodel, ConvertUTF8ToJavaString(env, configuration.link_text()),
+        ConvertUTF8ToJavaString(env, configuration.dialog_title()),
+        ConvertUTF8ToJavaString(env, configuration.dialog_text()),
+        ConvertUTF8ToJavaString(env, configuration.dialog_button_text()));
   }
   if (collect_user_data_options->request_login_choice) {
     auto jlist = CreateJavaLoginChoiceList(
@@ -1323,6 +1403,27 @@ void UiControllerAndroid::OnCollectUserDataOptionsChanged(
   Java_AssistantCollectUserDataModel_setVisible(env, jmodel, true);
 }
 
+void UiControllerAndroid::OnCollectUserDataUiStateChanged(
+    bool loading,
+    UserDataEventField event_field) {
+  JNIEnv* env = AttachCurrentThread();
+  auto jmodel = GetCollectUserDataModel();
+
+  Java_AssistantCollectUserDataModel_setEnableUiInteractions(env, jmodel,
+                                                             !loading);
+  Java_AssistantCollectUserDataModel_setMarkContactsLoading(
+      env, jmodel, loading && event_field == UserDataEventField::CONTACT_EVENT);
+  Java_AssistantCollectUserDataModel_setMarkPhoneNumbersLoading(
+      env, jmodel,
+      loading && event_field == UserDataEventField::PHONE_NUMBER_EVENT);
+  Java_AssistantCollectUserDataModel_setMarkShippingAddressesLoading(
+      env, jmodel,
+      loading && event_field == UserDataEventField::SHIPPING_EVENT);
+  Java_AssistantCollectUserDataModel_setMarkPaymentMethodsLoading(
+      env, jmodel,
+      loading && event_field == UserDataEventField::CREDIT_CARD_EVENT);
+}
+
 void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
                                             UserDataFieldChange field_change) {
   DCHECK(execution_delegate_ != nullptr);
@@ -1362,7 +1463,7 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
               env, *user_data.available_contacts_[index]->profile,
               base::android::GetDefaultLocaleString()),
           base::android::ToJavaArrayOfStrings(env, errors),
-          collect_user_data_options->can_edit_contacts);
+          user_data.available_contacts_[index]->can_edit);
     }
     Java_AssistantCollectUserDataModel_setAvailableContacts(env, jmodel,
                                                             jcontactlist);
@@ -1409,7 +1510,7 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
       const auto& errors = user_data::GetShippingAddressValidationErrors(
           shipping_address->profile.get(), *collect_user_data_options);
       auto jedit_token =
-          collect_user_data_options->use_gms_core_edit_dialogs
+          collect_user_data_options->use_alternative_edit_dialogs
               ? ToJavaByteArray(
                     env, shipping_address->edit_token.value_or(std::string()))
               : nullptr;
@@ -1443,13 +1544,26 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
     const auto& selected_contact_errors = user_data::GetContactValidationErrors(
         selected_contact_profile, *collect_user_data_options);
 
+    bool can_edit = true;
+    if (selected_contact_profile) {
+      const auto& contact_it = base::ranges::find_if(
+          user_data.available_contacts_,
+          [&](const std::unique_ptr<Contact>& contact) {
+            return contact->profile &&
+                   contact->profile->guid() == selected_contact_profile->guid();
+          });
+      if (contact_it != user_data.available_contacts_.end()) {
+        can_edit = (*contact_it)->can_edit;
+      }
+    }
+
     // In the UserDataFieldChange::CONTACT_PROFILE case the selection is
     // already known in Java, but it has no errors. The PDM off case does not
     // set updated contacts.
     Java_AssistantCollectUserDataModel_setSelectedContactDetails(
         env, jmodel, jselected_contact,
         base::android::ToJavaArrayOfStrings(env, selected_contact_errors),
-        collect_user_data_options->can_edit_contacts);
+        can_edit);
   }
 
   if (field_change == UserDataFieldChange::ALL ||
@@ -1467,13 +1581,26 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
         user_data::GetPhoneNumberValidationErrors(selected_phone_number,
                                                   *collect_user_data_options);
 
+    bool can_edit = true;
+    if (selected_phone_number) {
+      const auto& phone_number_it = base::ranges::find_if(
+          user_data.available_phone_numbers_,
+          [&](const std::unique_ptr<PhoneNumber>& phone_number) {
+            return phone_number->profile && phone_number->profile->guid() ==
+                                                selected_phone_number->guid();
+          });
+      if (phone_number_it != user_data.available_phone_numbers_.end()) {
+        can_edit = (*phone_number_it)->can_edit;
+      }
+    }
+
     // In the UserDataFieldChange::PHONE_NUMBER case the selection is already
     // known in Java, but it has no errors. The PDM off case does not set
     // updated phone numbers.
     Java_AssistantCollectUserDataModel_setSelectedPhoneNumber(
         env, jmodel, jselected_phone_number,
         base::android::ToJavaArrayOfStrings(env, selected_phone_number_errors),
-        /* canEdit = */ false);
+        can_edit);
   }
 
   if (field_change == UserDataFieldChange::ALL ||
@@ -1492,7 +1619,7 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
         user_data::GetShippingAddressValidationErrors(
             selected_shipping_address, *collect_user_data_options);
     auto jselected_shipping_address_edit_token =
-        collect_user_data_options->use_gms_core_edit_dialogs
+        collect_user_data_options->use_alternative_edit_dialogs
             ? ToJavaByteArray(env, std::string())
             : nullptr;
     if (selected_shipping_address) {
@@ -1545,7 +1672,7 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
           instrument->card.get(), instrument->billing_address.get(),
           *collect_user_data_options);
       auto jedit_token =
-          collect_user_data_options->use_gms_core_edit_dialogs
+          collect_user_data_options->use_alternative_edit_dialogs
               ? ToJavaByteArray(env,
                                 instrument->edit_token.value_or(std::string()))
               : nullptr;
@@ -1588,7 +1715,7 @@ void UiControllerAndroid::OnUserDataChanged(const UserData& user_data,
             selected_card, selected_billing_address,
             *collect_user_data_options);
     auto jselected_payment_instrument_edit_token =
-        collect_user_data_options->use_gms_core_edit_dialogs
+        collect_user_data_options->use_alternative_edit_dialogs
             ? ToJavaByteArray(env, std::string())
             : nullptr;
     if (selected_card) {
@@ -1743,7 +1870,8 @@ void UiControllerAndroid::OnFormChanged(const FormProto* form,
         ui_controller_android_utils::CreateJavaInfoPopup(
             env, form->info_popup(), GetInfoPageUtil(),
             GetDisplayStringUTF8(ClientSettingsProto::CLOSE,
-                                 execution_delegate_->GetClientSettings())));
+                                 execution_delegate_->GetClientSettings()),
+            nullptr));
   } else {
     Java_AssistantFormModel_clearInfoPopup(env, GetFormModel());
   }
@@ -1802,6 +1930,43 @@ void UiControllerAndroid::OnClientSettingsChanged(
   OnClientSettingsDisplayStringsChanged(settings);
 }
 
+void UiControllerAndroid::OnQrCodeScanUiChanged(
+    const PromptQrCodeScanProto* qr_code_scan) {
+  if (!qr_code_scan) {
+    // Action is completed and we will clear all the models and delegate
+    // objects. For any new action, we will create it again.
+    qr_code_native_delegate_ = nullptr;
+    qr_code_camera_scan_model_wrapper_ = nullptr;
+    qr_code_image_picker_model_wrapper_ = nullptr;
+    return;
+  }
+
+  JNIEnv* env = AttachCurrentThread();
+  qr_code_native_delegate_ =
+      std::make_unique<AssistantQrCodeNativeDelegate>(this);
+
+  base::android::ScopedJavaGlobalRef<jobject> java_qr_code_native_delegate =
+      qr_code_native_delegate_->GetJavaObject();
+
+  if (qr_code_scan->use_gallery()) {
+    // Create a model to manage state of QR Code Scanning via Image Picker.
+    qr_code_image_picker_model_wrapper_ =
+        std::make_unique<AssistantQrCodeImagePickerModelWrapper>();
+
+    PromptQrCodeImagePicker(
+        env, java_object_, &qr_code_scan->image_picker_ui_strings(),
+        *qr_code_image_picker_model_wrapper_, java_qr_code_native_delegate);
+  } else {
+    // Create a model to manage state of QR Code Scanning via Camera Preview.
+    qr_code_camera_scan_model_wrapper_ =
+        std::make_unique<AssistantQrCodeCameraScanModelWrapper>();
+
+    PromptQrCodeCameraScan(
+        env, java_object_, &qr_code_scan->camera_scan_ui_strings(),
+        *qr_code_camera_scan_model_wrapper_, java_qr_code_native_delegate);
+  }
+}
+
 void UiControllerAndroid::OnGenericUserInterfaceChanged(
     const GenericUserInterfaceProto* generic_ui) {
   // Try to inflate user interface from proto.
@@ -1819,6 +1984,15 @@ void UiControllerAndroid::OnGenericUserInterfaceChanged(
       AttachCurrentThread(), GetGenericUiModel(),
       generic_ui_controller_ != nullptr ? generic_ui_controller_->GetRootView()
                                         : nullptr);
+}
+
+void UiControllerAndroid::OnShowAccountScreen(
+    const ShowAccountScreenProto& proto,
+    const std::string& email_address) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_AutofillAssistantUiController_showGmsAccountScreenIntent(
+      env, java_object_, proto.gms_account_intent_screen_id(),
+      base::android::ConvertUTF8ToJavaString(env, email_address));
 }
 
 void UiControllerAndroid::OnPersistentGenericUserInterfaceChanged(
@@ -1933,9 +2107,38 @@ void UiControllerAndroid::OnInfoBoxChanged(const InfoBox* info_box) {
   }
 
   const InfoBoxProto& proto = info_box->proto().info_box();
+  auto jcontext =
+      Java_AutofillAssistantUiController_getContext(env, java_object_);
+  absl::optional<DrawableProto> drawable_proto;
+  bool use_instrinsic_dimensions = false;
+  switch (proto.image_case()) {
+    case InfoBoxProto::ImageCase::kImagePath: {
+      if (!proto.image_path().empty()) {
+        drawable_proto.emplace();
+        auto* bitmap_proto = drawable_proto->mutable_bitmap();
+        bitmap_proto->set_url(proto.image_path());
+        bitmap_proto->set_use_instrinsic_dimensions(true);
+        use_instrinsic_dimensions = true;
+      }
+      break;
+    }
+    case InfoBoxProto::ImageCase::kDrawable: {
+      drawable_proto = proto.drawable();
+      break;
+    }
+    case InfoBoxProto::ImageCase::IMAGE_NOT_SET: {
+      break;
+    }
+  }
+  base::android::ScopedJavaLocalRef<jobject> jdrawable = nullptr;
+  if (drawable_proto.has_value()) {
+    jdrawable = ui_controller_android_utils::CreateJavaDrawable(
+        env, jcontext, *dependencies_, *drawable_proto,
+        execution_delegate_->GetUserModel());
+  }
   auto jinfo_box = Java_AssistantInfoBox_create(
-      env, ConvertUTF8ToJavaString(env, proto.image_path()),
-      ConvertUTF8ToJavaString(env, proto.explanation()));
+      env, jdrawable, ConvertUTF8ToJavaString(env, proto.explanation()),
+      use_instrinsic_dimensions);
   Java_AssistantInfoBoxModel_setInfoBox(env, jmodel, jinfo_box);
 }
 
@@ -1983,15 +2186,6 @@ UiControllerAndroid::CreateGenericUiControllerForProto(
       ui_delegate_->GetEventHandler(), execution_delegate_->GetUserModel(),
       ui_delegate_->GetBasicInteractions());
 }
-
-void UiControllerAndroid::OnError(const std::string& error_message,
-                                  Metrics::DropOutReason reason) {}
-void UiControllerAndroid::OnExecuteScript(const std::string& start_message) {}
-void UiControllerAndroid::OnStart(const TriggerContext& trigger_context) {}
-void UiControllerAndroid::OnStop() {}
-void UiControllerAndroid::OnResetState() {}
-void UiControllerAndroid::OnUiShownChanged(bool shown) {}
-void UiControllerAndroid::OnShutdown(Metrics::DropOutReason reason) {}
 
 base::android::ScopedJavaLocalRef<jobject>
 UiControllerAndroid::GetGenericUiModel() {

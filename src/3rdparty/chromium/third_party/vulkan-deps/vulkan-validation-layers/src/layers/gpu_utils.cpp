@@ -19,6 +19,7 @@
 
 #include "gpu_utils.h"
 #include "descriptor_sets.h"
+#include "sync_utils.h"
 #include "spirv-tools/libspirv.h"
 #include "spirv-tools/optimizer.hpp"
 #include "spirv-tools/instrument.hpp"
@@ -26,14 +27,23 @@
 #include <algorithm>
 #include <regex>
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4189)
+#endif
+
 #define VMA_IMPLEMENTATION
 // This define indicates that we will supply Vulkan function pointers at initialization
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #include "vk_mem_alloc.h"
 
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 // Implementation for Descriptor Set Manager class
-UtilDescriptorSetManager::UtilDescriptorSetManager(VkDevice device, uint32_t numBindingsInSet)
-    : device(device), numBindingsInSet(numBindingsInSet) {}
+UtilDescriptorSetManager::UtilDescriptorSetManager(VkDevice device, uint32_t num_bindings_in_set)
+    : device(device), num_bindings_in_set(num_bindings_in_set) {}
 
 UtilDescriptorSetManager::~UtilDescriptorSetManager() {
     for (auto &pool : desc_pool_map_) {
@@ -80,7 +90,7 @@ VkResult UtilDescriptorSetManager::GetDescriptorSets(uint32_t count, VkDescripto
         }
         const VkDescriptorPoolSize size_counts = {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            pool_count * numBindingsInSet,
+            pool_count * num_bindings_in_set,
         };
         auto desc_pool_info = LvlInitStruct<VkDescriptorPoolCreateInfo>();
         desc_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -129,6 +139,12 @@ void UtilDescriptorSetManager::PutBackDescriptorSet(VkDescriptorPool desc_pool, 
 }
 
 // Trampolines to make VMA call Dispatch for Vulkan calls
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL gpuVkGetInstanceProcAddr(VkInstance inst, const char *name) {
+    return DispatchGetInstanceProcAddr(inst, name);
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL gpuVkGetDeviceProcAddr(VkDevice dev, const char *name) {
+    return DispatchGetDeviceProcAddr(dev, name);
+}
 static VKAPI_ATTR void VKAPI_CALL gpuVkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
                                                                    VkPhysicalDeviceProperties *pProperties) {
     DispatchGetPhysicalDeviceProperties(physicalDevice, pProperties);
@@ -192,12 +208,15 @@ static VKAPI_ATTR void VKAPI_CALL gpuVkCmdCopyBuffer(VkCommandBuffer commandBuff
     DispatchCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, regionCount, pRegions);
 }
 
-VkResult UtilInitializeVma(VkPhysicalDevice physical_device, VkDevice device, VmaAllocator *pAllocator) {
+VkResult UtilInitializeVma(VkInstance instance, VkPhysicalDevice physical_device, VkDevice device, VmaAllocator *pAllocator) {
     VmaVulkanFunctions functions;
     VmaAllocatorCreateInfo allocator_info = {};
+    allocator_info.instance = instance;
     allocator_info.device = device;
     allocator_info.physicalDevice = physical_device;
 
+    functions.vkGetInstanceProcAddr = static_cast<PFN_vkGetInstanceProcAddr>(gpuVkGetInstanceProcAddr);
+    functions.vkGetDeviceProcAddr = static_cast<PFN_vkGetDeviceProcAddr>(gpuVkGetDeviceProcAddr);
     functions.vkGetPhysicalDeviceProperties = static_cast<PFN_vkGetPhysicalDeviceProperties>(gpuVkGetPhysicalDeviceProperties);
     functions.vkGetPhysicalDeviceMemoryProperties =
         static_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(gpuVkGetPhysicalDeviceMemoryProperties);
@@ -219,6 +238,26 @@ VkResult UtilInitializeVma(VkPhysicalDevice physical_device, VkDevice device, Vm
     allocator_info.pVulkanFunctions = &functions;
 
     return vmaCreateAllocator(&allocator_info, pAllocator);
+}
+
+gpu_utils_state::CommandBuffer::CommandBuffer(GpuAssistedBase *ga, VkCommandBuffer cb,
+                                              const VkCommandBufferAllocateInfo *pCreateInfo, const COMMAND_POOL_STATE *pool)
+    : CMD_BUFFER_STATE(ga, cb, pCreateInfo, pool) {}
+
+ReadLockGuard GpuAssistedBase::ReadLock() {
+    if (fine_grained_locking) {
+        return ReadLockGuard(validation_object_mutex, std::defer_lock);
+    } else {
+        return ReadLockGuard(validation_object_mutex);
+    }
+}
+
+WriteLockGuard GpuAssistedBase::WriteLock() {
+    if (fine_grained_locking) {
+        return WriteLockGuard(validation_object_mutex, std::defer_lock);
+    } else {
+        return WriteLockGuard(validation_object_mutex);
+    }
 }
 
 void GpuAssistedBase::PreCallRecordCreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo *pCreateInfo,
@@ -284,7 +323,7 @@ void GpuAssistedBase::CreateDevice(const VkDeviceCreateInfo *pCreateInfo) {
     }
     desc_set_bind_index = adjusted_max_desc_sets - 1;
 
-    VkResult result1 = UtilInitializeVma(physical_device, device, &vmaAllocator);
+    VkResult result1 = UtilInitializeVma(instance, physical_device, device, &vmaAllocator);
     assert(result1 == VK_SUCCESS);
     desc_set_manager = layer_data::make_unique<UtilDescriptorSetManager>(device, static_cast<uint32_t>(bindings_.size()));
 
@@ -332,8 +371,8 @@ void GpuAssistedBase::PreCallRecordDestroyDevice(VkDevice device, const VkAlloca
     desc_set_manager.reset();
 }
 
-gpu_utils_state::Queue::Queue(GpuAssistedBase &state, VkQueue q, uint32_t index, VkDeviceQueueCreateFlags flags)
-    : QUEUE_STATE(q, index, flags), state_(state) {}
+gpu_utils_state::Queue::Queue(GpuAssistedBase &state, VkQueue q, uint32_t index, VkDeviceQueueCreateFlags flags, const VkQueueFamilyProperties &queueFamilyProperties)
+    : QUEUE_STATE(state, q, index, flags, queueFamilyProperties), state_(state) {}
 
 gpu_utils_state::Queue::~Queue() {
     if (barrier_command_buffer_) {
@@ -394,6 +433,32 @@ void gpu_utils_state::Queue::SubmitBarrier() {
         submit_info.commandBufferCount = 1;
         submit_info.pCommandBuffers = &barrier_command_buffer_;
         DispatchQueueSubmit(QUEUE_STATE::Queue(), 1, &submit_info, VK_NULL_HANDLE);
+    }
+}
+
+bool GpuAssistedBase::CommandBufferNeedsProcessing(VkCommandBuffer command_buffer) const {
+    auto cb_node = GetRead<gpu_utils_state::CommandBuffer>(command_buffer);
+    if (cb_node->NeedsProcessing()) {
+        return true;
+    }
+    for (const auto *secondary_cb : cb_node->linkedCommandBuffers) {
+        auto secondary_cb_node = static_cast<const gpu_utils_state::CommandBuffer *>(secondary_cb);
+        auto guard = secondary_cb_node->ReadLock();
+        if (secondary_cb_node->NeedsProcessing()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void GpuAssistedBase::ProcessCommandBuffer(VkQueue queue, VkCommandBuffer command_buffer) {
+    auto cb_node = GetWrite<gpu_utils_state::CommandBuffer>(command_buffer);
+
+    cb_node->Process(queue);
+    for (auto *secondary_cmd_base : cb_node->linkedCommandBuffers) {
+        auto *secondary_cb_node = static_cast<gpu_utils_state::CommandBuffer *>(secondary_cmd_base);
+        auto guard = secondary_cb_node->WriteLock();
+        secondary_cb_node->Process(queue);
     }
 }
 
@@ -464,6 +529,58 @@ void GpuAssistedBase::PostCallRecordQueueSubmit2(VkQueue queue, uint32_t submitC
     RecordQueueSubmit2(queue, submitCount, pSubmits, fence, result);
 }
 
+// Just gives a warning about a possible deadlock.
+bool GpuAssistedBase::ValidateCmdWaitEvents(VkCommandBuffer command_buffer, VkPipelineStageFlags2 src_stage_mask,
+                                            CMD_TYPE cmd_type) const {
+    if (src_stage_mask & VK_PIPELINE_STAGE_2_HOST_BIT) {
+        std::ostringstream error_msg;
+        error_msg << CommandTypeString(cmd_type)
+                  << ": recorded with VK_PIPELINE_STAGE_HOST_BIT set. GPU-Assisted validation waits on queue completion. This wait "
+                     "could block the host's signaling of this event, resulting in deadlock.";
+        ReportSetupProblem(command_buffer, error_msg.str().c_str());
+    }
+    return false;
+}
+
+bool GpuAssistedBase::PreCallValidateCmdWaitEvents(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent *pEvents,
+                                                   VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask,
+                                                   uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
+                                                   uint32_t bufferMemoryBarrierCount,
+                                                   const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+                                                   uint32_t imageMemoryBarrierCount,
+                                                   const VkImageMemoryBarrier *pImageMemoryBarriers) const {
+    ValidationStateTracker::PreCallValidateCmdWaitEvents(commandBuffer, eventCount, pEvents, srcStageMask, dstStageMask,
+                                                         memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount,
+                                                         pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers);
+    return ValidateCmdWaitEvents(commandBuffer, static_cast<VkPipelineStageFlags2>(srcStageMask), CMD_WAITEVENTS);
+}
+
+bool GpuAssistedBase::PreCallValidateCmdWaitEvents2KHR(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent *pEvents,
+                                                       const VkDependencyInfoKHR *pDependencyInfos) const {
+    VkPipelineStageFlags2 src_stage_mask = 0;
+
+    for (uint32_t i = 0; i < eventCount; i++) {
+        auto stage_masks = sync_utils::GetGlobalStageMasks(pDependencyInfos[i]);
+        src_stage_mask |= stage_masks.src;
+    }
+
+    ValidationStateTracker::PreCallValidateCmdWaitEvents2KHR(commandBuffer, eventCount, pEvents, pDependencyInfos);
+    return ValidateCmdWaitEvents(commandBuffer, src_stage_mask, CMD_WAITEVENTS2KHR);
+}
+
+bool GpuAssistedBase::PreCallValidateCmdWaitEvents2(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent *pEvents,
+                                                    const VkDependencyInfo *pDependencyInfos) const {
+    VkPipelineStageFlags2 src_stage_mask = 0;
+
+    for (uint32_t i = 0; i < eventCount; i++) {
+        auto stage_masks = sync_utils::GetGlobalStageMasks(pDependencyInfos[i]);
+        src_stage_mask |= stage_masks.src;
+    }
+
+    ValidationStateTracker::PreCallValidateCmdWaitEvents2(commandBuffer, eventCount, pEvents, pDependencyInfos);
+    return ValidateCmdWaitEvents(commandBuffer, src_stage_mask, CMD_WAITEVENTS2);
+}
+
 void GpuAssistedBase::PreCallRecordCreatePipelineLayout(VkDevice device, const VkPipelineLayoutCreateInfo *pCreateInfo,
                                                         const VkAllocationCallbacks *pAllocator, VkPipelineLayout *pPipelineLayout,
                                                         void *cpl_state_data) {
@@ -515,8 +632,8 @@ void GpuAssistedBase::PreCallRecordCreateGraphicsPipelines(VkDevice device, VkPi
     create_graphics_pipeline_api_state *cgpl_state = reinterpret_cast<create_graphics_pipeline_api_state *>(cgpl_state_data);
     PreCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, cgpl_state->pipe_state, &new_pipeline_create_infos,
                                    VK_PIPELINE_BIND_POINT_GRAPHICS);
-    cgpl_state->printf_create_infos = new_pipeline_create_infos;
-    cgpl_state->pCreateInfos = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(cgpl_state->printf_create_infos.data());
+    cgpl_state->modified_create_infos = new_pipeline_create_infos;
+    cgpl_state->pCreateInfos = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(cgpl_state->modified_create_infos.data());
 }
 
 void GpuAssistedBase::PreCallRecordCreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache, uint32_t count,
@@ -528,8 +645,8 @@ void GpuAssistedBase::PreCallRecordCreateComputePipelines(VkDevice device, VkPip
     auto *ccpl_state = reinterpret_cast<create_compute_pipeline_api_state *>(ccpl_state_data);
     PreCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, ccpl_state->pipe_state, &new_pipeline_create_infos,
                                    VK_PIPELINE_BIND_POINT_COMPUTE);
-    ccpl_state->printf_create_infos = new_pipeline_create_infos;
-    ccpl_state->pCreateInfos = reinterpret_cast<VkComputePipelineCreateInfo *>(ccpl_state->printf_create_infos.data());
+    ccpl_state->modified_create_infos = new_pipeline_create_infos;
+    ccpl_state->pCreateInfos = reinterpret_cast<VkComputePipelineCreateInfo *>(ccpl_state->modified_create_infos.data());
 }
 
 void GpuAssistedBase::PreCallRecordCreateRayTracingPipelinesNV(VkDevice device, VkPipelineCache pipelineCache, uint32_t count,
@@ -541,8 +658,8 @@ void GpuAssistedBase::PreCallRecordCreateRayTracingPipelinesNV(VkDevice device, 
     auto *crtpl_state = reinterpret_cast<create_ray_tracing_pipeline_api_state *>(crtpl_state_data);
     PreCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, crtpl_state->pipe_state, &new_pipeline_create_infos,
                                    VK_PIPELINE_BIND_POINT_RAY_TRACING_NV);
-    crtpl_state->printf_create_infos = new_pipeline_create_infos;
-    crtpl_state->pCreateInfos = reinterpret_cast<VkRayTracingPipelineCreateInfoNV *>(crtpl_state->printf_create_infos.data());
+    crtpl_state->modified_create_infos = new_pipeline_create_infos;
+    crtpl_state->pCreateInfos = reinterpret_cast<VkRayTracingPipelineCreateInfoNV *>(crtpl_state->modified_create_infos.data());
 }
 
 void GpuAssistedBase::PreCallRecordCreateRayTracingPipelinesKHR(VkDevice device, VkDeferredOperationKHR deferredOperation,
@@ -555,8 +672,8 @@ void GpuAssistedBase::PreCallRecordCreateRayTracingPipelinesKHR(VkDevice device,
     auto *crtpl_state = reinterpret_cast<create_ray_tracing_pipeline_khr_api_state *>(crtpl_state_data);
     PreCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, crtpl_state->pipe_state, &new_pipeline_create_infos,
                                    VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
-    crtpl_state->printf_create_infos = new_pipeline_create_infos;
-    crtpl_state->pCreateInfos = reinterpret_cast<VkRayTracingPipelineCreateInfoKHR *>(crtpl_state->printf_create_infos.data());
+    crtpl_state->modified_create_infos = new_pipeline_create_infos;
+    crtpl_state->pCreateInfos = reinterpret_cast<VkRayTracingPipelineCreateInfoKHR *>(crtpl_state->modified_create_infos.data());
 }
 
 template <typename CreateInfos, typename SafeCreateInfos>
@@ -581,8 +698,9 @@ void GpuAssistedBase::PostCallRecordCreateGraphicsPipelines(VkDevice device, VkP
                                                                   pPipelines, result, cgpl_state_data);
     if (aborted) return;
     create_graphics_pipeline_api_state *cgpl_state = reinterpret_cast<create_graphics_pipeline_api_state *>(cgpl_state_data);
-    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, cgpl_state->printf_create_infos.data());
-    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_GRAPHICS);
+    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, cgpl_state->modified_create_infos.data());
+    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    cgpl_state->modified_create_infos.data());
 }
 
 void GpuAssistedBase::PostCallRecordCreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache, uint32_t count,
@@ -593,8 +711,9 @@ void GpuAssistedBase::PostCallRecordCreateComputePipelines(VkDevice device, VkPi
                                                                  result, ccpl_state_data);
     if (aborted) return;
     create_compute_pipeline_api_state *ccpl_state = reinterpret_cast<create_compute_pipeline_api_state *>(ccpl_state_data);
-    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, ccpl_state->printf_create_infos.data());
-    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_COMPUTE);
+    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, ccpl_state->modified_create_infos.data());
+    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                    ccpl_state->modified_create_infos.data());
 }
 
 void GpuAssistedBase::PostCallRecordCreateRayTracingPipelinesNV(VkDevice device, VkPipelineCache pipelineCache, uint32_t count,
@@ -605,8 +724,9 @@ void GpuAssistedBase::PostCallRecordCreateRayTracingPipelinesNV(VkDevice device,
     ValidationStateTracker::PostCallRecordCreateRayTracingPipelinesNV(device, pipelineCache, count, pCreateInfos, pAllocator,
                                                                       pPipelines, result, crtpl_state_data);
     if (aborted) return;
-    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, crtpl_state->printf_create_infos.data());
-    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_RAY_TRACING_NV);
+    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, crtpl_state->modified_create_infos.data());
+    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
+                                    crtpl_state->modified_create_infos.data());
 }
 
 void GpuAssistedBase::PostCallRecordCreateRayTracingPipelinesKHR(VkDevice device, VkDeferredOperationKHR deferredOperation,
@@ -618,18 +738,16 @@ void GpuAssistedBase::PostCallRecordCreateRayTracingPipelinesKHR(VkDevice device
     ValidationStateTracker::PostCallRecordCreateRayTracingPipelinesKHR(
         device, deferredOperation, pipelineCache, count, pCreateInfos, pAllocator, pPipelines, result, crtpl_state_data);
     if (aborted) return;
-    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, crtpl_state->printf_create_infos.data());
-    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+    UtilCopyCreatePipelineFeedbackData(count, pCreateInfos, crtpl_state->modified_create_infos.data());
+    PostCallRecordPipelineCreations(count, pCreateInfos, pAllocator, pPipelines, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                                    crtpl_state->modified_create_infos.data());
 }
 
 // Remove all the shader trackers associated with this destroyed pipeline.
 void GpuAssistedBase::PreCallRecordDestroyPipeline(VkDevice device, VkPipeline pipeline, const VkAllocationCallbacks *pAllocator) {
-    for (auto it = shader_map.begin(); it != shader_map.end();) {
-        if (it->second.pipeline == pipeline) {
-            it = shader_map.erase(it);
-        } else {
-            ++it;
-        }
+    auto to_erase = shader_map.snapshot([pipeline](const GpuAssistedShaderTracker &entry) { return entry.pipeline == pipeline; });
+    for (const auto &entry : to_erase) {
+        shader_map.erase(entry.first);
     }
     ValidationStateTracker::PreCallRecordDestroyPipeline(device, pipeline, pAllocator);
 }
@@ -639,9 +757,6 @@ struct CreatePipelineTraits {};
 template <>
 struct CreatePipelineTraits<VkGraphicsPipelineCreateInfo> {
     using SafeType = safe_VkGraphicsPipelineCreateInfo;
-    static const SafeType &GetPipelineCI(const PIPELINE_STATE *pipeline_state) {
-        return pipeline_state->GetUnifiedCreateInfo().graphics;
-    }
     static uint32_t GetStageCount(const VkGraphicsPipelineCreateInfo &createInfo) { return createInfo.stageCount; }
     static VkShaderModule GetShaderModule(const VkGraphicsPipelineCreateInfo &createInfo, uint32_t stage) {
         return createInfo.pStages[stage].module;
@@ -654,9 +769,6 @@ struct CreatePipelineTraits<VkGraphicsPipelineCreateInfo> {
 template <>
 struct CreatePipelineTraits<VkComputePipelineCreateInfo> {
     using SafeType = safe_VkComputePipelineCreateInfo;
-    static const SafeType &GetPipelineCI(const PIPELINE_STATE *pipeline_state) {
-        return pipeline_state->GetUnifiedCreateInfo().compute;
-    }
     static uint32_t GetStageCount(const VkComputePipelineCreateInfo &createInfo) { return 1; }
     static VkShaderModule GetShaderModule(const VkComputePipelineCreateInfo &createInfo, uint32_t stage) {
         return createInfo.stage.module;
@@ -670,9 +782,6 @@ struct CreatePipelineTraits<VkComputePipelineCreateInfo> {
 template <>
 struct CreatePipelineTraits<VkRayTracingPipelineCreateInfoNV> {
     using SafeType = safe_VkRayTracingPipelineCreateInfoCommon;
-    static const SafeType &GetPipelineCI(const PIPELINE_STATE *pipeline_state) {
-        return pipeline_state->GetUnifiedCreateInfo().raytracing;
-    }
     static uint32_t GetStageCount(const VkRayTracingPipelineCreateInfoNV &createInfo) { return createInfo.stageCount; }
     static VkShaderModule GetShaderModule(const VkRayTracingPipelineCreateInfoNV &createInfo, uint32_t stage) {
         return createInfo.pStages[stage].module;
@@ -685,9 +794,6 @@ struct CreatePipelineTraits<VkRayTracingPipelineCreateInfoNV> {
 template <>
 struct CreatePipelineTraits<VkRayTracingPipelineCreateInfoKHR> {
     using SafeType = safe_VkRayTracingPipelineCreateInfoCommon;
-    static const SafeType &GetPipelineCI(const PIPELINE_STATE *pipeline_state) {
-        return pipeline_state->GetUnifiedCreateInfo().raytracing;
-    }
     static uint32_t GetStageCount(const VkRayTracingPipelineCreateInfoKHR &createInfo) { return createInfo.stageCount; }
     static VkShaderModule GetShaderModule(const VkRayTracingPipelineCreateInfoKHR &createInfo, uint32_t stage) {
         return createInfo.pStages[stage].module;
@@ -708,7 +814,7 @@ void GpuAssistedBase::PreCallRecordPipelineCreations(uint32_t count, const Creat
                                                      const VkPipelineBindPoint bind_point) {
     using Accessor = CreatePipelineTraits<CreateInfo>;
     if (bind_point != VK_PIPELINE_BIND_POINT_GRAPHICS && bind_point != VK_PIPELINE_BIND_POINT_COMPUTE &&
-        bind_point != VK_PIPELINE_BIND_POINT_RAY_TRACING_NV) {
+        bind_point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
         return;
     }
 
@@ -716,8 +822,8 @@ void GpuAssistedBase::PreCallRecordPipelineCreations(uint32_t count, const Creat
     // descriptor set index.
     for (uint32_t pipeline = 0; pipeline < count; ++pipeline) {
         uint32_t stageCount = Accessor::GetStageCount(pCreateInfos[pipeline]);
-        new_pipeline_create_infos->push_back(Accessor::GetPipelineCI(pipe_state[pipeline].get()));
         const auto &pipe = pipe_state[pipeline];
+        new_pipeline_create_infos->push_back(pipe->GetCreateInfo<CreateInfo>());
 
         if (!pipe->IsGraphicsLibrary()) {
             bool replace_shaders = false;
@@ -733,7 +839,7 @@ void GpuAssistedBase::PreCallRecordPipelineCreations(uint32_t count, const Creat
 
             if (replace_shaders) {
                 for (uint32_t stage = 0; stage < stageCount; ++stage) {
-                    const auto module_state = Get<SHADER_MODULE_STATE>(Accessor::GetShaderModule(pCreateInfos[pipeline], stage));
+                    const auto module_state = Get<SHADER_MODULE_STATE>(pipe->GetShaderModuleByCIIndex<CreateInfo>(stage));
 
                     VkShaderModule shader_module;
                     auto create_info = LvlInitStruct<VkShaderModuleCreateInfo>();
@@ -758,13 +864,12 @@ void GpuAssistedBase::PreCallRecordPipelineCreations(uint32_t count, const Creat
 //     - Destroy it since it has been bound into the pipeline by now.  This is our only chance to delete it.
 //   - Track the shader in the shader_map
 //   - Save the shader binary if it contains debug code
-template <typename CreateInfo>
+template <typename CreateInfo, typename SafeCreateInfo>
 void GpuAssistedBase::PostCallRecordPipelineCreations(const uint32_t count, const CreateInfo *pCreateInfos,
                                                       const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines,
-                                                      const VkPipelineBindPoint bind_point) {
-    using Accessor = CreatePipelineTraits<CreateInfo>;
+                                                      const VkPipelineBindPoint bind_point, const SafeCreateInfo &modified_create_infos) {
     if (bind_point != VK_PIPELINE_BIND_POINT_GRAPHICS && bind_point != VK_PIPELINE_BIND_POINT_COMPUTE &&
-        bind_point != VK_PIPELINE_BIND_POINT_RAY_TRACING_NV) {
+        bind_point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
         return;
     }
     for (uint32_t pipeline = 0; pipeline < count; ++pipeline) {
@@ -774,21 +879,18 @@ void GpuAssistedBase::PostCallRecordPipelineCreations(const uint32_t count, cons
         const uint32_t stageCount = static_cast<uint32_t>(pipeline_state->stage_state.size());
         assert(stageCount > 0);
 
+        const auto pipeline_layout = pipeline_state->PipelineLayoutState();
         for (uint32_t stage = 0; stage < stageCount; ++stage) {
-            if (pipeline_state->active_slots.find(desc_set_bind_index) != pipeline_state->active_slots.end()) {
-                DispatchDestroyShaderModule(device, Accessor::GetShaderModule(pCreateInfos[pipeline], stage), pAllocator);
-            }
+            assert((bind_point != VK_PIPELINE_BIND_POINT_COMPUTE) || (stage == 0));
+            auto shader_module = pipeline_state->GetShaderModuleByCIIndex<CreateInfo>(stage);
+            auto module_state = Get<SHADER_MODULE_STATE>(shader_module);
 
-            std::shared_ptr<const SHADER_MODULE_STATE> module_state;
-            if (bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-                module_state = Get<SHADER_MODULE_STATE>(pipeline_state->GetUnifiedCreateInfo().graphics.pStages[stage].module);
-            } else if (bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
-                assert(stage == 0);
-                module_state = Get<SHADER_MODULE_STATE>(pipeline_state->GetUnifiedCreateInfo().compute.stage.module);
-            } else if (bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_NV) {
-                module_state = Get<SHADER_MODULE_STATE>(pipeline_state->GetUnifiedCreateInfo().raytracing.pStages[stage].module);
-            } else {
-                assert(false);
+            if (pipeline_state->active_slots.find(desc_set_bind_index) != pipeline_state->active_slots.end() ||
+                (pipeline_layout->set_layouts.size() >= adjusted_max_desc_sets)) {
+                auto *modified_ci = reinterpret_cast<const CreateInfo *>(modified_create_infos[pipeline].ptr());
+                auto uninstrumented_module = CreatePipelineTraits<CreateInfo>::GetShaderModule(*modified_ci, stage);
+                assert(uninstrumented_module != shader_module);
+                DispatchDestroyShaderModule(device, uninstrumented_module, pAllocator);
             }
 
             std::vector<unsigned int> code;
@@ -798,21 +900,8 @@ void GpuAssistedBase::PostCallRecordPipelineCreations(const uint32_t count, cons
             // the pipeline is used, so we have to keep another copy.
             if (module_state && module_state->has_valid_spirv) code = module_state->words;
 
-            // Be careful to use the originally bound (instrumented) shader here, even if PreCallRecord had to back it
-            // out with a non-instrumented shader.  The non-instrumented shader (found in pCreateInfo) was destroyed above.
-            VkShaderModule shader_module = VK_NULL_HANDLE;
-            if (bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-                shader_module = pipeline_state->GetUnifiedCreateInfo().graphics.pStages[stage].module;
-            } else if (bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
-                assert(stage == 0);
-                shader_module = pipeline_state->GetUnifiedCreateInfo().compute.stage.module;
-            } else if (bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_NV) {
-                shader_module = pipeline_state->GetUnifiedCreateInfo().raytracing.pStages[stage].module;
-            } else {
-                assert(false);
-            }
-            shader_map.emplace(module_state->gpu_validation_shader_id, GpuAssistedShaderTracker{pipeline_state->pipeline(), shader_module,
-                                std::move(code)});
+            shader_map.insert_or_assign(module_state->gpu_validation_shader_id, pipeline_state->pipeline(), shader_module,
+                                        std::move(code));
         }
     }
 }
@@ -913,8 +1002,8 @@ void UtilGenerateCommonMessage(const debug_report_data *report_data, const VkCom
         if (pipeline_bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
             strm << "Draw ";
         } else if (pipeline_bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
-            strm << "Compute ";
-        } else if (pipeline_bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_NV) {
+            strm << "Compute Dispatch ";
+        } else if (pipeline_bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
             strm << "Ray Trace ";
         } else {
             assert(false);

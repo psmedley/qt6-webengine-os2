@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,6 +60,7 @@ class CORE_EXPORT PageAnimator final : public GarbageCollected<PageAnimator> {
   void SetHasSmilAnimation();
   void SetCurrentFrameHadRaf();
   void SetNextFrameHasPendingRaf();
+  void SetHasSharedElementTransition(bool);
   void ReportFrameAnimations(cc::AnimationHost* animation_host);
 
  private:
@@ -79,6 +80,8 @@ class CORE_EXPORT PageAnimator final : public GarbageCollected<PageAnimator> {
   bool current_frame_had_raf_ = false;
   // True if there is a raf scheduled for the next frame.
   bool next_frame_has_pending_raf_ = false;
+  // True if there is an ongoing shared element transition.
+  bool has_shared_element_transition_ = false;
 };
 
 }  // namespace blink

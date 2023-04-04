@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,8 @@ VROrientationDeviceProvider::~VROrientationDeviceProvider() = default;
 
 void VROrientationDeviceProvider::Initialize(VRDeviceProviderClient* client) {
   if (device_ && device_->IsAvailable()) {
-    client->AddRuntime(device_->GetId(), device_->GetVRDisplayInfo(),
-                       device_->GetDeviceData(), device_->BindXRRuntime());
+    client->AddRuntime(device_->GetId(), device_->GetDeviceData(),
+                       device_->BindXRRuntime());
     return;
   }
 
@@ -47,8 +47,8 @@ void VROrientationDeviceProvider::DeviceInitialized() {
 
   // If the device successfully connected to the orientation APIs, provide it.
   if (device_->IsAvailable()) {
-    client_->AddRuntime(device_->GetId(), device_->GetVRDisplayInfo(),
-                        device_->GetDeviceData(), device_->BindXRRuntime());
+    client_->AddRuntime(device_->GetId(), device_->GetDeviceData(),
+                        device_->BindXRRuntime());
   }
 
   initialized_ = true;

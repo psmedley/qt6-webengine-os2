@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CONTENT_SERVICES_SHARED_STORAGE_WORKLET_CONSOLE_H_
 
 #include "base/memory/raw_ptr.h"
-#include "content/services/shared_storage_worklet/public/mojom/shared_storage_worklet_service.mojom.h"
+#include "content/common/shared_storage_worklet_service.mojom.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
 

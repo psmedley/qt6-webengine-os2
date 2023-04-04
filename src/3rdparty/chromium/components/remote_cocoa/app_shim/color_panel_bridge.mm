@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -137,15 +137,18 @@ ColorPanelBridge::~ColorPanelBridge() {
     g_current_panel_bridge = nullptr;
 }
 
-void ColorPanelBridge::Show(uint32_t initial_color) {
+void ColorPanelBridge::Show(uint32_t initial_color, ShowCallback callback) {
   ColorPanelListener* listener = [ColorPanelListener instance];
   [listener setColor:skia::SkColorToDeviceNSColor(initial_color)];
   [listener showColorPanel];
+  std::move(callback).Run();
 }
 
-void ColorPanelBridge::SetSelectedColor(uint32_t color) {
+void ColorPanelBridge::SetSelectedColor(uint32_t color,
+                                        SetSelectedColorCallback callback) {
   ColorPanelListener* listener = [ColorPanelListener instance];
   [listener setColor:skia::SkColorToDeviceNSColor(color)];
+  std::move(callback).Run();
 }
 
 }  // namespace remote_cocoa

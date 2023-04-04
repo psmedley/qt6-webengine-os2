@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,7 +92,7 @@ class VirtualAuthenticator : public blink::test::mojom::VirtualAuthenticator {
   //
   // There is an N:1 relationship between VirtualFidoDevices and this class, so
   // this method can be called any number of times.
-  std::unique_ptr<device::FidoDevice> ConstructDevice();
+  std::unique_ptr<device::VirtualFidoDevice> ConstructDevice();
 
   // blink::test::mojom::VirtualAuthenticator:
   void GetLargeBlob(const std::vector<uint8_t>& key_handle,
@@ -118,11 +118,12 @@ class VirtualAuthenticator : public blink::test::mojom::VirtualAuthenticator {
  private:
   void OnLargeBlobUncompressed(
       GetLargeBlobCallback callback,
-      data_decoder::DataDecoder::ResultOrError<mojo_base::BigBuffer> result);
+      base::expected<mojo_base::BigBuffer, std::string> result);
   void OnLargeBlobCompressed(
       base::span<const uint8_t> key_handle,
+      uint64_t original_size,
       SetLargeBlobCallback callback,
-      data_decoder::DataDecoder::ResultOrError<mojo_base::BigBuffer> result);
+      base::expected<mojo_base::BigBuffer, std::string> result);
 
   const device::ProtocolVersion protocol_;
   const device::Ctap2Version ctap2_version_;

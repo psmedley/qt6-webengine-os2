@@ -72,7 +72,7 @@ Here are some examples for a 2D array/matrix \c A and a 1D array/vector \c v.
 </tr>
 <tr>
   <td>%Block starting at \c i,j having \c m rows, and \c n columns</td>
-  <td>\code A(seqN(i,m), seqN(i,n) \endcode</td>
+  <td>\code A(seqN(i,m), seqN(i,n)) \endcode</td>
   <td>\code A.block(i,j,m,n) \endcode</td>
 </tr>
 <tr>
@@ -130,12 +130,12 @@ Here comes \link Eigen::placeholders::lastN(SizeType) Eigen::placeholders::lastN
 </tr>
 <tr>
   <td>Bottom-right corner of A of size \c m times \c n</td>
-  <td>\code v(lastN(m), lastN(n)) \endcode</td>
+  <td>\code A(lastN(m), lastN(n)) \endcode</td>
   <td>\code A.bottomRightCorner(m,n) \endcode</td>
 </tr>
 <tr>
   <td>Bottom-right corner of A of size \c m times \c n</td>
-  <td>\code v(lastN(m), lastN(n)) \endcode</td>
+  <td>\code A(lastN(m), lastN(n)) \endcode</td>
   <td>\code A.bottomRightCorner(m,n) \endcode</td>
 </tr>
 <tr>

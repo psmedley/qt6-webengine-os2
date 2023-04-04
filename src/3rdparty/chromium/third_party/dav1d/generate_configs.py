@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Creates config files for building dav1d."""
@@ -194,6 +194,7 @@ def main():
 
     GenerateConfig('config/linux/x64', linux_env)
     GenerateConfig('config/linux-noasm/x64', linux_env, ['-Denable_asm=false'])
+    GenerateConfig('config/linux-noasm/generic', linux_env, ['-Denable_asm=false'])
 
     GenerateConfig('config/linux/x86', linux_env,
                    ['--cross-file', '../crossfiles/linux32.crossfile'])
@@ -201,6 +202,8 @@ def main():
                    ['--cross-file', '../crossfiles/arm.crossfile'])
     GenerateConfig('config/linux/arm64', linux_env,
                    ['--cross-file', '../crossfiles/arm64.crossfile'])
+
+    GenerateConfig('config/linux/ppc64', linux_env)
 
     win_x86_env = SetupWindowsCrossCompileToolchain('x86')
     GenerateConfig('config/win/x86', win_x86_env,

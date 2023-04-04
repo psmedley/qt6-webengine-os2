@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -24,21 +24,20 @@
     ],
     "files": [
       "android_webview/java/strings/android_webview_strings.grd",
-      "android_webview/ui/aw_strings.grd",
       "ash/ash_strings.grd",
       "ash/shortcut_viewer/shortcut_viewer_strings.grd",
       "ash/webui/camera_app_ui/resources/strings/camera_strings.grd",
       "chrome/android/features/vr/java/strings/android_chrome_vr_strings.grd",
       "chrome/android/features/keyboard_accessory/internal/java/strings/android_keyboard_accessory_strings.grd",
-      "chrome/android/features/start_surface/internal/java/strings/android_chrome_start_surface_strings.grd",
       "chrome/android/features/tab_ui/java/strings/android_chrome_tab_ui_strings.grd",
       "chrome/android/webapk/strings/android_webapk_strings.grd",
       "chrome/app/chromium_strings.grd",
       "chrome/app/generated_resources.grd",
       "chrome/app/google_chrome_strings.grd",
+      "chrome/browser/password_check/android/internal/java/strings/android_password_check_strings.grd",
       "chrome/browser/resources/chromeos/accessibility/strings/accessibility_strings.grd",
       "chrome/browser/touch_to_fill/android/internal/java/strings/android_touch_to_fill_strings.grd",
-      "chrome/browser/password_check/android/internal/java/strings/android_password_check_strings.grd",
+      "chrome/browser/ui/android/fast_checkout/internal/java/strings/android_fast_checkout_strings.grd",
       "chrome/browser/ui/android/strings/android_chrome_strings.grd",
       "chrome/credential_provider/gaiacp/gaia_resources.grd",
       "chromeos/chromeos_strings.grd",
@@ -122,7 +121,6 @@
     "chrome/test/data/chrome_test_resources.grd": "Test data",
     "chromecast/app/resources/chromecast_settings.grd": "Not UI strings; localized separately",
     "components/components_locale_settings.grd": "Not UI strings; localized separately",
-    "components/omnibox/resources/omnibox_resources.grd": "Not UI strings; localized separately",
     "tools/grit/grit/testdata/allowlist_resources.grd": "Test data",
     "tools/grit/grit/testdata/allowlist_strings.grd": "Test data",
     "tools/grit/grit/testdata/buildinfo.grd": "Test data",
@@ -136,6 +134,7 @@
     "ui/base/test/ui_base_test_resources.grd": "Test data",
     "ui/strings/app_locale_settings.grd": "Not UI strings; localized separately",
     "ui/views/examples/views_examples_resources.grd": "Test data",
+    "ui/webui/examples/resources/webui_examples_resources.grd": "Test data",
   },
   # Internal grds that contain parts not available publicly and thus should
   # not be checked by translation script.

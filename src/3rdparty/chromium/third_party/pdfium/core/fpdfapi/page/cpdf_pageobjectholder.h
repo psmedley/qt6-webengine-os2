@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_transparency.h"
@@ -56,9 +57,9 @@ class CPDF_PageObjectHolder {
       std::deque<std::unique_ptr<CPDF_PageObject>>::const_iterator;
 
   CPDF_PageObjectHolder(CPDF_Document* pDoc,
-                        CPDF_Dictionary* pDict,
-                        CPDF_Dictionary* pPageResources,
-                        CPDF_Dictionary* pResources);
+                        RetainPtr<CPDF_Dictionary> pDict,
+                        RetainPtr<CPDF_Dictionary> pPageResources,
+                        RetainPtr<CPDF_Dictionary> pResources);
   virtual ~CPDF_PageObjectHolder();
 
   virtual bool IsPage() const;
@@ -68,10 +69,19 @@ class CPDF_PageObjectHolder {
   ParseState GetParseState() const { return m_ParseState; }
 
   CPDF_Document* GetDocument() const { return m_pDocument.Get(); }
-  CPDF_Dictionary* GetDict() const { return m_pDict.Get(); }
-  CPDF_Dictionary* GetResources() const { return m_pResources.Get(); }
-  void SetResources(CPDF_Dictionary* pDict) { m_pResources.Reset(pDict); }
-  CPDF_Dictionary* GetPageResources() const { return m_pPageResources.Get(); }
+  RetainPtr<const CPDF_Dictionary> GetDict() const { return m_pDict; }
+  RetainPtr<CPDF_Dictionary> GetMutableDict() { return m_pDict; }
+  RetainPtr<const CPDF_Dictionary> GetResources() const { return m_pResources; }
+  RetainPtr<CPDF_Dictionary> GetMutableResources() { return m_pResources; }
+  void SetResources(RetainPtr<CPDF_Dictionary> pDict) {
+    m_pResources = std::move(pDict);
+  }
+  RetainPtr<const CPDF_Dictionary> GetPageResources() const {
+    return m_pPageResources;
+  }
+  RetainPtr<CPDF_Dictionary> GetMutablePageResources() {
+    return m_pPageResources;
+  }
   size_t GetPageObjectCount() const { return m_PageObjectList.size(); }
   CPDF_PageObject* GetPageObjectByIndex(size_t index) const;
   void AppendPageObject(std::unique_ptr<CPDF_PageObject> pPageObj);

@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -164,7 +164,7 @@ void ServiceDiscardableManager::InsertLockedTexture(
   }
 
   total_size_ += texture_size;
-  entries_.Put({texture_id, texture_manager},
+  entries_.Put(GpuDiscardableEntryKey{texture_id, texture_manager},
                GpuDiscardableEntry{handle, texture_size});
   EnforceCacheSizeLimit(cache_size_limit_);
 }

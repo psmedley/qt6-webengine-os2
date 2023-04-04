@@ -6,12 +6,9 @@
 #include "src/common/message-template.h"
 #include "src/execution/arguments-inl.h"
 #include "src/heap/factory.h"
-#include "src/heap/heap-inl.h"
-#include "src/logging/counters.h"
 #include "src/objects/elements.h"
 #include "src/objects/js-array-buffer-inl.h"
 #include "src/objects/objects-inl.h"
-#include "src/runtime/runtime-utils.h"
 #include "src/runtime/runtime.h"
 
 namespace v8 {
@@ -93,7 +90,7 @@ RUNTIME_FUNCTION(Runtime_TypedArraySortFast) {
   DCHECK(!array->IsOutOfBounds());
 
 #if MULTI_MAPPED_ALLOCATOR_AVAILABLE
-  if (FLAG_multi_mapped_mock_allocator) {
+  if (v8_flags.multi_mapped_mock_allocator) {
     // Sorting is meaningless with the mock allocator, and std::sort
     // might crash (because aliasing elements violate its assumptions).
     return *array;

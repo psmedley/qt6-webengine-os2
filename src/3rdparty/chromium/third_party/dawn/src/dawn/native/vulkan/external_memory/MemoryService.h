@@ -21,58 +21,64 @@
 #include "dawn/native/vulkan/ExternalHandle.h"
 
 namespace dawn::native::vulkan {
-    class Device;
-    struct VulkanDeviceInfo;
+class Device;
+struct VulkanDeviceInfo;
 }  // namespace dawn::native::vulkan
 
-namespace dawn::native { namespace vulkan::external_memory {
+namespace dawn::native::vulkan::external_memory {
 
-    struct MemoryImportParams {
-        VkDeviceSize allocationSize;
-        uint32_t memoryTypeIndex;
-    };
+struct MemoryImportParams {
+    VkDeviceSize allocationSize;
+    uint32_t memoryTypeIndex;
+    bool dedicatedAllocation = false;
+};
 
-    class Service {
-      public:
-        explicit Service(Device* device);
-        ~Service();
+class Service {
+  public:
+    explicit Service(Device* device);
+    ~Service();
 
-        static bool CheckSupport(const VulkanDeviceInfo& deviceInfo);
+    static bool CheckSupport(const VulkanDeviceInfo& deviceInfo);
 
-        // True if the device reports it supports importing external memory.
-        bool SupportsImportMemory(VkFormat format,
-                                  VkImageType type,
-                                  VkImageTiling tiling,
-                                  VkImageUsageFlags usage,
-                                  VkImageCreateFlags flags);
+    // True if the device reports it supports importing external memory.
+    bool SupportsImportMemory(VkFormat format,
+                              VkImageType type,
+                              VkImageTiling tiling,
+                              VkImageUsageFlags usage,
+                              VkImageCreateFlags flags);
 
-        // True if the device reports it supports creating VkImages from external memory.
-        bool SupportsCreateImage(const ExternalImageDescriptor* descriptor,
-                                 VkFormat format,
-                                 VkImageUsageFlags usage,
-                                 bool* supportsDisjoint);
+    // True if the device reports it supports creating VkImages from external memory.
+    bool SupportsCreateImage(const ExternalImageDescriptor* descriptor,
+                             VkFormat format,
+                             VkImageUsageFlags usage,
+                             bool* supportsDisjoint);
 
-        // Returns the parameters required for importing memory
-        ResultOrError<MemoryImportParams> GetMemoryImportParams(
-            const ExternalImageDescriptor* descriptor,
-            VkImage image);
+    // Returns the parameters required for importing memory
+    ResultOrError<MemoryImportParams> GetMemoryImportParams(
+        const ExternalImageDescriptor* descriptor,
+        VkImage image);
 
-        // Given an external handle pointing to memory, import it into a VkDeviceMemory
-        ResultOrError<VkDeviceMemory> ImportMemory(ExternalMemoryHandle handle,
-                                                   const MemoryImportParams& importParams,
-                                                   VkImage image);
+    // Returns the index of the queue memory from this services should be exported with.
+    uint32_t GetQueueFamilyIndex();
 
-        // Create a VkImage for the given handle type
-        ResultOrError<VkImage> CreateImage(const ExternalImageDescriptor* descriptor,
-                                           const VkImageCreateInfo& baseCreateInfo);
+    // Given an external handle pointing to memory, import it into a VkDeviceMemory
+    ResultOrError<VkDeviceMemory> ImportMemory(ExternalMemoryHandle handle,
+                                               const MemoryImportParams& importParams,
+                                               VkImage image);
 
-      private:
-        Device* mDevice = nullptr;
+    // Create a VkImage for the given handle type
+    ResultOrError<VkImage> CreateImage(const ExternalImageDescriptor* descriptor,
+                                       const VkImageCreateInfo& baseCreateInfo);
 
-        // True if early checks pass that determine if the service is supported
-        bool mSupported = false;
-    };
+  private:
+    bool RequiresDedicatedAllocation(const ExternalImageDescriptorVk* descriptor, VkImage image);
 
-}}  // namespace dawn::native::vulkan::external_memory
+    Device* mDevice = nullptr;
+
+    // True if early checks pass that determine if the service is supported
+    bool mSupported = false;
+};
+
+}  // namespace dawn::native::vulkan::external_memory
 
 #endif  // SRC_DAWN_NATIVE_VULKAN_EXTERNAL_MEMORY_MEMORYSERVICE_H_

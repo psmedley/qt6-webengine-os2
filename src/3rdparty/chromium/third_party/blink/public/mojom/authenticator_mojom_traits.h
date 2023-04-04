@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -160,11 +160,6 @@ struct BLINK_COMMON_EXPORT
     return in.name;
   }
 
-  static const absl::optional<GURL>& icon(
-      const device::PublicKeyCredentialRpEntity& in) {
-    return in.icon_url;
-  }
-
   static bool Read(blink::mojom::PublicKeyCredentialRpEntityDataView data,
                    device::PublicKeyCredentialRpEntity* out);
 };
@@ -186,11 +181,6 @@ struct BLINK_COMMON_EXPORT
   static const absl::optional<std::string>& display_name(
       const device::PublicKeyCredentialUserEntity& in) {
     return in.display_name;
-  }
-
-  static const absl::optional<GURL>& icon(
-      const device::PublicKeyCredentialUserEntity& in) {
-    return in.icon_url;
   }
 
   static bool Read(blink::mojom::PublicKeyCredentialUserEntityDataView data,
@@ -240,7 +230,15 @@ struct BLINK_COMMON_EXPORT
   static const absl::optional<std::vector<uint8_t>> server_link_data(
       const device::CableDiscoveryData& in) {
     if (in.version == device::CableDiscoveryData::Version::V2) {
-      return *in.v2;
+      return in.v2->server_link_data;
+    }
+    return absl::nullopt;
+  }
+
+  static const absl::optional<std::vector<uint8_t>> experiments(
+      const device::CableDiscoveryData& in) {
+    if (in.version == device::CableDiscoveryData::Version::V2) {
+      return in.v2->experiments;
     }
     return absl::nullopt;
   }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,9 +65,6 @@ class COMPONENT_EXPORT(APP_UPDATE) AppUpdate {
   static void Merge(App* state, const App* delta);
 
   // At most one of |state| or |delta| may be nullptr.
-  AppUpdate(const apps::mojom::App* state,
-            const apps::mojom::App* delta,
-            const AccountId& account_id);
   AppUpdate(const App* state, const App* delta, const AccountId& account_id);
 
   AppUpdate(const AppUpdate&) = delete;
@@ -103,7 +100,7 @@ class COMPONENT_EXPORT(APP_UPDATE) AppUpdate {
   const std::string& Version() const;
   bool VersionChanged() const;
 
-  std::vector<std::string> AdditionalSearchTerms() const;
+  const std::vector<std::string>& AdditionalSearchTerms() const;
   bool AdditionalSearchTermsChanged() const;
 
   absl::optional<apps::IconKey> IconKey() const;
@@ -124,10 +121,10 @@ class COMPONENT_EXPORT(APP_UPDATE) AppUpdate {
   apps::InstallSource InstallSource() const;
   bool InstallSourceChanged() const;
 
-  // An optional ID used for policy to identify the app.
-  // For web apps, it contains the install URL.
-  const std::string& PolicyId() const;
-  bool PolicyIdChanged() const;
+  // IDs used for policy to identify the app.
+  // For web apps, it contains the install URL(s).
+  const std::vector<std::string>& PolicyIds() const;
+  bool PolicyIdsChanged() const;
 
   bool InstalledInternally() const;
 
@@ -181,13 +178,14 @@ class COMPONENT_EXPORT(APP_UPDATE) AppUpdate {
 
   const ::AccountId& AccountId() const;
 
+  absl::optional<uint64_t> AppSizeInBytes() const;
+  bool AppSizeInBytesChanged() const;
+
+  absl::optional<uint64_t> DataSizeInBytes() const;
+  bool DataSizeInBytesChanged() const;
+
  private:
   friend class AppRegistryCacheTest;
-
-  bool ShouldUseNonMojom() const;
-
-  raw_ptr<const apps::mojom::App> mojom_state_ = nullptr;
-  raw_ptr<const apps::mojom::App> mojom_delta_ = nullptr;
 
   raw_ptr<const apps::App> state_ = nullptr;
   raw_ptr<const apps::App> delta_ = nullptr;

@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ class CC_EXPORT RenderSurfaceImpl {
     return nearest_occlusion_immune_ancestor_;
   }
 
-  SkColor GetDebugBorderColor() const;
+  SkColor4f GetDebugBorderColor() const;
   float GetDebugBorderWidth() const;
 
   void SetDrawTransform(const gfx::Transform& draw_transform) {

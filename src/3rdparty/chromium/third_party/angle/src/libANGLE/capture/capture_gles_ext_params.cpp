@@ -178,6 +178,35 @@ void CaptureDrawElementsInstancedANGLE_indices(const State &glState,
                                 paramCapture);
 }
 
+void CaptureDrawElementsInstancedBaseInstanceEXT_indices(const State &glState,
+                                                         bool isCallValid,
+                                                         PrimitiveMode mode,
+                                                         GLsizei count,
+                                                         DrawElementsType type,
+                                                         const void *indices,
+                                                         GLsizei instancecount,
+                                                         GLuint baseinstance,
+                                                         angle::ParamCapture *indicesParam)
+{
+    CaptureDrawElements_indices(glState, isCallValid, mode, count, type, indices, indicesParam);
+}
+
+void CaptureDrawElementsInstancedBaseVertexBaseInstanceEXT_indices(
+    const State &glState,
+    bool isCallValid,
+    PrimitiveMode modePacked,
+    GLsizei count,
+    DrawElementsType typePacked,
+    const void *indices,
+    GLsizei instancecount,
+    GLint basevertex,
+    GLuint baseInstance,
+    angle::ParamCapture *indicesParam)
+{
+    CaptureDrawElements_indices(glState, isCallValid, modePacked, count, typePacked, indices,
+                                indicesParam);
+}
+
 void CaptureDrawElementsBaseVertexEXT_indices(const State &glState,
                                               bool isCallValid,
                                               PrimitiveMode modePacked,
@@ -3197,7 +3226,7 @@ void CaptureGetProgramBinaryOES_length(const State &glState,
                                        void *binary,
                                        ParamCapture *paramCapture)
 {
-    UNIMPLEMENTED();
+    paramCapture->readBufferSizeBytes = sizeof(GLsizei);
 }
 
 void CaptureGetProgramBinaryOES_binaryFormat(const State &glState,
@@ -3209,7 +3238,7 @@ void CaptureGetProgramBinaryOES_binaryFormat(const State &glState,
                                              void *binary,
                                              ParamCapture *paramCapture)
 {
-    UNIMPLEMENTED();
+    paramCapture->readBufferSizeBytes = sizeof(GLenum);
 }
 
 void CaptureGetProgramBinaryOES_binary(const State &glState,
@@ -3221,7 +3250,7 @@ void CaptureGetProgramBinaryOES_binary(const State &glState,
                                        void *binary,
                                        ParamCapture *paramCapture)
 {
-    UNIMPLEMENTED();
+    paramCapture->readBufferSizeBytes = bufSize;
 }
 
 void CaptureProgramBinaryOES_binary(const State &glState,
@@ -4212,5 +4241,42 @@ void CaptureSelectPerfMonitorCountersAMD_counterList(const State &glState,
                                                      angle::ParamCapture *paramCapture)
 {
     UNIMPLEMENTED();
+}
+
+// ANGLE_shader_pixel_local_storage
+void CaptureBeginPixelLocalStorageANGLE_loadops(const State &glState,
+                                                bool isCallValid,
+                                                GLsizei planes,
+                                                const GLenum loadops[],
+                                                const void *cleardata,
+                                                angle::ParamCapture *paramCapture)
+{
+    if (!isCallValid)
+    {
+        return;
+    }
+    CaptureArray(loadops, planes, paramCapture);
+}
+
+void CaptureBeginPixelLocalStorageANGLE_cleardata(const State &glState,
+                                                  bool isCallValid,
+                                                  GLsizei planes,
+                                                  const GLenum loadops[],
+                                                  const void *cleardata,
+                                                  angle::ParamCapture *paramCapture)
+{
+    if (!isCallValid)
+    {
+        return;
+    }
+    GLsizei minLengthWithAllClears = planes;
+    while (minLengthWithAllClears > 0 && loadops[minLengthWithAllClears - 1] != GL_CLEAR_ANGLE)
+    {
+        --minLengthWithAllClears;
+    }
+    if (minLengthWithAllClears > 0)
+    {
+        CaptureMemory(cleardata, minLengthWithAllClears * 4 * 4, paramCapture);
+    }
 }
 }  // namespace gl

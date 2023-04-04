@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -109,8 +109,7 @@ class VideoCaptureTest : public testing::Test,
     SetBrowserClientForTesting(&browser_client_);
 
     media_stream_manager_ = std::make_unique<MediaStreamManager>(
-        audio_system_.get(), audio_manager_->GetTaskRunner(),
-        std::make_unique<FakeVideoCaptureProvider>());
+        audio_system_.get(), std::make_unique<FakeVideoCaptureProvider>());
     media_stream_manager_->UseFakeUIFactoryForTests(base::BindRepeating(
         &VideoCaptureTest::CreateFakeUI, base::Unretained(this)));
 
@@ -187,7 +186,7 @@ class VideoCaptureTest : public testing::Test,
  protected:
   // media::mojom::VideoCaptureObserver implementation.
   void OnStateChanged(media::mojom::VideoCaptureResultPtr result) override {
-    if (result->which() == media::mojom::VideoCaptureResult::Tag::STATE)
+    if (result->which() == media::mojom::VideoCaptureResult::Tag::kState)
       DoOnStateChanged(result->get_state());
     else
       DoOnVideoCaptureError(result->get_error_code());
@@ -207,6 +206,7 @@ class VideoCaptureTest : public testing::Test,
   }
   MOCK_METHOD1(DoOnBufferReady, void(int32_t));
   MOCK_METHOD1(OnBufferDestroyed, void(int32_t));
+  MOCK_METHOD1(OnNewCropVersion, void(uint32_t));
 
   void StartCapture() {
     base::RunLoop run_loop;

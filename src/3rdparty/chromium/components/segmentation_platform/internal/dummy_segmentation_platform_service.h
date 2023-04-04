@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,11 @@ class DummySegmentationPlatformService : public SegmentationPlatformService {
                           SegmentSelectionCallback callback) override;
   SegmentSelectionResult GetCachedSegmentResult(
       const std::string& segmentation_key) override;
+  void GetSelectedSegmentOnDemand(const std::string& segmentation_key,
+                                  scoped_refptr<InputContext> input_context,
+                                  SegmentSelectionCallback callback) override;
   void EnableMetrics(bool signal_collection_allowed) override;
+  bool IsPlatformInitialized() override;
 };
 
 }  // namespace segmentation_platform

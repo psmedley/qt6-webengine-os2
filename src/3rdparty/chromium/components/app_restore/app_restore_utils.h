@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,16 +88,6 @@ const std::string GetLacrosWindowId(aura::Window* window);
 // Returns the restore window id for the Lacros window with `lacros_window_id`.
 COMPONENT_EXPORT(APP_RESTORE)
 int32_t GetLacrosRestoreWindowId(const std::string& lacros_window_id);
-
-// Invoked when Lacros window is created. `browser_session_id` is the
-// current browser session id. `restored_browser_session_id` is the restored
-// browser session id. `is_browser_app` is true if it's an app type Lacros
-// browser window.
-COMPONENT_EXPORT(APP_RESTORE)
-void OnLacrosWindowAdded(aura::Window* const window,
-                         uint32_t browser_session_id,
-                         uint32_t restored_browser_session_id,
-                         bool is_browser_app);
 
 }  // namespace app_restore
 

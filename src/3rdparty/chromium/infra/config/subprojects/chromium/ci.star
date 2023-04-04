@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -63,6 +63,7 @@ luci.gitiles_poller(
         "chromium.linux",
         "chromium.chromiumos",
         "chromium.android",
+        "chromium.fuchsia",
         "chromium.angle",
         "chrome",
         "chromium.memory",
@@ -90,6 +91,7 @@ luci.gitiles_poller(
 ) for name, short_name in (
     ("lacros-amd64-generic-chrome", "lcr"),
     ("lacros-arm-generic-chrome", "lcr"),
+    ("lacros-arm64-generic-chrome", "lcr"),
     ("linux-chromeos-chrome", "cro"),
     ("linux-chrome", "lnx"),
     ("mac-chrome", "mac"),
@@ -97,14 +99,15 @@ luci.gitiles_poller(
     ("win64-chrome", "win"),
 )]
 
+# Any builders that should be monitored by the Chrome-Fuchsia Gardener
+# should be in the "gardener" group.
 consoles.console_view(
     name = "sheriff.fuchsia",
     title = "Fuchsia Sheriff Console",
     ordering = {
-        "*type*": consoles.ordering(short_names = ["a64", "x64"]),
-        None: ["ci", "fyi", "astro", "sherlock", "misc"],
-        "chromium.mac": "*type*",
-        "chromium.fyi|13": "*type*",
+        None: ["gardener", "fyi"],
+        "gardener": ["ci", "fuchsia ci", "p/chrome", "hardware"],
+        "fyi": ["arm64", "x64", "clang", "hardware"],
     },
 )
 
@@ -115,25 +118,31 @@ consoles.console_view(
     category = category,
     short_name = short_name,
 ) for name, category, short_name in (
-    ("fuchsia-fyi-arm64-size", "fyi", "a64-size"),
-    ("fuchsia-fyi-astro", "astro", "gpu"),
-    ("fuchsia-fyi-atlas", "atlas", "gpu"),
-    ("fuchsia-fyi-sherlock", "sherlock", "gpu"),
-    ("fuchsia-builder-perf-fyi", "fyi", "builder-perf"),
-    ("fuchsia-builder-perf-x64", "fyi", "builder-perf-x64"),
-    ("fuchsia-perf-fyi", "astro", "perf"),
-    ("fuchsia-perf-atlas-fyi", "atlas", "perf"),
-    ("fuchsia-perf-sherlock-fyi", "sherlock", "perf"),
-    ("fuchsia-x64", "ci", "x64-chrome"),
+    ("fuchsia-builder-perf-arm64", "gardener|p/chrome|arm64", "perf-bld"),
+    ("fuchsia-builder-perf-x64", "gardener|p/chrome|x64", "perf-bld"),
+    ("fuchsia-fyi-arm64-size", "gardener|p/chrome|arm64", "size"),
+    ("fuchsia-fyi-astro", "gardener|hardware", "ast"),
+    ("fuchsia-fyi-atlas", "fyi|hardware", "atl"),
+    ("fuchsia-fyi-sherlock", "fyi|hardware", "sher"),
+    ("fuchsia-perf-ast", "gardener|hardware|perf", "ast"),
+    ("fuchsia-perf-atlas-fyi", "fyi|hardware|perf", "atl"),
+    ("fuchsia-perf-fyi", "fyi|hardware|perf", "ast"),
+    ("fuchsia-perf-sherlock-fyi", "fyi|hardware|perf", "sher"),
+    ("fuchsia-perf-shk", "gardener|hardware|perf", "sher"),
+    ("fuchsia-x64", "gardener|p/chrome|x64", "rel"),
 )]
 
+exec("./ci/checks.star")
 exec("./ci/chromium.star")
+exec("./ci/chromium.accessibility.star")
 exec("./ci/chromium.android.star")
 exec("./ci/chromium.android.fyi.star")
 exec("./ci/chromium.angle.star")
 exec("./ci/chromium.chromiumos.star")
 exec("./ci/chromium.clang.star")
 exec("./ci/chromium.dawn.star")
+exec("./ci/chromium.fuchsia.star")
+exec("./ci/chromium.fuchsia.fyi.star")
 exec("./ci/chromium.fuzz.star")
 exec("./ci/chromium.fyi.star")
 exec("./ci/chromium.gpu.star")

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -109,4 +109,11 @@ std::vector<std::string> ClientStorage::GetMatchingStateKeyHashes(
   return hashes;
 }
 
+std::vector<ClientStorage::ClientInfo> ClientStorage::GetAllClients() {
+  std::vector<ClientStorage::ClientInfo> result;
+  for (const auto& [device_id, client_info] : clients_) {
+    result.push_back(client_info);
+  }
+  return result;
+}
 }  // namespace policy

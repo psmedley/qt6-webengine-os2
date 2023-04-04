@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -65,6 +65,7 @@ os = struct(
     LINUX_TRUSTY = os_enum("Ubuntu-14.04", os_category.LINUX),
     LINUX_XENIAL = os_enum("Ubuntu-16.04", os_category.LINUX),
     LINUX_BIONIC = os_enum("Ubuntu-18.04", os_category.LINUX),
+    LINUX_FOCAL = os_enum("Ubuntu-20.04", os_category.LINUX),
     LINUX_DEFAULT = os_enum("Ubuntu-18.04", os_category.LINUX),
     MAC_10_12 = os_enum("Mac-10.12", os_category.MAC),
     MAC_10_13 = os_enum("Mac-10.13", os_category.MAC),
@@ -72,8 +73,8 @@ os = struct(
     MAC_10_15 = os_enum("Mac-10.15", os_category.MAC),
     MAC_11 = os_enum("Mac-11", os_category.MAC),
     MAC_12 = os_enum("Mac-12", os_category.MAC),
-    # TODO(crbug.com/1323966) Remove Mac11 once builders have been migrated to Mac12
-    MAC_DEFAULT = os_enum("Mac-11|Mac-12", os_category.MAC),
+    MAC_13 = os_enum("Mac-13", os_category.MAC),
+    MAC_DEFAULT = os_enum("Mac-12", os_category.MAC),
     MAC_ANY = os_enum("Mac", os_category.MAC),
     MAC_BETA = os_enum("Mac-12", os_category.MAC),
     WINDOWS_7 = os_enum("Windows-7", os_category.WINDOWS),
@@ -146,8 +147,8 @@ reclient = struct(
         DEFAULT = 250,
         LOW_JOBS_FOR_CI = 80,
         HIGH_JOBS_FOR_CI = 500,
-        LOW_JOBS_FOR_CQ = 80,
-        HIGH_JOBS_FOR_CQ = 500,
+        LOW_JOBS_FOR_CQ = 150,
+        HIGH_JOBS_FOR_CQ = 300,
     ),
 )
 
@@ -158,8 +159,11 @@ def _rotation(name):
 # Arbitrary elements can't be added, new rotations must be added in SoM code
 sheriff_rotations = struct(
     ANDROID = _rotation("android"),
+    ANGLE = _rotation("angle"),
     CHROMIUM = _rotation("chromium"),
+    FUCHSIA = _rotation("fuchsia"),
     CHROMIUM_CLANG = _rotation("chromium.clang"),
+    CHROMIUM_FUZZ = _rotation("chromium.fuzz"),
     CHROMIUM_GPU = _rotation("chromium.gpu"),
     IOS = _rotation("ios"),
 )
@@ -181,8 +185,12 @@ xcode = struct(
     x12e262 = xcode_enum("12e262"),
     # Default Xcode 13 for chromium iOS.
     x13main = xcode_enum("13c100"),
-    # A newer Xcode version used on beta bots.
-    x13betabots = xcode_enum("13e5104i"),
+    # A newer Xcode 13 version used on beta bots.
+    x13betabots = xcode_enum("13f17a"),
+    # Xcode14 RC will be used to build Main iOS
+    x14main = xcode_enum("14a309"),
+    # A newer Xcode 14 RC  used on beta bots.
+    x14betabots = xcode_enum("14b5024i"),
     # in use by ios-webkit-tot
     x13wk = xcode_enum("13a1030dwk"),
 )
@@ -277,7 +285,7 @@ def _code_coverage_property(
 
     return code_coverage or None
 
-def _reclient_property(*, instance, service, jobs, rewrapper_env, profiler_service, publish_trace, cache_silo, ensure_verified):
+def _reclient_property(*, instance, service, jobs, rewrapper_env, profiler_service, publish_trace, cache_silo, ensure_verified, bootstrap_env):
     reclient = {}
     instance = defaults.get_value("reclient_instance", instance)
     if not instance:
@@ -297,6 +305,13 @@ def _reclient_property(*, instance, service, jobs, rewrapper_env, profiler_servi
                 fail("Environment variables in rewrapper_env must start with " +
                      "'RBE_', got '%s'" % k)
         reclient["rewrapper_env"] = rewrapper_env
+    bootstrap_env = defaults.get_value("reclient_bootstrap_env", bootstrap_env)
+    if bootstrap_env:
+        for k in bootstrap_env:
+            if not (k.startswith("RBE_") or k.startswith("GLOG_")):
+                fail("Environment variables in bootstrap_env must start with " +
+                     "'RBE_' or 'GLOG_', got '%s'" % k)
+        reclient["bootstrap_env"] = bootstrap_env
     profiler_service = defaults.get_value("reclient_profiler_service", profiler_service)
     if profiler_service:
         reclient["profiler_service"] = profiler_service
@@ -308,7 +323,8 @@ def _reclient_property(*, instance, service, jobs, rewrapper_env, profiler_servi
     ensure_verified = defaults.get_value("reclient_ensure_verified", ensure_verified)
     if ensure_verified:
         reclient["ensure_verified"] = True
-    return reclient or None
+
+    return reclient
 
 ################################################################################
 # Builder defaults and function                                                #
@@ -330,6 +346,7 @@ defaults = args.defaults(
     goma_debug = False,
     goma_enable_ats = args.COMPUTE,
     goma_jobs = None,
+    console_view = args.COMPUTE,
     list_view = args.COMPUTE,
     os = None,
     pool = None,
@@ -348,10 +365,15 @@ defaults = args.defaults(
     reclient_service = None,
     reclient_jobs = None,
     reclient_rewrapper_env = None,
+    reclient_bootstrap_env = None,
     reclient_profiler_service = None,
     reclient_publish_trace = None,
     reclient_cache_silo = None,
     reclient_ensure_verified = None,
+
+    # This is to enable luci.buildbucket.omit_python2 experiment.
+    # TODO(crbug.com/1362440): remove this after enabling this in all builders.
+    omit_python2 = True,
 
     # Provide vars for bucket and executable so users don't have to
     # unnecessarily make wrapper functions
@@ -405,10 +427,12 @@ def builder(
         reclient_service = args.DEFAULT,
         reclient_jobs = args.DEFAULT,
         reclient_rewrapper_env = args.DEFAULT,
+        reclient_bootstrap_env = args.DEFAULT,
         reclient_profiler_service = args.DEFAULT,
         reclient_publish_trace = args.DEFAULT,
         reclient_cache_silo = None,
         reclient_ensure_verified = None,
+        omit_python2 = args.DEFAULT,
         **kwargs):
     """Define a builder.
 
@@ -568,6 +592,9 @@ def builder(
         reclient_rewrapper_env: a map that sets the rewrapper flags via the
             environment variables. All such vars must start with the "RBE_"
             prefix. Has no effect if reclient_instance is not set.
+        reclient_bootstrap_env: a map that sets the bootstrap flags via the
+            environment variables. All such vars must start with the "RBE_"
+            prefix. Has no effect if reclient_instance is not set.
         reclient_profiler_service: a string indicating service name for
             re-client's cloud profiler. Has no effect if reclient_instance is
             not set.
@@ -577,6 +604,9 @@ def builder(
             remote caching. Has no effect if reclient_instance is not set.
         reclient_ensure_verified: If True, it verifies build artifacts. Has no
             effect if reclient_instance is not set.
+        omit_python2: If True, set luci.buildbucket.omit_python2 experiment.
+            TODO(crbug.com/1362440): remove this after enabling this in all
+            builders.
         **kwargs: Additional keyword arguments to forward on to `luci.builder`.
 
     Returns:
@@ -585,7 +615,7 @@ def builder(
 
     # We don't have any need of an explicit dimensions dict,
     # instead we have individual arguments for dimensions
-    if "dimensions" in "kwargs":
+    if "dimensions" in kwargs:
         fail("Explicit dimensions are not supported: " +
              "use builderless, cores, cpu, os or ssd instead")
 
@@ -719,6 +749,7 @@ def builder(
         service = reclient_service,
         jobs = reclient_jobs,
         rewrapper_env = reclient_rewrapper_env,
+        bootstrap_env = reclient_bootstrap_env,
         profiler_service = reclient_profiler_service,
         publish_trace = reclient_publish_trace,
         cache_silo = reclient_cache_silo,
@@ -757,6 +788,13 @@ def builder(
     if triggered_by != args.COMPUTE:
         kwargs["triggered_by"] = triggered_by
 
+    experiments = kwargs.pop("experiments", None) or {}
+
+    # TODO: remove this after this experiment is removed from
+    # cr-buildbucket/settings.cfg (http://shortn/_cz2s9ql61X).
+    if defaults.get_value("omit_python2", omit_python2):
+        experiments["luci.buildbucket.omit_python2"] = 100
+
     builder = branches.builder(
         name = name,
         branch_selector = branch_selector,
@@ -770,6 +808,7 @@ def builder(
             ),
             history_options = history_options,
         ),
+        experiments = experiments,
         **kwargs
     )
 
@@ -808,7 +847,9 @@ def builder(
 
             console_view = entry.console_view
             if console_view == None:
-                console_view = builder_group
+                console_view = defaults.console_view.get()
+                if console_view == args.COMPUTE:
+                    console_view = builder_group
                 if not console_view:
                     fail("Builder does not have builder group and " +
                          "console_view_entry does not have console view: {}".format(entry))

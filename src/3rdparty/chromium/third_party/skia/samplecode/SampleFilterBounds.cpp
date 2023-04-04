@@ -13,6 +13,7 @@
 #include "include/core/SkFont.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathEffect.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/effects/SkDashPathEffect.h"
@@ -106,7 +107,7 @@ static const SkColor4f kScaleGradientColors[] =
                   { 0.8f,  0.1f, 0.f,  1.f } }; // Severe upscaling,   s > 8,   log(s) > 3
 static const SkScalar kLogScaleFactors[] = { -3.f, -1.f, 0.f, 1.f, 3.f };
 static const SkScalar kGradientStops[] = { 0.f, 0.33333f, 0.5f, 0.66667f, 1.f };
-static const int kStopCount = (int) SK_ARRAY_COUNT(kScaleGradientColors);
+static const int kStopCount = (int) std::size(kScaleGradientColors);
 
 static void draw_scale_key(SkCanvas* canvas, float y) {
     SkRect key = SkRect::MakeXYWH(15.f, y + 30.f, 15.f, 100.f);
@@ -129,7 +130,7 @@ static void draw_scale_factors(SkCanvas* canvas, const skif::Mapping& mapping, c
     rect.toQuad(testPoints + 1);
     for (int i = 0; i < 5; ++i) {
         float scale = SkMatrixPriv::DifferentialAreaScale(
-                mapping.deviceMatrix(),
+                mapping.layerToDevice(),
                 SkPoint(mapping.paramToLayer(skif::ParameterSpace<SkPoint>(testPoints[i]))));
         SkColor4f color = {0.f, 0.f, 0.f, 1.f};
 
@@ -202,7 +203,7 @@ public:
 
         // Add axis lines, to show perspective distortion
         canvas->save();
-        canvas->setMatrix(mapping.deviceMatrix());
+        canvas->setMatrix(mapping.layerToDevice());
         canvas->drawPath(create_axis_path(SkRect(mapping.paramToLayer(contentBounds)), 20.f),
                          line_paint(SK_ColorGRAY));
         canvas->restore();
@@ -224,7 +225,7 @@ public:
         skif::LayerSpace<SkIRect> unhintedLayerBounds = as_IFB(fBlur)->getInputBounds(
                 mapping, targetOutput, nullptr);
 
-        canvas->setMatrix(mapping.deviceMatrix());
+        canvas->setMatrix(mapping.layerToDevice());
         canvas->drawRect(SkRect::Make(SkIRect(targetOutputInLayer)),
                          line_paint(SK_ColorDKGRAY, true));
         canvas->drawRect(SkRect::Make(SkIRect(hintedLayerBounds)), line_paint(SK_ColorRED));

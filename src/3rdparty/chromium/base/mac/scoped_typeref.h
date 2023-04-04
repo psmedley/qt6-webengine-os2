@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,9 +110,13 @@ class ScopedTypeRef {
     object_ = object;
   }
 
-  bool operator==(const element_type& that) const { return object_ == that; }
+  bool operator==(const ScopedTypeRef& that) const {
+    return object_ == that.object_;
+  }
 
-  bool operator!=(const element_type& that) const { return object_ != that; }
+  bool operator!=(const ScopedTypeRef& that) const {
+    return object_ != that.object_;
+  }
 
   operator element_type() const { return object_; }
 

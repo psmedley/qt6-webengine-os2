@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_token.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_ua_data_values.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -222,9 +222,9 @@ ScriptPromise NavigatorUAData::getHighEntropyValues(
   execution_context->GetTaskRunner(TaskType::kPermission)
       ->PostTask(
           FROM_HERE,
-          WTF::Bind([](ScriptPromiseResolver* resolver,
-                       UADataValues* values) { resolver->Resolve(values); },
-                    WrapPersistent(resolver), WrapPersistent(values)));
+          WTF::BindOnce([](ScriptPromiseResolver* resolver,
+                           UADataValues* values) { resolver->Resolve(values); },
+                        WrapPersistent(resolver), WrapPersistent(values)));
 
   return promise;
 }
@@ -233,11 +233,14 @@ ScriptValue NavigatorUAData::toJSON(ScriptState* script_state) const {
   V8ObjectBuilder builder(script_state);
   builder.Add("brands", brands());
   builder.Add("mobile", mobile());
+  builder.Add("platform", platform());
 
-  // Record IdentifiabilityStudy metrics for `mobile()` (the `brands()` part is
-  // already recorded inside that function).
+  // Record IdentifiabilityStudy metrics for `mobile()` and `platform()`
+  // (the `brands()` part is already recorded inside that function).
   Dactyloscoper::RecordDirectSurface(
       GetExecutionContext(), WebFeature::kNavigatorUAData_Mobile, mobile());
+  Dactyloscoper::RecordDirectSurface(
+      GetExecutionContext(), WebFeature::kNavigatorUAData_Platform, platform());
 
   return builder.GetScriptValue();
 }

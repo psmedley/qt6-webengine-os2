@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,18 +26,21 @@ const dom = {
    */
   createFragment(nodes) {
     const fragment = document.createDocumentFragment();
-    for (const node of nodes) fragment.appendChild(node);
+    for (const node of nodes)
+      fragment.appendChild(node);
     return fragment;
   },
   /**
-   * Removes all the existing children of `parent` and inserts
-   * `newChild` in their place.
+   * Removes all the existing children of `parent` and inserts `newChild` in
+   * their place.
    * @param {Node} parent
    * @param {Node | null} newChild
    */
   replace(parent, newChild) {
-    while (parent.firstChild) parent.removeChild(parent.firstChild);
-    if (newChild != null) parent.appendChild(newChild);
+    while (parent.firstChild)
+      parent.removeChild(parent.firstChild);
+    if (newChild != null)
+      parent.appendChild(newChild);
   },
   /**
    * Builds a text element in a single statement.
@@ -48,7 +51,8 @@ const dom = {
   textElement(tagName, text, className) {
     const element = document.createElement(tagName);
     element.textContent = text;
-    if (className) element.className = className;
+    if (className)
+      element.className = className;
     return element;
   },
 };
@@ -58,9 +62,8 @@ function _initState() {
   const _DEFAULT_FORM = new FormData(form);
 
   /**
-   * State is represented in the query string and
-   * can be manipulated by this object. Keys in the query match with
-   * input names.
+   * State is represented in the query string and can be manipulated by this
+   * object. Keys in the query match with input names.
    */
 
   /** @type {URLSearchParams} */
@@ -113,7 +116,8 @@ function _initState() {
       } else {
         _filterParams.set(key, value);
       }
-      history.replaceState(null, null, state.toString());
+      // Passing empty `state` leads to no change, so use `location.pathname`.
+      history.replaceState(null, null, state.toString() || location.pathname);
     },
   });
 
@@ -141,8 +145,7 @@ function _initState() {
   }
 
   /**
-   * Yields only entries that have been modified in
-   * comparison to `_DEFAULT_FORM`.
+   * Yields only entries that have been modified relative to `_DEFAULT_FORM`.
    * @generator
    * @param {FormData} modifiedForm
    * @yields {{key: string, value: FormDataEntryValue}}
@@ -171,7 +174,8 @@ function _initState() {
     for (const {key, value} of onlyChangedEntries(modifiedForm)) {
       _filterParams.append(key, value.toString());
     }
-    history.replaceState(null, null, state.toString());
+    // Passing empty `state` leads to no change, so use `location.pathname`.
+    history.replaceState(null, null, state.toString() || location.pathname);
   }
 
   form.addEventListener('change', _updateStateFromForm);
@@ -274,7 +278,7 @@ function _makeIconTemplateGetter() {
    */
   const symbolIcons = {
     D: _icons.querySelector('.foldericon'),
-    C: _icons.querySelector('.componenticon'),
+    G: _icons.querySelector('.groupicon'),
     J: _icons.querySelector('.javaclassicon'),
     F: _icons.querySelector('.fileicon'),
     b: _icons.querySelector('.bssicon'),
@@ -287,7 +291,7 @@ function _makeIconTemplateGetter() {
     m: _icons.querySelector('.dexmethodicon'),
     p: _icons.querySelector('.localpakicon'),
     P: _icons.querySelector('.nonlocalpakicon'),
-    o: _icons.querySelector('.othericon'), // used as default icon
+    o: _icons.querySelector('.othericon'),  // used as default icon
   };
 
   const _statuses = document.getElementById('symbol-diff-status-icons');
@@ -374,17 +378,14 @@ function _makeSizeTextGetter() {
    *
    * @param {TreeNode} node Node whose size is the number of bytes to use for
    * the size text
-   * @returns {GetSizeResult} Object with hover text title and
-   * size element body. Can be consumed by `_applySizeFunc()`
+   * @returns {GetSizeResult} Object with hover text title and size element
+   * body.
    */
   function getSizeContents(node) {
     if (state.has('method_count')) {
       const {count: methodCount = 0} =
         node.childStats[_DEX_METHOD_SYMBOL_TYPE] || {};
-      const methodStr = methodCount.toLocaleString(_LOCALE, {
-        useGrouping: true,
-      });
-
+      const methodStr = formatNumber(methodCount);
       return {
         description: `${methodStr} method${methodCount === 1 ? '' : 's'}`,
         element: document.createTextNode(methodStr),
@@ -393,26 +394,27 @@ function _makeSizeTextGetter() {
 
     } else {
       const bytes = node.size;
-
-      const bytesGrouped = bytes.toLocaleString(_LOCALE, {useGrouping: true});
-      let description = `${bytesGrouped} bytes`;
+      const descriptionToks = [];
+      if ('beforeSize' in node) {
+        const before = formatNumber(node.beforeSize);
+        const after = formatNumber(node.beforeSize + bytes);
+        descriptionToks.push(`(${before} → ${after})`);  // '→' is '\u2192'.
+      }
+      descriptionToks.push(`${formatNumber(bytes)} bytes`);
       if (node.numAliases && node.numAliases > 1) {
-        description += ` for 1 of ${node.numAliases} aliases`;
+        descriptionToks.push(`for 1 of ${node.numAliases} aliases`);
       }
 
       const unit = state.get('byteunit') || 'KiB';
       const suffix = _BYTE_UNITS[unit];
       // Format |bytes| as a number with 2 digits after the decimal point
-      const text = (bytes / suffix).toLocaleString(_LOCALE, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+      const text = formatNumber(bytes / suffix, 2, 2);
       const textNode = document.createTextNode(`${text} `);
       // Display the suffix with a smaller font
       const suffixElement = dom.textElement('small', unit);
 
       return {
-        description,
+        description: descriptionToks.join(' '),
         element: dom.createFragment([textNode, suffixElement]),
         value: bytes,
       };

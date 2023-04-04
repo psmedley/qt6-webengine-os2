@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@ void RenderFrameHostCSPContext::ReportContentSecurityPolicyViolation(
 }
 
 void RenderFrameHostCSPContext::SanitizeDataForUseInCspViolation(
-    bool is_redirect,
     network::mojom::CSPDirectiveName directive,
     GURL* blocked_url,
     network::mojom::SourceLocation* source_location) const {

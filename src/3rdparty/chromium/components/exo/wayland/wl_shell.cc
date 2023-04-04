@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,6 +154,8 @@ void shell_get_shell_surface(wl_client* client,
   // Shell surfaces are initially disabled and needs to be explicitly mapped
   // before they are enabled and can become visible.
   shell_surface->SetEnabled(false);
+
+  shell_surface->SetSecurityDelegate(GetSecurityDelegate(client));
 
   shell_surface->set_configure_callback(
       base::BindRepeating(&HandleShellSurfaceConfigureCallback,

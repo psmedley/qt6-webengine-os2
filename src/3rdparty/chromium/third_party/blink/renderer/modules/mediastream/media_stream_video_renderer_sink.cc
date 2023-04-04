@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -179,7 +179,7 @@ void MediaStreamVideoRendererSink::Start() {
       // Local display video rendering is considered a secure link.
       MediaStreamVideoSink::IsSecure::kYes, uses_alpha);
 
-  if (video_component_->Source()->GetReadyState() ==
+  if (video_component_->GetReadyState() ==
           MediaStreamSource::kReadyStateEnded ||
       !video_component_->Enabled()) {
     PostCrossThreadTask(

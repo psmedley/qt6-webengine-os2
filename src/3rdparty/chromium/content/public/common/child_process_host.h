@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,14 @@
 #include "base/clang_profiling_buildflags.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
+#include "build/chromeos_buildflags.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_sender.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if BUILDFLAG(IS_CHROMECAST)
+// TODO(crbug.com/1328879): Remove this when fixing the bug.
+#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
 #include <string>
 
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -26,7 +28,7 @@
 namespace base {
 class File;
 class FilePath;
-}
+}  // namespace base
 
 namespace IPC {
 class MessageFilter;
@@ -177,7 +179,16 @@ class CONTENT_EXPORT ChildProcessHost : public IPC::Sender {
   //   3. Main thread, ChildThreadImpl::BindReceiver (virtual).
   virtual void BindReceiver(mojo::GenericPendingReceiver receiver) = 0;
 
-#if BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Reinitializes the child process's logging with the given settings. This
+  // is needed on Chrome OS, which switches to a log file in the user's home
+  // directory once they log in.
+  virtual void ReinitializeLogging(uint32_t logging_dest,
+                                   base::ScopedFD log_file_descriptor) = 0;
+#endif
+
+// TODO(crbug.com/1328879): Remove this method when fixing the bug.
+#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
   // Instructs the child process to run an instance of the named service. This
   // is DEPRECATED and should never be used.
   virtual void RunServiceDeprecated(

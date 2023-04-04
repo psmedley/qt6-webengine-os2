@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ enum class ContentSettingsType : int32_t {
   MEDIASTREAM_MIC,
   MEDIASTREAM_CAMERA,
   PROTOCOL_HANDLERS,
-  PPAPI_BROKER,
+  DEPRECATED_PPAPI_BROKER,
   AUTOMATIC_DOWNLOADS,
   MIDI_SYSEX,
   SSL_CERT_DECISIONS,
@@ -160,10 +160,6 @@ enum class ContentSettingsType : int32_t {
   // File System Access API.
   FILE_SYSTEM_WRITE_GUARD,
 
-  // Content settings for installed web apps that browsing history may be
-  // inferred from e.g. last update check timestamp.
-  INSTALLED_WEB_APP_METADATA,
-
   // Used to store whether to allow a website to exchange data with NFC devices.
   NFC,
 
@@ -207,10 +203,11 @@ enum class ContentSettingsType : int32_t {
   // movements. It does not give access to camera.
   CAMERA_PAN_TILT_ZOOM,
 
-  // Content setting for Screen Enumeration and Window Placement functionality.
-  // Permits access to information about the screens, like size and position.
-  // Permits creating and placing windows across the set of connected screens.
-  WINDOW_PLACEMENT,
+  // Content setting for Screen Enumeration and Screen Detail functionality.
+  // Permits access to detailed multi-screen information, like size and
+  // position. Permits placing fullscreen and windowed content on specific
+  // screens. See also: https://w3c.github.io/window-placement
+  WINDOW_MANAGEMENT,
 
   // Stores whether to allow insecure websites to make private network requests.
   // See also: https://wicg.github.io/cors-rfc1918
@@ -242,18 +239,11 @@ enum class ContentSettingsType : int32_t {
   // the corresponding "guard" setting.
   FILE_SYSTEM_ACCESS_CHOOSER_DATA,
 
-  // Stores a grant for the browser to intermediate or allow without
-  // restriction sharing of identity information by an identity provider to
-  // specified relying parties. The setting is associated with the identity
-  // provider's origin.
-  // This is managed by WebID.
-  FEDERATED_IDENTITY_SHARING,
-
   // Stores a grant that allows a relying party to send a request for identity
   // information to specified identity providers, potentially through any
   // anti-tracking measures that would otherwise prevent it. This setting is
   // associated with the relying party's origin.
-  FEDERATED_IDENTITY_REQUEST,
+  FEDERATED_IDENTITY_SHARING,
 
   // Whether to use the v8 optimized JIT for running JavaScript on the page.
   JAVASCRIPT_JIT,
@@ -287,6 +277,20 @@ enum class ContentSettingsType : int32_t {
   // Setting to indicate whether browser should allow signing into a website via
   // the browser FedCM API.
   FEDERATED_IDENTITY_API,
+
+  // Stores notification interactions per origin for the past 90 days.
+  // Interactions per origin are pre-aggregated over seven-day windows: A
+  // notification interaction or display is assigned to the last Monday midnight
+  // in local time.
+  NOTIFICATION_INTERACTIONS,
+
+  // Website setting which stores the last reduced accept language negotiated
+  // for a given origin, to be used on future visits to the origin.
+  REDUCED_ACCEPT_LANGUAGE,
+
+  // Website setting which is used for NotificationPermissionReviewService to
+  // store origin blocklist from review notification permissions feature.
+  NOTIFICATION_PERMISSION_REVIEW,
 
   NUM_TYPES,
 };

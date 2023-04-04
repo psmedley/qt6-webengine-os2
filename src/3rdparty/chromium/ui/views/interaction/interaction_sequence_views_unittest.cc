@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,7 +166,7 @@ class InteractionSequenceViewsTest : public ViewsTestBase {
     menu_model_->AddItem(kMenuID1, kMenuItem1);
     menu_model_->AddItem(kMenuID2, kMenuItem2);
     menu_model_->SetElementIdentifierAt(
-        menu_model_->GetIndexOfCommandId(kMenuID2), id);
+        menu_model_->GetIndexOfCommandId(kMenuID2).value(), id);
 
     menu_runner_ =
         std::make_unique<MenuRunner>(menu_model_.get(), MenuRunner::NO_FLAGS);

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -118,7 +118,9 @@ class TestNavigationLoaderInterceptor : public NavigationLoaderInterceptor {
         mojo::NullRemote() /* cookie_observer */,
         mojo::NullRemote() /* url_loader_network_observer */,
         /*devtools_observer=*/mojo::NullRemote(),
-        /*accept_ch_frame_observer=*/mojo::NullRemote());
+        /*accept_ch_frame_observer=*/mojo::NullRemote(),
+        /*third_party_cookies_enabled=*/true,
+        /*cache_transparency_settings=*/nullptr);
   }
 
   bool MaybeCreateLoaderForResponse(
@@ -237,7 +239,7 @@ class NavigationURLLoaderImplTest : public testing::Test {
     url::Origin origin = url::Origin::Create(url);
 
     uint32_t frame_tree_node_id =
-        web_contents_->GetMainFrame()->GetFrameTreeNodeId();
+        web_contents_->GetPrimaryMainFrame()->GetFrameTreeNodeId();
 
     bool is_primary_main_frame = is_main_frame;
     bool is_outermost_main_frame = is_main_frame;
@@ -256,7 +258,6 @@ class NavigationURLLoaderImplTest : public testing::Test {
             nullptr /* blob_url_loader_factory */,
             base::UnguessableToken::Create() /* devtools_navigation_token */,
             base::UnguessableToken::Create() /* devtools_frame_token */,
-            false /* obey_origin_policy */,
             net::HttpRequestHeaders() /* cors_exempt_headers */,
             nullptr /* client_security_state */,
             absl::nullopt /* devtools_accepted_stream_types */,

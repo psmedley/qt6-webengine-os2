@@ -45,7 +45,6 @@
 #include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/blob/blob_bytes_provider.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/line_ending.h"
@@ -62,7 +61,6 @@ using mojom::blink::DataElementBlob;
 using mojom::blink::DataElementBytes;
 using mojom::blink::DataElementBytesPtr;
 using mojom::blink::DataElementFile;
-using mojom::blink::DataElementFilesystemURL;
 using mojom::blink::DataElementPtr;
 
 namespace {
@@ -136,17 +134,6 @@ std::unique_ptr<BlobData> BlobData::CreateForFileWithUnknownSize(
   return data;
 }
 
-std::unique_ptr<BlobData> BlobData::CreateForFileSystemURLWithUnknownSize(
-    const KURL& file_system_url,
-    const absl::optional<base::Time>& expected_modification_time) {
-  std::unique_ptr<BlobData> data = base::WrapUnique(
-      new BlobData(FileCompositionStatus::kSingleUnknownSizeFile));
-  data->elements_.push_back(DataElement::NewFileFilesystem(
-      DataElementFilesystemURL::New(file_system_url, 0, BlobData::kToEndOfFile,
-                                    expected_modification_time)));
-  return data;
-}
-
 void BlobData::SetContentType(const String& content_type) {
   if (IsValidBlobType(content_type))
     content_type_ = content_type;
@@ -192,22 +179,6 @@ void BlobData::AppendBlob(scoped_refptr<BlobDataHandle> data_handle,
       DataElementBlob::New(data_handle->CloneBlobRemote(), offset, length)));
 }
 
-void BlobData::AppendFileSystemURL(
-    const KURL& url,
-    int64_t offset,
-    int64_t length,
-    const absl::optional<base::Time>& expected_modification_time) {
-  DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
-      << "Blobs with a unknown-size file cannot have other items.";
-  DCHECK_GE(length, 0);
-  // Skip zero-byte items, as they don't matter for the contents of the blob.
-  if (length == 0)
-    return;
-  elements_.push_back(
-      DataElement::NewFileFilesystem(DataElementFilesystemURL::New(
-          url, offset, length, expected_modification_time)));
-}
-
 void BlobData::AppendText(const String& text,
                           bool do_normalize_line_endings_to_native) {
   DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
@@ -241,16 +212,13 @@ uint64_t BlobData::length() const {
 
   for (const auto& element : elements_) {
     switch (element->which()) {
-      case DataElement::Tag::BYTES:
+      case DataElement::Tag::kBytes:
         length += element->get_bytes()->length;
         break;
-      case DataElement::Tag::FILE:
+      case DataElement::Tag::kFile:
         length += element->get_file()->length;
         break;
-      case DataElement::Tag::FILE_FILESYSTEM:
-        length += element->get_file_filesystem()->length;
-        break;
-      case DataElement::Tag::BLOB:
+      case DataElement::Tag::kBlob:
         length += element->get_blob()->length;
         break;
     }
@@ -267,7 +235,7 @@ void BlobData::AppendDataInternal(base::span<const char> data,
     return;
   bool should_embed_bytes = current_memory_population_ + data.size() <=
                             DataElementBytes::kMaximumEmbeddedDataSize;
-  if (!elements_.IsEmpty() && elements_.back()->is_bytes()) {
+  if (!elements_.empty() && elements_.back()->is_bytes()) {
     // Append bytes to previous element.
     DCHECK(last_bytes_provider_);
     DCHECK(last_bytes_provider_receiver_);
@@ -334,12 +302,11 @@ BlobDataHandle::BlobDataHandle()
 
 BlobDataHandle::BlobDataHandle(std::unique_ptr<BlobData> data, uint64_t size)
     : uuid_(WTF::CreateCanonicalUUIDString()),
-      type_(data->ContentType().IsolatedCopy()),
+      type_(data->ContentType()),
       size_(size),
       is_single_unknown_size_file_(data->IsSingleUnknownSizeFile()) {
   auto elements = data->ReleaseElements();
   TRACE_EVENT0("Blob", "Registry::RegisterBlob");
-  SCOPED_BLINK_UMA_HISTOGRAM_TIMER_THREAD_SAFE("Storage.Blob.RegisterBlobTime");
   GetThreadSpecificRegistry()->Register(
       blob_remote_.InitWithNewPipeAndPassReceiver(), uuid_,
       type_.IsNull() ? "" : type_, "", std::move(elements));
@@ -348,12 +315,10 @@ BlobDataHandle::BlobDataHandle(std::unique_ptr<BlobData> data, uint64_t size)
 BlobDataHandle::BlobDataHandle(const String& uuid,
                                const String& type,
                                uint64_t size)
-    : uuid_(uuid.IsolatedCopy()),
-      type_(IsValidBlobType(type) ? type.IsolatedCopy() : ""),
+    : uuid_(uuid),
+      type_(IsValidBlobType(type) ? type : ""),
       size_(size),
       is_single_unknown_size_file_(false) {
-  SCOPED_BLINK_UMA_HISTOGRAM_TIMER_THREAD_SAFE(
-      "Storage.Blob.GetBlobFromUUIDTime");
   GetThreadSpecificRegistry()->GetBlobFromUUID(
       blob_remote_.InitWithNewPipeAndPassReceiver(), uuid_);
 }
@@ -363,8 +328,8 @@ BlobDataHandle::BlobDataHandle(
     const String& type,
     uint64_t size,
     mojo::PendingRemote<mojom::blink::Blob> blob_remote)
-    : uuid_(uuid.IsolatedCopy()),
-      type_(IsValidBlobType(type) ? type.IsolatedCopy() : ""),
+    : uuid_(uuid),
+      type_(IsValidBlobType(type) ? type : ""),
       size_(size),
       is_single_unknown_size_file_(false),
       blob_remote_(std::move(blob_remote)) {

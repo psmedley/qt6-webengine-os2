@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,6 +54,12 @@ void RTCEncodedVideoUnderlyingSource::OnFrameFromSource(
   // If the source is canceled or there are too many queued frames,
   // drop the new frame.
   if (!disconnect_callback_ || !GetExecutionContext()) {
+    return;
+  }
+  if (!Controller()) {
+    // TODO(ricea): Maybe avoid dropping frames during transfer?
+    DVLOG(1) << "Dropped frame due to null Controller(). This can happen "
+                "during transfer.";
     return;
   }
   if (Controller()->DesiredSize() <= kMinQueueDesiredSize) {

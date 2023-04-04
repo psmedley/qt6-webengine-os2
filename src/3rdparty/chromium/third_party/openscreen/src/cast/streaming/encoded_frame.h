@@ -22,22 +22,29 @@ namespace cast {
 // A combination of metadata and data for one encoded frame.  This can contain
 // audio data or video data or other.
 struct EncodedFrame {
-  enum Dependency : int8_t {
+  enum class Dependency : int8_t {
     // "null" value, used to indicate whether |dependency| has been set.
-    UNKNOWN_DEPENDENCY,
+    kUnknown,
 
     // Not decodable without the reference frame indicated by
     // |referenced_frame_id|.
-    DEPENDS_ON_ANOTHER,
+    kDependent,
 
     // Independently decodable.
-    INDEPENDENTLY_DECODABLE,
+    kIndependent,
 
     // Independently decodable, and no future frames will depend on any frames
     // before this one.
-    KEY_FRAME,
+    kKeyFrame,
   };
 
+  EncodedFrame(Dependency dependency,
+               FrameId frame_id,
+               FrameId referenced_frame_id,
+               RtpTimeTicks rtp_timestamp,
+               Clock::time_point reference_time,
+               std::chrono::milliseconds new_playout_delay,
+               absl::Span<uint8_t> data);
   EncodedFrame();
   ~EncodedFrame();
 
@@ -48,7 +55,7 @@ struct EncodedFrame {
   void CopyMetadataTo(EncodedFrame* dest) const;
 
   // This frame's dependency relationship with respect to other frames.
-  Dependency dependency = UNKNOWN_DEPENDENCY;
+  Dependency dependency = Dependency::kUnknown;
 
   // The label associated with this frame.  Implies an ordering relative to
   // other frames in the same stream.

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/separator.h"
 
 std::u16string ui::metadata::TypeConverter<GURL>::ToString(
     const GURL& source_value) {
@@ -84,3 +85,8 @@ DEFINE_ENUM_CONVERTERS(
     {ui::TextInputType::TEXT_INPUT_TYPE_DATE_TIME_FIELD,
      u"TEXT_INPUT_TYPE_DATE_TIME_FIELD"},
     {ui::TextInputType::TEXT_INPUT_TYPE_NULL, u"TEXT_INPUT_TYPE_NULL"})
+
+DEFINE_ENUM_CONVERTERS(views::Separator::Orientation,
+                       {views::Separator::Orientation::kHorizontal,
+                        u"kHorizontal"},
+                       {views::Separator::Orientation::kVertical, u"kVertical"})

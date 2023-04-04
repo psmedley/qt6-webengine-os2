@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include <tuple>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/scoped_feature_list.h"
@@ -380,16 +381,21 @@ class GpuImageDecodeCacheTest
                      bool /* allow_accelerated_jpeg_decoding */,
                      bool /* allow_accelerated_webp_decoding */,
                      bool /* advertise_accelerated_decoding */,
-                     bool /* enable_clipped_image_scaling */>> {
+                     bool /* enable_clipped_image_scaling */,
+                     bool /* no_discardable_memory */>> {
  public:
   void SetUp() override {
-    std::vector<base::Feature> enabled_features;
+    std::vector<base::test::FeatureRef> enabled_features;
     allow_accelerated_jpeg_decoding_ = std::get<3>(GetParam());
     if (allow_accelerated_jpeg_decoding_)
       enabled_features.push_back(features::kVaapiJpegImageDecodeAcceleration);
     allow_accelerated_webp_decoding_ = std::get<4>(GetParam());
     if (allow_accelerated_webp_decoding_)
       enabled_features.push_back(features::kVaapiWebPImageDecodeAcceleration);
+    no_discardable_memory_ = std::get<7>(GetParam());
+    if (no_discardable_memory_)
+      enabled_features.push_back(
+          features::kNoDiscardableMemoryForGpuDecodePath);
     feature_list_.InitWithFeatures(enabled_features,
                                    {} /* disabled_features */);
     advertise_accelerated_decoding_ = std::get<5>(GetParam());
@@ -422,8 +428,7 @@ class GpuImageDecodeCacheTest
       RasterDarkModeFilter* const dark_mode_filter = nullptr) {
     return std::make_unique<GpuImageDecodeCache>(
         context_provider_.get(), use_transfer_cache_, color_type_,
-        memory_limit_bytes, max_texture_size_,
-        PaintImage::kDefaultGeneratorClientId, dark_mode_filter);
+        memory_limit_bytes, max_texture_size_, dark_mode_filter);
   }
 
   // Returns dimensions for an image that will not fit in GPU memory and hence
@@ -691,6 +696,7 @@ class GpuImageDecodeCacheTest
   bool allow_accelerated_webp_decoding_;
   bool advertise_accelerated_decoding_;
   bool enable_clipped_image_scaling_;
+  bool no_discardable_memory_;
   int max_texture_size_ = 0;
 };
 
@@ -3131,7 +3137,7 @@ TEST_P(GpuImageDecodeCacheTest, HighBitDepthYUVDecoding) {
     // If `draw_image` is tone mapped, then it will be converted to RGBA
     // during tone mapping.
     bool color_converted_to_rgba = use_transfer_cache_ &&
-                                   decoded_cs.IsPQOrHLG() &&
+                                   decoded_cs.IsToneMappedByDefault() &&
                                    cache->SupportsColorSpaceConversion();
 
     if (decodes_to_yuv && !color_converted_to_rgba) {
@@ -3628,7 +3634,8 @@ INSTANTIATE_TEST_SUITE_P(
         testing::Values(false) /* allow_accelerated_jpeg_decoding */,
         testing::Values(false) /* allow_accelerated_webp_decoding */,
         testing::Values(false) /* advertise_accelerated_decoding */,
-        testing::Bool() /* enable_clipped_image_scaling */));
+        testing::Bool() /* enable_clipped_image_scaling */,
+        testing::Values(false) /* no_discardable_memory */));
 
 INSTANTIATE_TEST_SUITE_P(
     GpuImageDecodeCacheTestsOOPR,
@@ -3640,7 +3647,8 @@ INSTANTIATE_TEST_SUITE_P(
         testing::Values(false) /* allow_accelerated_jpeg_decoding */,
         testing::Values(false) /* allow_accelerated_webp_decoding */,
         testing::Values(false) /* advertise_accelerated_decoding */,
-        testing::Values(false) /* enable_clipped_image_scaling */));
+        testing::Values(false) /* enable_clipped_image_scaling */,
+        testing::Values(false) /* no_discardable_memory */));
 
 class GpuImageDecodeCacheWithAcceleratedDecodesTest
     : public GpuImageDecodeCacheTest {
@@ -3956,7 +3964,8 @@ INSTANTIATE_TEST_SUITE_P(
         testing::Values(true) /* allow_accelerated_jpeg_decoding */,
         testing::Values(true) /* allow_accelerated_webp_decoding */,
         testing::Values(true) /* advertise_accelerated_decoding */,
-        testing::Values(false) /* enable_clipped_image_scaling */));
+        testing::Values(false) /* enable_clipped_image_scaling */,
+        testing::Bool() /* no_discardable_memory */));
 
 class GpuImageDecodeCacheWithAcceleratedDecodesFlagsTest
     : public GpuImageDecodeCacheWithAcceleratedDecodesTest {};
@@ -4092,14 +4101,14 @@ TEST_P(GpuImageDecodeCacheWithAcceleratedDecodesFlagsTest,
 INSTANTIATE_TEST_SUITE_P(
     GpuImageDecodeCacheTestsOOPR,
     GpuImageDecodeCacheWithAcceleratedDecodesFlagsTest,
-    testing::Combine(
-        testing::Values(kN32_SkColorType),
-        testing::Values(true) /* use_transfer_cache */,
-        testing::Bool() /* do_yuv_decode */,
-        testing::Bool() /* allow_accelerated_jpeg_decoding */,
-        testing::Bool() /* allow_accelerated_webp_decoding */,
-        testing::Bool() /* advertise_accelerated_decoding */,
-        testing::Values(false) /* enable_clipped_image_scaling */));
+    testing::Combine(testing::Values(kN32_SkColorType),
+                     testing::Values(true) /* use_transfer_cache */,
+                     testing::Bool() /* do_yuv_decode */,
+                     testing::Bool() /* allow_accelerated_jpeg_decoding */,
+                     testing::Bool() /* allow_accelerated_webp_decoding */,
+                     testing::Bool() /* advertise_accelerated_decoding */,
+                     testing::Values(false) /* enable_clipped_image_scaling */,
+                     testing::Bool() /* no_discardable_memory */));
 
 #undef EXPECT_TRUE_IF_NOT_USING_TRANSFER_CACHE
 #undef EXPECT_FALSE_IF_NOT_USING_TRANSFER_CACHE

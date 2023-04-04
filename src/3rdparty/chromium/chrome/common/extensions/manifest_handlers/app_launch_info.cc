@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "components/app_constants/constants.h"
-#include "components/services/app_service/public/mojom/types.mojom-shared.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/manifest_constants.h"
@@ -62,10 +61,7 @@ const AppLaunchInfo& GetAppLaunchInfo(const Extension* extension) {
 
 }  // namespace
 
-AppLaunchInfo::AppLaunchInfo()
-    : launch_container_(apps::mojom::LaunchContainer::kLaunchContainerTab),
-      launch_width_(0),
-      launch_height_(0) {}
+AppLaunchInfo::AppLaunchInfo() = default;
 
 AppLaunchInfo::~AppLaunchInfo() {
 }
@@ -82,7 +78,7 @@ const GURL& AppLaunchInfo::GetLaunchWebURL(const Extension* extension) {
 }
 
 // static
-apps::mojom::LaunchContainer AppLaunchInfo::GetLaunchContainer(
+apps::LaunchContainer AppLaunchInfo::GetLaunchContainer(
     const Extension* extension) {
   return GetAppLaunchInfo(extension).launch_container_;
 }
@@ -117,7 +113,8 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, std::u16string* error) {
   // Launch URL can be either local (to chrome-extension:// root) or an absolute
   // web URL.
   if (const base::Value* temp =
-          extension->manifest()->FindPath(keys::kLaunchLocalPath)) {
+          extension->manifest()->FindPath(keys::kLaunchLocalPath);
+      temp) {
     if (extension->manifest()->FindPath(keys::kLaunchWebURL)) {
       *error = errors::kLaunchPathAndURLAreExclusive;
       return false;
@@ -147,8 +144,8 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, std::u16string* error) {
     }
 
     launch_local_path_ = launch_path;
-  } else if (const base::Value* temp =
-                 extension->manifest()->FindPath(keys::kLaunchWebURL)) {
+  } else if (temp = extension->manifest()->FindPath(keys::kLaunchWebURL);
+             temp) {
     if (!temp->is_string()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           errors::kInvalidLaunchValue,
@@ -232,10 +229,9 @@ bool AppLaunchInfo::LoadLaunchContainer(Extension* extension,
       tmp_launcher_container->GetString();
 
   if (launch_container_string == values::kLaunchContainerPanelDeprecated) {
-    launch_container_ =
-        apps::mojom::LaunchContainer::kLaunchContainerPanelDeprecated;
+    launch_container_ = apps::LaunchContainer::kLaunchContainerPanelDeprecated;
   } else if (launch_container_string == values::kLaunchContainerTab) {
-    launch_container_ = apps::mojom::LaunchContainer::kLaunchContainerTab;
+    launch_container_ = apps::LaunchContainer::kLaunchContainerTab;
   } else {
     *error = errors::kInvalidLaunchContainer;
     return false;
@@ -245,7 +241,7 @@ bool AppLaunchInfo::LoadLaunchContainer(Extension* extension,
   // deprecated.
   bool can_specify_initial_size =
       launch_container_ ==
-      apps::mojom::LaunchContainer::kLaunchContainerPanelDeprecated;
+      apps::LaunchContainer::kLaunchContainerPanelDeprecated;
 
   // Validate the container width if present.
   if (!ReadLaunchDimension(extension->manifest(),

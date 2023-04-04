@@ -1,10 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_REPORTING_METRICS_FAKE_METRIC_REPORT_QUEUE_H_
 #define COMPONENTS_REPORTING_METRICS_FAKE_METRIC_REPORT_QUEUE_H_
 
+#include <memory>
 #include <vector>
 
 #include "components/reporting/client/report_queue.h"
@@ -29,17 +30,18 @@ class FakeMetricReportQueue : public MetricReportQueue {
 
   ~FakeMetricReportQueue() override;
 
-  void Enqueue(const MetricData& metric_data,
+  void Enqueue(std::unique_ptr<const MetricData> metric_data,
                ReportQueue::EnqueueCallback callback) override;
 
-  std::vector<MetricData> GetMetricDataReported() const;
+  const std::vector<std::unique_ptr<const MetricData>>& GetMetricDataReported()
+      const;
 
   int GetNumFlush() const;
 
  private:
   void Flush() override;
 
-  std::vector<MetricData> reported_data_;
+  std::vector<std::unique_ptr<const MetricData>> reported_data_;
 
   int num_flush_ = 0;
 };

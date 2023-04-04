@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,11 +88,11 @@ class CORE_EXPORT FindBuffer {
                TextSearcherICU* text_searcher,
                const String& search_text);
 
-      bool operator==(const Iterator& other) {
+      bool operator==(const Iterator& other) const {
         return has_match_ == other.has_match_;
       }
 
-      bool operator!=(const Iterator& other) {
+      bool operator!=(const Iterator& other) const {
         return has_match_ != other.has_match_;
       }
 

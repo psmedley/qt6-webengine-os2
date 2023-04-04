@@ -1,6 +1,6 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.  Use
-# of this source code is governed by a BSD-style license that can
-# be found in the LICENSE file.
+# Copyright 2021 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 
 import("//build/config/features.gni")
 import("//third_party/libprotobuf-mutator/fuzzable_proto_library.gni")
@@ -20,11 +20,6 @@ static_library("file") {
     "file.cc",
     "file.h",
   ]
-  deps = [ "//base" ]
-}
-
-source_set("shared_vector") {
-  sources = [ "shared_vector.h" ]
   deps = [
     ":status",
     "//base",
@@ -32,6 +27,9 @@ source_set("shared_vector") {
 }
 
 proto_library("status_proto") {
+  # Generate JS so it can be used by chrome extensions
+  generate_javascript = true
+
   proto_in_dir = "//"
   sources = [ "status.proto" ]
 }
@@ -47,14 +45,6 @@ static_library("status") {
   deps = [ "//base" ]
 }
 
-source_set("shared_queue") {
-  sources = [ "shared_queue.h" ]
-  deps = [
-    ":status",
-    "//base",
-  ]
-}
-
 source_set("status_macros") {
   sources = [ "status_macros.h" ]
 
@@ -68,12 +58,18 @@ source_set("task_runner_context") {
 }
 
 source_set("test_callbacks_support") {
+  testonly = true
   sources = [
     "test_support_callbacks.cc",
     "test_support_callbacks.h",
+    "test_util.h",
   ]
 
-  deps = [ "//base" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//testing/gtest",
+  ]
 }
 
 source_set("disconnectable_client") {
@@ -95,8 +91,6 @@ source_set("unit_tests") {
   sources = [
     "disconnectable_client_unittest.cc",
     "file_unittest.cc",
-    "shared_queue_unittest.cc",
-    "shared_vector_unittest.cc",
     "status_macros_unittest.cc",
     "status_unittest.cc",
     "statusor_unittest.cc",
@@ -104,8 +98,6 @@ source_set("unit_tests") {
   deps = [
     ":disconnectable_client",
     ":file",
-    ":shared_queue",
-    ":shared_vector",
     ":status",
     ":status_macros",
     ":status_proto",

@@ -29,12 +29,12 @@
 #include "libavutil/thread.h"
 #include "avcodec.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "mpeg_er.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
 #include "mpegvideodec.h"
 #include "h261.h"
-#include "internal.h"
 
 #define H261_MBA_VLC_BITS 8
 #define H261_MTYPE_VLC_BITS 6
@@ -214,7 +214,7 @@ static int h261_decode_mb_skipped(H261DecContext *h, int mba1, int mba2)
         s->mb_y = ((h->gob_number - 1) / 2) * 3 + i / 11;
         xy      = s->mb_x + s->mb_y * s->mb_stride;
         ff_init_block_index(s);
-        ff_update_block_index(s);
+        ff_update_block_index(s, 8, s->avctx->lowres, 1);
 
         for (j = 0; j < 6; j++)
             s->block_last_index[j] = -1;
@@ -400,7 +400,7 @@ static int h261_decode_mb(H261DecContext *h)
     s->mb_y = ((h->gob_number - 1) / 2) * 3 + ((h->current_mba - 1) / 11);
     xy      = s->mb_x + s->mb_y * s->mb_stride;
     ff_init_block_index(s);
-    ff_update_block_index(s);
+    ff_update_block_index(s, 8, s->avctx->lowres, 1);
 
     // Read mtype
     com->mtype = get_vlc2(&s->gb, h261_mtype_vlc.table, H261_MTYPE_VLC_BITS, 2);
@@ -594,7 +594,7 @@ static int get_consumed_bytes(MpegEncContext *s, int buf_size)
     return pos;
 }
 
-static int h261_decode_frame(AVCodecContext *avctx, void *data,
+static int h261_decode_frame(AVCodecContext *avctx, AVFrame *pict,
                              int *got_frame, AVPacket *avpkt)
 {
     H261DecContext *const h = avctx->priv_data;
@@ -602,7 +602,6 @@ static int h261_decode_frame(AVCodecContext *avctx, void *data,
     int buf_size       = avpkt->size;
     MpegEncContext *s  = &h->s;
     int ret;
-    AVFrame *pict = data;
 
     ff_dlog(avctx, "*****frame %d size=%d\n", avctx->frame_number, buf_size);
     ff_dlog(avctx, "bytes=%x %x %x %x\n", buf[0], buf[1], buf[2], buf[3]);
@@ -683,14 +682,13 @@ static av_cold int h261_decode_end(AVCodecContext *avctx)
 
 const FFCodec ff_h261_decoder = {
     .p.name         = "h261",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("H.261"),
+    CODEC_LONG_NAME("H.261"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_H261,
     .priv_data_size = sizeof(H261DecContext),
     .init           = h261_decode_init,
     .close          = h261_decode_end,
-    .decode         = h261_decode_frame,
+    FF_CODEC_DECODE_CB(h261_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .p.max_lowres   = 3,
 };

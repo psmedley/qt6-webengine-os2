@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,7 +66,6 @@ RendererSettings CreateRendererSettings() {
 #endif
   renderer_settings.allow_antialiasing =
       !command_line->HasSwitch(switches::kDisableCompositedAntialiasing);
-  renderer_settings.use_skia_renderer = features::IsUsingSkiaRenderer();
 
   if (command_line->HasSwitch(switches::kSlowDownCompositingScaleFactor)) {
     const int kMinSlowDownScaleFactor = 1;

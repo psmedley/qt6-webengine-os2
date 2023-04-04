@@ -7,11 +7,13 @@
 #ifndef CORE_FXCODEC_BMP_CFX_BMPDECOMPRESSOR_H_
 #define CORE_FXCODEC_BMP_CFX_BMPDECOMPRESSOR_H_
 
+#include <stdint.h>
+
 #include <vector>
 
 #include "core/fxcodec/bmp/bmp_decoder.h"
 #include "core/fxcodec/bmp/fx_bmp.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/span.h"
@@ -62,7 +64,7 @@ class CFX_BmpDecompressor {
   BmpDecoder::Status DecodeRGB();
   BmpDecoder::Status DecodeRLE8();
   BmpDecoder::Status DecodeRLE4();
-  bool ReadData(pdfium::span<uint8_t> buf);
+  bool ReadAllOrNone(pdfium::span<uint8_t> buf);
   void SaveDecodingStatus(DecodeStatus status);
   bool ValidateColorIndex(uint8_t val) const;
   bool ValidateFlag() const;
@@ -70,7 +72,7 @@ class CFX_BmpDecompressor {
   int PaletteChannelCount() const { return pal_type_ == PalType::kNew ? 4 : 3; }
 
   UnownedPtr<const CFX_BmpContext> const context_;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> out_row_buffer_;
+  DataVector<uint8_t> out_row_buffer_;
   std::vector<uint32_t> palette_;
   uint32_t header_offset_ = 0;
   uint32_t width_ = 0;
@@ -84,6 +86,7 @@ class CFX_BmpDecompressor {
   uint32_t color_used_ = 0;
   int32_t pal_num_ = 0;
   PalType pal_type_ = PalType::kNew;
+  uint32_t data_offset_ = 0;
   uint32_t data_size_ = 0;
   uint32_t img_ifh_size_ = 0;
   uint32_t row_num_ = 0;

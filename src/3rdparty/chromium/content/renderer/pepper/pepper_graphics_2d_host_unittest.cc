@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@ class PepperGraphics2DHostTest : public testing::Test {
     return PepperGraphics2DHost::ConvertToLogicalPixels(scale, op_rect, delta);
   }
 
-  PepperGraphics2DHostTest() : renderer_ppapi_host_(nullptr, nullptr, 12345) {}
+  PepperGraphics2DHostTest() : renderer_ppapi_host_(nullptr, 12345) {}
 
   ~PepperGraphics2DHostTest() override {
     ppapi::ProxyAutoLock proxy_lock;

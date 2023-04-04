@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,8 @@
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/interaction/element_test_util.h"
 #include "ui/base/interaction/element_tracker.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/dom/dom_code.h"
@@ -44,6 +46,15 @@ View* ElementToView(ui::TrackedElement* element) {
   auto* const view_element = element->AsA<TrackedElementViews>();
   return view_element ? view_element->view() : nullptr;
 }
+
+// A subclass of View that has metadata.
+class TypedView : public View {
+ public:
+  METADATA_HEADER(TypedView);
+};
+
+BEGIN_METADATA(TypedView, View)
+END_METADATA
 
 // Watches events on the ElementTracker and converts the resulting values back
 // into Views from the original ui::TrackedElement objects. Monitoring
@@ -95,7 +106,9 @@ class ElementEventWatcher {
   const ElementEventType event_type_;
   ui::ElementTracker::Subscription subscription_;
   int event_count_ = 0;
-  raw_ptr<View> last_view_ = nullptr;
+  // TODO(crbug.com/1298696): views_unittests breaks with MTECheckedPtr
+  // enabled. Triage.
+  raw_ptr<View, DegradeToNoOpWhenMTE> last_view_ = nullptr;
 };
 
 ElementTrackerViews::ViewList ElementsToViews(
@@ -958,6 +971,28 @@ TEST_F(ElementTrackerViewsTest, GetUniqueView) {
                          kTestElementID, context));
 }
 
+TEST_F(ElementTrackerViewsTest, GetUniqueViewAs) {
+  auto widget = CreateWidget();
+  TypedView* const contents =
+      widget->SetContentsView(std::make_unique<TypedView>());
+  widget->Show();
+  const ui::ElementContext context =
+      ElementTrackerViews::GetContextForView(contents);
+  EXPECT_EQ(nullptr,
+            ElementTrackerViews::GetInstance()->GetUniqueViewAs<TypedView>(
+                kTestElementID, context));
+
+  contents->SetProperty(kElementIdentifierKey, kTestElementID);
+  EXPECT_EQ(contents,
+            ElementTrackerViews::GetInstance()->GetUniqueViewAs<TypedView>(
+                kTestElementID, context));
+
+  contents->ClearProperty(kElementIdentifierKey);
+  EXPECT_EQ(nullptr,
+            ElementTrackerViews::GetInstance()->GetUniqueViewAs<TypedView>(
+                kTestElementID, context));
+}
+
 TEST_F(ElementTrackerViewsTest, GetFirstMatchingViewWithSingleView) {
   auto widget = CreateWidget();
   View* const contents = widget->SetContentsView(std::make_unique<View>());
@@ -974,6 +1009,31 @@ TEST_F(ElementTrackerViewsTest, GetFirstMatchingViewWithSingleView) {
   contents->ClearProperty(kElementIdentifierKey);
   EXPECT_EQ(nullptr, ElementTrackerViews::GetInstance()->GetFirstMatchingView(
                          kTestElementID, context));
+}
+
+TEST_F(ElementTrackerViewsTest, GetFirstMatchingViewAs) {
+  auto widget = CreateWidget();
+  TypedView* const contents =
+      widget->SetContentsView(std::make_unique<TypedView>());
+  widget->Show();
+  const ui::ElementContext context =
+      ElementTrackerViews::GetContextForView(contents);
+  EXPECT_EQ(
+      nullptr,
+      ElementTrackerViews::GetInstance()->GetFirstMatchingViewAs<TypedView>(
+          kTestElementID, context));
+
+  contents->SetProperty(kElementIdentifierKey, kTestElementID);
+  EXPECT_EQ(
+      contents,
+      ElementTrackerViews::GetInstance()->GetFirstMatchingViewAs<TypedView>(
+          kTestElementID, context));
+
+  contents->ClearProperty(kElementIdentifierKey);
+  EXPECT_EQ(
+      nullptr,
+      ElementTrackerViews::GetInstance()->GetFirstMatchingViewAs<TypedView>(
+          kTestElementID, context));
 }
 
 TEST_F(ElementTrackerViewsTest, GetFirstMatchingViewWithMultipleViews) {

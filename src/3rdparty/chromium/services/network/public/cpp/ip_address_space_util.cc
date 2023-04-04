@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -288,6 +288,7 @@ IPAddressSpace TransportInfoToIPAddressSpace(const net::TransportInfo& info) {
     case net::TransportType::kCached:
       return IPEndPointToIPAddressSpace(info.endpoint);
     case net::TransportType::kProxied:
+    case net::TransportType::kCachedFromProxy:
       return mojom::IPAddressSpace::kUnknown;
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,7 +83,7 @@ IN_PROC_BROWSER_TEST_F(DocumentServicePrerenderingBrowserTest,
   mojo::Remote<mojom::Echo> echo_remote;
   bool echo_deleted = false;
   new DocumentServiceEchoImpl(
-      prerendered_frame_host, echo_remote.BindNewPipeAndPassReceiver(),
+      *prerendered_frame_host, echo_remote.BindNewPipeAndPassReceiver(),
       base::BindOnce([](bool* deleted) { *deleted = true; }, &echo_deleted));
 
   // Activate the prerendered page.
@@ -100,8 +100,7 @@ class DocumentServiceBFCacheBrowserTest : public DocumentServiceBrowserTest {
  public:
   DocumentServiceBFCacheBrowserTest() {
     std::vector<base::test::ScopedFeatureList::FeatureAndParams>
-        additional_features = {
-            {features::kBackForwardCache, {{"enable_same_site", "true"}}}};
+        additional_features = {{features::kBackForwardCache, {}}};
     feature_list_.InitWithFeaturesAndParameters(
         DefaultEnabledBackForwardCacheParametersForTests(additional_features),
         DefaultDisabledBackForwardCacheParametersForTests());
@@ -119,13 +118,13 @@ IN_PROC_BROWSER_TEST_F(DocumentServiceBFCacheBrowserTest, DocumentService) {
   // 1) Navigate to A.
   ASSERT_TRUE(NavigateToURL(shell(), url_a));
   RenderFrameHost* rfh_a =
-      web_contents()->GetMainFrame();  // current_frame_host();
+      web_contents()->GetPrimaryMainFrame();  // current_frame_host();
   RenderFrameDeletedObserver delete_observer_rfh_a(rfh_a);
 
   mojo::Remote<mojom::Echo> echo_remote;
   bool echo_deleted = false;
   new DocumentServiceEchoImpl(
-      rfh_a, echo_remote.BindNewPipeAndPassReceiver(),
+      *rfh_a, echo_remote.BindNewPipeAndPassReceiver(),
       base::BindOnce([](bool* deleted) { *deleted = true; }, &echo_deleted));
 
   // 2) Navigate to B.

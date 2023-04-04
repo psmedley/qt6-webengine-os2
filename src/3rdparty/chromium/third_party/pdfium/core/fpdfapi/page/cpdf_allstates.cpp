@@ -17,7 +17,6 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fxge/cfx_graphstatedata.h"
-#include "third_party/base/compiler_specific.h"
 #include "third_party/base/cxx17_backports.h"
 
 CPDF_AllStates::CPDF_AllStates() = default;
@@ -43,11 +42,11 @@ void CPDF_AllStates::SetLineDash(const CPDF_Array* pArray,
   m_GraphState.SetLineDash(std::move(dashes), phase, scale);
 }
 
-void CPDF_AllStates::ProcessExtGS(CPDF_Dictionary* pGS,
+void CPDF_AllStates::ProcessExtGS(const CPDF_Dictionary* pGS,
                                   CPDF_StreamContentParser* pParser) {
   CPDF_DictionaryLocker locker(pGS);
   for (const auto& it : locker) {
-    CPDF_Object* pObject = it.second->GetDirect();
+    RetainPtr<CPDF_Object> pObject = it.second->GetMutableDirect();
     if (!pObject)
       continue;
 
@@ -68,53 +67,52 @@ void CPDF_AllStates::ProcessExtGS(CPDF_Dictionary* pGS,
         m_GraphState.SetMiterLimit(pObject->GetNumber());
         break;
       case FXBSTR_ID('D', 0, 0, 0): {
-        CPDF_Array* pDash = pObject->AsArray();
+        const CPDF_Array* pDash = pObject->AsArray();
         if (!pDash)
           break;
 
-        CPDF_Array* pArray = pDash->GetArrayAt(0);
+        RetainPtr<const CPDF_Array> pArray = pDash->GetArrayAt(0);
         if (!pArray)
           break;
 
-        SetLineDash(pArray, pDash->GetNumberAt(1), 1.0f);
+        SetLineDash(pArray.Get(), pDash->GetFloatAt(1), 1.0f);
         break;
       }
       case FXBSTR_ID('R', 'I', 0, 0):
         m_GeneralState.SetRenderIntent(pObject->GetString());
         break;
       case FXBSTR_ID('F', 'o', 'n', 't'): {
-        CPDF_Array* pFont = pObject->AsArray();
+        const CPDF_Array* pFont = pObject->AsArray();
         if (!pFont)
           break;
 
-        m_TextState.SetFontSize(pFont->GetNumberAt(1));
-        m_TextState.SetFont(pParser->FindFont(pFont->GetStringAt(0)));
+        m_TextState.SetFontSize(pFont->GetFloatAt(1));
+        m_TextState.SetFont(pParser->FindFont(pFont->GetByteStringAt(0)));
         break;
       }
       case FXBSTR_ID('T', 'R', 0, 0):
         if (pGS->KeyExist("TR2")) {
           continue;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
       case FXBSTR_ID('T', 'R', '2', 0):
-        m_GeneralState.SetTR(!pObject->IsName() ? pObject : nullptr);
+        m_GeneralState.SetTR(!pObject->IsName() ? std::move(pObject) : nullptr);
         break;
       case FXBSTR_ID('B', 'M', 0, 0): {
-        CPDF_Array* pArray = pObject->AsArray();
-        m_GeneralState.SetBlendMode(pArray ? pArray->GetStringAt(0)
+        const CPDF_Array* pArray = pObject->AsArray();
+        m_GeneralState.SetBlendMode(pArray ? pArray->GetByteStringAt(0)
                                            : pObject->GetString());
         if (m_GeneralState.GetBlendType() > BlendMode::kMultiply)
           pParser->GetPageObjectHolder()->SetBackgroundAlphaNeeded(true);
         break;
       }
-      case FXBSTR_ID('S', 'M', 'a', 's'):
-        if (ToDictionary(pObject)) {
-          m_GeneralState.SetSoftMask(pObject);
+      case FXBSTR_ID('S', 'M', 'a', 's'): {
+        RetainPtr<CPDF_Dictionary> pMaskDict = ToDictionary(pObject);
+        m_GeneralState.SetSoftMask(pMaskDict);
+        if (pMaskDict)
           m_GeneralState.SetSMaskMatrix(pParser->GetCurStates()->m_CTM);
-        } else {
-          m_GeneralState.SetSoftMask(nullptr);
-        }
         break;
+      }
       case FXBSTR_ID('C', 'A', 0, 0):
         m_GeneralState.SetStrokeAlpha(
             pdfium::clamp(pObject->GetNumber(), 0.0f, 1.0f));
@@ -138,20 +136,20 @@ void CPDF_AllStates::ProcessExtGS(CPDF_Dictionary* pGS,
         if (pGS->KeyExist("BG2")) {
           continue;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
       case FXBSTR_ID('B', 'G', '2', 0):
-        m_GeneralState.SetBG(pObject);
+        m_GeneralState.SetBG(std::move(pObject));
         break;
       case FXBSTR_ID('U', 'C', 'R', 0):
         if (pGS->KeyExist("UCR2")) {
           continue;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
       case FXBSTR_ID('U', 'C', 'R', '2'):
-        m_GeneralState.SetUCR(pObject);
+        m_GeneralState.SetUCR(std::move(pObject));
         break;
       case FXBSTR_ID('H', 'T', 0, 0):
-        m_GeneralState.SetHT(pObject);
+        m_GeneralState.SetHT(std::move(pObject));
         break;
       case FXBSTR_ID('F', 'L', 0, 0):
         m_GeneralState.SetFlatness(pObject->GetNumber());

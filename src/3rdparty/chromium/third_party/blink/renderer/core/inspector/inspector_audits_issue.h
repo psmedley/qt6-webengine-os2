@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,9 +36,64 @@ class InspectorIssue;
 }
 }  // namespace protocol
 
+// Please keep this alphabetized.
 enum class DeprecationIssueType {
+  kAuthorizationCoveredByWildcard,
+  kCanRequestURLHTTPContainingNewline,
+  kChromeLoadTimesConnectionInfo,
+  kChromeLoadTimesFirstPaintAfterLoadTime,
+  kChromeLoadTimesWasAlternateProtocolAvailable,
+  kCookieWithTruncatingChar,
+  kCrossOriginAccessBasedOnDocumentDomain,
+  kCrossOriginWindowAlert,
+  kCrossOriginWindowConfirm,
+  kCSSSelectorInternalMediaControlsOverlayCastButton,
   kDeprecationExample,
-  kUntranslated,
+  kDocumentDomainSettingWithoutOriginAgentClusterHeader,
+  kEventPath,
+  kExpectCTHeader,
+  kGeolocationInsecureOrigin,
+  kGeolocationInsecureOriginDeprecatedNotRemoved,
+  kGetUserMediaInsecureOrigin,
+  kHostCandidateAttributeGetter,
+  kIdentityInCanMakePaymentEvent,
+  kInsecurePrivateNetworkSubresourceRequest,
+  kLocalCSSFileExtensionRejected,
+  kMediaSourceAbortRemove,
+  kMediaSourceDurationTruncatingBuffered,
+  kNoSysexWebMIDIWithoutPermission,
+  kNotDeprecated,
+  kNotificationInsecureOrigin,
+  kNotificationPermissionRequestedIframe,
+  kObsoleteWebRtcCipherSuite,
+  kOpenWebDatabaseInsecureContext,
+  kOverflowVisibleOnReplacedElement,
+  kPaymentInstruments,
+  kPaymentRequestCSPViolation,
+  kPersistentQuotaType,
+  kPictureSourceSrc,
+  kPrefixedCancelAnimationFrame,
+  kPrefixedRequestAnimationFrame,
+  kPrefixedStorageInfo,
+  kPrefixedVideoDisplayingFullscreen,
+  kPrefixedVideoEnterFullScreen,
+  kPrefixedVideoEnterFullscreen,
+  kPrefixedVideoExitFullScreen,
+  kPrefixedVideoExitFullscreen,
+  kPrefixedVideoSupportsFullscreen,
+  kRangeExpand,
+  kRequestedSubresourceWithEmbeddedCredentials,
+  kRTCConstraintEnableDtlsSrtpFalse,
+  kRTCConstraintEnableDtlsSrtpTrue,
+  kRTCPeerConnectionComplexPlanBSdpUsingDefaultSdpSemantics,
+  kRTCPeerConnectionSdpSemanticsPlanB,
+  kRtcpMuxPolicyNegotiate,
+  kSharedArrayBufferConstructedWithoutIsolation,
+  kTextToSpeech_DisallowedByAutoplay,
+  kV8SharedArrayBufferConstructedInExtensionWithoutIsolation,
+  kXHRJSONEncodingDetection,
+  kXMLHttpRequestSynchronousInNonWorkerOutsideBeforeUnload,
+  kXRSupportsSession,
 };
 
 enum class RendererCorsIssueCode {
@@ -49,11 +104,16 @@ enum class RendererCorsIssueCode {
 
 enum class AttributionReportingIssueType {
   kPermissionPolicyDisabled,
-  kInvalidAttributionSourceEventId,
-  kAttributionSourceUntrustworthyOrigin,
-  kAttributionUntrustworthyOrigin,
-  kInvalidAttributionSourceExpiry,
-  kInvalidAttributionSourcePriority,
+  kPermissionPolicyNotDelegated,
+  kUntrustworthyReportingOrigin,
+  kInsecureContext,
+  kInvalidRegisterSourceHeader,
+  kInvalidRegisterTriggerHeader,
+  kInvalidEligibleHeader,
+  kTooManyConcurrentRequests,
+  kSourceAndTriggerHeaders,
+  kSourceIgnored,
+  kTriggerIgnored,
 };
 
 enum class SharedArrayBufferIssueType {
@@ -112,21 +172,12 @@ class CORE_EXPORT AuditsIssue {
                               WTF::String initiator_origin,
                               WTF::String failedParameter,
                               absl::optional<base::UnguessableToken> issue_id);
-  // Reports an Attribution Reporting API issue to DevTools.
-  // |reporting_execution_context| is the current execution context in which the
-  // issue happens and is reported in (the "target" in DevTools terms).
-  // |offending_frame_token| is the offending frame that triggered the issue.
-  // |offending_frame_token| does not necessarly correspond to
-  // |reporting_execution_context|, e.g. when an impression click in an iframe
-  // is blocked due to an insecure main frame.
-  static void ReportAttributionIssue(
-      ExecutionContext* reporting_execution_context,
-      AttributionReportingIssueType type,
-      const absl::optional<base::UnguessableToken>& offending_frame_token =
-          absl::nullopt,
-      Element* element = nullptr,
-      const absl::optional<String>& request_id = absl::nullopt,
-      const absl::optional<String>& invalid_parameter = absl::nullopt);
+
+  static void ReportAttributionIssue(ExecutionContext* execution_context,
+                                     AttributionReportingIssueType type,
+                                     Element* element,
+                                     const String& request_id,
+                                     const String& invalid_parameter);
 
   static void ReportNavigatorUserAgentAccess(
       ExecutionContext* execution_context,
@@ -140,11 +191,8 @@ class CORE_EXPORT AuditsIssue {
   // Reports a Deprecation issue to DevTools.
   // `execution_context` is used to extract the affected frame and source.
   // `type` is the enum used to differentiate messages.
-  // `legacy_message` and `legacy_type` are for untranslated deprecations.
   static void ReportDeprecationIssue(ExecutionContext* execution_context,
-                                     const DeprecationIssueType& type,
-                                     const String& legacy_message,
-                                     const String& legacy_type);
+                                     DeprecationIssueType type);
 
   static void ReportClientHintIssue(LocalDOMWindow* local_dom_window,
                                     ClientHintIssueReason reason);

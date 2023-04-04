@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,9 @@ APP_ENUM_TO_STRING(InstallReason,
                    kDefault,
                    kSync,
                    kUser,
-                   kSubApp)
+                   kSubApp,
+                   kKiosk,
+                   kCommandLine)
 APP_ENUM_TO_STRING(InstallSource,
                    kUnknown,
                    kSystem,
@@ -76,7 +78,7 @@ AppPtr App::Clone() const {
   app->permissions = ClonePermissions(permissions);
   app->install_reason = install_reason;
   app->install_source = install_source;
-  app->policy_id = policy_id;
+  app->policy_ids = policy_ids;
   app->is_platform_app = is_platform_app;
   app->recommendable = recommendable;
   app->searchable = searchable;
@@ -98,6 +100,9 @@ AppPtr App::Clone() const {
   }
 
   app->shortcuts = CloneShortcuts(shortcuts);
+
+  app->app_size_in_bytes = app_size_in_bytes;
+  app->data_size_in_bytes = data_size_in_bytes;
 
   return app;
 }
@@ -238,6 +243,10 @@ InstallReason ConvertMojomInstallReasonToInstallReason(
       return InstallReason::kUser;
     case apps::mojom::InstallReason::kSubApp:
       return InstallReason::kSubApp;
+    case apps::mojom::InstallReason::kKiosk:
+      return InstallReason::kKiosk;
+    case apps::mojom::InstallReason::kCommandLine:
+      return InstallReason::kCommandLine;
   }
 }
 
@@ -260,6 +269,10 @@ apps::mojom::InstallReason ConvertInstallReasonToMojomInstallReason(
       return apps::mojom::InstallReason::kUser;
     case InstallReason::kSubApp:
       return apps::mojom::InstallReason::kSubApp;
+    case InstallReason::kKiosk:
+      return apps::mojom::InstallReason::kKiosk;
+    case InstallReason::kCommandLine:
+      return apps::mojom::InstallReason::kCommandLine;
   }
 }
 
@@ -378,7 +391,7 @@ AppPtr ConvertMojomAppToApp(const apps::mojom::AppPtr& mojom_app) {
   app->install_source =
       ConvertMojomInstallSourceToInstallSource(mojom_app->install_source);
 
-  app->policy_id = mojom_app->policy_id;
+  app->policy_ids = mojom_app->policy_ids;
 
   app->is_platform_app = GetOptionalBool(mojom_app->is_platform_app);
   app->recommendable = GetOptionalBool(mojom_app->recommendable);
@@ -442,7 +455,7 @@ apps::mojom::AppPtr ConvertAppToMojomApp(const AppPtr& app) {
       ConvertInstallReasonToMojomInstallReason(app->install_reason);
   mojom_app->install_source =
       ConvertInstallSourceToMojomInstallSource(app->install_source);
-  mojom_app->policy_id = app->policy_id;
+  mojom_app->policy_ids = app->policy_ids;
   mojom_app->is_platform_app = GetMojomOptionalBool(app->is_platform_app);
   mojom_app->recommendable = GetMojomOptionalBool(app->recommendable);
   mojom_app->searchable = GetMojomOptionalBool(app->searchable);
@@ -470,6 +483,47 @@ apps::mojom::AppPtr ConvertAppToMojomApp(const AppPtr& app) {
         ConvertRunOnOsLoginToMojomRunOnOsLogin(app->run_on_os_login.value());
   }
   return mojom_app;
+}
+
+std::vector<base::FilePath> ConvertMojomFilePathsToFilePaths(
+    apps::mojom::FilePathsPtr mojom_file_paths) {
+  std::vector<base::FilePath> file_paths;
+  if (mojom_file_paths) {
+    file_paths = std::move(mojom_file_paths->file_paths);
+  }
+  return file_paths;
+}
+
+UninstallSource ConvertMojomUninstallSourceToUninstallSource(
+    apps::mojom::UninstallSource mojom_uninstall_source) {
+  switch (mojom_uninstall_source) {
+    case apps::mojom::UninstallSource::kUnknown:
+      return UninstallSource::kUnknown;
+    case apps::mojom::UninstallSource::kAppList:
+      return UninstallSource::kAppList;
+    case apps::mojom::UninstallSource ::kAppManagement:
+      return UninstallSource::kAppManagement;
+    case apps::mojom::UninstallSource ::kShelf:
+      return UninstallSource::kShelf;
+    case apps::mojom::UninstallSource ::kMigration:
+      return UninstallSource::kMigration;
+  }
+}
+
+apps::mojom::UninstallSource ConvertUninstallSourceToMojomUninstallSource(
+    UninstallSource uninstall_source) {
+  switch (uninstall_source) {
+    case UninstallSource::kUnknown:
+      return apps::mojom::UninstallSource::kUnknown;
+    case UninstallSource::kAppList:
+      return apps::mojom::UninstallSource::kAppList;
+    case UninstallSource ::kAppManagement:
+      return apps::mojom::UninstallSource::kAppManagement;
+    case UninstallSource ::kShelf:
+      return apps::mojom::UninstallSource::kShelf;
+    case UninstallSource ::kMigration:
+      return apps::mojom::UninstallSource::kMigration;
+  }
 }
 
 }  // namespace apps

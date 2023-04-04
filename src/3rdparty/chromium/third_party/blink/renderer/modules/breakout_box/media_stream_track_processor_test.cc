@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 
@@ -78,9 +79,11 @@ MediaStreamTrack* CreateAudioMediaStreamTrack(
           /*remote=*/false, std::move(source));
 
   MediaStreamComponent* component =
-      MakeGarbageCollected<MediaStreamComponent>(media_stream_source);
+      MakeGarbageCollected<MediaStreamComponentImpl>(
+          media_stream_source,
+          std::make_unique<MediaStreamAudioTrack>(true /* is_local_track */));
 
-  source_ptr->ConnectToTrack(component);
+  source_ptr->ConnectToInitializedTrack(component);
 
   return MakeGarbageCollected<MediaStreamTrackImpl>(context, component);
 }
@@ -90,12 +93,22 @@ MediaStreamTrack* CreateAudioMediaStreamTrack(
 class MediaStreamTrackProcessorTest : public testing::Test {
  public:
   ~MediaStreamTrackProcessorTest() override {
-    platform_->RunUntilIdle();
+    RunIOUntilIdle();
     WebHeap::CollectAllGarbageForTesting();
   }
 
  protected:
   ScopedTestingPlatformSupport<IOTaskRunnerTestingPlatformSupport> platform_;
+
+ private:
+  void RunIOUntilIdle() const {
+    // Make sure that tasks on IO thread are completed before moving on.
+    base::RunLoop run_loop;
+    Platform::Current()->GetIOTaskRunner()->PostTaskAndReply(
+        FROM_HERE, base::BindOnce([] {}), run_loop.QuitClosure());
+    run_loop.Run();
+    base::RunLoop().RunUntilIdle();
+  }
 };
 
 TEST_F(MediaStreamTrackProcessorTest, VideoFramesAreExposed) {

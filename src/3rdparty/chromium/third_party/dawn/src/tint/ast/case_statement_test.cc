@@ -19,116 +19,110 @@
 #include "src/tint/ast/if_statement.h"
 #include "src/tint/ast/test_helper.h"
 
+using namespace tint::number_suffixes;  // NOLINT
+
 namespace tint::ast {
 namespace {
 
 using CaseStatementTest = TestHelper;
 
 TEST_F(CaseStatementTest, Creation_i32) {
-  CaseSelectorList b;
-  auto* selector = create<SintLiteralExpression>(2);
-  b.push_back(selector);
+    auto* selector = Expr(2_i);
+    utils::Vector b{selector};
 
-  auto* discard = create<DiscardStatement>();
-  auto* body = create<BlockStatement>(StatementList{discard});
+    auto* discard = create<DiscardStatement>();
+    auto* body = create<BlockStatement>(utils::Vector{discard});
 
-  auto* c = create<CaseStatement>(b, body);
-  ASSERT_EQ(c->selectors.size(), 1u);
-  EXPECT_EQ(c->selectors[0], selector);
-  ASSERT_EQ(c->body->statements.size(), 1u);
-  EXPECT_EQ(c->body->statements[0], discard);
+    auto* c = create<CaseStatement>(b, body);
+    ASSERT_EQ(c->selectors.Length(), 1u);
+    EXPECT_EQ(c->selectors[0], selector);
+    ASSERT_EQ(c->body->statements.Length(), 1u);
+    EXPECT_EQ(c->body->statements[0], discard);
 }
 
 TEST_F(CaseStatementTest, Creation_u32) {
-  CaseSelectorList b;
-  auto* selector = create<UintLiteralExpression>(2u);
-  b.push_back(selector);
+    auto* selector = Expr(2_u);
+    utils::Vector b{selector};
 
-  auto* discard = create<DiscardStatement>();
-  auto* body = create<BlockStatement>(StatementList{discard});
+    auto* discard = create<DiscardStatement>();
+    auto* body = create<BlockStatement>(utils::Vector{discard});
 
-  auto* c = create<CaseStatement>(b, body);
-  ASSERT_EQ(c->selectors.size(), 1u);
-  EXPECT_EQ(c->selectors[0], selector);
-  ASSERT_EQ(c->body->statements.size(), 1u);
-  EXPECT_EQ(c->body->statements[0], discard);
+    auto* c = create<CaseStatement>(b, body);
+    ASSERT_EQ(c->selectors.Length(), 1u);
+    EXPECT_EQ(c->selectors[0], selector);
+    ASSERT_EQ(c->body->statements.Length(), 1u);
+    EXPECT_EQ(c->body->statements[0], discard);
 }
 
 TEST_F(CaseStatementTest, Creation_WithSource) {
-  CaseSelectorList b;
-  b.push_back(create<SintLiteralExpression>(2));
+    utils::Vector b{Expr(2_i)};
 
-  auto* body = create<BlockStatement>(StatementList{
-      create<DiscardStatement>(),
-  });
-  auto* c = create<CaseStatement>(Source{Source::Location{20, 2}}, b, body);
-  auto src = c->source;
-  EXPECT_EQ(src.range.begin.line, 20u);
-  EXPECT_EQ(src.range.begin.column, 2u);
+    auto* body = create<BlockStatement>(utils::Vector{
+        create<DiscardStatement>(),
+    });
+    auto* c = create<CaseStatement>(Source{Source::Location{20, 2}}, b, body);
+    auto src = c->source;
+    EXPECT_EQ(src.range.begin.line, 20u);
+    EXPECT_EQ(src.range.begin.column, 2u);
 }
 
 TEST_F(CaseStatementTest, IsDefault_WithoutSelectors) {
-  auto* body = create<BlockStatement>(StatementList{
-      create<DiscardStatement>(),
-  });
-  auto* c = create<CaseStatement>(CaseSelectorList{}, body);
-  EXPECT_TRUE(c->IsDefault());
+    auto* body = create<BlockStatement>(utils::Vector{
+        create<DiscardStatement>(),
+    });
+    auto* c = create<CaseStatement>(utils::Empty, body);
+    EXPECT_TRUE(c->IsDefault());
 }
 
 TEST_F(CaseStatementTest, IsDefault_WithSelectors) {
-  CaseSelectorList b;
-  b.push_back(create<SintLiteralExpression>(2));
-
-  auto* c = create<CaseStatement>(b, create<BlockStatement>(StatementList{}));
-  EXPECT_FALSE(c->IsDefault());
+    utils::Vector b{Expr(2_i)};
+    auto* c = create<CaseStatement>(b, create<BlockStatement>(utils::Empty));
+    EXPECT_FALSE(c->IsDefault());
 }
 
 TEST_F(CaseStatementTest, IsCase) {
-  auto* c = create<CaseStatement>(CaseSelectorList{},
-                                  create<BlockStatement>(StatementList{}));
-  EXPECT_TRUE(c->Is<CaseStatement>());
+    auto* c = create<CaseStatement>(utils::Empty, create<BlockStatement>(utils::Empty));
+    EXPECT_TRUE(c->Is<CaseStatement>());
 }
 
 TEST_F(CaseStatementTest, Assert_Null_Body) {
-  EXPECT_FATAL_FAILURE(
-      {
-        ProgramBuilder b;
-        b.create<CaseStatement>(CaseSelectorList{}, nullptr);
-      },
-      "internal compiler error");
+    EXPECT_FATAL_FAILURE(
+        {
+            ProgramBuilder b;
+            b.create<CaseStatement>(utils::Empty, nullptr);
+        },
+        "internal compiler error");
 }
 
 TEST_F(CaseStatementTest, Assert_Null_Selector) {
-  EXPECT_FATAL_FAILURE(
-      {
-        ProgramBuilder b;
-        b.create<CaseStatement>(CaseSelectorList{nullptr},
-                                b.create<BlockStatement>(StatementList{}));
-      },
-      "internal compiler error");
+    EXPECT_FATAL_FAILURE(
+        {
+            ProgramBuilder b;
+            b.create<CaseStatement>(utils::Vector<const ast::IntLiteralExpression*, 1>{nullptr},
+                                    b.create<BlockStatement>(utils::Empty));
+        },
+        "internal compiler error");
 }
 
 TEST_F(CaseStatementTest, Assert_DifferentProgramID_Call) {
-  EXPECT_FATAL_FAILURE(
-      {
-        ProgramBuilder b1;
-        ProgramBuilder b2;
-        b1.create<CaseStatement>(CaseSelectorList{},
-                                 b2.create<BlockStatement>(StatementList{}));
-      },
-      "internal compiler error");
+    EXPECT_FATAL_FAILURE(
+        {
+            ProgramBuilder b1;
+            ProgramBuilder b2;
+            b1.create<CaseStatement>(utils::Empty, b2.create<BlockStatement>(utils::Empty));
+        },
+        "internal compiler error");
 }
 
 TEST_F(CaseStatementTest, Assert_DifferentProgramID_Selector) {
-  EXPECT_FATAL_FAILURE(
-      {
-        ProgramBuilder b1;
-        ProgramBuilder b2;
-        b1.create<CaseStatement>(
-            CaseSelectorList{b2.create<SintLiteralExpression>(2)},
-            b1.create<BlockStatement>(StatementList{}));
-      },
-      "internal compiler error");
+    EXPECT_FATAL_FAILURE(
+        {
+            ProgramBuilder b1;
+            ProgramBuilder b2;
+            b1.create<CaseStatement>(utils::Vector{b2.Expr(2_i)},
+                                     b1.create<BlockStatement>(utils::Empty));
+        },
+        "internal compiler error");
 }
 
 }  // namespace

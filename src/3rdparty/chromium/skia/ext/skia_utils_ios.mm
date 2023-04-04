@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,13 +49,8 @@ SkBitmap CGImageToSkBitmap(CGImageRef image, CGSize size, bool is_opaque) {
   base::ScopedCFTypeRef<CGColorSpaceRef> color_space(
       CGColorSpaceCreateDeviceRGB());
   base::ScopedCFTypeRef<CGContextRef> context(CGBitmapContextCreate(
-      data,
-      size.width,
-      size.height,
-      8,
-      size.width * 4,
-      color_space,
-      kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host));
+      data, size.width, size.height, 8, size.width * 4, color_space,
+      uint32_t{kCGImageAlphaPremultipliedFirst} | kCGBitmapByteOrder32Host));
 #else
 #error We require that Skia's and CoreGraphics's recommended \
        image memory layout match.

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/core/document_transition/document_transition_style_tracker.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/graphics/document_transition_shared_element_id.h"
 #include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
@@ -28,7 +29,6 @@
 namespace blink {
 
 class Document;
-class DocumentTransitionSetElementOptions;
 class Element;
 class ExceptionState;
 class LayoutObject;
@@ -41,7 +41,8 @@ class CORE_EXPORT DocumentTransition
     : public ScriptWrappable,
       public ActiveScriptWrappable<DocumentTransition>,
       public ExecutionContextLifecycleObserver,
-      public LocalFrameView::LifecycleNotificationObserver {
+      public LocalFrameView::LifecycleNotificationObserver,
+      public ChromeClient::CommitObserver {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -61,25 +62,29 @@ class CORE_EXPORT DocumentTransition
   // can be started.
   bool StartNewTransition();
 
-  // JavaScript API implementation.
-  void setElement(ScriptState*,
-                  Element*,
-                  const AtomicString&,
-                  const DocumentTransitionSetElementOptions*,
-                  ExceptionState&);
   ScriptPromise start(ScriptState*, ExceptionState&);
   ScriptPromise start(ScriptState*,
                       V8DocumentTransitionCallback* callback,
                       ExceptionState&);
-  void ignoreCSSTaggedElements(ScriptState*, ExceptionState&);
   void abandon(ScriptState*, ExceptionState&);
+
+  ScriptPromise prepare(ScriptState*, ExceptionState&);
+  ScriptPromise prepare(ScriptState*,
+                        V8DocumentTransitionCallback* callback,
+                        ExceptionState&);
+  ScriptPromise finished() const;
 
   // This uses std::move semantics to take the request from this object.
   std::unique_ptr<DocumentTransitionRequest> TakePendingRequest();
 
-  // Returns true if this object participates in an active transition (if there
-  // is one).
-  bool IsTransitionParticipant(const LayoutObject& object) const;
+  // Returns true if this object needs to create an EffectNode for the shared
+  // element transition.
+  bool NeedsSharedElementEffectNode(const LayoutObject& object) const;
+
+  // Returns true if this object is painted via pseudo elements. Note that this
+  // is different from NeedsSharedElementFromEffectNode() since the root may not
+  // be a shared element, but require an effect node.
+  bool IsRepresentedViaPseudoElements(const LayoutObject& object) const;
 
   // Updates an effect node. This effect populates the shared element id and the
   // shared element resource id. The return value is a result of updating the
@@ -109,7 +114,7 @@ class CORE_EXPORT DocumentTransition
 
   // Returns the UA style sheet for the pseudo element tree generated during a
   // transition.
-  const String& UAStyleSheet() const;
+  String UAStyleSheet() const;
 
   // Used by web tests to retain the pseudo-element tree after a
   // DocumentTransition finishes. This is used to capture a static version of
@@ -119,8 +124,25 @@ class CORE_EXPORT DocumentTransition
   // LifecycleNotificationObserver overrides.
   void WillStartLifecycleUpdate(const LocalFrameView&) override;
 
+  // CommitObserver overrides.
+  void WillCommitCompositorFrame() override;
+
+  // Return non-root transitioning elements.
+  VectorOf<Element> GetTransitioningElements() const {
+    return style_tracker_ ? style_tracker_->GetTransitioningElements()
+                          : VectorOf<Element>{};
+  }
+
+  bool IsIdle() const { return state_ == State::kIdle; }
+
+  // In physical pixels. See comments on equivalent methods in
+  // DocumentTransitionStyleTracker for info.
+  gfx::Rect GetSnapshotViewportRect() const;
+  gfx::Vector2d GetRootSnapshotPaintOffset() const;
+
  private:
   friend class DocumentTransitionTest;
+  friend class AXDocumentTransitionTest;
 
   enum class State { kIdle, kCapturing, kCaptured, kStarted };
 
@@ -128,7 +150,9 @@ class CORE_EXPORT DocumentTransition
   // executing.
   class PostCaptureResolved : public ScriptFunction::Callable {
    public:
-    explicit PostCaptureResolved(DocumentTransition* transition, bool success);
+    explicit PostCaptureResolved(DocumentTransition* transition,
+                                 bool success,
+                                 Document*);
     ~PostCaptureResolved() override;
 
     ScriptValue Call(ScriptState*, ScriptValue) override;
@@ -139,6 +163,7 @@ class CORE_EXPORT DocumentTransition
    private:
     Member<DocumentTransition> transition_;
     const bool success_;
+    Member<Document> document_;
   };
 
   void NotifyHasChangesToCommit();
@@ -150,11 +175,12 @@ class CORE_EXPORT DocumentTransition
   // start phase of the animation can be initiated.
   void NotifyPostCaptureCallbackResolved(bool success);
 
-  // Used to defer visual updates between transition prepare finishing and
+  // Used to defer visual updates between transition prepare dispatching and
   // transition start to allow the page to set up the final scene
   // asynchronously.
-  void StartDeferringCommits();
-  void StopDeferringCommits();
+  void PauseRendering();
+  void OnRenderingPausedTimeout(uint32_t sequence_id);
+  void ResumeRendering();
 
   // Allow canceling a transition until it reaches start().
   void CancelPendingTransition(const char* abort_message);
@@ -163,6 +189,11 @@ class CORE_EXPORT DocumentTransition
   // finished situations.
   void ResetTransitionState(bool abort_style_tracker = true);
   void ResetScriptState(const char* abort_message);
+
+  // A common helper for start() and prepare() calls.
+  bool InitiateTransition(ScriptState*,
+                          V8DocumentTransitionCallback* callback,
+                          ExceptionState&);
 
   Member<Document> document_;
 
@@ -182,7 +213,10 @@ class CORE_EXPORT DocumentTransition
 
   // The following promise is provided to script and resolved when all
   // animations from the start phase finish.
-  Member<ScriptPromiseResolver> start_promise_resolver_;
+  Member<ScriptPromiseResolver> finished_promise_resolver_;
+  // The following promise is provided to script and resolved after the prepare
+  // callback finishes.
+  Member<ScriptPromiseResolver> prepare_promise_resolver_;
 
   // Created conditionally if renderer based SharedElementTransitions is
   // enabled.
@@ -202,7 +236,7 @@ class CORE_EXPORT DocumentTransition
   // It's unique among other local documents.
   uint32_t document_tag_ = 0u;
 
-  bool deferring_commits_ = false;
+  std::unique_ptr<cc::ScopedPauseRendering> rendering_paused_scope_;
 
   // Set only for tests.
   bool disable_end_transition_ = false;

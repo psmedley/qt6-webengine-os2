@@ -47,11 +47,11 @@ static int64_t parse_timecode(const uint8_t *buf, int64_t packet_time) {
     return ms - packet_time;
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data, int *got_sub_ptr,
-                        AVPacket *avpkt) {
+static int decode_frame(AVCodecContext *avctx, AVSubtitle *sub,
+                        int *got_sub_ptr, const AVPacket *avpkt)
+{
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
-    AVSubtitle *sub = data;
     AVSubtitleRect *rect;
     const uint8_t *buf_end = buf + buf_size;
     uint8_t *bitmap;
@@ -156,10 +156,9 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_sub_ptr,
 
 const FFCodec ff_xsub_decoder = {
     .p.name    = "xsub",
-    .p.long_name = NULL_IF_CONFIG_SMALL("XSUB"),
+    CODEC_LONG_NAME("XSUB"),
     .p.type    = AVMEDIA_TYPE_SUBTITLE,
     .p.id      = AV_CODEC_ID_XSUB,
     .init      = decode_init,
-    .decode    = decode_frame,
-    .caps_internal = FF_CODEC_CAP_INIT_THREADSAFE,
+    FF_CODEC_DECODE_SUB_CB(decode_frame),
 };

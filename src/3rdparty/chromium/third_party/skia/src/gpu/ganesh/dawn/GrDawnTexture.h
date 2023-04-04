@@ -15,13 +15,19 @@ class GrDawnGpu;
 
 class GrDawnTexture : public GrTexture {
 public:
-    static sk_sp<GrDawnTexture> Make(GrDawnGpu*, SkISize dimensions,
-                                     wgpu::TextureFormat format, GrRenderable, int sampleCnt,
-                                     SkBudgeted, int mipLevels, GrMipmapStatus);
+    static sk_sp<GrDawnTexture> Make(GrDawnGpu*,
+                                     SkISize dimensions,
+                                     wgpu::TextureFormat format,
+                                     GrRenderable,
+                                     int sampleCnt,
+                                     SkBudgeted,
+                                     int mipLevels,
+                                     GrMipmapStatus,
+                                     std::string_view label);
 
     static sk_sp<GrDawnTexture> MakeWrapped(GrDawnGpu*, SkISize dimensions, GrRenderable,
                                             int sampleCnt, GrWrapCacheable, GrIOType,
-                                            const GrDawnTextureInfo&);
+                                            const GrDawnTextureInfo&, std::string_view label);
 
     ~GrDawnTexture() override;
 
@@ -50,6 +56,8 @@ protected:
 
 private:
     GrDawnTextureInfo        fInfo;
+
+    void onSetLabel() override{}
 
     using INHERITED = GrTexture;
 };

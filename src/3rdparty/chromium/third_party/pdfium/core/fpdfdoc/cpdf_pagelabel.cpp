@@ -6,6 +6,8 @@
 
 #include "core/fpdfdoc/cpdf_pagelabel.h"
 
+#include <utility>
+
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
@@ -15,8 +17,9 @@ namespace {
 
 WideString MakeRoman(int num) {
   const int kArabic[] = {1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1};
-  const WideString kRoman[] = {L"m",  L"cm", L"d",  L"cd", L"c",  L"xc", L"l",
-                               L"xl", L"x",  L"ix", L"v",  L"iv", L"i"};
+  const WideStringView kRoman[] = {L"m",  L"cm", L"d",  L"cd", L"c",
+                                   L"xc", L"l",  L"xl", L"x",  L"ix",
+                                   L"v",  L"iv", L"i"};
   const int kMaxNum = 1000000;
 
   num %= kMaxNum;
@@ -53,7 +56,7 @@ WideString GetLabelNumPortion(int num, const ByteString& bsStyle) {
   if (bsStyle.IsEmpty())
     return WideString();
   if (bsStyle == "D")
-    return WideString::Format(L"%d", num);
+    return WideString::FormatInteger(num);
   if (bsStyle == "R") {
     WideString wsNumPortion = MakeRoman(num);
     wsNumPortion.MakeUpper();
@@ -89,12 +92,12 @@ absl::optional<WideString> CPDF_PageLabel::GetLabel(int nPage) const {
   if (!pPDFRoot)
     return absl::nullopt;
 
-  const CPDF_Dictionary* pLabels = pPDFRoot->GetDictFor("PageLabels");
+  RetainPtr<const CPDF_Dictionary> pLabels = pPDFRoot->GetDictFor("PageLabels");
   if (!pLabels)
     return absl::nullopt;
 
-  CPDF_NumberTree numberTree(pLabels);
-  const CPDF_Object* pValue = nullptr;
+  CPDF_NumberTree numberTree(std::move(pLabels));
+  RetainPtr<const CPDF_Object> pValue;
   int n = nPage;
   while (n >= 0) {
     pValue = numberTree.LookupValue(n);
@@ -103,20 +106,19 @@ absl::optional<WideString> CPDF_PageLabel::GetLabel(int nPage) const {
     n--;
   }
 
-  WideString label;
   if (pValue) {
     pValue = pValue->GetDirect();
     if (const CPDF_Dictionary* pLabel = pValue->AsDictionary()) {
+      WideString label;
       if (pLabel->KeyExist("P"))
         label += pLabel->GetUnicodeTextFor("P");
 
-      ByteString bsNumberingStyle = pLabel->GetStringFor("S", ByteString());
+      ByteString bsNumberingStyle = pLabel->GetByteStringFor("S", ByteString());
       int nLabelNum = nPage - n + pLabel->GetIntegerFor("St", 1);
       WideString wsNumPortion = GetLabelNumPortion(nLabelNum, bsNumberingStyle);
       label += wsNumPortion;
       return label;
     }
   }
-  label = WideString::Format(L"%d", nPage + 1);
-  return label;
+  return WideString::FormatInteger(nPage + 1);
 }

@@ -158,7 +158,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL StubCreateWin32SurfaceKHR(VkInstance insta
 static VKAPI_ATTR VkBool32 VKAPI_CALL StubGetPhysicalDeviceWin32PresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) { return VK_FALSE; };
 #endif // VK_USE_PLATFORM_WIN32_KHR
 #ifdef VK_ENABLE_BETA_EXTENSIONS
-static VKAPI_ATTR VkResult VKAPI_CALL StubGetPhysicalDeviceVideoCapabilitiesKHR(VkPhysicalDevice physicalDevice, const VkVideoProfileKHR* pVideoProfile, VkVideoCapabilitiesKHR* pCapabilities) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetPhysicalDeviceVideoCapabilitiesKHR(VkPhysicalDevice physicalDevice, const VkVideoProfileInfoKHR* pVideoProfile, VkVideoCapabilitiesKHR* pCapabilities) { return VK_SUCCESS; };
 #endif // VK_ENABLE_BETA_EXTENSIONS
 #ifdef VK_ENABLE_BETA_EXTENSIONS
 static VKAPI_ATTR VkResult VKAPI_CALL StubGetPhysicalDeviceVideoFormatPropertiesKHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceVideoFormatInfoKHR* pVideoFormatInfo, uint32_t* pVideoFormatPropertyCount, VkVideoFormatPropertiesKHR* pVideoFormatProperties) { return VK_SUCCESS; };
@@ -170,10 +170,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL StubCreateVideoSessionKHR(VkDevice device,
 static VKAPI_ATTR void VKAPI_CALL StubDestroyVideoSessionKHR(VkDevice device, VkVideoSessionKHR videoSession, const VkAllocationCallbacks* pAllocator) {  };
 #endif // VK_ENABLE_BETA_EXTENSIONS
 #ifdef VK_ENABLE_BETA_EXTENSIONS
-static VKAPI_ATTR VkResult VKAPI_CALL StubGetVideoSessionMemoryRequirementsKHR(VkDevice device, VkVideoSessionKHR videoSession, uint32_t* pVideoSessionMemoryRequirementsCount, VkVideoGetMemoryPropertiesKHR* pVideoSessionMemoryRequirements) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetVideoSessionMemoryRequirementsKHR(VkDevice device, VkVideoSessionKHR videoSession, uint32_t* pMemoryRequirementsCount, VkVideoSessionMemoryRequirementsKHR* pMemoryRequirements) { return VK_SUCCESS; };
 #endif // VK_ENABLE_BETA_EXTENSIONS
 #ifdef VK_ENABLE_BETA_EXTENSIONS
-static VKAPI_ATTR VkResult VKAPI_CALL StubBindVideoSessionMemoryKHR(VkDevice device, VkVideoSessionKHR videoSession, uint32_t videoSessionBindMemoryCount, const VkVideoBindMemoryKHR* pVideoSessionBindMemories) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubBindVideoSessionMemoryKHR(VkDevice device, VkVideoSessionKHR videoSession, uint32_t bindSessionMemoryInfoCount, const VkBindVideoSessionMemoryInfoKHR* pBindSessionMemoryInfos) { return VK_SUCCESS; };
 #endif // VK_ENABLE_BETA_EXTENSIONS
 #ifdef VK_ENABLE_BETA_EXTENSIONS
 static VKAPI_ATTR VkResult VKAPI_CALL StubCreateVideoSessionParametersKHR(VkDevice device, const VkVideoSessionParametersCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkVideoSessionParametersKHR* pVideoSessionParameters) { return VK_SUCCESS; };
@@ -194,7 +194,7 @@ static VKAPI_ATTR void VKAPI_CALL StubCmdEndVideoCodingKHR(VkCommandBuffer comma
 static VKAPI_ATTR void VKAPI_CALL StubCmdControlVideoCodingKHR(VkCommandBuffer commandBuffer, const VkVideoCodingControlInfoKHR* pCodingControlInfo) {  };
 #endif // VK_ENABLE_BETA_EXTENSIONS
 #ifdef VK_ENABLE_BETA_EXTENSIONS
-static VKAPI_ATTR void VKAPI_CALL StubCmdDecodeVideoKHR(VkCommandBuffer commandBuffer, const VkVideoDecodeInfoKHR* pFrameInfo) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdDecodeVideoKHR(VkCommandBuffer commandBuffer, const VkVideoDecodeInfoKHR* pDecodeInfo) {  };
 #endif // VK_ENABLE_BETA_EXTENSIONS
 static VKAPI_ATTR void VKAPI_CALL StubCmdBeginRenderingKHR(VkCommandBuffer                   commandBuffer, const VkRenderingInfo*                              pRenderingInfo) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdEndRenderingKHR(VkCommandBuffer                   commandBuffer) {  };
@@ -301,6 +301,7 @@ static VKAPI_ATTR void VKAPI_CALL StubCmdCopyBufferToImage2KHR(VkCommandBuffer c
 static VKAPI_ATTR void VKAPI_CALL StubCmdCopyImageToBuffer2KHR(VkCommandBuffer commandBuffer, const VkCopyImageToBufferInfo2* pCopyImageToBufferInfo) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdBlitImage2KHR(VkCommandBuffer commandBuffer, const VkBlitImageInfo2* pBlitImageInfo) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdResolveImage2KHR(VkCommandBuffer commandBuffer, const VkResolveImageInfo2* pResolveImageInfo) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdTraceRaysIndirect2KHR(VkCommandBuffer commandBuffer, VkDeviceAddress indirectDeviceAddress) {  };
 static VKAPI_ATTR void VKAPI_CALL StubGetDeviceBufferMemoryRequirementsKHR(VkDevice device, const VkDeviceBufferMemoryRequirements* pInfo, VkMemoryRequirements2* pMemoryRequirements) {  };
 static VKAPI_ATTR void VKAPI_CALL StubGetDeviceImageMemoryRequirementsKHR(VkDevice device, const VkDeviceImageMemoryRequirements* pInfo, VkMemoryRequirements2* pMemoryRequirements) {  };
 static VKAPI_ATTR void VKAPI_CALL StubGetDeviceImageSparseMemoryRequirementsKHR(VkDevice device, const VkDeviceImageMemoryRequirements* pInfo, uint32_t* pSparseMemoryRequirementCount, VkSparseImageMemoryRequirements2* pSparseMemoryRequirements) {  };
@@ -472,7 +473,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL StubCreatePrivateDataSlotEXT(VkDevice devi
 static VKAPI_ATTR void VKAPI_CALL StubDestroyPrivateDataSlotEXT(VkDevice device, VkPrivateDataSlot privateDataSlot, const VkAllocationCallbacks* pAllocator) {  };
 static VKAPI_ATTR VkResult VKAPI_CALL StubSetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t data) { return VK_SUCCESS; };
 static VKAPI_ATTR void VKAPI_CALL StubGetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t* pData) {  };
+#ifdef VK_USE_PLATFORM_METAL_EXT
+static VKAPI_ATTR void VKAPI_CALL StubExportMetalObjectsEXT(VkDevice device, VkExportMetalObjectsInfoEXT* pMetalObjectsInfo) {  };
+#endif // VK_USE_PLATFORM_METAL_EXT
 static VKAPI_ATTR void VKAPI_CALL StubCmdSetFragmentShadingRateEnumNV(VkCommandBuffer           commandBuffer, VkFragmentShadingRateNV                     shadingRate, const VkFragmentShadingRateCombinerOpKHR    combinerOps[2]) {  };
+static VKAPI_ATTR void VKAPI_CALL StubGetImageSubresourceLayout2EXT(VkDevice device, VkImage image, const VkImageSubresource2EXT* pSubresource, VkSubresourceLayout2EXT* pLayout) {  };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetDeviceFaultInfoEXT(VkDevice device, VkDeviceFaultCountsEXT* pFaultCounts, VkDeviceFaultInfoEXT* pFaultInfo) { return VK_SUCCESS; };
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 static VKAPI_ATTR VkResult VKAPI_CALL StubAcquireWinrtDisplayNV(VkPhysicalDevice physicalDevice, VkDisplayKHR display) { return VK_SUCCESS; };
 #endif // VK_USE_PLATFORM_WIN32_KHR
@@ -517,6 +523,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL StubGetDeviceSubpassShadingMaxWorkgroupSiz
 static VKAPI_ATTR void VKAPI_CALL StubCmdSubpassShadingHUAWEI(VkCommandBuffer commandBuffer) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdBindInvocationMaskHUAWEI(VkCommandBuffer commandBuffer, VkImageView imageView, VkImageLayout imageLayout) {  };
 static VKAPI_ATTR VkResult VKAPI_CALL StubGetMemoryRemoteAddressNV(VkDevice device, const VkMemoryGetRemoteAddressInfoNV* pMemoryGetRemoteAddressInfo, VkRemoteAddressNV* pAddress) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetPipelinePropertiesEXT(VkDevice device, const VkPipelineInfoEXT* pPipelineInfo, VkBaseOutStructure* pPipelineProperties) { return VK_SUCCESS; };
 static VKAPI_ATTR void VKAPI_CALL StubCmdSetPatchControlPointsEXT(VkCommandBuffer commandBuffer, uint32_t patchControlPoints) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdSetRasterizerDiscardEnableEXT(VkCommandBuffer commandBuffer, VkBool32 rasterizerDiscardEnable) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdSetDepthBiasEnableEXT(VkCommandBuffer commandBuffer, VkBool32 depthBiasEnable) {  };
@@ -531,9 +538,63 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL StubGetPhysicalDeviceScreenPresentationSup
 static VKAPI_ATTR void                                    VKAPI_CALL StubCmdSetColorWriteEnableEXT(VkCommandBuffer       commandBuffer, uint32_t                                attachmentCount, const VkBool32*   pColorWriteEnables) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdDrawMultiEXT(VkCommandBuffer commandBuffer, uint32_t drawCount, const VkMultiDrawInfoEXT* pVertexInfo, uint32_t instanceCount, uint32_t firstInstance, uint32_t stride) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdDrawMultiIndexedEXT(VkCommandBuffer commandBuffer, uint32_t drawCount, const VkMultiDrawIndexedInfoEXT* pIndexInfo, uint32_t instanceCount, uint32_t firstInstance, uint32_t stride, const int32_t* pVertexOffset) {  };
+static VKAPI_ATTR VkResult VKAPI_CALL StubCreateMicromapEXT(VkDevice                                           device, const VkMicromapCreateInfoEXT*        pCreateInfo, const VkAllocationCallbacks*       pAllocator, VkMicromapEXT*                        pMicromap) { return VK_SUCCESS; };
+static VKAPI_ATTR void VKAPI_CALL StubDestroyMicromapEXT(VkDevice device, VkMicromapEXT micromap, const VkAllocationCallbacks* pAllocator) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdBuildMicromapsEXT(VkCommandBuffer                                    commandBuffer, uint32_t infoCount, const VkMicromapBuildInfoEXT* pInfos) {  };
+static VKAPI_ATTR VkResult VKAPI_CALL StubBuildMicromapsEXT(VkDevice                                           device, VkDeferredOperationKHR deferredOperation, uint32_t infoCount, const VkMicromapBuildInfoEXT* pInfos) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubCopyMicromapEXT(VkDevice device, VkDeferredOperationKHR deferredOperation, const VkCopyMicromapInfoEXT* pInfo) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubCopyMicromapToMemoryEXT(VkDevice device, VkDeferredOperationKHR deferredOperation, const VkCopyMicromapToMemoryInfoEXT* pInfo) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubCopyMemoryToMicromapEXT(VkDevice device, VkDeferredOperationKHR deferredOperation, const VkCopyMemoryToMicromapInfoEXT* pInfo) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubWriteMicromapsPropertiesEXT(VkDevice device, uint32_t micromapCount, const VkMicromapEXT* pMicromaps, VkQueryType  queryType, size_t       dataSize, void* pData, size_t stride) { return VK_SUCCESS; };
+static VKAPI_ATTR void VKAPI_CALL StubCmdCopyMicromapEXT(VkCommandBuffer commandBuffer, const VkCopyMicromapInfoEXT* pInfo) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdCopyMicromapToMemoryEXT(VkCommandBuffer commandBuffer, const VkCopyMicromapToMemoryInfoEXT* pInfo) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdCopyMemoryToMicromapEXT(VkCommandBuffer commandBuffer, const VkCopyMemoryToMicromapInfoEXT* pInfo) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdWriteMicromapsPropertiesEXT(VkCommandBuffer commandBuffer, uint32_t micromapCount, const VkMicromapEXT* pMicromaps, VkQueryType queryType, VkQueryPool queryPool, uint32_t firstQuery) {  };
+static VKAPI_ATTR void VKAPI_CALL StubGetDeviceMicromapCompatibilityEXT(VkDevice device, const VkMicromapVersionInfoEXT* pVersionInfo, VkAccelerationStructureCompatibilityKHR* pCompatibility) {  };
+static VKAPI_ATTR void VKAPI_CALL StubGetMicromapBuildSizesEXT(VkDevice                                            device, VkAccelerationStructureBuildTypeKHR                 buildType, const VkMicromapBuildInfoEXT*  pBuildInfo, VkMicromapBuildSizesInfoEXT*           pSizeInfo) {  };
 static VKAPI_ATTR void VKAPI_CALL StubSetDeviceMemoryPriorityEXT(VkDevice       device, VkDeviceMemory memory, float          priority) {  };
 static VKAPI_ATTR void VKAPI_CALL StubGetDescriptorSetLayoutHostMappingInfoVALVE(VkDevice device, const VkDescriptorSetBindingReferenceVALVE* pBindingReference, VkDescriptorSetLayoutHostMappingInfoVALVE* pHostMapping) {  };
 static VKAPI_ATTR void VKAPI_CALL StubGetDescriptorSetHostMappingVALVE(VkDevice device, VkDescriptorSet descriptorSet, void** ppData) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetTessellationDomainOriginEXT(VkCommandBuffer commandBuffer, VkTessellationDomainOrigin domainOrigin) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetDepthClampEnableEXT(VkCommandBuffer commandBuffer, VkBool32 depthClampEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetPolygonModeEXT(VkCommandBuffer commandBuffer, VkPolygonMode polygonMode) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetRasterizationSamplesEXT(VkCommandBuffer commandBuffer, VkSampleCountFlagBits  rasterizationSamples) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetSampleMaskEXT(VkCommandBuffer commandBuffer, VkSampleCountFlagBits  samples, const VkSampleMask*    pSampleMask) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetAlphaToCoverageEnableEXT(VkCommandBuffer commandBuffer, VkBool32 alphaToCoverageEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetAlphaToOneEnableEXT(VkCommandBuffer commandBuffer, VkBool32 alphaToOneEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetLogicOpEnableEXT(VkCommandBuffer commandBuffer, VkBool32 logicOpEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetColorBlendEnableEXT(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkBool32* pColorBlendEnables) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetColorBlendEquationEXT(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkColorBlendEquationEXT* pColorBlendEquations) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetColorWriteMaskEXT(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkColorComponentFlags* pColorWriteMasks) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetRasterizationStreamEXT(VkCommandBuffer commandBuffer, uint32_t rasterizationStream) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetConservativeRasterizationModeEXT(VkCommandBuffer commandBuffer, VkConservativeRasterizationModeEXT conservativeRasterizationMode) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetExtraPrimitiveOverestimationSizeEXT(VkCommandBuffer commandBuffer, float extraPrimitiveOverestimationSize) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetDepthClipEnableEXT(VkCommandBuffer commandBuffer, VkBool32 depthClipEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetSampleLocationsEnableEXT(VkCommandBuffer commandBuffer, VkBool32 sampleLocationsEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetColorBlendAdvancedEXT(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkColorBlendAdvancedEXT* pColorBlendAdvanced) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetProvokingVertexModeEXT(VkCommandBuffer commandBuffer, VkProvokingVertexModeEXT provokingVertexMode) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetLineRasterizationModeEXT(VkCommandBuffer commandBuffer, VkLineRasterizationModeEXT lineRasterizationMode) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetLineStippleEnableEXT(VkCommandBuffer commandBuffer, VkBool32 stippledLineEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetDepthClipNegativeOneToOneEXT(VkCommandBuffer commandBuffer, VkBool32 negativeOneToOne) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetViewportWScalingEnableNV(VkCommandBuffer commandBuffer, VkBool32 viewportWScalingEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetViewportSwizzleNV(VkCommandBuffer commandBuffer, uint32_t firstViewport, uint32_t viewportCount, const VkViewportSwizzleNV* pViewportSwizzles) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetCoverageToColorEnableNV(VkCommandBuffer commandBuffer, VkBool32 coverageToColorEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetCoverageToColorLocationNV(VkCommandBuffer commandBuffer, uint32_t coverageToColorLocation) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetCoverageModulationModeNV(VkCommandBuffer commandBuffer, VkCoverageModulationModeNV coverageModulationMode) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetCoverageModulationTableEnableNV(VkCommandBuffer commandBuffer, VkBool32 coverageModulationTableEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetCoverageModulationTableNV(VkCommandBuffer commandBuffer, uint32_t coverageModulationTableCount, const float* pCoverageModulationTable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetShadingRateImageEnableNV(VkCommandBuffer commandBuffer, VkBool32 shadingRateImageEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetRepresentativeFragmentTestEnableNV(VkCommandBuffer commandBuffer, VkBool32 representativeFragmentTestEnable) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdSetCoverageReductionModeNV(VkCommandBuffer commandBuffer, VkCoverageReductionModeNV coverageReductionMode) {  };
+static VKAPI_ATTR void VKAPI_CALL StubGetShaderModuleIdentifierEXT(VkDevice device, VkShaderModule shaderModule, VkShaderModuleIdentifierEXT* pIdentifier) {  };
+static VKAPI_ATTR void VKAPI_CALL StubGetShaderModuleCreateInfoIdentifierEXT(VkDevice device, const VkShaderModuleCreateInfo* pCreateInfo, VkShaderModuleIdentifierEXT* pIdentifier) {  };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetPhysicalDeviceOpticalFlowImageFormatsNV(VkPhysicalDevice physicalDevice, const VkOpticalFlowImageFormatInfoNV* pOpticalFlowImageFormatInfo, uint32_t* pFormatCount, VkOpticalFlowImageFormatPropertiesNV* pImageFormatProperties) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubCreateOpticalFlowSessionNV(VkDevice device, const VkOpticalFlowSessionCreateInfoNV* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkOpticalFlowSessionNV* pSession) { return VK_SUCCESS; };
+static VKAPI_ATTR void VKAPI_CALL StubDestroyOpticalFlowSessionNV(VkDevice device, VkOpticalFlowSessionNV session, const VkAllocationCallbacks* pAllocator) {  };
+static VKAPI_ATTR VkResult VKAPI_CALL StubBindOpticalFlowSessionImageNV(VkDevice device, VkOpticalFlowSessionNV session, VkOpticalFlowSessionBindingPointNV bindingPoint, VkImageView view, VkImageLayout layout) { return VK_SUCCESS; };
+static VKAPI_ATTR void VKAPI_CALL StubCmdOpticalFlowExecuteNV(VkCommandBuffer commandBuffer, VkOpticalFlowSessionNV session, const VkOpticalFlowExecuteInfoNV* pExecuteInfo) {  };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetFramebufferTilePropertiesQCOM(VkDevice device, VkFramebuffer framebuffer, uint32_t* pPropertiesCount, VkTilePropertiesQCOM* pProperties) { return VK_SUCCESS; };
+static VKAPI_ATTR VkResult VKAPI_CALL StubGetDynamicRenderingTilePropertiesQCOM(VkDevice device, const VkRenderingInfo* pRenderingInfo, VkTilePropertiesQCOM* pProperties) { return VK_SUCCESS; };
 static VKAPI_ATTR VkResult VKAPI_CALL StubCreateAccelerationStructureKHR(VkDevice                                           device, const VkAccelerationStructureCreateInfoKHR*        pCreateInfo, const VkAllocationCallbacks*       pAllocator, VkAccelerationStructureKHR*                        pAccelerationStructure) { return VK_SUCCESS; };
 static VKAPI_ATTR void VKAPI_CALL StubDestroyAccelerationStructureKHR(VkDevice device, VkAccelerationStructureKHR accelerationStructure, const VkAllocationCallbacks* pAllocator) {  };
 static VKAPI_ATTR void VKAPI_CALL StubCmdBuildAccelerationStructuresKHR(VkCommandBuffer                                    commandBuffer, uint32_t infoCount, const VkAccelerationStructureBuildGeometryInfoKHR* pInfos, const VkAccelerationStructureBuildRangeInfoKHR* const* ppBuildRangeInfos) {  };
@@ -556,6 +617,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL StubGetRayTracingCaptureReplayShaderGroupH
 static VKAPI_ATTR void VKAPI_CALL StubCmdTraceRaysIndirectKHR(VkCommandBuffer commandBuffer, const VkStridedDeviceAddressRegionKHR* pRaygenShaderBindingTable, const VkStridedDeviceAddressRegionKHR* pMissShaderBindingTable, const VkStridedDeviceAddressRegionKHR* pHitShaderBindingTable, const VkStridedDeviceAddressRegionKHR* pCallableShaderBindingTable, VkDeviceAddress indirectDeviceAddress) {  };
 static VKAPI_ATTR VkDeviceSize VKAPI_CALL StubGetRayTracingShaderGroupStackSizeKHR(VkDevice device, VkPipeline pipeline, uint32_t group, VkShaderGroupShaderKHR groupShader) { return 0; };
 static VKAPI_ATTR void VKAPI_CALL StubCmdSetRayTracingPipelineStackSizeKHR(VkCommandBuffer commandBuffer, uint32_t pipelineStackSize) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdDrawMeshTasksEXT(VkCommandBuffer commandBuffer, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdDrawMeshTasksIndirectEXT(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride) {  };
+static VKAPI_ATTR void VKAPI_CALL StubCmdDrawMeshTasksIndirectCountEXT(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkBuffer countBuffer, VkDeviceSize countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {  };
 
 
 
@@ -570,8 +634,10 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkBindBufferMemory2KHR", "VK_KHR_bind_memory2"},
     {"vkBindImageMemory2", "VK_VERSION_1_1"},
     {"vkBindImageMemory2KHR", "VK_KHR_bind_memory2"},
+    {"vkBindOpticalFlowSessionImageNV", "VK_NV_optical_flow"},
     {"vkBindVideoSessionMemoryKHR", "VK_KHR_video_queue"},
     {"vkBuildAccelerationStructuresKHR", "VK_KHR_acceleration_structure"},
+    {"vkBuildMicromapsEXT", "VK_EXT_opacity_micromap"},
     {"vkCmdBeginConditionalRenderingEXT", "VK_EXT_conditional_rendering"},
     {"vkCmdBeginDebugUtilsLabelEXT", "VK_EXT_debug_utils"},
     {"vkCmdBeginQueryIndexedEXT", "VK_EXT_transform_feedback"},
@@ -592,6 +658,7 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdBuildAccelerationStructureNV", "VK_NV_ray_tracing"},
     {"vkCmdBuildAccelerationStructuresIndirectKHR", "VK_KHR_acceleration_structure"},
     {"vkCmdBuildAccelerationStructuresKHR", "VK_KHR_acceleration_structure"},
+    {"vkCmdBuildMicromapsEXT", "VK_EXT_opacity_micromap"},
     {"vkCmdControlVideoCodingKHR", "VK_KHR_video_queue"},
     {"vkCmdCopyAccelerationStructureKHR", "VK_KHR_acceleration_structure"},
     {"vkCmdCopyAccelerationStructureNV", "VK_NV_ray_tracing"},
@@ -605,6 +672,9 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdCopyImageToBuffer2", "VK_VERSION_1_3"},
     {"vkCmdCopyImageToBuffer2KHR", "VK_KHR_copy_commands2"},
     {"vkCmdCopyMemoryToAccelerationStructureKHR", "VK_KHR_acceleration_structure"},
+    {"vkCmdCopyMemoryToMicromapEXT", "VK_EXT_opacity_micromap"},
+    {"vkCmdCopyMicromapEXT", "VK_EXT_opacity_micromap"},
+    {"vkCmdCopyMicromapToMemoryEXT", "VK_EXT_opacity_micromap"},
     {"vkCmdCuLaunchKernelNVX", "VK_NVX_binary_import"},
     {"vkCmdDebugMarkerBeginEXT", "VK_EXT_debug_marker"},
     {"vkCmdDebugMarkerEndEXT", "VK_EXT_debug_marker"},
@@ -619,7 +689,10 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdDrawIndirectCount", "VK_VERSION_1_2"},
     {"vkCmdDrawIndirectCountAMD", "VK_AMD_draw_indirect_count"},
     {"vkCmdDrawIndirectCountKHR", "VK_KHR_draw_indirect_count"},
+    {"vkCmdDrawMeshTasksEXT", "VK_EXT_mesh_shader"},
+    {"vkCmdDrawMeshTasksIndirectCountEXT", "VK_EXT_mesh_shader"},
     {"vkCmdDrawMeshTasksIndirectCountNV", "VK_NV_mesh_shader"},
+    {"vkCmdDrawMeshTasksIndirectEXT", "VK_EXT_mesh_shader"},
     {"vkCmdDrawMeshTasksIndirectNV", "VK_NV_mesh_shader"},
     {"vkCmdDrawMeshTasksNV", "VK_NV_mesh_shader"},
     {"vkCmdDrawMultiEXT", "VK_EXT_multi_draw"},
@@ -638,6 +711,7 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdInsertDebugUtilsLabelEXT", "VK_EXT_debug_utils"},
     {"vkCmdNextSubpass2", "VK_VERSION_1_2"},
     {"vkCmdNextSubpass2KHR", "VK_KHR_create_renderpass2"},
+    {"vkCmdOpticalFlowExecuteNV", "VK_NV_optical_flow"},
     {"vkCmdPipelineBarrier2", "VK_VERSION_1_3"},
     {"vkCmdPipelineBarrier2KHR", "VK_KHR_synchronization2"},
     {"vkCmdPreprocessGeneratedCommandsNV", "VK_NV_device_generated_commands"},
@@ -647,15 +721,31 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdResetEvent2KHR", "VK_KHR_synchronization2"},
     {"vkCmdResolveImage2", "VK_VERSION_1_3"},
     {"vkCmdResolveImage2KHR", "VK_KHR_copy_commands2"},
+    {"vkCmdSetAlphaToCoverageEnableEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetAlphaToOneEnableEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetCheckpointNV", "VK_NV_device_diagnostic_checkpoints"},
     {"vkCmdSetCoarseSampleOrderNV", "VK_NV_shading_rate_image"},
+    {"vkCmdSetColorBlendAdvancedEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetColorBlendEnableEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetColorBlendEquationEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetColorWriteEnableEXT", "VK_EXT_color_write_enable"},
+    {"vkCmdSetColorWriteMaskEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetConservativeRasterizationModeEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetCoverageModulationModeNV", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetCoverageModulationTableEnableNV", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetCoverageModulationTableNV", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetCoverageReductionModeNV", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetCoverageToColorEnableNV", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetCoverageToColorLocationNV", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetCullMode", "VK_VERSION_1_3"},
     {"vkCmdSetCullModeEXT", "VK_EXT_extended_dynamic_state"},
     {"vkCmdSetDepthBiasEnable", "VK_VERSION_1_3"},
     {"vkCmdSetDepthBiasEnableEXT", "VK_EXT_extended_dynamic_state2"},
     {"vkCmdSetDepthBoundsTestEnable", "VK_VERSION_1_3"},
     {"vkCmdSetDepthBoundsTestEnableEXT", "VK_EXT_extended_dynamic_state"},
+    {"vkCmdSetDepthClampEnableEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetDepthClipEnableEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetDepthClipNegativeOneToOneEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetDepthCompareOp", "VK_VERSION_1_3"},
     {"vkCmdSetDepthCompareOpEXT", "VK_EXT_extended_dynamic_state"},
     {"vkCmdSetDepthTestEnable", "VK_VERSION_1_3"},
@@ -668,36 +758,52 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdSetEvent2", "VK_VERSION_1_3"},
     {"vkCmdSetEvent2KHR", "VK_KHR_synchronization2"},
     {"vkCmdSetExclusiveScissorNV", "VK_NV_scissor_exclusive"},
+    {"vkCmdSetExtraPrimitiveOverestimationSizeEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetFragmentShadingRateEnumNV", "VK_NV_fragment_shading_rate_enums"},
     {"vkCmdSetFragmentShadingRateKHR", "VK_KHR_fragment_shading_rate"},
     {"vkCmdSetFrontFace", "VK_VERSION_1_3"},
     {"vkCmdSetFrontFaceEXT", "VK_EXT_extended_dynamic_state"},
+    {"vkCmdSetLineRasterizationModeEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetLineStippleEXT", "VK_EXT_line_rasterization"},
+    {"vkCmdSetLineStippleEnableEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetLogicOpEXT", "VK_EXT_extended_dynamic_state2"},
+    {"vkCmdSetLogicOpEnableEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetPatchControlPointsEXT", "VK_EXT_extended_dynamic_state2"},
     {"vkCmdSetPerformanceMarkerINTEL", "VK_INTEL_performance_query"},
     {"vkCmdSetPerformanceOverrideINTEL", "VK_INTEL_performance_query"},
     {"vkCmdSetPerformanceStreamMarkerINTEL", "VK_INTEL_performance_query"},
+    {"vkCmdSetPolygonModeEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetPrimitiveRestartEnable", "VK_VERSION_1_3"},
     {"vkCmdSetPrimitiveRestartEnableEXT", "VK_EXT_extended_dynamic_state2"},
     {"vkCmdSetPrimitiveTopology", "VK_VERSION_1_3"},
     {"vkCmdSetPrimitiveTopologyEXT", "VK_EXT_extended_dynamic_state"},
+    {"vkCmdSetProvokingVertexModeEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetRasterizationSamplesEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetRasterizationStreamEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetRasterizerDiscardEnable", "VK_VERSION_1_3"},
     {"vkCmdSetRasterizerDiscardEnableEXT", "VK_EXT_extended_dynamic_state2"},
     {"vkCmdSetRayTracingPipelineStackSizeKHR", "VK_KHR_ray_tracing_pipeline"},
+    {"vkCmdSetRepresentativeFragmentTestEnableNV", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetSampleLocationsEXT", "VK_EXT_sample_locations"},
+    {"vkCmdSetSampleLocationsEnableEXT", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetSampleMaskEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetScissorWithCount", "VK_VERSION_1_3"},
     {"vkCmdSetScissorWithCountEXT", "VK_EXT_extended_dynamic_state"},
+    {"vkCmdSetShadingRateImageEnableNV", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetStencilOp", "VK_VERSION_1_3"},
     {"vkCmdSetStencilOpEXT", "VK_EXT_extended_dynamic_state"},
     {"vkCmdSetStencilTestEnable", "VK_VERSION_1_3"},
     {"vkCmdSetStencilTestEnableEXT", "VK_EXT_extended_dynamic_state"},
+    {"vkCmdSetTessellationDomainOriginEXT", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetVertexInputEXT", "VK_EXT_vertex_input_dynamic_state"},
     {"vkCmdSetViewportShadingRatePaletteNV", "VK_NV_shading_rate_image"},
+    {"vkCmdSetViewportSwizzleNV", "VK_EXT_extended_dynamic_state3"},
+    {"vkCmdSetViewportWScalingEnableNV", "VK_EXT_extended_dynamic_state3"},
     {"vkCmdSetViewportWScalingNV", "VK_NV_clip_space_w_scaling"},
     {"vkCmdSetViewportWithCount", "VK_VERSION_1_3"},
     {"vkCmdSetViewportWithCountEXT", "VK_EXT_extended_dynamic_state"},
     {"vkCmdSubpassShadingHUAWEI", "VK_HUAWEI_subpass_shading"},
+    {"vkCmdTraceRaysIndirect2KHR", "VK_KHR_ray_tracing_maintenance1"},
     {"vkCmdTraceRaysIndirectKHR", "VK_KHR_ray_tracing_pipeline"},
     {"vkCmdTraceRaysKHR", "VK_KHR_ray_tracing_pipeline"},
     {"vkCmdTraceRaysNV", "VK_NV_ray_tracing"},
@@ -707,12 +813,16 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCmdWriteAccelerationStructuresPropertiesNV", "VK_NV_ray_tracing"},
     {"vkCmdWriteBufferMarker2AMD", "VK_KHR_synchronization2"},
     {"vkCmdWriteBufferMarkerAMD", "VK_AMD_buffer_marker"},
+    {"vkCmdWriteMicromapsPropertiesEXT", "VK_EXT_opacity_micromap"},
     {"vkCmdWriteTimestamp2", "VK_VERSION_1_3"},
     {"vkCmdWriteTimestamp2KHR", "VK_KHR_synchronization2"},
     {"vkCompileDeferredNV", "VK_NV_ray_tracing"},
     {"vkCopyAccelerationStructureKHR", "VK_KHR_acceleration_structure"},
     {"vkCopyAccelerationStructureToMemoryKHR", "VK_KHR_acceleration_structure"},
     {"vkCopyMemoryToAccelerationStructureKHR", "VK_KHR_acceleration_structure"},
+    {"vkCopyMemoryToMicromapEXT", "VK_EXT_opacity_micromap"},
+    {"vkCopyMicromapEXT", "VK_EXT_opacity_micromap"},
+    {"vkCopyMicromapToMemoryEXT", "VK_EXT_opacity_micromap"},
     {"vkCreateAccelerationStructureKHR", "VK_KHR_acceleration_structure"},
     {"vkCreateAccelerationStructureNV", "VK_NV_ray_tracing"},
     {"vkCreateBufferCollectionFUCHSIA", "VK_FUCHSIA_buffer_collection"},
@@ -722,6 +832,8 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkCreateDescriptorUpdateTemplate", "VK_VERSION_1_1"},
     {"vkCreateDescriptorUpdateTemplateKHR", "VK_KHR_descriptor_update_template"},
     {"vkCreateIndirectCommandsLayoutNV", "VK_NV_device_generated_commands"},
+    {"vkCreateMicromapEXT", "VK_EXT_opacity_micromap"},
+    {"vkCreateOpticalFlowSessionNV", "VK_NV_optical_flow"},
     {"vkCreatePrivateDataSlot", "VK_VERSION_1_3"},
     {"vkCreatePrivateDataSlotEXT", "VK_EXT_private_data"},
     {"vkCreateRayTracingPipelinesKHR", "VK_KHR_ray_tracing_pipeline"},
@@ -747,6 +859,8 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkDestroyDescriptorUpdateTemplate", "VK_VERSION_1_1"},
     {"vkDestroyDescriptorUpdateTemplateKHR", "VK_KHR_descriptor_update_template"},
     {"vkDestroyIndirectCommandsLayoutNV", "VK_NV_device_generated_commands"},
+    {"vkDestroyMicromapEXT", "VK_EXT_opacity_micromap"},
+    {"vkDestroyOpticalFlowSessionNV", "VK_NV_optical_flow"},
     {"vkDestroyPrivateDataSlot", "VK_VERSION_1_3"},
     {"vkDestroyPrivateDataSlotEXT", "VK_EXT_private_data"},
     {"vkDestroySamplerYcbcrConversion", "VK_VERSION_1_1"},
@@ -756,6 +870,7 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkDestroyVideoSessionKHR", "VK_KHR_video_queue"},
     {"vkDestroyVideoSessionParametersKHR", "VK_KHR_video_queue"},
     {"vkDisplayPowerControlEXT", "VK_EXT_display_control"},
+    {"vkExportMetalObjectsEXT", "VK_EXT_metal_objects"},
     {"vkGetAccelerationStructureBuildSizesKHR", "VK_KHR_acceleration_structure"},
     {"vkGetAccelerationStructureDeviceAddressKHR", "VK_KHR_acceleration_structure"},
     {"vkGetAccelerationStructureHandleNV", "VK_NV_ray_tracing"},
@@ -779,6 +894,7 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkGetDeviceAccelerationStructureCompatibilityKHR", "VK_KHR_acceleration_structure"},
     {"vkGetDeviceBufferMemoryRequirements", "VK_VERSION_1_3"},
     {"vkGetDeviceBufferMemoryRequirementsKHR", "VK_KHR_maintenance4"},
+    {"vkGetDeviceFaultInfoEXT", "VK_EXT_device_fault"},
     {"vkGetDeviceGroupPeerMemoryFeatures", "VK_VERSION_1_1"},
     {"vkGetDeviceGroupPeerMemoryFeaturesKHR", "VK_KHR_device_group"},
     {"vkGetDeviceGroupPresentCapabilitiesKHR", "VK_KHR_swapchain"},
@@ -790,16 +906,20 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkGetDeviceImageSparseMemoryRequirementsKHR", "VK_KHR_maintenance4"},
     {"vkGetDeviceMemoryOpaqueCaptureAddress", "VK_VERSION_1_2"},
     {"vkGetDeviceMemoryOpaqueCaptureAddressKHR", "VK_KHR_buffer_device_address"},
+    {"vkGetDeviceMicromapCompatibilityEXT", "VK_EXT_opacity_micromap"},
     {"vkGetDeviceQueue2", "VK_VERSION_1_1"},
     {"vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI", "VK_HUAWEI_subpass_shading"},
+    {"vkGetDynamicRenderingTilePropertiesQCOM", "VK_QCOM_tile_properties"},
     {"vkGetFenceFdKHR", "VK_KHR_external_fence_fd"},
     {"vkGetFenceWin32HandleKHR", "VK_KHR_external_fence_win32"},
+    {"vkGetFramebufferTilePropertiesQCOM", "VK_QCOM_tile_properties"},
     {"vkGetGeneratedCommandsMemoryRequirementsNV", "VK_NV_device_generated_commands"},
     {"vkGetImageDrmFormatModifierPropertiesEXT", "VK_EXT_image_drm_format_modifier"},
     {"vkGetImageMemoryRequirements2", "VK_VERSION_1_1"},
     {"vkGetImageMemoryRequirements2KHR", "VK_KHR_get_memory_requirements2"},
     {"vkGetImageSparseMemoryRequirements2", "VK_VERSION_1_1"},
     {"vkGetImageSparseMemoryRequirements2KHR", "VK_KHR_get_memory_requirements2"},
+    {"vkGetImageSubresourceLayout2EXT", "VK_EXT_image_compression_control"},
     {"vkGetImageViewAddressNVX", "VK_NVX_image_view_handle"},
     {"vkGetImageViewHandleNVX", "VK_NVX_image_view_handle"},
     {"vkGetMemoryAndroidHardwareBufferANDROID", "VK_ANDROID_external_memory_android_hardware_buffer"},
@@ -812,11 +932,13 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkGetMemoryWin32HandlePropertiesKHR", "VK_KHR_external_memory_win32"},
     {"vkGetMemoryZirconHandleFUCHSIA", "VK_FUCHSIA_external_memory"},
     {"vkGetMemoryZirconHandlePropertiesFUCHSIA", "VK_FUCHSIA_external_memory"},
+    {"vkGetMicromapBuildSizesEXT", "VK_EXT_opacity_micromap"},
     {"vkGetPastPresentationTimingGOOGLE", "VK_GOOGLE_display_timing"},
     {"vkGetPerformanceParameterINTEL", "VK_INTEL_performance_query"},
     {"vkGetPipelineExecutableInternalRepresentationsKHR", "VK_KHR_pipeline_executable_properties"},
     {"vkGetPipelineExecutablePropertiesKHR", "VK_KHR_pipeline_executable_properties"},
     {"vkGetPipelineExecutableStatisticsKHR", "VK_KHR_pipeline_executable_properties"},
+    {"vkGetPipelinePropertiesEXT", "VK_EXT_pipeline_properties"},
     {"vkGetPrivateData", "VK_VERSION_1_3"},
     {"vkGetPrivateDataEXT", "VK_EXT_private_data"},
     {"vkGetQueueCheckpointData2NV", "VK_KHR_synchronization2"},
@@ -832,6 +954,8 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkGetSemaphoreWin32HandleKHR", "VK_KHR_external_semaphore_win32"},
     {"vkGetSemaphoreZirconHandleFUCHSIA", "VK_FUCHSIA_external_semaphore"},
     {"vkGetShaderInfoAMD", "VK_AMD_shader_info"},
+    {"vkGetShaderModuleCreateInfoIdentifierEXT", "VK_EXT_shader_module_identifier"},
+    {"vkGetShaderModuleIdentifierEXT", "VK_EXT_shader_module_identifier"},
     {"vkGetSwapchainCounterEXT", "VK_EXT_display_control"},
     {"vkGetSwapchainImagesKHR", "VK_KHR_swapchain"},
     {"vkGetSwapchainStatusKHR", "VK_KHR_shared_presentable_image"},
@@ -879,6 +1003,7 @@ const layer_data::unordered_map<std::string, std::string> api_extension_map {
     {"vkWaitSemaphores", "VK_VERSION_1_2"},
     {"vkWaitSemaphoresKHR", "VK_KHR_timeline_semaphore"},
     {"vkWriteAccelerationStructuresPropertiesKHR", "VK_KHR_acceleration_structure"},
+    {"vkWriteMicromapsPropertiesEXT", "VK_EXT_opacity_micromap"},
 };
 
 // Using the above code-generated map of APINames-to-parent extension names, this function will:
@@ -1372,6 +1497,8 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     if (table->CmdBlitImage2KHR == nullptr) { table->CmdBlitImage2KHR = (PFN_vkCmdBlitImage2KHR)StubCmdBlitImage2KHR; }
     table->CmdResolveImage2KHR = (PFN_vkCmdResolveImage2KHR) gpa(device, "vkCmdResolveImage2KHR");
     if (table->CmdResolveImage2KHR == nullptr) { table->CmdResolveImage2KHR = (PFN_vkCmdResolveImage2KHR)StubCmdResolveImage2KHR; }
+    table->CmdTraceRaysIndirect2KHR = (PFN_vkCmdTraceRaysIndirect2KHR) gpa(device, "vkCmdTraceRaysIndirect2KHR");
+    if (table->CmdTraceRaysIndirect2KHR == nullptr) { table->CmdTraceRaysIndirect2KHR = (PFN_vkCmdTraceRaysIndirect2KHR)StubCmdTraceRaysIndirect2KHR; }
     table->GetDeviceBufferMemoryRequirementsKHR = (PFN_vkGetDeviceBufferMemoryRequirementsKHR) gpa(device, "vkGetDeviceBufferMemoryRequirementsKHR");
     if (table->GetDeviceBufferMemoryRequirementsKHR == nullptr) { table->GetDeviceBufferMemoryRequirementsKHR = (PFN_vkGetDeviceBufferMemoryRequirementsKHR)StubGetDeviceBufferMemoryRequirementsKHR; }
     table->GetDeviceImageMemoryRequirementsKHR = (PFN_vkGetDeviceImageMemoryRequirementsKHR) gpa(device, "vkGetDeviceImageMemoryRequirementsKHR");
@@ -1614,8 +1741,16 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     if (table->SetPrivateDataEXT == nullptr) { table->SetPrivateDataEXT = (PFN_vkSetPrivateDataEXT)StubSetPrivateDataEXT; }
     table->GetPrivateDataEXT = (PFN_vkGetPrivateDataEXT) gpa(device, "vkGetPrivateDataEXT");
     if (table->GetPrivateDataEXT == nullptr) { table->GetPrivateDataEXT = (PFN_vkGetPrivateDataEXT)StubGetPrivateDataEXT; }
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    table->ExportMetalObjectsEXT = (PFN_vkExportMetalObjectsEXT) gpa(device, "vkExportMetalObjectsEXT");
+    if (table->ExportMetalObjectsEXT == nullptr) { table->ExportMetalObjectsEXT = (PFN_vkExportMetalObjectsEXT)StubExportMetalObjectsEXT; }
+#endif // VK_USE_PLATFORM_METAL_EXT
     table->CmdSetFragmentShadingRateEnumNV = (PFN_vkCmdSetFragmentShadingRateEnumNV) gpa(device, "vkCmdSetFragmentShadingRateEnumNV");
     if (table->CmdSetFragmentShadingRateEnumNV == nullptr) { table->CmdSetFragmentShadingRateEnumNV = (PFN_vkCmdSetFragmentShadingRateEnumNV)StubCmdSetFragmentShadingRateEnumNV; }
+    table->GetImageSubresourceLayout2EXT = (PFN_vkGetImageSubresourceLayout2EXT) gpa(device, "vkGetImageSubresourceLayout2EXT");
+    if (table->GetImageSubresourceLayout2EXT == nullptr) { table->GetImageSubresourceLayout2EXT = (PFN_vkGetImageSubresourceLayout2EXT)StubGetImageSubresourceLayout2EXT; }
+    table->GetDeviceFaultInfoEXT = (PFN_vkGetDeviceFaultInfoEXT) gpa(device, "vkGetDeviceFaultInfoEXT");
+    if (table->GetDeviceFaultInfoEXT == nullptr) { table->GetDeviceFaultInfoEXT = (PFN_vkGetDeviceFaultInfoEXT)StubGetDeviceFaultInfoEXT; }
     table->CmdSetVertexInputEXT = (PFN_vkCmdSetVertexInputEXT) gpa(device, "vkCmdSetVertexInputEXT");
     if (table->CmdSetVertexInputEXT == nullptr) { table->CmdSetVertexInputEXT = (PFN_vkCmdSetVertexInputEXT)StubCmdSetVertexInputEXT; }
 #ifdef VK_USE_PLATFORM_FUCHSIA
@@ -1662,6 +1797,8 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     if (table->CmdBindInvocationMaskHUAWEI == nullptr) { table->CmdBindInvocationMaskHUAWEI = (PFN_vkCmdBindInvocationMaskHUAWEI)StubCmdBindInvocationMaskHUAWEI; }
     table->GetMemoryRemoteAddressNV = (PFN_vkGetMemoryRemoteAddressNV) gpa(device, "vkGetMemoryRemoteAddressNV");
     if (table->GetMemoryRemoteAddressNV == nullptr) { table->GetMemoryRemoteAddressNV = (PFN_vkGetMemoryRemoteAddressNV)StubGetMemoryRemoteAddressNV; }
+    table->GetPipelinePropertiesEXT = (PFN_vkGetPipelinePropertiesEXT) gpa(device, "vkGetPipelinePropertiesEXT");
+    if (table->GetPipelinePropertiesEXT == nullptr) { table->GetPipelinePropertiesEXT = (PFN_vkGetPipelinePropertiesEXT)StubGetPipelinePropertiesEXT; }
     table->CmdSetPatchControlPointsEXT = (PFN_vkCmdSetPatchControlPointsEXT) gpa(device, "vkCmdSetPatchControlPointsEXT");
     if (table->CmdSetPatchControlPointsEXT == nullptr) { table->CmdSetPatchControlPointsEXT = (PFN_vkCmdSetPatchControlPointsEXT)StubCmdSetPatchControlPointsEXT; }
     table->CmdSetRasterizerDiscardEnableEXT = (PFN_vkCmdSetRasterizerDiscardEnableEXT) gpa(device, "vkCmdSetRasterizerDiscardEnableEXT");
@@ -1678,12 +1815,118 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     if (table->CmdDrawMultiEXT == nullptr) { table->CmdDrawMultiEXT = (PFN_vkCmdDrawMultiEXT)StubCmdDrawMultiEXT; }
     table->CmdDrawMultiIndexedEXT = (PFN_vkCmdDrawMultiIndexedEXT) gpa(device, "vkCmdDrawMultiIndexedEXT");
     if (table->CmdDrawMultiIndexedEXT == nullptr) { table->CmdDrawMultiIndexedEXT = (PFN_vkCmdDrawMultiIndexedEXT)StubCmdDrawMultiIndexedEXT; }
+    table->CreateMicromapEXT = (PFN_vkCreateMicromapEXT) gpa(device, "vkCreateMicromapEXT");
+    if (table->CreateMicromapEXT == nullptr) { table->CreateMicromapEXT = (PFN_vkCreateMicromapEXT)StubCreateMicromapEXT; }
+    table->DestroyMicromapEXT = (PFN_vkDestroyMicromapEXT) gpa(device, "vkDestroyMicromapEXT");
+    if (table->DestroyMicromapEXT == nullptr) { table->DestroyMicromapEXT = (PFN_vkDestroyMicromapEXT)StubDestroyMicromapEXT; }
+    table->CmdBuildMicromapsEXT = (PFN_vkCmdBuildMicromapsEXT) gpa(device, "vkCmdBuildMicromapsEXT");
+    if (table->CmdBuildMicromapsEXT == nullptr) { table->CmdBuildMicromapsEXT = (PFN_vkCmdBuildMicromapsEXT)StubCmdBuildMicromapsEXT; }
+    table->BuildMicromapsEXT = (PFN_vkBuildMicromapsEXT) gpa(device, "vkBuildMicromapsEXT");
+    if (table->BuildMicromapsEXT == nullptr) { table->BuildMicromapsEXT = (PFN_vkBuildMicromapsEXT)StubBuildMicromapsEXT; }
+    table->CopyMicromapEXT = (PFN_vkCopyMicromapEXT) gpa(device, "vkCopyMicromapEXT");
+    if (table->CopyMicromapEXT == nullptr) { table->CopyMicromapEXT = (PFN_vkCopyMicromapEXT)StubCopyMicromapEXT; }
+    table->CopyMicromapToMemoryEXT = (PFN_vkCopyMicromapToMemoryEXT) gpa(device, "vkCopyMicromapToMemoryEXT");
+    if (table->CopyMicromapToMemoryEXT == nullptr) { table->CopyMicromapToMemoryEXT = (PFN_vkCopyMicromapToMemoryEXT)StubCopyMicromapToMemoryEXT; }
+    table->CopyMemoryToMicromapEXT = (PFN_vkCopyMemoryToMicromapEXT) gpa(device, "vkCopyMemoryToMicromapEXT");
+    if (table->CopyMemoryToMicromapEXT == nullptr) { table->CopyMemoryToMicromapEXT = (PFN_vkCopyMemoryToMicromapEXT)StubCopyMemoryToMicromapEXT; }
+    table->WriteMicromapsPropertiesEXT = (PFN_vkWriteMicromapsPropertiesEXT) gpa(device, "vkWriteMicromapsPropertiesEXT");
+    if (table->WriteMicromapsPropertiesEXT == nullptr) { table->WriteMicromapsPropertiesEXT = (PFN_vkWriteMicromapsPropertiesEXT)StubWriteMicromapsPropertiesEXT; }
+    table->CmdCopyMicromapEXT = (PFN_vkCmdCopyMicromapEXT) gpa(device, "vkCmdCopyMicromapEXT");
+    if (table->CmdCopyMicromapEXT == nullptr) { table->CmdCopyMicromapEXT = (PFN_vkCmdCopyMicromapEXT)StubCmdCopyMicromapEXT; }
+    table->CmdCopyMicromapToMemoryEXT = (PFN_vkCmdCopyMicromapToMemoryEXT) gpa(device, "vkCmdCopyMicromapToMemoryEXT");
+    if (table->CmdCopyMicromapToMemoryEXT == nullptr) { table->CmdCopyMicromapToMemoryEXT = (PFN_vkCmdCopyMicromapToMemoryEXT)StubCmdCopyMicromapToMemoryEXT; }
+    table->CmdCopyMemoryToMicromapEXT = (PFN_vkCmdCopyMemoryToMicromapEXT) gpa(device, "vkCmdCopyMemoryToMicromapEXT");
+    if (table->CmdCopyMemoryToMicromapEXT == nullptr) { table->CmdCopyMemoryToMicromapEXT = (PFN_vkCmdCopyMemoryToMicromapEXT)StubCmdCopyMemoryToMicromapEXT; }
+    table->CmdWriteMicromapsPropertiesEXT = (PFN_vkCmdWriteMicromapsPropertiesEXT) gpa(device, "vkCmdWriteMicromapsPropertiesEXT");
+    if (table->CmdWriteMicromapsPropertiesEXT == nullptr) { table->CmdWriteMicromapsPropertiesEXT = (PFN_vkCmdWriteMicromapsPropertiesEXT)StubCmdWriteMicromapsPropertiesEXT; }
+    table->GetDeviceMicromapCompatibilityEXT = (PFN_vkGetDeviceMicromapCompatibilityEXT) gpa(device, "vkGetDeviceMicromapCompatibilityEXT");
+    if (table->GetDeviceMicromapCompatibilityEXT == nullptr) { table->GetDeviceMicromapCompatibilityEXT = (PFN_vkGetDeviceMicromapCompatibilityEXT)StubGetDeviceMicromapCompatibilityEXT; }
+    table->GetMicromapBuildSizesEXT = (PFN_vkGetMicromapBuildSizesEXT) gpa(device, "vkGetMicromapBuildSizesEXT");
+    if (table->GetMicromapBuildSizesEXT == nullptr) { table->GetMicromapBuildSizesEXT = (PFN_vkGetMicromapBuildSizesEXT)StubGetMicromapBuildSizesEXT; }
     table->SetDeviceMemoryPriorityEXT = (PFN_vkSetDeviceMemoryPriorityEXT) gpa(device, "vkSetDeviceMemoryPriorityEXT");
     if (table->SetDeviceMemoryPriorityEXT == nullptr) { table->SetDeviceMemoryPriorityEXT = (PFN_vkSetDeviceMemoryPriorityEXT)StubSetDeviceMemoryPriorityEXT; }
     table->GetDescriptorSetLayoutHostMappingInfoVALVE = (PFN_vkGetDescriptorSetLayoutHostMappingInfoVALVE) gpa(device, "vkGetDescriptorSetLayoutHostMappingInfoVALVE");
     if (table->GetDescriptorSetLayoutHostMappingInfoVALVE == nullptr) { table->GetDescriptorSetLayoutHostMappingInfoVALVE = (PFN_vkGetDescriptorSetLayoutHostMappingInfoVALVE)StubGetDescriptorSetLayoutHostMappingInfoVALVE; }
     table->GetDescriptorSetHostMappingVALVE = (PFN_vkGetDescriptorSetHostMappingVALVE) gpa(device, "vkGetDescriptorSetHostMappingVALVE");
     if (table->GetDescriptorSetHostMappingVALVE == nullptr) { table->GetDescriptorSetHostMappingVALVE = (PFN_vkGetDescriptorSetHostMappingVALVE)StubGetDescriptorSetHostMappingVALVE; }
+    table->CmdSetTessellationDomainOriginEXT = (PFN_vkCmdSetTessellationDomainOriginEXT) gpa(device, "vkCmdSetTessellationDomainOriginEXT");
+    if (table->CmdSetTessellationDomainOriginEXT == nullptr) { table->CmdSetTessellationDomainOriginEXT = (PFN_vkCmdSetTessellationDomainOriginEXT)StubCmdSetTessellationDomainOriginEXT; }
+    table->CmdSetDepthClampEnableEXT = (PFN_vkCmdSetDepthClampEnableEXT) gpa(device, "vkCmdSetDepthClampEnableEXT");
+    if (table->CmdSetDepthClampEnableEXT == nullptr) { table->CmdSetDepthClampEnableEXT = (PFN_vkCmdSetDepthClampEnableEXT)StubCmdSetDepthClampEnableEXT; }
+    table->CmdSetPolygonModeEXT = (PFN_vkCmdSetPolygonModeEXT) gpa(device, "vkCmdSetPolygonModeEXT");
+    if (table->CmdSetPolygonModeEXT == nullptr) { table->CmdSetPolygonModeEXT = (PFN_vkCmdSetPolygonModeEXT)StubCmdSetPolygonModeEXT; }
+    table->CmdSetRasterizationSamplesEXT = (PFN_vkCmdSetRasterizationSamplesEXT) gpa(device, "vkCmdSetRasterizationSamplesEXT");
+    if (table->CmdSetRasterizationSamplesEXT == nullptr) { table->CmdSetRasterizationSamplesEXT = (PFN_vkCmdSetRasterizationSamplesEXT)StubCmdSetRasterizationSamplesEXT; }
+    table->CmdSetSampleMaskEXT = (PFN_vkCmdSetSampleMaskEXT) gpa(device, "vkCmdSetSampleMaskEXT");
+    if (table->CmdSetSampleMaskEXT == nullptr) { table->CmdSetSampleMaskEXT = (PFN_vkCmdSetSampleMaskEXT)StubCmdSetSampleMaskEXT; }
+    table->CmdSetAlphaToCoverageEnableEXT = (PFN_vkCmdSetAlphaToCoverageEnableEXT) gpa(device, "vkCmdSetAlphaToCoverageEnableEXT");
+    if (table->CmdSetAlphaToCoverageEnableEXT == nullptr) { table->CmdSetAlphaToCoverageEnableEXT = (PFN_vkCmdSetAlphaToCoverageEnableEXT)StubCmdSetAlphaToCoverageEnableEXT; }
+    table->CmdSetAlphaToOneEnableEXT = (PFN_vkCmdSetAlphaToOneEnableEXT) gpa(device, "vkCmdSetAlphaToOneEnableEXT");
+    if (table->CmdSetAlphaToOneEnableEXT == nullptr) { table->CmdSetAlphaToOneEnableEXT = (PFN_vkCmdSetAlphaToOneEnableEXT)StubCmdSetAlphaToOneEnableEXT; }
+    table->CmdSetLogicOpEnableEXT = (PFN_vkCmdSetLogicOpEnableEXT) gpa(device, "vkCmdSetLogicOpEnableEXT");
+    if (table->CmdSetLogicOpEnableEXT == nullptr) { table->CmdSetLogicOpEnableEXT = (PFN_vkCmdSetLogicOpEnableEXT)StubCmdSetLogicOpEnableEXT; }
+    table->CmdSetColorBlendEnableEXT = (PFN_vkCmdSetColorBlendEnableEXT) gpa(device, "vkCmdSetColorBlendEnableEXT");
+    if (table->CmdSetColorBlendEnableEXT == nullptr) { table->CmdSetColorBlendEnableEXT = (PFN_vkCmdSetColorBlendEnableEXT)StubCmdSetColorBlendEnableEXT; }
+    table->CmdSetColorBlendEquationEXT = (PFN_vkCmdSetColorBlendEquationEXT) gpa(device, "vkCmdSetColorBlendEquationEXT");
+    if (table->CmdSetColorBlendEquationEXT == nullptr) { table->CmdSetColorBlendEquationEXT = (PFN_vkCmdSetColorBlendEquationEXT)StubCmdSetColorBlendEquationEXT; }
+    table->CmdSetColorWriteMaskEXT = (PFN_vkCmdSetColorWriteMaskEXT) gpa(device, "vkCmdSetColorWriteMaskEXT");
+    if (table->CmdSetColorWriteMaskEXT == nullptr) { table->CmdSetColorWriteMaskEXT = (PFN_vkCmdSetColorWriteMaskEXT)StubCmdSetColorWriteMaskEXT; }
+    table->CmdSetRasterizationStreamEXT = (PFN_vkCmdSetRasterizationStreamEXT) gpa(device, "vkCmdSetRasterizationStreamEXT");
+    if (table->CmdSetRasterizationStreamEXT == nullptr) { table->CmdSetRasterizationStreamEXT = (PFN_vkCmdSetRasterizationStreamEXT)StubCmdSetRasterizationStreamEXT; }
+    table->CmdSetConservativeRasterizationModeEXT = (PFN_vkCmdSetConservativeRasterizationModeEXT) gpa(device, "vkCmdSetConservativeRasterizationModeEXT");
+    if (table->CmdSetConservativeRasterizationModeEXT == nullptr) { table->CmdSetConservativeRasterizationModeEXT = (PFN_vkCmdSetConservativeRasterizationModeEXT)StubCmdSetConservativeRasterizationModeEXT; }
+    table->CmdSetExtraPrimitiveOverestimationSizeEXT = (PFN_vkCmdSetExtraPrimitiveOverestimationSizeEXT) gpa(device, "vkCmdSetExtraPrimitiveOverestimationSizeEXT");
+    if (table->CmdSetExtraPrimitiveOverestimationSizeEXT == nullptr) { table->CmdSetExtraPrimitiveOverestimationSizeEXT = (PFN_vkCmdSetExtraPrimitiveOverestimationSizeEXT)StubCmdSetExtraPrimitiveOverestimationSizeEXT; }
+    table->CmdSetDepthClipEnableEXT = (PFN_vkCmdSetDepthClipEnableEXT) gpa(device, "vkCmdSetDepthClipEnableEXT");
+    if (table->CmdSetDepthClipEnableEXT == nullptr) { table->CmdSetDepthClipEnableEXT = (PFN_vkCmdSetDepthClipEnableEXT)StubCmdSetDepthClipEnableEXT; }
+    table->CmdSetSampleLocationsEnableEXT = (PFN_vkCmdSetSampleLocationsEnableEXT) gpa(device, "vkCmdSetSampleLocationsEnableEXT");
+    if (table->CmdSetSampleLocationsEnableEXT == nullptr) { table->CmdSetSampleLocationsEnableEXT = (PFN_vkCmdSetSampleLocationsEnableEXT)StubCmdSetSampleLocationsEnableEXT; }
+    table->CmdSetColorBlendAdvancedEXT = (PFN_vkCmdSetColorBlendAdvancedEXT) gpa(device, "vkCmdSetColorBlendAdvancedEXT");
+    if (table->CmdSetColorBlendAdvancedEXT == nullptr) { table->CmdSetColorBlendAdvancedEXT = (PFN_vkCmdSetColorBlendAdvancedEXT)StubCmdSetColorBlendAdvancedEXT; }
+    table->CmdSetProvokingVertexModeEXT = (PFN_vkCmdSetProvokingVertexModeEXT) gpa(device, "vkCmdSetProvokingVertexModeEXT");
+    if (table->CmdSetProvokingVertexModeEXT == nullptr) { table->CmdSetProvokingVertexModeEXT = (PFN_vkCmdSetProvokingVertexModeEXT)StubCmdSetProvokingVertexModeEXT; }
+    table->CmdSetLineRasterizationModeEXT = (PFN_vkCmdSetLineRasterizationModeEXT) gpa(device, "vkCmdSetLineRasterizationModeEXT");
+    if (table->CmdSetLineRasterizationModeEXT == nullptr) { table->CmdSetLineRasterizationModeEXT = (PFN_vkCmdSetLineRasterizationModeEXT)StubCmdSetLineRasterizationModeEXT; }
+    table->CmdSetLineStippleEnableEXT = (PFN_vkCmdSetLineStippleEnableEXT) gpa(device, "vkCmdSetLineStippleEnableEXT");
+    if (table->CmdSetLineStippleEnableEXT == nullptr) { table->CmdSetLineStippleEnableEXT = (PFN_vkCmdSetLineStippleEnableEXT)StubCmdSetLineStippleEnableEXT; }
+    table->CmdSetDepthClipNegativeOneToOneEXT = (PFN_vkCmdSetDepthClipNegativeOneToOneEXT) gpa(device, "vkCmdSetDepthClipNegativeOneToOneEXT");
+    if (table->CmdSetDepthClipNegativeOneToOneEXT == nullptr) { table->CmdSetDepthClipNegativeOneToOneEXT = (PFN_vkCmdSetDepthClipNegativeOneToOneEXT)StubCmdSetDepthClipNegativeOneToOneEXT; }
+    table->CmdSetViewportWScalingEnableNV = (PFN_vkCmdSetViewportWScalingEnableNV) gpa(device, "vkCmdSetViewportWScalingEnableNV");
+    if (table->CmdSetViewportWScalingEnableNV == nullptr) { table->CmdSetViewportWScalingEnableNV = (PFN_vkCmdSetViewportWScalingEnableNV)StubCmdSetViewportWScalingEnableNV; }
+    table->CmdSetViewportSwizzleNV = (PFN_vkCmdSetViewportSwizzleNV) gpa(device, "vkCmdSetViewportSwizzleNV");
+    if (table->CmdSetViewportSwizzleNV == nullptr) { table->CmdSetViewportSwizzleNV = (PFN_vkCmdSetViewportSwizzleNV)StubCmdSetViewportSwizzleNV; }
+    table->CmdSetCoverageToColorEnableNV = (PFN_vkCmdSetCoverageToColorEnableNV) gpa(device, "vkCmdSetCoverageToColorEnableNV");
+    if (table->CmdSetCoverageToColorEnableNV == nullptr) { table->CmdSetCoverageToColorEnableNV = (PFN_vkCmdSetCoverageToColorEnableNV)StubCmdSetCoverageToColorEnableNV; }
+    table->CmdSetCoverageToColorLocationNV = (PFN_vkCmdSetCoverageToColorLocationNV) gpa(device, "vkCmdSetCoverageToColorLocationNV");
+    if (table->CmdSetCoverageToColorLocationNV == nullptr) { table->CmdSetCoverageToColorLocationNV = (PFN_vkCmdSetCoverageToColorLocationNV)StubCmdSetCoverageToColorLocationNV; }
+    table->CmdSetCoverageModulationModeNV = (PFN_vkCmdSetCoverageModulationModeNV) gpa(device, "vkCmdSetCoverageModulationModeNV");
+    if (table->CmdSetCoverageModulationModeNV == nullptr) { table->CmdSetCoverageModulationModeNV = (PFN_vkCmdSetCoverageModulationModeNV)StubCmdSetCoverageModulationModeNV; }
+    table->CmdSetCoverageModulationTableEnableNV = (PFN_vkCmdSetCoverageModulationTableEnableNV) gpa(device, "vkCmdSetCoverageModulationTableEnableNV");
+    if (table->CmdSetCoverageModulationTableEnableNV == nullptr) { table->CmdSetCoverageModulationTableEnableNV = (PFN_vkCmdSetCoverageModulationTableEnableNV)StubCmdSetCoverageModulationTableEnableNV; }
+    table->CmdSetCoverageModulationTableNV = (PFN_vkCmdSetCoverageModulationTableNV) gpa(device, "vkCmdSetCoverageModulationTableNV");
+    if (table->CmdSetCoverageModulationTableNV == nullptr) { table->CmdSetCoverageModulationTableNV = (PFN_vkCmdSetCoverageModulationTableNV)StubCmdSetCoverageModulationTableNV; }
+    table->CmdSetShadingRateImageEnableNV = (PFN_vkCmdSetShadingRateImageEnableNV) gpa(device, "vkCmdSetShadingRateImageEnableNV");
+    if (table->CmdSetShadingRateImageEnableNV == nullptr) { table->CmdSetShadingRateImageEnableNV = (PFN_vkCmdSetShadingRateImageEnableNV)StubCmdSetShadingRateImageEnableNV; }
+    table->CmdSetRepresentativeFragmentTestEnableNV = (PFN_vkCmdSetRepresentativeFragmentTestEnableNV) gpa(device, "vkCmdSetRepresentativeFragmentTestEnableNV");
+    if (table->CmdSetRepresentativeFragmentTestEnableNV == nullptr) { table->CmdSetRepresentativeFragmentTestEnableNV = (PFN_vkCmdSetRepresentativeFragmentTestEnableNV)StubCmdSetRepresentativeFragmentTestEnableNV; }
+    table->CmdSetCoverageReductionModeNV = (PFN_vkCmdSetCoverageReductionModeNV) gpa(device, "vkCmdSetCoverageReductionModeNV");
+    if (table->CmdSetCoverageReductionModeNV == nullptr) { table->CmdSetCoverageReductionModeNV = (PFN_vkCmdSetCoverageReductionModeNV)StubCmdSetCoverageReductionModeNV; }
+    table->GetShaderModuleIdentifierEXT = (PFN_vkGetShaderModuleIdentifierEXT) gpa(device, "vkGetShaderModuleIdentifierEXT");
+    if (table->GetShaderModuleIdentifierEXT == nullptr) { table->GetShaderModuleIdentifierEXT = (PFN_vkGetShaderModuleIdentifierEXT)StubGetShaderModuleIdentifierEXT; }
+    table->GetShaderModuleCreateInfoIdentifierEXT = (PFN_vkGetShaderModuleCreateInfoIdentifierEXT) gpa(device, "vkGetShaderModuleCreateInfoIdentifierEXT");
+    if (table->GetShaderModuleCreateInfoIdentifierEXT == nullptr) { table->GetShaderModuleCreateInfoIdentifierEXT = (PFN_vkGetShaderModuleCreateInfoIdentifierEXT)StubGetShaderModuleCreateInfoIdentifierEXT; }
+    table->CreateOpticalFlowSessionNV = (PFN_vkCreateOpticalFlowSessionNV) gpa(device, "vkCreateOpticalFlowSessionNV");
+    if (table->CreateOpticalFlowSessionNV == nullptr) { table->CreateOpticalFlowSessionNV = (PFN_vkCreateOpticalFlowSessionNV)StubCreateOpticalFlowSessionNV; }
+    table->DestroyOpticalFlowSessionNV = (PFN_vkDestroyOpticalFlowSessionNV) gpa(device, "vkDestroyOpticalFlowSessionNV");
+    if (table->DestroyOpticalFlowSessionNV == nullptr) { table->DestroyOpticalFlowSessionNV = (PFN_vkDestroyOpticalFlowSessionNV)StubDestroyOpticalFlowSessionNV; }
+    table->BindOpticalFlowSessionImageNV = (PFN_vkBindOpticalFlowSessionImageNV) gpa(device, "vkBindOpticalFlowSessionImageNV");
+    if (table->BindOpticalFlowSessionImageNV == nullptr) { table->BindOpticalFlowSessionImageNV = (PFN_vkBindOpticalFlowSessionImageNV)StubBindOpticalFlowSessionImageNV; }
+    table->CmdOpticalFlowExecuteNV = (PFN_vkCmdOpticalFlowExecuteNV) gpa(device, "vkCmdOpticalFlowExecuteNV");
+    if (table->CmdOpticalFlowExecuteNV == nullptr) { table->CmdOpticalFlowExecuteNV = (PFN_vkCmdOpticalFlowExecuteNV)StubCmdOpticalFlowExecuteNV; }
+    table->GetFramebufferTilePropertiesQCOM = (PFN_vkGetFramebufferTilePropertiesQCOM) gpa(device, "vkGetFramebufferTilePropertiesQCOM");
+    if (table->GetFramebufferTilePropertiesQCOM == nullptr) { table->GetFramebufferTilePropertiesQCOM = (PFN_vkGetFramebufferTilePropertiesQCOM)StubGetFramebufferTilePropertiesQCOM; }
+    table->GetDynamicRenderingTilePropertiesQCOM = (PFN_vkGetDynamicRenderingTilePropertiesQCOM) gpa(device, "vkGetDynamicRenderingTilePropertiesQCOM");
+    if (table->GetDynamicRenderingTilePropertiesQCOM == nullptr) { table->GetDynamicRenderingTilePropertiesQCOM = (PFN_vkGetDynamicRenderingTilePropertiesQCOM)StubGetDynamicRenderingTilePropertiesQCOM; }
     table->CreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR) gpa(device, "vkCreateAccelerationStructureKHR");
     if (table->CreateAccelerationStructureKHR == nullptr) { table->CreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR)StubCreateAccelerationStructureKHR; }
     table->DestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR) gpa(device, "vkDestroyAccelerationStructureKHR");
@@ -1728,12 +1971,19 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     if (table->GetRayTracingShaderGroupStackSizeKHR == nullptr) { table->GetRayTracingShaderGroupStackSizeKHR = (PFN_vkGetRayTracingShaderGroupStackSizeKHR)StubGetRayTracingShaderGroupStackSizeKHR; }
     table->CmdSetRayTracingPipelineStackSizeKHR = (PFN_vkCmdSetRayTracingPipelineStackSizeKHR) gpa(device, "vkCmdSetRayTracingPipelineStackSizeKHR");
     if (table->CmdSetRayTracingPipelineStackSizeKHR == nullptr) { table->CmdSetRayTracingPipelineStackSizeKHR = (PFN_vkCmdSetRayTracingPipelineStackSizeKHR)StubCmdSetRayTracingPipelineStackSizeKHR; }
+    table->CmdDrawMeshTasksEXT = (PFN_vkCmdDrawMeshTasksEXT) gpa(device, "vkCmdDrawMeshTasksEXT");
+    if (table->CmdDrawMeshTasksEXT == nullptr) { table->CmdDrawMeshTasksEXT = (PFN_vkCmdDrawMeshTasksEXT)StubCmdDrawMeshTasksEXT; }
+    table->CmdDrawMeshTasksIndirectEXT = (PFN_vkCmdDrawMeshTasksIndirectEXT) gpa(device, "vkCmdDrawMeshTasksIndirectEXT");
+    if (table->CmdDrawMeshTasksIndirectEXT == nullptr) { table->CmdDrawMeshTasksIndirectEXT = (PFN_vkCmdDrawMeshTasksIndirectEXT)StubCmdDrawMeshTasksIndirectEXT; }
+    table->CmdDrawMeshTasksIndirectCountEXT = (PFN_vkCmdDrawMeshTasksIndirectCountEXT) gpa(device, "vkCmdDrawMeshTasksIndirectCountEXT");
+    if (table->CmdDrawMeshTasksIndirectCountEXT == nullptr) { table->CmdDrawMeshTasksIndirectCountEXT = (PFN_vkCmdDrawMeshTasksIndirectCountEXT)StubCmdDrawMeshTasksIndirectCountEXT; }
 }
 
 
 static inline void layer_init_instance_dispatch_table(VkInstance instance, VkLayerInstanceDispatchTable *table, PFN_vkGetInstanceProcAddr gpa) {
     memset(table, 0, sizeof(*table));
     // Instance function pointers
+    table->GetPhysicalDeviceProcAddr = (PFN_GetPhysicalDeviceProcAddr) gpa(instance, "vk_layerGetPhysicalDeviceProcAddr");
     table->DestroyInstance = (PFN_vkDestroyInstance) gpa(instance, "vkDestroyInstance");
     table->EnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices) gpa(instance, "vkEnumeratePhysicalDevices");
     table->GetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures) gpa(instance, "vkGetPhysicalDeviceFeatures");
@@ -1974,4 +2224,6 @@ static inline void layer_init_instance_dispatch_table(VkInstance instance, VkLay
     table->GetPhysicalDeviceScreenPresentationSupportQNX = (PFN_vkGetPhysicalDeviceScreenPresentationSupportQNX) gpa(instance, "vkGetPhysicalDeviceScreenPresentationSupportQNX");
     if (table->GetPhysicalDeviceScreenPresentationSupportQNX == nullptr) { table->GetPhysicalDeviceScreenPresentationSupportQNX = (PFN_vkGetPhysicalDeviceScreenPresentationSupportQNX)StubGetPhysicalDeviceScreenPresentationSupportQNX; }
 #endif // VK_USE_PLATFORM_SCREEN_QNX
+    table->GetPhysicalDeviceOpticalFlowImageFormatsNV = (PFN_vkGetPhysicalDeviceOpticalFlowImageFormatsNV) gpa(instance, "vkGetPhysicalDeviceOpticalFlowImageFormatsNV");
+    if (table->GetPhysicalDeviceOpticalFlowImageFormatsNV == nullptr) { table->GetPhysicalDeviceOpticalFlowImageFormatsNV = (PFN_vkGetPhysicalDeviceOpticalFlowImageFormatsNV)StubGetPhysicalDeviceOpticalFlowImageFormatsNV; }
 }

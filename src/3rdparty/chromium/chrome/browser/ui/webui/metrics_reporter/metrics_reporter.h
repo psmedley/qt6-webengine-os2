@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,13 +28,14 @@ class MetricsReporter : public metrics_reporter::mojom::PageMetricsHost {
   using MeasureCallback = base::OnceCallback<void(base::TimeDelta delta)>;
   using HasMarkCallback = base::OnceCallback<void(bool)>;
 
-  void Mark(const std::string& name);
-  void Measure(const std::string& start_mark, MeasureCallback callback);
-  void Measure(const std::string& start_mark,
-               const std::string& end_mark,
-               MeasureCallback callback);
-  void HasMark(const std::string& name, HasMarkCallback callback);
-  void ClearMark(const std::string& name);
+  virtual void Mark(const std::string& name);
+  virtual void Measure(const std::string& start_mark, MeasureCallback callback);
+  virtual void Measure(const std::string& start_mark,
+                       const std::string& end_mark,
+                       MeasureCallback callback);
+  virtual void HasMark(const std::string& name, HasMarkCallback callback);
+  virtual bool HasLocalMark(const std::string& name);
+  virtual void ClearMark(const std::string& name);
 
   void BindInterface(
       mojo::PendingReceiver<metrics_reporter::mojom::PageMetricsHost> receiver);

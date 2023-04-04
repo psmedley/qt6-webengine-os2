@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,18 +31,17 @@
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint_serializer.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/geometry/point_f.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/shell.h"
+#include "ui/aura/env.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace exo {
-namespace {
-
-}  // namespace
 
 Seat::Seat(std::unique_ptr<DataExchangeDelegate> delegate)
     : changing_clipboard_data_to_selection_source_(false),
@@ -129,14 +128,12 @@ void Seat::StartDrag(DataSource* source,
                      Surface* origin,
                      Surface* icon,
                      ui::mojom::DragEventSource event_source) {
+  gfx::Point cursor_location = aura::Env::GetInstance()->GetLastPointerPoint(
+      event_source, origin->window(), /*fallback=*/absl::nullopt);
   // DragDropOperation manages its own lifetime.
-  drag_drop_operation_ =
-      DragDropOperation::Create(data_exchange_delegate_.get(), source, origin,
-                                icon, last_pointer_location_, event_source);
-}
-
-void Seat::SetLastPointerLocation(const gfx::PointF& last_pointer_location) {
-  last_pointer_location_ = last_pointer_location;
+  drag_drop_operation_ = DragDropOperation::Create(
+      data_exchange_delegate_.get(), source, origin, icon,
+      gfx::PointF(cursor_location), event_source);
 }
 
 void Seat::AbortPendingDragOperation() {
@@ -398,6 +395,10 @@ void Seat::OnKeyEvent(ui::KeyEvent* event) {
   }
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   xkb_tracker_->UpdateKeyboardModifiers(event->flags());
+  for (auto& observer_list : priority_observer_list_) {
+    for (auto& observer : observer_list)
+      observer.OnKeyboardModifierUpdated();
+  }
 #endif
 }
 

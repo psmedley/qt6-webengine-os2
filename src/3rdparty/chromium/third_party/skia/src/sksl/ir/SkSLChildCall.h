@@ -8,11 +8,21 @@
 #ifndef SKSL_CHILDCALL
 #define SKSL_CHILDCALL
 
-#include "include/private/SkTArray.h"
+#include "include/private/SkSLDefines.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
-#include "src/sksl/ir/SkSLVariable.h"
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace SkSL {
+
+class Context;
+class Type;
+class Variable;
+enum class OperatorPrecedence : uint8_t;
 
 /**
  * A call to a child effect object (shader, color filter, or blender).
@@ -45,11 +55,9 @@ public:
         return fArguments;
     }
 
-    bool hasProperty(Property property) const override;
+    std::unique_ptr<Expression> clone(Position pos) const override;
 
-    std::unique_ptr<Expression> clone() const override;
-
-    std::string description() const override;
+    std::string description(OperatorPrecedence) const override;
 
 private:
     const Variable& fChild;

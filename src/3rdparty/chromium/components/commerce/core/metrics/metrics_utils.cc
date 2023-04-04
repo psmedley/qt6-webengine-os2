@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 
 namespace commerce::metrics {
 
+const char kPDPStateHistogramName[] = "Commerce.PDPStateOnNavigation";
+
 void RecordPDPStateToUma(ShoppingPDPState state) {
-  base::UmaHistogramEnumeration("Commerce.PDPStateOnNavigation", state);
+  base::UmaHistogramEnumeration(kPDPStateHistogramName, state);
 }
 
 ShoppingPDPState ComputeStateForOptGuideResult(

@@ -473,11 +473,14 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock,
     return this;
   }
   LayoutNGTableSectionInterface* FirstBodyInterface() const final;
-  LayoutNGTableSectionInterface* TopSectionInterface() const final;
-  LayoutNGTableSectionInterface* TopNonEmptySectionInterface() const final;
-  LayoutNGTableSectionInterface* BottomSectionInterface() const final;
-  LayoutNGTableSectionInterface* BottomNonEmptySectionInterface() const final;
-  LayoutNGTableSectionInterface* SectionBelowInterface(
+  LayoutNGTableSectionInterface* FirstSectionInterface() const final;
+  LayoutNGTableSectionInterface* FirstNonEmptySectionInterface() const final;
+  LayoutNGTableSectionInterface* LastSectionInterface() const final;
+  LayoutNGTableSectionInterface* LastNonEmptySectionInterface() const final;
+  LayoutNGTableSectionInterface* NextSectionInterface(
+      const LayoutNGTableSectionInterface*,
+      SkipEmptySectionsValue) const final;
+  LayoutNGTableSectionInterface* PreviousSectionInterface(
       const LayoutNGTableSectionInterface*,
       SkipEmptySectionsValue) const final;
   bool IsFirstCell(const LayoutNGTableCellInterface&) const final;
@@ -498,7 +501,7 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock,
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
+                   HitTestPhase) override;
 
   LayoutUnit BaselinePosition(
       FontBaseline,

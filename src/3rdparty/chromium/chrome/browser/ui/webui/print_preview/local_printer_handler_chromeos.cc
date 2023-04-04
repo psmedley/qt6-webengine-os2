@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/stl_util.h"
+#include "base/types/optional_util.h"
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_utils.h"
@@ -46,10 +46,10 @@ void OnGetPrintersComplete(
     LocalPrinterHandlerChromeos::AddedPrintersCallback callback,
     std::vector<crosapi::mojom::LocalDestinationInfoPtr> printers) {
   if (!printers.empty()) {
-    base::Value::ListStorage list;
+    base::Value::List list;
     for (const crosapi::mojom::LocalDestinationInfoPtr& p : printers)
-      list.push_back(LocalPrinterHandlerChromeos::PrinterToValue(*p));
-    std::move(callback).Run(base::ListValue(std::move(list)));
+      list.Append(LocalPrinterHandlerChromeos::PrinterToValue(*p));
+    std::move(callback).Run(std::move(list));
   }
 }
 
@@ -102,12 +102,12 @@ base::Value LocalPrinterHandlerChromeos::PrinterToValue(
 }
 
 // static
-base::Value LocalPrinterHandlerChromeos::CapabilityToValue(
+base::Value::Dict LocalPrinterHandlerChromeos::CapabilityToValue(
     crosapi::mojom::CapabilitiesResponsePtr caps) {
   if (!caps)
-    return base::Value();
+    return base::Value::Dict();
 
-  base::Value dict = AssemblePrinterSettings(
+  return AssemblePrinterSettings(
       caps->basic_info->id,
       PrinterBasicInfo(
           caps->basic_info->id, caps->basic_info->name,
@@ -117,26 +117,24 @@ base::Value LocalPrinterHandlerChromeos::CapabilityToValue(
                                            ? kValueTrue
                                            : kValueFalse}}),
       PrinterSemanticCapsAndDefaults::Papers(), caps->has_secure_protocol,
-      base::OptionalOrNullptr(caps->capabilities));
-
-  return dict;
+      base::OptionalToPtr(caps->capabilities));
 }
 
 // static
-base::Value LocalPrinterHandlerChromeos::StatusToValue(
+base::Value::Dict LocalPrinterHandlerChromeos::StatusToValue(
     const crosapi::mojom::PrinterStatus& status) {
-  base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetStringKey("printerId", status.printer_id);
-  dict.SetDoubleKey("timestamp", status.timestamp.ToJsTimeIgnoringNull());
-  base::Value status_reasons(base::Value::Type::LIST);
+  base::Value::Dict dict;
+  dict.Set("printerId", status.printer_id);
+  dict.Set("timestamp", status.timestamp.ToJsTimeIgnoringNull());
+  base::Value::List status_reasons;
   for (const crosapi::mojom::StatusReasonPtr& reason_ptr :
        status.status_reasons) {
-    base::Value status_reason(base::Value::Type::DICTIONARY);
-    status_reason.SetIntKey("reason", static_cast<int>(reason_ptr->reason));
-    status_reason.SetIntKey("severity", static_cast<int>(reason_ptr->severity));
+    base::Value::Dict status_reason;
+    status_reason.Set("reason", static_cast<int>(reason_ptr->reason));
+    status_reason.Set("severity", static_cast<int>(reason_ptr->severity));
     status_reasons.Append(std::move(status_reason));
   }
-  dict.SetKey("statusReasons", std::move(status_reasons));
+  dict.Set("statusReasons", std::move(status_reasons));
   return dict;
 }
 
@@ -169,7 +167,7 @@ void LocalPrinterHandlerChromeos::StartGetCapability(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!local_printer_) {
     PRINTER_LOG(ERROR) << "Local printer not available (StartGetCapability)";
-    std::move(callback).Run(base::Value());
+    std::move(callback).Run(base::Value::Dict());
     return;
   }
   local_printer_->GetCapability(
@@ -243,7 +241,7 @@ void LocalPrinterHandlerChromeos::StartPrinterStatusRequest(
   if (!local_printer_) {
     PRINTER_LOG(ERROR)
         << "Local printer not available (StartPrinterStatusRequest)";
-    std::move(callback).Run(base::Value());
+    std::move(callback).Run(absl::nullopt);
     return;
   }
   local_printer_->GetStatus(

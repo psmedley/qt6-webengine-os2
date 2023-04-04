@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,8 @@ void FakeDisplayDelegate::GetDisplays(GetDisplaysCallback callback) {
 
 void FakeDisplayDelegate::Configure(
     const std::vector<display::DisplayConfigurationParams>& config_requests,
-    ConfigureCallback callback) {
+    ConfigureCallback callback,
+    uint32_t modeset_flag) {
   bool config_success = true;
   for (const auto& config : config_requests) {
     bool request_success = false;

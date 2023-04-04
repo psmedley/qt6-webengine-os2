@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,8 @@ class TestInterstitialPage : public SecurityInterstitialPage {
   void OnInterstitialClosing() override {}
 
  protected:
-  void PopulateInterstitialStrings(base::Value* load_time_data) override {}
+  void PopulateInterstitialStrings(base::Value::Dict& load_time_data) override {
+  }
 
  private:
   raw_ptr<bool> destroyed_tracker_;
@@ -260,9 +261,10 @@ TEST_F(SecurityInterstitialTabHelperFencedFrameTest,
       ->InitializeRenderFrameIfNeeded();
   content::RenderFrameHost* fenced_frame_rfh = CreateFencedFrame(main_rfh());
   std::unique_ptr<content::NavigationSimulator> navigation_simulator =
-      content::NavigationSimulator::CreateForFencedFrame(fenced_frame_url,
-                                                         fenced_frame_rfh);
+      content::NavigationSimulator::CreateRendererInitiated(fenced_frame_url,
+                                                            fenced_frame_rfh);
   navigation_simulator->Commit();
+  fenced_frame_rfh = navigation_simulator->GetFinalRenderFrameHost();
   EXPECT_TRUE(fenced_frame_rfh->IsFencedFrameRoot());
   EXPECT_FALSE(blocking_page_destroyed);
   EXPECT_TRUE(helper->IsDisplayingInterstitial());

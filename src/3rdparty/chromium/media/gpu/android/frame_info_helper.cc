@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/threading/sequence_bound.h"
-#include "gpu/command_buffer/service/shared_image_video.h"
+#include "gpu/command_buffer/service/shared_image/android_video_image_backing.h"
 #include "gpu/ipc/service/command_buffer_stub.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
@@ -103,7 +103,7 @@ class FrameInfoHelperImpl : public FrameInfoHelper,
           info.emplace();
           info->coded_size = coded_size;
           info->visible_rect = visible_rect;
-          info->ycbcr_info = gpu::SharedImageVideo::GetYcbcrInfo(
+          info->ycbcr_info = gpu::AndroidVideoImageBacking::GetYcbcrInfo(
               texture_owner.get(), vulkan_context_provider_);
         }
       }

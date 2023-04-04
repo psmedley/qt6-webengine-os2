@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,8 @@ struct AXNodeData;
 // TODO(nektar): Move this struct over to AXNode so that it can be accessed by
 // AXPosition.
 struct AX_EXPORT AXLegacyHypertext {
+  using OffsetToIndex = std::map<int32_t, int32_t>;
+
   AXLegacyHypertext();
   ~AXLegacyHypertext();
   AXLegacyHypertext(const AXLegacyHypertext& other);
@@ -48,7 +50,7 @@ struct AX_EXPORT AXLegacyHypertext {
 
   // Maps an embedded character offset in |hypertext| to an index in
   // |hyperlinks|.
-  std::map<int32_t, int32_t> hyperlink_offset_to_index;
+  OffsetToIndex hyperlink_offset_to_index;
 
   // The unique id of a AXPlatformNodes for each hyperlink.
   // TODO(nektar): Replace object IDs with child indices if we decide that
@@ -71,14 +73,14 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
   const AXNodeData& GetData() const;
   gfx::NativeViewAccessible GetFocus() const;
   gfx::NativeViewAccessible GetParent() const;
-  int GetChildCount() const;
-  gfx::NativeViewAccessible ChildAtIndex(int index) const;
+  size_t GetChildCount() const;
+  gfx::NativeViewAccessible ChildAtIndex(size_t index) const;
 
   std::string GetName() const;
 
   // This returns nullopt if there's no parent, it's unable to find the child in
   // the list of its parent's children, or its parent doesn't have children.
-  virtual absl::optional<int> GetIndexInParent();
+  virtual absl::optional<size_t> GetIndexInParent();
 
   // Returns a stack of ancestors of this node. The node at the top of the stack
   // is the top most ancestor.
@@ -267,13 +269,8 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
   // Returns the font size converted to points, if available.
   absl::optional<float> GetFontSizeInPoints() const;
 
-  // Returns true if either a descendant has selection (sel_focus_object_id) or
-  // if this node is a simple text element and has text selection attributes.
-  // Optionally accepts a selection, which can be useful if checking the
-  // unignored selection is required. If not provided, uses the selection from
-  // the tree data, which is safe and fast but does not take ignored nodes into
-  // account.
-  bool HasCaret(const AXTree::Selection* selection = nullptr);
+  // See `AXNode::HasVisibleCaretOrSelection`.
+  bool HasVisibleCaretOrSelection() const;
 
   // See AXPlatformNodeDelegate::IsChildOfLeaf().
   bool IsChildOfLeaf() const;
@@ -518,8 +515,8 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
   // First they check for a local selection found on the current control, e.g.
   // when querying the selection on a textarea.
   // If not found they retrieve the global selection found on the current frame.
-  int GetSelectionAnchor(const AXTree::Selection* selection);
-  int GetSelectionFocus(const AXTree::Selection* selection);
+  int GetSelectionAnchor(const AXSelection* selection);
+  int GetSelectionFocus(const AXSelection* selection);
 
   // Retrieves the selection offsets in the way required by the IA2 APIs.
   // selection_start and selection_end are -1 when there is no selection active
@@ -527,10 +524,10 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
   // The greatest of the two offsets is one past the last character of the
   // selection.)
   void GetSelectionOffsets(int* selection_start, int* selection_end);
-  void GetSelectionOffsets(const AXTree::Selection* selection,
+  void GetSelectionOffsets(const AXSelection* selection,
                            int* selection_start,
                            int* selection_end);
-  void GetSelectionOffsetsFromTree(const AXTree::Selection* selection,
+  void GetSelectionOffsetsFromTree(const AXSelection* selection,
                                    int* selection_start,
                                    int* selection_end);
 
@@ -543,6 +540,7 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
   int32_t GetHyperlinkIndexFromChild(AXPlatformNodeBase* child);
   int32_t GetHypertextOffsetFromHyperlinkIndex(int32_t hyperlink_index);
   int32_t GetHypertextOffsetFromChild(AXPlatformNodeBase* child);
+  int HypertextOffsetFromChildIndex(int child_index) const;
   int32_t GetHypertextOffsetFromDescendant(AXPlatformNodeBase* descendant);
 
   // If the selection endpoint is either equal to or an ancestor of this object,
@@ -554,6 +552,9 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
   // cannot be found in the accessibility tree.
   int GetHypertextOffsetFromEndpoint(AXPlatformNodeBase* endpoint_object,
                                      int endpoint_offset);
+
+  AXPlatformNodeBase::AXPosition HypertextOffsetToEndpoint(
+      int hypertext_offset) const;
 
   bool IsSameHypertextCharacter(const AXLegacyHypertext& old_hypertext,
                                 size_t old_char_index,
@@ -585,6 +586,8 @@ class AX_EXPORT AXPlatformNodeBase : public AXPlatformNode {
 
   friend AXPlatformNode* AXPlatformNode::Create(
       AXPlatformNodeDelegate* delegate);
+
+  FRIEND_TEST_ALL_PREFIXES(AXPlatformNodeTest, HypertextOffsetFromEndpoint);
 };
 
 }  // namespace ui

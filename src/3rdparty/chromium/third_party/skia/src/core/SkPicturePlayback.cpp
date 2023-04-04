@@ -10,7 +10,7 @@
 #include "include/core/SkTextBlob.h"
 #include "include/core/SkTypes.h"
 #include "include/private/SkTDArray.h"
-#include "include/private/chromium/GrSlug.h"
+#include "include/private/chromium/Slug.h"
 #include "src/core/SkCanvasPriv.h"
 #include "src/core/SkDrawShadowInfo.h"
 #include "src/core/SkFontPriv.h"
@@ -42,6 +42,7 @@ void SkPicturePlayback::draw(SkCanvas* canvas,
 
     SkReadBuffer reader(fPictureData->opData()->bytes(),
                         fPictureData->opData()->size());
+    reader.setVersion(fPictureData->info().getVersion());
 
     // Record this, so we can concat w/ it if we encounter a setMatrix()
     SkM44 initialMatrix = canvas->getLocalToDevice();
@@ -365,8 +366,9 @@ void SkPicturePlayback::handleOp(SkReadBuffer* reader,
 
             int dstClipCount = reader->readInt();
             SkPoint* dstClips = nullptr;
-            if (!reader->validate(expectedClips <= dstClipCount)) {
-                // Entries request more dstClip points than are provided in the buffer
+            if (!reader->validate(dstClipCount >= 0) ||
+                !reader->validate(expectedClips <= dstClipCount)) {
+                // A bad dstClipCount (either negative, or not enough to satisfy entries).
                 break;
             } else if (dstClipCount > 0) {
                 dstClips = (SkPoint*) reader->skip(dstClipCount, sizeof(SkPoint));
@@ -376,7 +378,8 @@ void SkPicturePlayback::handleOp(SkReadBuffer* reader,
                 }
             }
             int matrixCount = reader->readInt();
-            if (!reader->validate((maxMatrixIndex + 1) <= matrixCount) ||
+            if (!reader->validate(matrixCount >= 0) ||
+                !reader->validate(maxMatrixIndex <= (matrixCount - 1)) ||
                 !reader->validate(
                     SkSafeMath::Mul(matrixCount, kMatrixSize) <= reader->available())) {
                 // Entries access out-of-bound matrix indices, given provided matrices or
@@ -605,7 +608,7 @@ void SkPicturePlayback::handleOp(SkReadBuffer* reader,
         } break;
         case DRAW_SLUG: {
 #if SK_SUPPORT_GPU
-            const GrSlug* slug = fPictureData->getSlug(reader);
+            const sktext::gpu::Slug* slug = fPictureData->getSlug(reader);
             BREAK_ON_READ_ERROR(reader);
 
             slug->draw(canvas);

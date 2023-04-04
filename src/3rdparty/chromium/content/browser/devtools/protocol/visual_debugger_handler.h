@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,7 @@ class VisualDebuggerHandler : public DevToolsDomainHandler,
   void Wire(UberDispatcher* dispatcher) override;
 
   DispatchResponse FilterStream(
-      std::unique_ptr<base::flat_map<std::string, base::Value>> in_filter)
-      override;
+      std::unique_ptr<base::Value::Dict> in_filter) override;
 
   DispatchResponse StartStream() override;
   DispatchResponse StopStream() override;

@@ -144,7 +144,7 @@ CompilerImpl *Context11::createCompiler()
 
 ShaderImpl *Context11::createShader(const gl::ShaderState &data)
 {
-    return new ShaderD3D(data, mRenderer->getFeatures(), mRenderer->getNativeExtensions());
+    return new ShaderD3D(data, mRenderer);
 }
 
 ProgramImpl *Context11::createProgram(const gl::ProgramState &data)
@@ -177,6 +177,8 @@ TextureImpl *Context11::createTexture(const gl::TextureState &state)
             return new TextureD3D_2DMultisample(state, mRenderer);
         case gl::TextureType::_2DMultisampleArray:
             return new TextureD3D_2DMultisampleArray(state, mRenderer);
+        case gl::TextureType::Buffer:
+            return new TextureD3D_Buffer(state, mRenderer);
         default:
             UNREACHABLE();
     }
@@ -748,14 +750,14 @@ gl::GraphicsResetStatus Context11::getResetStatus()
 
 angle::Result Context11::insertEventMarker(GLsizei length, const char *marker)
 {
-    mRenderer->getAnnotator()->setMarker(marker);
+    mRenderer->getDebugAnnotatorContext()->setMarker(marker);
     return angle::Result::Continue;
 }
 
 angle::Result Context11::pushGroupMarker(GLsizei length, const char *marker)
 {
-    mRenderer->getAnnotator()->beginEvent(nullptr, angle::EntryPoint::GLPushGroupMarkerEXT, marker,
-                                          marker);
+    mRenderer->getDebugAnnotatorContext()->beginEvent(angle::EntryPoint::GLPushGroupMarkerEXT,
+                                                      marker, marker);
     mMarkerStack.push(std::string(marker));
     return angle::Result::Continue;
 }
@@ -767,8 +769,8 @@ angle::Result Context11::popGroupMarker()
     {
         marker = mMarkerStack.top().c_str();
         mMarkerStack.pop();
-        mRenderer->getAnnotator()->endEvent(nullptr, marker,
-                                            angle::EntryPoint::GLPopGroupMarkerEXT);
+        mRenderer->getDebugAnnotatorContext()->endEvent(marker,
+                                                        angle::EntryPoint::GLPopGroupMarkerEXT);
     }
     return angle::Result::Continue;
 }
@@ -857,6 +859,11 @@ const gl::Extensions &Context11::getNativeExtensions() const
 const gl::Limitations &Context11::getNativeLimitations() const
 {
     return mRenderer->getNativeLimitations();
+}
+
+ShPixelLocalStorageType Context11::getNativePixelLocalStorageType() const
+{
+    return mRenderer->getNativePixelLocalStorageType();
 }
 
 angle::Result Context11::dispatchCompute(const gl::Context *context,
@@ -965,7 +972,8 @@ angle::Result Context11::triggerDispatchCallProgramRecompilation(const gl::Conte
     gl::InfoLog infoLog;
 
     ShaderExecutableD3D *computeExe = nullptr;
-    ANGLE_TRY(programD3D->getComputeExecutableForImage2DBindLayout(this, &computeExe, &infoLog));
+    ANGLE_TRY(
+        programD3D->getComputeExecutableForImage2DBindLayout(context, this, &computeExe, &infoLog));
     if (!programD3D->hasComputeExecutableForCachedImage2DBindLayout())
     {
         ASSERT(infoLog.getLength() > 0);

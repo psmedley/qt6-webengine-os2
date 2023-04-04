@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/android/jni_string.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantViewFactory_jni.h"
 #include "components/autofill_assistant/browser/android/assistant_generic_ui_delegate.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/android/generic_ui_events_android.h"
 #include "components/autofill_assistant/browser/android/generic_ui_interactions_android.h"
 #include "components/autofill_assistant/browser/android/interaction_handler_android.h"
@@ -30,7 +30,7 @@ base::android::ScopedJavaGlobalRef<jobject> CreateViewHierarchy(
     JNIEnv* env,
     const JavaRef<jobject>& jcontext,
     const JavaRef<jobject>& jdelegate,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const ViewProto& proto,
     InteractionHandlerAndroid* interaction_handler,
     ViewHandlerAndroid* view_handler,
@@ -102,7 +102,7 @@ base::android::ScopedJavaLocalRef<jobject> CreateJavaVerticalExpander(
     const JavaRef<jobject>& jcontext,
     const JavaRef<jobject>& jdelegate,
     const JavaRef<jstring>& jidentifier,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const VerticalExpanderViewProto& proto,
     InteractionHandlerAndroid* interaction_handler,
     ViewHandlerAndroid* view_handler,
@@ -160,7 +160,7 @@ base::android::ScopedJavaLocalRef<jobject> CreateJavaToggleButton(
     const JavaRef<jobject>& jcontext,
     const JavaRef<jobject>& jdelegate,
     const JavaRef<jstring>& jidentifier,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const ToggleButtonViewProto& proto,
     InteractionHandlerAndroid* interaction_handler,
     ViewHandlerAndroid* view_handler,
@@ -214,7 +214,7 @@ base::android::ScopedJavaGlobalRef<jobject> CreateJavaView(
     JNIEnv* env,
     const JavaRef<jobject>& jcontext,
     const JavaRef<jobject>& jdelegate,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const ViewProto& proto,
     InteractionHandlerAndroid* interaction_handler,
     ViewHandlerAndroid* view_handler,
@@ -244,8 +244,9 @@ base::android::ScopedJavaGlobalRef<jobject> CreateJavaView(
         VLOG(1) << "Failed to create image for " << proto.identifier();
         return nullptr;
       }
-      jview = Java_AssistantViewFactory_createImageView(env, jcontext,
-                                                        jidentifier, jimage);
+      jview = Java_AssistantViewFactory_createImageView(
+          env, jcontext, jidentifier, jimage,
+          proto.image_view().use_icon_semantic_tinting());
       break;
     }
     case ViewProto::kVerticalExpanderView: {
@@ -267,7 +268,8 @@ base::android::ScopedJavaGlobalRef<jobject> CreateJavaView(
           base::android::ConvertUTF8ToJavaString(
               env, proto.text_input_view().hint()),
           base::android::ConvertUTF8ToJavaString(
-              env, proto.text_input_view().model_identifier()));
+              env, proto.text_input_view().model_identifier()),
+          proto.text_input_view().focus_and_show_keyboard());
       break;
     }
     case ViewProto::kToggleButtonView:
@@ -409,7 +411,7 @@ base::android::ScopedJavaGlobalRef<jobject> CreateViewHierarchy(
     JNIEnv* env,
     const JavaRef<jobject>& jcontext,
     const JavaRef<jobject>& jdelegate,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const ViewProto& proto,
     InteractionHandlerAndroid* interaction_handler,
     ViewHandlerAndroid* view_handler,
@@ -477,7 +479,7 @@ GenericUiNestedControllerAndroid::CreateFromProto(
     const GenericUserInterfaceProto& proto,
     base::android::ScopedJavaGlobalRef<jobject> jcontext,
     base::android::ScopedJavaGlobalRef<jobject> jinfo_page_util,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     base::android::ScopedJavaGlobalRef<jobject> jdelegate,
     EventHandler* event_handler,
     UserModel* user_model,

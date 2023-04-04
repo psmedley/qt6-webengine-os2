@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,6 +87,7 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
     DebugRendererSettings debug_renderer_settings;
     base::ProcessId host_process_id = base::kNullProcessId;
     raw_ptr<HintSessionFactory> hint_session_factory = nullptr;
+    size_t max_uncommitted_frames = 0;
   };
   explicit FrameSinkManagerImpl(const InitParams& params);
 
@@ -152,6 +153,8 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
       const DebugRendererSettings& debug_settings) override;
   void Throttle(const std::vector<FrameSinkId>& ids,
                 base::TimeDelta interval) override;
+  void StartThrottlingAllFrameSinks(base::TimeDelta interval) override;
+  void StopThrottlingAllFrameSinks() override;
 
   void DestroyFrameSinkBundle(const FrameSinkBundleId& id);
 
@@ -394,8 +397,15 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
   // Ids of the frame sinks that have been requested to throttle.
   std::vector<FrameSinkId> frame_sink_ids_to_throttle_;
 
-  // The throttling interval which defines how often BeginFrames are sent.
+  // The throttling interval which defines how often BeginFrames are sent for
+  // frame sinks in `frame_sink_ids_to_throttle_`, if
+  // `global_throttle_interval_` is unset or if this interval is longer than
+  // `global_throttle_interval_`.
   base::TimeDelta throttle_interval_ = BeginFrameArgs::DefaultInterval();
+
+  // If present, the throttling interval which defines the upper bound of how
+  // often BeginFrames are sent for all current and future frame sinks.
+  absl::optional<base::TimeDelta> global_throttle_interval_ = absl::nullopt;
 
   base::flat_map<uint32_t, base::ScopedClosureRunner> cached_back_buffers_;
 
@@ -405,6 +415,8 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
   // platforms that don't need video detection.
   std::unique_ptr<VideoDetector> video_detector_;
 
+  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
+  mojo::Remote<mojom::FrameSinkManagerClient> client_remote_;
   // There are three states this can be in:
   //  1. Mojo client: |client_| will point to |client_remote_|, the Mojo client,
   //     and |ui_task_runner_| will not be used. Calls to OnFrameTokenChanged()
@@ -419,8 +431,6 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
   //     OnFrameTokenChanged() will be directly called (without PostTask) on
   //     |client_|. Used for some unit tests.
   raw_ptr<mojom::FrameSinkManagerClient> client_ = nullptr;
-  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
-  mojo::Remote<mojom::FrameSinkManagerClient> client_remote_;
   mojo::Receiver<mojom::FrameSinkManager> receiver_{this};
 
   base::ObserverList<FrameSinkObserver>::Unchecked observer_list_;

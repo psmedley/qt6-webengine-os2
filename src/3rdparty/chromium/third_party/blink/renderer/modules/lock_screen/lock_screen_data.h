@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -33,6 +35,10 @@ class LockScreenData final : public ScriptWrappable,
   ScriptPromise deleteData(ScriptState*, const String& key);
 
   void Trace(Visitor* visitor) const override;
+
+ private:
+  // Fake data store for use in testing before implementation is complete.
+  HashMap<String, String> fake_data_store_;
 };
 
 }  // namespace blink

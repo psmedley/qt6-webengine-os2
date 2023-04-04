@@ -21,12 +21,12 @@
 #include "src/gpu/ganesh/GrProcessor.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
 #include "src/gpu/ganesh/GrStyle.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/geometry/GrAAConvexTessellator.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 namespace skgpu::v1 {
@@ -279,13 +279,13 @@ private:
     }
 
     void onExecute(GrOpFlushState* flushState, const SkRect& chainBounds) override {
-        if (!fProgramInfo || fMeshes.isEmpty()) {
+        if (!fProgramInfo || fMeshes.empty()) {
             return;
         }
 
         flushState->bindPipelineAndScissorClip(*fProgramInfo, chainBounds);
         flushState->bindTextures(fProgramInfo->geomProc(), nullptr, fProgramInfo->pipeline());
-        for (int i = 0; i < fMeshes.count(); ++i) {
+        for (int i = 0; i < fMeshes.size(); ++i) {
             flushState->drawMesh(*fMeshes[i]);
         }
     }

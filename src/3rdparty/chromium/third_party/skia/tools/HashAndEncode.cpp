@@ -6,7 +6,7 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkICC.h"
 #include "include/core/SkString.h"
-#include "include/third_party/skcms/skcms.h"
+#include "modules/skcms/skcms.h"
 
 #include <png.h>
 
@@ -143,11 +143,11 @@ bool HashAndEncode::encodePNG(SkWStream* st,
 
     SkString description;
     description.append("Key: ");
-    for (int i = 0; i < key.count(); i++) {
+    for (int i = 0; i < key.size(); i++) {
         description.appendf("%s ", key[i]);
     }
     description.append("Properties: ");
-    for (int i = 0; i < properties.count(); i++) {
+    for (int i = 0; i < properties.size(); i++) {
         description.appendf("%s ", properties[i]);
     }
     description.appendf("MD5: %s", md5);
@@ -159,7 +159,7 @@ bool HashAndEncode::encodePNG(SkWStream* st,
     text[1].key  = (png_charp)"Description";
     text[1].text = (png_charp)description.c_str();
     text[1].compression = PNG_TEXT_COMPRESSION_NONE;
-    png_set_text(png, info, text, SK_ARRAY_COUNT(text));
+    png_set_text(png, info, text, std::size(text));
 
     png_set_IHDR(png, info, (png_uint_32)fSize.width()
                           , (png_uint_32)fSize.height()

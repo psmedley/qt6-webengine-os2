@@ -375,15 +375,15 @@ static av_cold int metasound_decode_init(AVCodecContext *avctx)
 
 const FFCodec ff_metasound_decoder = {
     .p.name         = "metasound",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Voxware MetaSound"),
+    CODEC_LONG_NAME("Voxware MetaSound"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_METASOUND,
     .priv_data_size = sizeof(TwinVQContext),
     .init           = metasound_decode_init,
     .close          = ff_twinvq_decode_close,
-    .decode         = ff_twinvq_decode_frame,
+    FF_CODEC_DECODE_CB(ff_twinvq_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

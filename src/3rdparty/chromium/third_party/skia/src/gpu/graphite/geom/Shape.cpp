@@ -37,24 +37,13 @@ bool Shape::conservativeContains(const Rect& rect) const {
     SkUNREACHABLE;
 }
 
-bool Shape::conservativeContains(float2 point) const {
+bool Shape::conservativeContains(skvx::float2 point) const {
     switch (fType) {
         case Type::kEmpty: return false;
         case Type::kLine:  return false;
         case Type::kRect:  return fRect.contains(Rect::Point(point));
         case Type::kRRect: return SkRRectPriv::ContainsPoint(fRRect, {point.x(), point.y()});
         case Type::kPath:  return fPath.contains(point.x(), point.y());
-    }
-    SkUNREACHABLE;
-}
-
-bool Shape::closed() const {
-    switch (fType) {
-        case Type::kEmpty: return true;
-        case Type::kLine:  return false;
-        case Type::kRect:  return true;
-        case Type::kRRect: return true;
-        case Type::kPath:  return SkPathPriv::IsClosedSingleContour(fPath);
     }
     SkUNREACHABLE;
 }

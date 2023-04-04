@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1236,7 +1236,7 @@ TEST_F(TileManagerTilePriorityQueueTest,
     // On the second iteration, mark everything as ready to draw (solid color).
     if (i == 1) {
       TileDrawInfo& draw_info = last_tile.tile()->draw_info();
-      draw_info.SetSolidColorForTesting(SK_ColorRED);
+      draw_info.SetSolidColorForTesting(SkColors::kRed);
     }
     queue->Pop();
     int eventually_bin_order_correct_count = 0;
@@ -1272,7 +1272,7 @@ TEST_F(TileManagerTilePriorityQueueTest,
       // color).
       if (i == 1) {
         TileDrawInfo& draw_info = last_tile.tile()->draw_info();
-        draw_info.SetSolidColorForTesting(SK_ColorRED);
+        draw_info.SetSolidColorForTesting(SkColors::kRed);
       }
     }
 
@@ -1519,13 +1519,13 @@ TEST_F(TileManagerTilePriorityQueueTest, NoRasterTasksforSolidColorTiles) {
       FakeRecordingSource::CreateFilledRecordingSource(layer_bounds);
 
   PaintFlags solid_flags;
-  SkColor solid_color = SkColorSetARGB(255, 12, 23, 34);
+  SkColor4f solid_color{0.1f, 0.2f, 0.3f, 1.0f};
   solid_flags.setColor(solid_color);
   recording_source->add_draw_rect_with_flags(gfx::Rect(layer_bounds),
                                              solid_flags);
 
   // Create non solid tile as well, otherwise tilings wouldnt be created.
-  SkColor non_solid_color = SkColorSetARGB(128, 45, 56, 67);
+  SkColor4f non_solid_color{0.2f, 0.3f, 0.4f, 0.5f};
   PaintFlags non_solid_flags;
   non_solid_flags.setColor(non_solid_color);
 
@@ -1682,7 +1682,6 @@ TEST_F(TileManagerTest, AllWorkFinished) {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
-    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
     EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
@@ -1697,7 +1696,6 @@ TEST_F(TileManagerTest, AllWorkFinished) {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
-    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
     EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
@@ -1713,7 +1711,6 @@ TEST_F(TileManagerTest, AllWorkFinished) {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
-    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
     EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
@@ -1728,7 +1725,6 @@ TEST_F(TileManagerTest, AllWorkFinished) {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
-    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
     EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
@@ -1915,7 +1911,7 @@ TEST_F(PixelInspectTileManagerTest, LowResHasNoImage) {
 
     std::unique_ptr<FakeRecordingSource> recording_source =
         FakeRecordingSource::CreateFilledRecordingSource(size);
-    recording_source->SetBackgroundColor(SK_ColorTRANSPARENT);
+    recording_source->SetBackgroundColor(SkColors::kTransparent);
     recording_source->SetRequiresClear(true);
     PaintFlags flags;
     flags.setColor(SK_ColorGREEN);
@@ -3261,7 +3257,7 @@ TEST_F(CheckerImagingTileManagerTest,
                   ->tile_manager()
                   ->checker_image_tracker()
                   .no_decodes_allowed_for_testing());
-  while (!host_impl()->client()->ready_to_draw()) {
+  while (!host_impl()->tile_manager()->IsReadyToDraw()) {
     static_cast<SynchronousTaskGraphRunner*>(task_graph_runner())
         ->RunSingleTaskForTesting();
     base::RunLoop().RunUntilIdle();
@@ -3569,7 +3565,7 @@ TEST_F(DecodedImageTrackerTileManagerTest, DecodedImageTrackerDropsLocksOnUse) {
 
 class HdrImageTileManagerTest : public CheckerImagingTileManagerTest {
  public:
-  void DecodeHdrImage(const gfx::ColorSpace& raster_cs) {
+  void DecodeHdrImage(const gfx::ColorSpace& output_cs) {
     auto color_space = gfx::ColorSpace::CreateHDR10();
     auto size = gfx::Size(250, 250);
     auto info =
@@ -3586,7 +3582,7 @@ class HdrImageTileManagerTest : public CheckerImagingTileManagerTest {
 
     // Add the image to our decoded_image_tracker.
     TargetColorParams target_color_params;
-    target_color_params.color_space = raster_cs;
+    target_color_params.color_space = output_cs;
     host_impl()->tile_manager()->decoded_image_tracker().QueueImageDecode(
         hdr_image, target_color_params, base::DoNothing());
     FlushDecodeTasks();
@@ -3606,8 +3602,8 @@ class HdrImageTileManagerTest : public CheckerImagingTileManagerTest {
     SetupPendingTree(raster_source, kTileSize, invalidation);
 
     constexpr float kCustomWhiteLevel = 200.f;
-    auto display_cs = gfx::DisplayColorSpaces(raster_cs);
-    if (raster_cs.IsHDR())
+    auto display_cs = gfx::DisplayColorSpaces(output_cs);
+    if (output_cs.IsHDR())
       display_cs.SetSDRMaxLuminanceNits(kCustomWhiteLevel);
 
     pending_layer()->layer_tree_impl()->SetDisplayColorSpaces(display_cs);
@@ -3628,7 +3624,8 @@ class HdrImageTileManagerTest : public CheckerImagingTileManagerTest {
     auto pending_tiles = pending_tiling->AllTilesForTesting();
     ASSERT_FALSE(pending_tiles.empty());
 
-    if (raster_cs.IsHDR()) {
+    const auto raster_cs = gfx::ColorSpace::CreateExtendedSRGB();
+    if (output_cs.IsHDR()) {
       // Only the last tile will have any pending tasks.
       const auto& pending_tasks =
           host_impl()->tile_manager()->decode_tasks_for_testing(
@@ -3647,7 +3644,7 @@ class HdrImageTileManagerTest : public CheckerImagingTileManagerTest {
     ASSERT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
 
-    auto expected_format = raster_cs.IsHDR() ? viz::RGBA_F16 : viz::RGBA_8888;
+    auto expected_format = output_cs.IsHDR() ? viz::RGBA_F16 : viz::RGBA_8888;
     auto all_tiles = host_impl()->tile_manager()->AllTilesForTesting();
     for (const auto* tile : all_tiles)
       EXPECT_EQ(expected_format, tile->draw_info().resource_format());

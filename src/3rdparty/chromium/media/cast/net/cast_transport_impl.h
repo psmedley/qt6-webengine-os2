@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,7 +93,7 @@ class CastTransportImpl final : public CastTransport {
   //   "media_streaming_mode" (value ignored)
   //        - Turn media streaming mode on.
   // Note, these options may be ignored on some platforms.
-  void SetOptions(const base::DictionaryValue& options) final;
+  void SetOptions(const base::Value::Dict& options) final;
 
   // CastTransport implementation for receiving.
   void AddValidRtpReceiver(uint32_t rtp_sender_ssrc,

@@ -364,6 +364,15 @@ static const std::map<VkAccessFlags2KHR, std::array<Entry, 6>> kAccessMask2Commo
          {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-03906"},
          {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-03906"},
      }}},
+    {VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR,
+     {{
+         {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "UNASSIGNED-VkMemoryBarrier2-srcAccessMask-SHADER_BINDING_TABLE_READ"},
+         {Key(Struct::VkMemoryBarrier2, Field::dstAccessMask), "UNASSIGNED-VkMemoryBarrier2-dstAccessMask-SHADER_BINDING_TABLE_READ"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::srcAccessMask), "UNASSIGNED-VkBufferMemoryBarrier2-srcAccessMask-SHADER_BINDING_TABLE_READ"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::dstAccessMask), "UNASSIGNED-VkBufferMemoryBarrier2-dstAccessMask-SHADER_BINDING_TABLE_READ"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "UNASSIGNED-VkImageMemoryBarrier2-srcAccessMask-SHADER_BINDING_TABLE_READ"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "UNASSIGNED-VkImageMemoryBarrier2-dstAccessMask-SHADER_BINDING_TABLE_READ"},
+     }}},
     {VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT_KHR,
      {{
          {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "VUID-VkMemoryBarrier2-srcAccessMask-03907"},
@@ -571,6 +580,51 @@ static const std::map<VkAccessFlags2KHR, std::array<Entry, 6>> kAccessMask2Commo
          {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-03928"},
          {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-03928"},
      }}},
+    {VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR,
+     {{
+         {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "VUID-VkMemoryBarrier2-srcAccessMask-04858"},
+         {Key(Struct::VkMemoryBarrier2, Field::dstAccessMask), "VUID-VkMemoryBarrier2-dstAccessMask-04858"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::srcAccessMask), "VUID-VkBufferMemoryBarrier2-srcAccessMask-04858"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::dstAccessMask), "VUID-VkBufferMemoryBarrier2-dstAccessMask-04858"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-04858"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-04858"},
+     }}},
+    {VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR,
+     {{
+         {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "VUID-VkMemoryBarrier2-srcAccessMask-04859"},
+         {Key(Struct::VkMemoryBarrier2, Field::dstAccessMask), "VUID-VkMemoryBarrier2-dstAccessMask-04859"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::srcAccessMask), "VUID-VkBufferMemoryBarrier2-srcAccessMask-04859"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::dstAccessMask), "VUID-VkBufferMemoryBarrier2-dstAccessMask-04859"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-04859"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-04859"},
+     }}},
+    {VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR,
+     {{
+         {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "VUID-VkMemoryBarrier2-srcAccessMask-04860"},
+         {Key(Struct::VkMemoryBarrier2, Field::dstAccessMask), "VUID-VkMemoryBarrier2-dstAccessMask-04860"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::srcAccessMask), "VUID-VkBufferMemoryBarrier2-srcAccessMask-04860"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::dstAccessMask), "VUID-VkBufferMemoryBarrier2-dstAccessMask-04860"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-04860"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-04860"},
+     }}},
+    {VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR,
+     {{
+         {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "VUID-VkMemoryBarrier2-srcAccessMask-04861"},
+         {Key(Struct::VkMemoryBarrier2, Field::dstAccessMask), "VUID-VkMemoryBarrier2-dstAccessMask-04861"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::srcAccessMask), "VUID-VkBufferMemoryBarrier2-srcAccessMask-04861"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::dstAccessMask), "VUID-VkBufferMemoryBarrier2-dstAccessMask-04861"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-04861"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-04861"},
+     }}},
+    {VK_ACCESS_2_INVOCATION_MASK_READ_BIT_HUAWEI,
+     {{
+         {Key(Struct::VkMemoryBarrier2, Field::srcAccessMask), "VUID-VkMemoryBarrier2-srcAccessMask-04994"},
+         {Key(Struct::VkMemoryBarrier2, Field::dstAccessMask), "VUID-VkMemoryBarrier2-dstAccessMask-04994"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::srcAccessMask), "VUID-VkBufferMemoryBarrier2-srcAccessMask-04994"},
+         {Key(Struct::VkBufferMemoryBarrier2, Field::dstAccessMask), "VUID-VkBufferMemoryBarrier2-dstAccessMask-04994"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::srcAccessMask), "VUID-VkImageMemoryBarrier2-srcAccessMask-04994"},
+         {Key(Struct::VkImageMemoryBarrier2, Field::dstAccessMask), "VUID-VkImageMemoryBarrier2-dstAccessMask-04994"},
+     }}},
 };
 
 // commonvalidity/fine_sync_commands_common.txt
@@ -680,7 +734,7 @@ static const std::map<QueueError, std::vector<Entry>> kBarrierQueueErrors{
 const std::map<QueueError, std::string> kQueueErrorSummary{
     {QueueError::kSrcOrDstMustBeIgnore, "Source or destination queue family must be ignored."},
     {QueueError::kSpecialOrIgnoreOnly, "Source or destination queue family must be special or ignored."},
-    {QueueError::kSrcAndDstValidOrSpecial, "Destination queue family must be valid, ignored, or special."},
+    {QueueError::kSrcAndDstValidOrSpecial, "Source and destination queue family must be valid, ignored, or special."},
     {QueueError::kSrcAndDestMustBeIgnore, "Source and destination queue family must both be ignored."},
     {QueueError::kSrcAndDstBothValid, "Source and destination queue family must both be valid."},
     {QueueError::kSubmitQueueMustMatchSrcOrDst,
@@ -743,6 +797,11 @@ static const std::map<VkImageLayout, std::array<Entry, 2>> kImageLayoutErrors{
          {Key(Struct::VkImageMemoryBarrier), "VUID-VkImageMemoryBarrier-oldLayout-01659"},
          {Key(Struct::VkImageMemoryBarrier2), "VUID-VkImageMemoryBarrier2-oldLayout-01659"},
      }}},
+    {VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT,
+     {{
+         {Key(Struct::VkImageMemoryBarrier), "VUID-VkImageMemoryBarrier-srcQueueFamilyIndex-07006"},
+         {Key(Struct::VkImageMemoryBarrier2), "VUID-VkImageMemoryBarrier2-srcQueueFamilyIndex-07006"},
+     }}},
 };
 
 const std::string &GetBadImageLayoutVUID(const Location &loc, VkImageLayout layout) {
@@ -776,6 +835,11 @@ static const std::map<BufferError, std::array<Entry, 2>> kBufferErrors{
          {Key(Struct::VkBufferMemoryBarrier), "VUID-VkBufferMemoryBarrier-size-01188"},
          {Key(Struct::VkBufferMemoryBarrier2), "VUID-VkBufferMemoryBarrier2-size-01188"},
      }}},
+    {BufferError::kQueueFamilyExternal,
+     {{
+         {Key(Struct::VkBufferMemoryBarrier), "VUID-VkBufferMemoryBarrier-srcQueueFamilyIndex-04087"},
+         {Key(Struct::VkBufferMemoryBarrier2), "VUID-VkBufferMemoryBarrier2-srcQueueFamilyIndex-04087"},
+     }}},
 };
 
 const std::string &GetBufferBarrierVUID(const Location &loc, BufferError error) {
@@ -803,6 +867,11 @@ static const std::map<ImageError, std::vector<Entry>> kImageErrors{
      {
          {Key(Struct::VkImageMemoryBarrier), "VUID-VkImageMemoryBarrier-newLayout-01198"},
          {Key(Struct::VkImageMemoryBarrier2), "VUID-VkImageMemoryBarrier2-newLayout-01198"},
+     }},
+    {ImageError::kBadAttFeedbackLoopLayout,
+     {
+         {Key(Struct::VkImageMemoryBarrier), "VUID-VkImageMemoryBarrier-attachmentFeedbackLoopLayout-07313"},
+         {Key(Struct::VkImageMemoryBarrier2), "VUID-VkImageMemoryBarrier2-attachmentFeedbackLoopLayout-07313"},
      }},
     {ImageError::kNotColorAspect,
      {

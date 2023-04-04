@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -71,10 +71,9 @@ struct App {
   [MinVersion=2]
   WindowMode window_mode@22;
 
-  // An optional ID used for policy to identify the app.
-  // For web apps, it contains the install URL.
-  [MinVersion=7]
-  string? policy_id@23;
+  [MinVersion=7, RenamedFrom="policy_id"]
+  // DEPRECATED, replaced with |policy_ids| below.
+  string? deprecated_policy_id@23;
 
   // This vector must be treated atomically, if there is a permission
   // change, the publisher must send through the entire list of permissions.
@@ -104,6 +103,11 @@ struct App {
 
   [MinVersion=19]
   OptionalBool is_platform_app@28;
+
+  [MinVersion=20]
+  // IDs used for policy to identify the app.
+  // For web apps, it contains the install URL(s).
+  array<string>? policy_ids@29;
 };
 
 // The types of apps available in the registry.
@@ -148,6 +152,8 @@ enum InstallReason {
   kSync,       // Installed by sync.
   kUser,       // Installed by user action.
   [MinVersion=7] kSubApp,     // Installed by the SubApp API call.
+  [MinVersion=8] kKiosk,      // Installed by Kiosk on Chrome OS.
+  [MinVersion=9] kCommandLine,  // Installed by a command line argument.
 };
 
 // Augments a bool to include an 'unknown' value.
@@ -193,7 +199,7 @@ struct IconKey {
 enum ConditionType {
   [Default] kScheme,  // Matches the URL scheme (e.g. https, tel).
   kHost,              // Matches the URL host (e.g. www.google.com).
-  kPattern,           // Matches the URL pattern (e.g. /abc/*).
+  kPath  ,            // Matches the URL path (e.g. /abc/*).
   kAction,            // Matches the action type (e.g. view, send).
   kMimeType,          // Matches the top-level mime type (e.g. text/plain).
   [MinVersion=1] kFileExtension,  // Deprecated.
@@ -347,6 +353,7 @@ struct Intent {
   [MinVersion=5] array<IntentFile>? files@5;
   // The activity for the app to launch.
   [MinVersion=13] string? activity_name@6;
+  [MinVersion=14] string? data@7;
 };
 
 // The result from launching an app.
@@ -413,6 +420,7 @@ enum WindowOpenDisposition {
   kNewForegroundTab,
   kNewBackgroundTab,
   kNewWindow,
+  [MinVersion=1] kNewPopup,
 };
 
 [Stable]
@@ -425,6 +433,8 @@ struct LaunchParams {
   [MinVersion=14]LaunchContainer container@3;
   // How the tab opened in a window if app is opened in tab.
   [MinVersion=14]WindowOpenDisposition disposition@4;
+  // An id that indicates which display the app should be launched in.
+  [MinVersion=15]int64 display_id@5;
 };
 
 [Stable]
@@ -445,6 +455,7 @@ enum PermissionType {
   kNotifications                  = 4,
   [MinVersion=9] kContacts        = 5,
   [MinVersion=9] kStorage         = 6,
+  [MinVersion=10] kFileHandling   = 7,
 };
 
 [Stable]

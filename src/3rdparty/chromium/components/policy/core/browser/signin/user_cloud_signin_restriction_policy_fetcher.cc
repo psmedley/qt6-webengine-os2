@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,8 +76,10 @@ void UserCloudSigninRestrictionPolicyFetcher::
         base::OnceCallback<void(const std::string&)> callback) {
   if (!base::FeatureList::IsEnabled(
           features::kEnableUserCloudSigninRestrictionPolicyFetcher)) {
+    cancelable_callback_.Reset(std::move(callback));
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(std::move(callback), std::string()));
+        FROM_HERE,
+        base::BindOnce(cancelable_callback_.callback(), std::string()));
     return;
   }
   // base::Unretained is safe here because the callback is called in the

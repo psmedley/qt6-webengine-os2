@@ -15,116 +15,143 @@
 #ifndef SRC_DAWN_NATIVE_INSTANCE_H_
 #define SRC_DAWN_NATIVE_INSTANCE_H_
 
+#include <array>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "dawn/common/RefCounted.h"
 #include "dawn/common/ityp_bitset.h"
 #include "dawn/native/Adapter.h"
 #include "dawn/native/BackendConnection.h"
+#include "dawn/native/BlobCache.h"
 #include "dawn/native/Features.h"
+#include "dawn/native/RefCountedWithExternalCount.h"
 #include "dawn/native/Toggles.h"
 #include "dawn/native/dawn_platform.h"
 
-#include <array>
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 namespace dawn::platform {
-    class Platform;
+class Platform;
 }  // namespace dawn::platform
 
 namespace dawn::native {
 
-    class Surface;
-    class XlibXcbFunctions;
+class Surface;
+class XlibXcbFunctions;
 
-    using BackendsBitset = ityp::bitset<wgpu::BackendType, kEnumCount<wgpu::BackendType>>;
+using BackendsBitset = ityp::bitset<wgpu::BackendType, kEnumCount<wgpu::BackendType>>;
 
-    InstanceBase* APICreateInstance(const InstanceDescriptor* descriptor);
+InstanceBase* APICreateInstance(const InstanceDescriptor* descriptor);
 
-    // This is called InstanceBase for consistency across the frontend, even if the backends don't
-    // specialize this class.
-    class InstanceBase final : public RefCounted {
-      public:
-        static Ref<InstanceBase> Create(const InstanceDescriptor* descriptor = nullptr);
+// This is called InstanceBase for consistency across the frontend, even if the backends don't
+// specialize this class.
+class InstanceBase final : public RefCountedWithExternalCount {
+  public:
+    static Ref<InstanceBase> Create(const InstanceDescriptor* descriptor = nullptr);
 
-        void APIRequestAdapter(const RequestAdapterOptions* options,
-                               WGPURequestAdapterCallback callback,
-                               void* userdata);
+    void APIRequestAdapter(const RequestAdapterOptions* options,
+                           WGPURequestAdapterCallback callback,
+                           void* userdata);
 
-        void DiscoverDefaultAdapters();
-        bool DiscoverAdapters(const AdapterDiscoveryOptionsBase* options);
+    void DiscoverDefaultAdapters();
+    bool DiscoverAdapters(const AdapterDiscoveryOptionsBase* options);
 
-        const std::vector<Ref<AdapterBase>>& GetAdapters() const;
+    const std::vector<Ref<AdapterBase>>& GetAdapters() const;
 
-        // Used to handle error that happen up to device creation.
-        bool ConsumedError(MaybeError maybeError);
+    // Used to handle error that happen up to device creation.
+    bool ConsumedError(MaybeError maybeError);
 
-        // Used to query the details of a toggle. Return nullptr if toggleName is not a valid name
-        // of a toggle supported in Dawn.
-        const ToggleInfo* GetToggleInfo(const char* toggleName);
-        Toggle ToggleNameToEnum(const char* toggleName);
+    template <typename T>
+    bool ConsumedError(ResultOrError<T> resultOrError, T* result) {
+        if (resultOrError.IsError()) {
+            ConsumeError(resultOrError.AcquireError());
+            return true;
+        }
+        *result = resultOrError.AcquireSuccess();
+        return false;
+    }
 
-        // Used to query the details of an feature. Return nullptr if featureName is not a valid
-        // name of an feature supported in Dawn.
-        const FeatureInfo* GetFeatureInfo(wgpu::FeatureName feature);
+    // Used to query the details of a toggle. Return nullptr if toggleName is not a valid name
+    // of a toggle supported in Dawn.
+    const ToggleInfo* GetToggleInfo(const char* toggleName);
+    Toggle ToggleNameToEnum(const char* toggleName);
 
-        bool IsBackendValidationEnabled() const;
-        void SetBackendValidationLevel(BackendValidationLevel level);
-        BackendValidationLevel GetBackendValidationLevel() const;
+    // Used to query the details of an feature. Return nullptr if featureName is not a valid
+    // name of an feature supported in Dawn.
+    const FeatureInfo* GetFeatureInfo(wgpu::FeatureName feature);
 
-        void EnableBeginCaptureOnStartup(bool beginCaptureOnStartup);
-        bool IsBeginCaptureOnStartupEnabled() const;
+    bool IsBackendValidationEnabled() const;
+    void SetBackendValidationLevel(BackendValidationLevel level);
+    BackendValidationLevel GetBackendValidationLevel() const;
 
-        void SetPlatform(dawn::platform::Platform* platform);
-        dawn::platform::Platform* GetPlatform();
+    void EnableBeginCaptureOnStartup(bool beginCaptureOnStartup);
+    bool IsBeginCaptureOnStartupEnabled() const;
 
-        const std::vector<std::string>& GetRuntimeSearchPaths() const;
+    // TODO(dawn:1374): SetPlatform should become a private helper, and SetPlatformForTesting
+    // will become the NOT thread-safe testing version exposed for special testing cases.
+    void SetPlatform(dawn::platform::Platform* platform);
+    void SetPlatformForTesting(dawn::platform::Platform* platform);
+    dawn::platform::Platform* GetPlatform();
+    BlobCache* GetBlobCache();
 
-        // Get backend-independent libraries that need to be loaded dynamically.
-        const XlibXcbFunctions* GetOrCreateXlibXcbFunctions();
+    uint64_t GetDeviceCountForTesting() const;
+    void IncrementDeviceCountForTesting();
+    void DecrementDeviceCountForTesting();
 
-        // Dawn API
-        Surface* APICreateSurface(const SurfaceDescriptor* descriptor);
+    const std::vector<std::string>& GetRuntimeSearchPaths() const;
 
-      private:
-        InstanceBase() = default;
-        ~InstanceBase() = default;
+    // Get backend-independent libraries that need to be loaded dynamically.
+    const XlibXcbFunctions* GetOrCreateXlibXcbFunctions();
 
-        InstanceBase(const InstanceBase& other) = delete;
-        InstanceBase& operator=(const InstanceBase& other) = delete;
+    // Dawn API
+    Surface* APICreateSurface(const SurfaceDescriptor* descriptor);
 
-        MaybeError Initialize(const InstanceDescriptor* descriptor);
+  private:
+    InstanceBase();
+    ~InstanceBase() override;
 
-        // Lazily creates connections to all backends that have been compiled.
-        void EnsureBackendConnection(wgpu::BackendType backendType);
+    void WillDropLastExternalRef() override;
 
-        MaybeError DiscoverAdaptersInternal(const AdapterDiscoveryOptionsBase* options);
+    InstanceBase(const InstanceBase& other) = delete;
+    InstanceBase& operator=(const InstanceBase& other) = delete;
 
-        ResultOrError<Ref<AdapterBase>> RequestAdapterInternal(
-            const RequestAdapterOptions* options);
+    MaybeError Initialize(const InstanceDescriptor* descriptor);
 
-        std::vector<std::string> mRuntimeSearchPaths;
+    // Lazily creates connections to all backends that have been compiled.
+    void EnsureBackendConnection(wgpu::BackendType backendType);
 
-        BackendsBitset mBackendsConnected;
+    MaybeError DiscoverAdaptersInternal(const AdapterDiscoveryOptionsBase* options);
 
-        bool mDiscoveredDefaultAdapters = false;
+    ResultOrError<Ref<AdapterBase>> RequestAdapterInternal(const RequestAdapterOptions* options);
 
-        bool mBeginCaptureOnStartup = false;
-        BackendValidationLevel mBackendValidationLevel = BackendValidationLevel::Disabled;
+    void ConsumeError(std::unique_ptr<ErrorData> error);
 
-        dawn::platform::Platform* mPlatform = nullptr;
-        std::unique_ptr<dawn::platform::Platform> mDefaultPlatform;
+    std::vector<std::string> mRuntimeSearchPaths;
 
-        std::vector<std::unique_ptr<BackendConnection>> mBackends;
-        std::vector<Ref<AdapterBase>> mAdapters;
+    BackendsBitset mBackendsConnected;
 
-        FeaturesInfo mFeaturesInfo;
-        TogglesInfo mTogglesInfo;
+    bool mDiscoveredDefaultAdapters = false;
+
+    bool mBeginCaptureOnStartup = false;
+    BackendValidationLevel mBackendValidationLevel = BackendValidationLevel::Disabled;
+
+    dawn::platform::Platform* mPlatform = nullptr;
+    std::unique_ptr<dawn::platform::Platform> mDefaultPlatform;
+    std::unique_ptr<BlobCache> mBlobCache;
+
+    std::vector<std::unique_ptr<BackendConnection>> mBackends;
+    std::vector<Ref<AdapterBase>> mAdapters;
+
+    FeaturesInfo mFeaturesInfo;
+    TogglesInfo mTogglesInfo;
 
 #if defined(DAWN_USE_X11)
-        std::unique_ptr<XlibXcbFunctions> mXlibXcbFunctions;
+    std::unique_ptr<XlibXcbFunctions> mXlibXcbFunctions;
 #endif  // defined(DAWN_USE_X11)
-    };
+
+    std::atomic_uint64_t mDeviceCountForTesting{0};
+};
 
 }  // namespace dawn::native
 

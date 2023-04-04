@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,7 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
       const std::string& user_agent,
       const HostPortPair& endpoint,
       const NetLogWithSource& net_log,
-      HttpAuthController* auth_controller,
+      scoped_refptr<HttpAuthController> auth_controller,
       ProxyDelegate* proxy_delegate);
 
   QuicProxyClientSocket(const QuicProxyClientSocket&) = delete;
@@ -63,9 +63,6 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const SocketTag& tag) override;
 
@@ -110,7 +107,7 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
   int DoReadReply();
   int DoReadReplyComplete(int result);
 
-  State next_state_;
+  State next_state_ = STATE_DISCONNECTED;
 
   // Handle to the QUIC Stream that this sits on top of.
   std::unique_ptr<QuicChromiumClientStream::Handle> stream_;
@@ -123,11 +120,11 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
   // Stores the callback for Read().
   CompletionOnceCallback read_callback_;
   // Stores the read buffer pointer for Read().
-  raw_ptr<IOBuffer> read_buf_;
+  raw_ptr<IOBuffer> read_buf_ = nullptr;
   // Stores the callback for Write().
   CompletionOnceCallback write_callback_;
   // Stores the write buffer length for Write().
-  int write_buf_len_;
+  int write_buf_len_ = 0;
 
   // CONNECT request and response.
   HttpRequestInfo request_;

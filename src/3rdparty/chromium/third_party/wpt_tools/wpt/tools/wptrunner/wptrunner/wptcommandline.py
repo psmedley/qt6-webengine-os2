@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import argparse
 import os
 import sys
@@ -73,6 +75,10 @@ scheme host and port.""")
                         default=True,
                         dest="fail_on_unexpected_pass",
                         help="Exit with status code 0 when all unexpected results are PASS")
+    parser.add_argument("--no-restart-on-new-group", action="store_false",
+                        default=True,
+                        dest="restart_on_new_group",
+                        help="Don't restart test runner when start a new test group")
 
     mode_group = parser.add_argument_group("Mode")
     mode_group.add_argument("--list-test-groups", action="store_true",
@@ -174,6 +180,12 @@ scheme host and port.""")
                                  help="Number of times to run the tests, restarting between each run")
     debugging_group.add_argument("--repeat-until-unexpected", action="store_true", default=None,
                                  help="Run tests in a loop until one returns an unexpected result")
+    debugging_group.add_argument('--retry-unexpected', type=int, default=0,
+                                 help=('Maximum number of times to retry '
+                                       'each test that consistently runs '
+                                       'unexpectedly in the initial repeat '
+                                       'loop. A retried test takes any '
+                                       'expected status as its final result.'))
     debugging_group.add_argument('--pause-after-test', action="store_true", default=None,
                                  help="Halt the test runner after each test (this happens by default if only a single test is run)")
     debugging_group.add_argument('--no-pause-after-test', dest="pause_after_test", action="store_false",
@@ -240,6 +252,8 @@ scheme host and port.""")
                               help="Do not install additional system fonts on your system")
     config_group.add_argument("--font-dir", action="store", type=abs_path, dest="font_dir",
                               help="Path to local font installation directory", default=None)
+    config_group.add_argument("--inject-script", action="store", dest="inject_script", default=None,
+                              help="Path to script file to inject, useful for testing polyfills.")
     config_group.add_argument("--headless", action="store_true",
                               help="Run browser in headless mode", default=None)
     config_group.add_argument("--no-headless", action="store_false", dest="headless",
@@ -289,12 +303,9 @@ scheme host and port.""")
                              default=None, help="Don't preload a gecko instance for faster restarts")
     gecko_group.add_argument("--disable-e10s", dest="gecko_e10s", action="store_false", default=True,
                              help="Run tests without electrolysis preferences")
-    gecko_group.add_argument("--enable-webrender", dest="enable_webrender", action="store_true", default=None,
-                             help="Enable the WebRender compositor in Gecko (defaults to disabled).")
-    gecko_group.add_argument("--no-enable-webrender", dest="enable_webrender", action="store_false",
-                             help="Disable the WebRender compositor in Gecko.")
     gecko_group.add_argument("--enable-fission", dest="enable_fission", action="store_true", default=None,
-                             help="Enable fission in Gecko (defaults to disabled).")
+                             help="Enable fission in Gecko (defaults to enabled; "
+                             "this option only exists for backward compatibility).")
     gecko_group.add_argument("--no-enable-fission", dest="enable_fission", action="store_false",
                              help="Disable fission in Gecko.")
     gecko_group.add_argument("--stackfix-dir", dest="stackfix_dir", action="store",
@@ -505,11 +516,11 @@ def check_paths(kwargs):
                 path = os.path.dirname(path)
 
             if not os.path.exists(path):
-                print("Fatal: %s path %s does not exist" % (name, path))
+                print(f"Fatal: {name} path {path} does not exist")
                 sys.exit(1)
 
             if not os.path.isdir(path):
-                print("Fatal: %s path %s is not a directory" % (name, path))
+                print(f"Fatal: {name} path {path} is not a directory")
                 sys.exit(1)
 
 
@@ -626,9 +637,6 @@ def check_args(kwargs):
     if kwargs["reftest_screenshot"] is None:
         kwargs["reftest_screenshot"] = "unexpected" if not kwargs["debug_test"] else "always"
 
-    if kwargs["enable_webrender"] is None:
-        kwargs["enable_webrender"] = False
-
     if kwargs["preload_browser"] is None:
         # Default to preloading a gecko instance if we're only running a single process
         kwargs["preload_browser"] = kwargs["processes"] == 1
@@ -646,6 +654,12 @@ def check_args_metadata_update(kwargs):
         if os.path.isdir(item):
             print("Log file %s is a directory" % item, file=sys.stderr)
             sys.exit(1)
+
+    if kwargs["properties_file"] is None and not kwargs["no_properties_file"]:
+        default_file = os.path.join(kwargs["test_paths"]["/"]["metadata_path"],
+                                    "update_properties.json")
+        if os.path.exists(default_file):
+            kwargs["properties_file"] = default_file
 
     return kwargs
 
@@ -669,8 +683,9 @@ def create_parser_metadata_update(product_choices=None):
 
     parser = argparse.ArgumentParser("web-platform-tests-update",
                                      description="Update script for web-platform-tests tests.")
+    # This will be removed once all consumers are updated to the properties-file based system
     parser.add_argument("--product", action="store", choices=product_choices,
-                        default=None, help="Browser for which metadata is being updated")
+                        default=None, help=argparse.SUPPRESS)
     parser.add_argument("--config", action="store", type=abs_path, help="Path to config file")
     parser.add_argument("--metadata", action="store", type=abs_path, dest="metadata_root",
                         help="Path to the folder containing test metadata"),
@@ -689,8 +704,14 @@ def create_parser_metadata_update(product_choices=None):
                         help="Remove obsolete intermittent statuses from expected statuses.")
     parser.add_argument("--no-remove-obsolete", action="store_false", dest="remove_obsolete", default=True,
                         help="Don't remove metadata files that no longer correspond to a test file")
+    parser.add_argument("--properties-file",
+                        help="""Path to a JSON file containing run_info properties to use in update. This must be of the form
+                        {"properties": [<name>], "dependents": {<property name>: [<name>]}}""")
+    parser.add_argument("--no-properties-file", action="store_true",
+                        help="Don't use the default properties file at "
+                        "${metadata_root}/update_properties.json, even if it exists.")
     parser.add_argument("--extra-property", action="append", default=[],
-                        help="Extra property from run_info.json to use in metadata update")
+                        help="Extra property from run_info.json to use in metadata update.")
     # TODO: Should make this required iff run=logfile
     parser.add_argument("run_log", nargs="*", type=abs_path,
                         help="Log file from run of tests")

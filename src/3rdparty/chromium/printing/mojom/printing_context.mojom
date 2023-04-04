@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,12 +29,6 @@ struct PageSetup {
   PageMargins requested_margins;
   bool forced_margins;
   int32 text_height;
-};
-
-// Corresponds to `printing::PageRange` in printing/page_range.h.
-struct PageRange {
-  uint32 from;
-  uint32 to;
 };
 
 // Corresponds to `printing::PrintSettings::RequestedMedia` in

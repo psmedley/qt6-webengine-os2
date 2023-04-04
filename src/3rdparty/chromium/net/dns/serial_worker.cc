@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,8 +49,7 @@ void SerialWorker::WorkItem::FollowupWork(base::OnceClosure closure) {
 
 SerialWorker::SerialWorker(int max_number_of_retries,
                            const net::BackoffEntry::Policy* backoff_policy)
-    : state_(State::kIdle),
-      max_number_of_retries_(max_number_of_retries),
+    : max_number_of_retries_(max_number_of_retries),
       backoff_entry_(backoff_policy ? backoff_policy : &kDefaultBackoffPolicy) {
 }
 

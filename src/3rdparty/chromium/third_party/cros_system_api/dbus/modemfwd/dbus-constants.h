@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium OS Authors. All rights reserved.
+// Copyright 2022 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,16 @@ const char kSetDebugMode[] = "SetDebugMode";
 const char kErrorResultFailure[] = "org.chromium.Modemfwd.Error.Failure";
 const char kErrorResultInitFailure[] =
     "org.chromium.Modemfwd.Error.InitFailure";
+const char kErrorResultInitFailureNonLteSku[] =
+    "org.chromium.Modemfwd.Error.InitFailureNonLteSku";
 const char kErrorResultInitManifestFailure[] =
     "org.chromium.Modemfwd.Error.InitManifestFailure";
 const char kErrorResultInitJournalFailure[] =
     "org.chromium.Modemfwd.Error.InitJournalFailure";
+const char kErrorResultFailedToPrepareFirmwareFile[] =
+    "org.chromium.Modemfwd.Error.FailedToPrepareFirmwareFile";
+const char kErrorResultFailureReturnedByHelper[] =
+    "org.chromium.Modemfwd.Error.FailureReturnedByHelper";
 const char kErrorResultFlashFailure[] =
     "org.chromium.Modemfwd.Error.FlashFailure";
 

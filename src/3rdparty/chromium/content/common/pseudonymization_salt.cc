@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,8 @@
 #include "base/rand_util.h"
 
 #if DCHECK_IS_ON()
-#include "sandbox/policy/sandbox.h"
+#include "base/command_line.h"
+#include "content/public/common/content_switches.h"
 #endif
 
 namespace content {
@@ -43,9 +44,9 @@ uint32_t GetPseudonymizationSalt() {
   if (salt == 0) {
 #if DCHECK_IS_ON()
     // Only the Browser process needs to initialize the `salt` on demand.
-    // Other processes (identified via the IsProcessSandboxed heuristic) should
+    // Other processes (identified via the process-type arg) should
     // receive the salt from their parent processes.
-    DCHECK(!sandbox::policy::Sandbox::IsProcessSandboxed());
+    DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kProcessType));
 #endif
     salt = InitializeSalt();
   }

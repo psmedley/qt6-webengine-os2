@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,12 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/feature_list.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/signin/internal/identity_manager/account_fetcher_service.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/gaia_cookie_manager_service.h"
-#include "components/signin/internal/identity_manager/ubertoken_fetcher_impl.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_client.h"
@@ -41,9 +39,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "components/account_manager_core/account.h"
-#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/tribool.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #endif
 
 namespace signin {
@@ -121,7 +117,7 @@ IdentityManager::IdentityManager(IdentityManager::InitParameters&& parameters)
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
       signin_client_(parameters.signin_client),
 #endif
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
       account_manager_facade_(parameters.account_manager_facade),
 #endif
       identity_mutator_(std::move(parameters.primary_account_mutator),
@@ -130,7 +126,10 @@ IdentityManager::IdentityManager(IdentityManager::InitParameters&& parameters)
                         std::move(parameters.device_accounts_synchronizer)),
       diagnostics_provider_(std::move(parameters.diagnostics_provider)),
       account_consistency_(parameters.account_consistency) {
+
+#if !defined(TOOLKIT_QT)
   DCHECK(account_fetcher_service_);
+#endif
   DCHECK(diagnostics_provider_);
 
   primary_account_manager_observation_.Observe(primary_account_manager_.get());
@@ -174,16 +173,12 @@ IdentityManager::IdentityManager(IdentityManager::InitParameters&& parameters)
     const absl::optional<bool>& initial_account_is_child =
         signin_client_->IsInitialPrimaryAccountChild();
     CHECK(initial_account_is_child.has_value());
-    SetPrimaryAccount(
-        this, account_tracker_service_.get(), signin_client_,
-        initial_account.value(),
-        initial_account_is_child.value() ? signin::Tribool::kTrue
-                                         : signin::Tribool::kFalse,
-        base::FeatureList::IsEnabled(switches::kLacrosNonSyncingProfiles)
-            ? ConsentLevel::kSignin
-            : ConsentLevel::kSync
-
-    );
+    SetPrimaryAccount(this, account_tracker_service_.get(), signin_client_,
+                      initial_account.value(),
+                      initial_account_is_child.value()
+                          ? signin::Tribool::kTrue
+                          : signin::Tribool::kFalse,
+                      ConsentLevel::kSignin);
   }
 #endif
 }
@@ -374,17 +369,6 @@ AccountInfo IdentityManager::FindExtendedAccountInfoByGaiaId(
                                                              : AccountInfo();
 }
 
-std::unique_ptr<UbertokenFetcher>
-IdentityManager::CreateUbertokenFetcherForAccount(
-    const CoreAccountId& account_id,
-    UbertokenFetcher::CompletionCallback callback,
-    gaia::GaiaSource source,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
-  return std::make_unique<UbertokenFetcherImpl>(
-      account_id, token_service_.get(), std::move(callback), source,
-      url_loader_factory);
-}
-
 AccountsInCookieJarInfo IdentityManager::GetAccountsInCookieJar() const {
   std::vector<gaia::ListedAccount> signed_in_accounts;
   std::vector<gaia::ListedAccount> signed_out_accounts;
@@ -420,15 +404,21 @@ void IdentityManager::RemoveDiagnosticsObserver(DiagnosticsObserver* observer) {
 }
 
 void IdentityManager::OnNetworkInitialized() {
+#if !defined(TOOLKIT_QT)
   gaia_cookie_manager_service_->InitCookieListener();
   account_fetcher_service_->OnNetworkInitialized();
+#else
+  DCHECK(false);  // we should never call network initialized
+#endif
 }
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 IdentityManager::AccountIdMigrationState
 IdentityManager::GetAccountIdMigrationState() const {
   return static_cast<IdentityManager::AccountIdMigrationState>(
       account_tracker_service_->GetMigrationState());
 }
+#endif
 
 CoreAccountId IdentityManager::PickAccountIdForAccount(
     const std::string& gaia,
@@ -448,9 +438,6 @@ void IdentityManager::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   AccountFetcherService::RegisterPrefs(registry);
   AccountTrackerService::RegisterPrefs(registry);
   GaiaCookieManagerService::RegisterPrefs(registry);
-#if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  MutableProfileOAuth2TokenServiceDelegate::RegisterProfilePrefs(registry);
-#endif
 }
 
 DiagnosticsProvider* IdentityManager::GetDiagnosticsProvider() {
@@ -559,7 +546,7 @@ GaiaCookieManagerService* IdentityManager::GetGaiaCookieManagerService() const {
   return gaia_cookie_manager_service_.get();
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 account_manager::AccountManagerFacade*
 IdentityManager::GetAccountManagerFacade() const {
   return account_manager_facade_;

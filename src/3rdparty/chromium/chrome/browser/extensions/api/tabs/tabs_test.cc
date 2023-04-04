@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ class ExtensionTabsTest : public PlatformAppBrowserTest {
     std::string args = base::StringPrintf(
         R"([%u, {"windowTypes": ["normal", "popup", "devtools", "app"]}])",
         ExtensionTabUtil::GetWindowId(test_browser));
-    base::Value::DictStorage result =
+    base::Value::Dict result =
         utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
             function.get(), args, browser()));
     return api_test_utils::GetString(result, "type");
@@ -120,25 +120,17 @@ const int kUndefinedId = INT_MIN;
 const ExtensionTabUtil::ScrubTabBehavior kDontScrubBehavior = {
     ExtensionTabUtil::kDontScrubTab, ExtensionTabUtil::kDontScrubTab};
 
-int GetTabId(const base::Value::DictStorage& tab) {
-  auto iter = tab.find(keys::kIdKey);
-  if (iter == tab.end() || !iter->second.is_int())
-    return kUndefinedId;
-  return iter->second.GetInt();
+int GetTabId(const base::Value::Dict& tab) {
+  return tab.FindInt(keys::kIdKey).value_or(kUndefinedId);
 }
 
-int GetTabWindowId(const base::Value::DictStorage& tab) {
-  auto iter = tab.find(keys::kWindowIdKey);
-  if (iter == tab.end() || !iter->second.is_int())
-    return kUndefinedId;
-  return iter->second.GetInt();
+int GetTabWindowId(const base::Value::Dict& tab) {
+  return tab.FindInt(keys::kWindowIdKey).value_or(kUndefinedId);
 }
 
-int GetWindowId(const base::Value::DictStorage& window) {
-  auto iter = window.find(keys::kIdKey);
-  if (iter == window.end() || !iter->second.is_int())
-    return kUndefinedId;
-  return iter->second.GetInt();
+int GetWindowId(const base::Value::Dict& window) {
+  return window.FindInt(keys::kIdKey).value_or(kUndefinedId);
+  ;
 }
 
 }  // namespace
@@ -164,7 +156,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetWindow) {
 
   function = new WindowsGetFunction();
   function->set_extension(extension.get());
-  base::Value::DictStorage result =
+  base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           function.get(), base::StringPrintf("[%u]", window_id), browser()));
   EXPECT_EQ(window_id, GetWindowId(result));
@@ -184,12 +176,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetWindow) {
 
   EXPECT_EQ(window_id, GetWindowId(result));
   // "populate" was enabled so tabs should be populated.
-  std::unique_ptr<base::ListValue> tabs =
-      api_test_utils::GetList(result, keys::kTabsKey);
-  ASSERT_TRUE(tabs);
-  ASSERT_FALSE(tabs->GetListDeprecated().empty());
-  absl::optional<int> tab0_id =
-      tabs->GetListDeprecated()[0].FindIntKey(keys::kIdKey);
+  base::Value::List tabs = api_test_utils::GetList(result, keys::kTabsKey);
+  ASSERT_FALSE(tabs.empty());
+  absl::optional<int> tab0_id = tabs[0].GetDict().FindInt(keys::kIdKey);
   ASSERT_TRUE(tab0_id.has_value());
   EXPECT_GE(*tab0_id, 0);
 
@@ -252,7 +241,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetCurrentWindow) {
       new WindowsGetCurrentFunction();
   scoped_refptr<const Extension> extension(ExtensionBuilder("Test").Build());
   function->set_extension(extension.get());
-  base::Value::DictStorage result =
+  base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           function.get(), "[]", new_browser));
 
@@ -271,12 +260,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetCurrentWindow) {
   // to RunFunctionAndReturnSingleResult.
   EXPECT_EQ(window_id, GetWindowId(result));
   // "populate" was enabled so tabs should be populated.
-  std::unique_ptr<base::ListValue> tabs =
-      api_test_utils::GetList(result, keys::kTabsKey);
-  ASSERT_TRUE(tabs);
-  ASSERT_FALSE(tabs->GetListDeprecated().empty());
-  absl::optional<int> tab0_id =
-      tabs->GetListDeprecated()[0].FindIntKey(keys::kIdKey);
+  base::Value::List tabs = api_test_utils::GetList(result, keys::kTabsKey);
+  ASSERT_FALSE(tabs.empty());
+  absl::optional<int> tab0_id = tabs[0].GetDict().FindInt(keys::kIdKey);
   ASSERT_TRUE(tab0_id.has_value());
   // The tab id should not be -1 as this is a browser window.
   EXPECT_GE(*tab0_id, 0);
@@ -305,12 +291,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetAllWindows) {
   scoped_refptr<WindowsGetAllFunction> function = new WindowsGetAllFunction();
   scoped_refptr<const Extension> extension(ExtensionBuilder("Test").Build());
   function->set_extension(extension.get());
-  std::unique_ptr<base::ListValue> result = utils::ToList(
+  base::Value::List windows = utils::ToList(
       utils::RunFunctionAndReturnSingleResult(function.get(), "[]", browser()));
 
-  base::ListValue* windows = result.get();
-  EXPECT_EQ(window_ids.size(), windows->GetListDeprecated().size());
-  for (const base::Value& result_window : windows->GetListDeprecated()) {
+  EXPECT_EQ(window_ids.size(), windows.size());
+  for (const base::Value& result_window : windows) {
     result_ids.insert(GetWindowId(utils::ToDictionary(result_window)));
 
     // "populate" was not passed in so tabs are not populated.
@@ -323,12 +308,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetAllWindows) {
   result_ids.clear();
   function = new WindowsGetAllFunction();
   function->set_extension(extension.get());
-  result = utils::ToList(utils::RunFunctionAndReturnSingleResult(
+  windows = utils::ToList(utils::RunFunctionAndReturnSingleResult(
       function.get(), "[{\"populate\": true}]", browser()));
 
-  windows = result.get();
-  EXPECT_EQ(window_ids.size(), windows->GetListDeprecated().size());
-  for (const base::Value& result_window : windows->GetListDeprecated()) {
+  EXPECT_EQ(window_ids.size(), windows.size());
+  for (const base::Value& result_window : windows) {
     result_ids.insert(GetWindowId(utils::ToDictionary(result_window)));
 
     // "populate" was enabled so tabs should be populated.
@@ -369,16 +353,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetAllWindowsAllTypes) {
   scoped_refptr<WindowsGetAllFunction> function = new WindowsGetAllFunction();
   scoped_refptr<const Extension> extension(ExtensionBuilder("Test").Build());
   function->set_extension(extension.get());
-  std::unique_ptr<base::ListValue> result(
+  base::Value::List windows(
       utils::ToList(utils::RunFunctionAndReturnSingleResult(
           function.get(),
           "[{\"windowTypes\": [\"app\", \"devtools\", \"normal\", \"panel\", "
           "\"popup\"]}]",
           browser())));
 
-  base::ListValue* windows = result.get();
-  EXPECT_EQ(window_ids.size(), windows->GetListDeprecated().size());
-  for (const base::Value& result_window : windows->GetListDeprecated()) {
+  EXPECT_EQ(window_ids.size(), windows.size());
+  for (const base::Value& result_window : windows) {
     result_ids.insert(GetWindowId(utils::ToDictionary(result_window)));
 
     // "populate" was not passed in so tabs are not populated.
@@ -391,15 +374,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, GetAllWindowsAllTypes) {
   result_ids.clear();
   function = new WindowsGetAllFunction();
   function->set_extension(extension.get());
-  result = utils::ToList(utils::RunFunctionAndReturnSingleResult(
+  windows = utils::ToList(utils::RunFunctionAndReturnSingleResult(
       function.get(),
       "[{\"populate\": true, \"windowTypes\": [\"app\", \"devtools\", "
       "\"normal\", \"panel\", \"popup\"]}]",
       browser()));
 
-  windows = result.get();
-  EXPECT_EQ(window_ids.size(), windows->GetListDeprecated().size());
-  for (const base::Value& result_window : windows->GetListDeprecated()) {
+  EXPECT_EQ(window_ids.size(), windows.size());
+  for (const base::Value& result_window : windows) {
     result_ids.insert(GetWindowId(utils::ToDictionary(result_window)));
 
     // "populate" was enabled so tabs should be populated.
@@ -425,7 +407,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, UpdateNoPermissions) {
   // Without a callback the function will not generate a result.
   update_tab_function->set_has_callback(true);
 
-  const base::Value::DictStorage result =
+  const base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           update_tab_function.get(),
           "[null, {\"url\": \"about:blank\", \"pinned\": true}]", browser()));
@@ -472,11 +454,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DefaultToIncognitoWhenItIsForced) {
       IncognitoModePrefs::Availability::kForced);
   // Run without an explicit "incognito" param.
   scoped_refptr<WindowsCreateFunction> function(new WindowsCreateFunction());
-  function->SetRenderFrameHost(
-      browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame());
+  function->SetRenderFrameHost(browser()
+                                   ->tab_strip_model()
+                                   ->GetActiveWebContents()
+                                   ->GetPrimaryMainFrame());
   scoped_refptr<const Extension> extension(ExtensionBuilder("Test").Build());
   function->set_extension(extension.get());
-  base::Value::DictStorage result =
+  base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           function.get(), kArgsWithoutExplicitIncognitoParam, browser(),
           api_test_utils::INCLUDE_INCOGNITO));
@@ -490,8 +474,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DefaultToIncognitoWhenItIsForced) {
   Browser* incognito_browser = CreateIncognitoBrowser();
   // Run without an explicit "incognito" param.
   function = new WindowsCreateFunction();
-  function->SetRenderFrameHost(
-      browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame());
+  function->SetRenderFrameHost(browser()
+                                   ->tab_strip_model()
+                                   ->GetActiveWebContents()
+                                   ->GetPrimaryMainFrame());
   function->set_extension(extension.get());
   result = utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
       function.get(), kArgsWithoutExplicitIncognitoParam, incognito_browser,
@@ -514,7 +500,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest,
   scoped_refptr<WindowsCreateFunction> function = new WindowsCreateFunction();
   scoped_refptr<const Extension> extension(ExtensionBuilder("Test").Build());
   function->set_extension(extension.get());
-  base::Value::DictStorage result =
+  base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           function.get(), kEmptyArgs, browser(),
           api_test_utils::INCLUDE_INCOGNITO));
@@ -606,27 +592,25 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, QueryCurrentWindowTabs) {
   // Get tabs in the 'current' window called from non-focused browser.
   scoped_refptr<TabsQueryFunction> function = new TabsQueryFunction();
   function->set_extension(ExtensionBuilder("Test").Build().get());
-  std::unique_ptr<base::ListValue> result(
+  base::Value::List result_tabs(
       utils::ToList(utils::RunFunctionAndReturnSingleResult(
           function.get(), "[{\"currentWindow\":true}]", browser())));
 
-  base::ListValue* result_tabs = result.get();
   // We should have one initial tab and one added tab.
-  EXPECT_EQ(2u, result_tabs->GetListDeprecated().size());
-  for (const base::Value& result_tab : result_tabs->GetListDeprecated()) {
+  EXPECT_EQ(2u, result_tabs.size());
+  for (const base::Value& result_tab : result_tabs) {
     EXPECT_EQ(window_id, GetTabWindowId(utils::ToDictionary(result_tab)));
   }
 
   // Get tabs NOT in the 'current' window called from non-focused browser.
   function = new TabsQueryFunction();
   function->set_extension(ExtensionBuilder("Test").Build().get());
-  result = utils::ToList(utils::RunFunctionAndReturnSingleResult(
+  result_tabs = utils::ToList(utils::RunFunctionAndReturnSingleResult(
       function.get(), "[{\"currentWindow\":false}]", browser()));
 
-  result_tabs = result.get();
   // We should have one tab for each extra window.
-  EXPECT_EQ(kExtraWindows, result_tabs->GetListDeprecated().size());
-  for (const base::Value& result_tab : result_tabs->GetListDeprecated()) {
+  EXPECT_EQ(kExtraWindows, result_tabs.size());
+  for (const base::Value& result_tab : result_tabs) {
     EXPECT_NE(window_id, GetTabWindowId(utils::ToDictionary(result_tab)));
   }
 }
@@ -647,15 +631,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, QueryAllTabsWithDevTools) {
   // Get tabs in the 'current' window called from non-focused browser.
   scoped_refptr<TabsQueryFunction> function = new TabsQueryFunction();
   function->set_extension(ExtensionBuilder("Test").Build().get());
-  std::unique_ptr<base::ListValue> result(
+  base::Value::List result_tabs(
       utils::ToList(utils::RunFunctionAndReturnSingleResult(
           function.get(), "[{}]", browser())));
 
   std::set<int> result_ids;
-  base::ListValue* result_tabs = result.get();
   // We should have one tab per browser except for DevTools.
-  EXPECT_EQ(kNumWindows, result_tabs->GetListDeprecated().size());
-  for (const base::Value& result_tab : result_tabs->GetListDeprecated()) {
+  EXPECT_EQ(kNumWindows, result_tabs.size());
+  for (const base::Value& result_tab : result_tabs) {
     result_ids.insert(GetTabWindowId(utils::ToDictionary(result_tab)));
   }
   EXPECT_EQ(window_ids, result_ids);
@@ -678,11 +661,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, QueryTabGroups) {
   constexpr char kFormatQueryArgs[] = R"([{"groupId":%d}])";
   const std::string args = base::StringPrintf(
       kFormatQueryArgs, tab_groups_util::GetGroupId(group_id));
-  std::unique_ptr<base::ListValue> result(
+  base::Value::List result(
       utils::ToList(utils::RunFunctionAndReturnSingleResult(function.get(),
                                                             args, browser())));
 
-  EXPECT_EQ(2u, result->GetListDeprecated().size());
+  EXPECT_EQ(2u, result.size());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DontCreateTabInClosingPopupWindow) {
@@ -703,7 +686,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DontCreateTabInClosingPopupWindow) {
   static const char kNewBlankTabArgs[] =
       "[{\"url\": \"about:blank\", \"windowId\": %u}]";
 
-  const base::Value::DictStorage result =
+  const base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           create_tab_function.get(),
           base::StringPrintf(kNewBlankTabArgs, window_id), browser()));
@@ -824,7 +807,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, UpdateDevToolsWindow) {
   scoped_refptr<const Extension> extension(
       ExtensionBuilder("Test").Build().get());
   get_function->set_extension(extension.get());
-  base::Value::DictStorage result =
+  base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           get_function.get(),
           base::StringPrintf(
@@ -892,7 +875,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWindowCreateTest, MAYBE_AcceptState) {
   function->set_extension(extension.get());
   function->SetBrowserContextForTesting(browser()->profile());
 
-  base::Value::DictStorage result =
+  base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           function.get(), "[{\"state\": \"minimized\"}]", browser(),
           api_test_utils::INCLUDE_INCOGNITO));
@@ -1000,6 +983,29 @@ IN_PROC_BROWSER_TEST_F(ExtensionWindowCreateTest, ValidateCreateWindowBounds) {
                            window_width, window_height),
         browser(), api_test_utils::NONE));
   }
+
+  {
+    // Window bounds that specify size and not position should be adjusted
+    // to the screen in case the window is not visible.
+    // For this, update the current window bounds so the new window position
+    // needs to be adjusted to fit.
+    gfx::Rect current_window_bounds = browser()->window()->GetBounds();
+    current_window_bounds.set_x(current_window_bounds.x() +
+                                current_window_bounds.width() - window_offset);
+    current_window_bounds.set_y(current_window_bounds.y() +
+                                current_window_bounds.height() - window_offset);
+    browser()->window()->SetBounds(current_window_bounds);
+
+    static const char kArgsCreateFunctionOnlySize[] =
+        "[{\"width\": %d, \"height\": %d }]";
+    auto function = base::MakeRefCounted<WindowsCreateFunction>();
+    function->set_extension(ExtensionBuilder("Test").Build().get());
+    EXPECT_TRUE(
+        utils::RunFunction(function.get(),
+                           base::StringPrintf(kArgsCreateFunctionOnlySize,
+                                              window_width, window_height),
+                           browser(), api_test_utils::NONE));
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWindowCreateTest, CreatePopupWindowFromWebUI) {
@@ -1007,7 +1013,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWindowCreateTest, CreatePopupWindowFromWebUI) {
   function->SetBrowserContextForTesting(browser()->profile());
   function->set_source_context_type(Feature::Context::WEBUI_UNTRUSTED_CONTEXT);
 
-  const base::Value::DictStorage result =
+  const base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           function.get(), R"([{"type": "popup"}])", browser()));
   int window_id = GetWindowId(result);
@@ -1035,7 +1041,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DuplicateTab) {
   duplicate_tab_function->set_extension(empty_tab_extension.get());
   duplicate_tab_function->set_has_callback(true);
 
-  const base::Value::DictStorage duplicate_result =
+  const base::Value::Dict duplicate_result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           duplicate_tab_function.get(), base::StringPrintf("[%u]", tab_id),
           browser()));
@@ -1072,7 +1078,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DuplicateTabNoPermission) {
   duplicate_tab_function->set_extension(empty_extension.get());
   duplicate_tab_function->set_has_callback(true);
 
-  const base::Value::DictStorage duplicate_result =
+  const base::Value::Dict duplicate_result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           duplicate_tab_function.get(), base::StringPrintf("[%u]", tab_id),
           browser()));
@@ -1093,7 +1099,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DuplicateTabNoPermission) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, NoTabsEventOnDevTools) {
   extensions::ResultCatcher catcher;
-  ExtensionTestMessageListener listener("ready", true);
+  ExtensionTestMessageListener listener("ready", ReplyBehavior::kWillReply);
   ASSERT_TRUE(
       LoadExtension(test_data_dir_.AppendASCII("api_test/tabs/no_events")));
   ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -1110,7 +1116,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, NoTabsEventOnDevTools) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, NoTabsAppWindow) {
   extensions::ResultCatcher catcher;
-  ExtensionTestMessageListener listener("ready", true);
+  ExtensionTestMessageListener listener("ready", ReplyBehavior::kWillReply);
   ASSERT_TRUE(
       LoadExtension(test_data_dir_.AppendASCII("api_test/tabs/no_events")));
   ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -1137,7 +1143,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, NoTabsAppWindow) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_FilteredEvents) {
   extensions::ResultCatcher catcher;
-  ExtensionTestMessageListener listener("ready", true);
+  ExtensionTestMessageListener listener("ready", ReplyBehavior::kWillReply);
   ASSERT_TRUE(
       LoadExtension(test_data_dir_.AppendASCII("api_test/windows/events")));
   ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -1175,7 +1181,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_FilteredEvents) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, OnBoundsChanged) {
   extensions::ResultCatcher catcher;
-  ExtensionTestMessageListener listener("ready", true);
+  ExtensionTestMessageListener listener("ready", ReplyBehavior::kWillReply);
   ASSERT_TRUE(
       LoadExtension(test_data_dir_.AppendASCII("api_test/windows/bounds")));
   ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -1245,27 +1251,24 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardedProperty) {
 
   // Get non-discarded tabs.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": false}]"));
+    base::Value::List result(RunQueryFunction("[{\"discarded\": false}]"));
 
     // The two created plus the default tab.
-    EXPECT_EQ(3u, result->GetListDeprecated().size());
+    EXPECT_EQ(3u, result.size());
   }
 
   // Get discarded tabs.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": true}]"));
-    EXPECT_EQ(0u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": true}]"));
+    EXPECT_EQ(0u, result.size());
   }
 
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
 
   // Creates Tab object to ensure the property is correct for the extension.
-  std::unique_ptr<api::tabs::Tab> tab_object_a =
-      ExtensionTabUtil::CreateTabObject(web_contents_a, kDontScrubBehavior,
-                                        nullptr, tab_strip_model, 0);
-  EXPECT_FALSE(tab_object_a->discarded);
+  api::tabs::Tab tab_object_a = ExtensionTabUtil::CreateTabObject(
+      web_contents_a, kDontScrubBehavior, nullptr, tab_strip_model, 0);
+  EXPECT_FALSE(tab_object_a.discarded);
 
   // Discards one tab.
   EXPECT_TRUE(tab_manager->DiscardTabByExtension(web_contents_a));
@@ -1274,26 +1277,23 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardedProperty) {
   // Make sure the property is changed accordingly after discarding the tab.
   tab_object_a = ExtensionTabUtil::CreateTabObject(
       web_contents_a, kDontScrubBehavior, nullptr, tab_strip_model, 0);
-  EXPECT_TRUE(tab_object_a->discarded);
+  EXPECT_TRUE(tab_object_a.discarded);
 
   // Get non-discarded tabs after discarding one tab.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": false}]"));
-    EXPECT_EQ(2u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": false}]"));
+    EXPECT_EQ(2u, result.size());
   }
 
   // Get discarded tabs after discarding one tab.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": true}]"));
-    EXPECT_EQ(1u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": true}]"));
+    EXPECT_EQ(1u, result.size());
 
     // Make sure the returned tab is the correct one.
     int tab_id_a = ExtensionTabUtil::GetTabId(web_contents_a);
 
-    absl::optional<int> id =
-        result->GetListDeprecated()[0].FindIntKey(keys::kIdKey);
+    absl::optional<int> id = result[0].FindIntKey(keys::kIdKey);
     ASSERT_TRUE(id);
 
     EXPECT_EQ(tab_id_a, *id);
@@ -1304,16 +1304,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardedProperty) {
 
   // Get non-discarded tabs after discarding two created tabs.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": false}]"));
-    ASSERT_EQ(1u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": false}]"));
+    ASSERT_EQ(1u, result.size());
 
     // Make sure the returned tab is the correct one.
     int tab_id_c =
         ExtensionTabUtil::GetTabId(tab_strip_model->GetWebContentsAt(0));
 
-    absl::optional<int> id =
-        result->GetListDeprecated()[0].FindIntKey(keys::kIdKey);
+    absl::optional<int> id = result[0].FindIntKey(keys::kIdKey);
     ASSERT_TRUE(id);
 
     EXPECT_EQ(tab_id_c, *id);
@@ -1321,9 +1319,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardedProperty) {
 
   // Get discarded tabs after discarding two created tabs.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": true}]"));
-    EXPECT_EQ(2u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": true}]"));
+    EXPECT_EQ(2u, result.size());
   }
 
   // Activates the first created tab.
@@ -1331,16 +1328,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardedProperty) {
 
   // Get non-discarded tabs after activating a discarded tab.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": false}]"));
-    EXPECT_EQ(2u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": false}]"));
+    EXPECT_EQ(2u, result.size());
   }
 
   // Get discarded tabs after activating a discarded tab.
   {
-    std::unique_ptr<base::ListValue> result(
-        RunQueryFunction("[{\"discarded\": true}]"));
-    EXPECT_EQ(1u, result->GetListDeprecated().size());
+    base::Value::List result(RunQueryFunction("[{\"discarded\": true}]"));
+    EXPECT_EQ(1u, result.size());
   }
 }
 
@@ -1361,7 +1356,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardWithId) {
 
   // Run function passing the tab id as argument.
   int tab_id = ExtensionTabUtil::GetTabId(web_contents);
-  const base::Value::DictStorage result =
+  const base::Value::Dict result =
       utils::ToDictionary(utils::RunFunctionAndReturnSingleResult(
           discard.get(), base::StringPrintf("[%u]", tab_id), browser()));
 
@@ -1437,7 +1432,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DiscardWithoutId) {
   discard->set_extension(extension.get());
 
   // Run without passing an id.
-  const base::Value::DictStorage result = utils::ToDictionary(
+  const base::Value::Dict result = utils::ToDictionary(
       utils::RunFunctionAndReturnSingleResult(discard.get(), "[]", browser()));
 
   // Confirms that TabManager sees the tab as discarded.
@@ -1465,10 +1460,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, AutoDiscardableProperty) {
 
   // Creates Tab object to ensure the property is correct for the extension.
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
-  std::unique_ptr<api::tabs::Tab> tab_object_a =
-      ExtensionTabUtil::CreateTabObject(web_contents_a, kDontScrubBehavior,
-                                        nullptr, tab_strip_model, 0);
-  EXPECT_TRUE(tab_object_a->auto_discardable);
+  api::tabs::Tab tab_object_a = ExtensionTabUtil::CreateTabObject(
+      web_contents_a, kDontScrubBehavior, nullptr, tab_strip_model, 0);
+  EXPECT_TRUE(tab_object_a.auto_discardable);
 
   // Set up query and update functions with the extension.
   scoped_refptr<const Extension> extension = ExtensionBuilder("Test").Build();
@@ -1488,21 +1482,19 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, AutoDiscardableProperty) {
   // Queries and results used.
   const char* kAutoDiscardableQueryInfo = "[{\"autoDiscardable\": true}]";
   const char* kNonAutoDiscardableQueryInfo = "[{\"autoDiscardable\": false}]";
-  std::unique_ptr<base::ListValue> query_result;
-  base::Value::DictStorage update_result;
 
   // Get auto-discardable tabs. Returns all since tabs are auto-discardable
   // by default.
-  query_result = RunQueryFunction(kAutoDiscardableQueryInfo);
-  EXPECT_EQ(3u, query_result->GetListDeprecated().size());
+  base::Value::List query_result = RunQueryFunction(kAutoDiscardableQueryInfo);
+  EXPECT_EQ(3u, query_result.size());
 
   // Get non auto-discardable tabs.
   query_result = RunQueryFunction(kNonAutoDiscardableQueryInfo);
-  EXPECT_EQ(0u, query_result->GetListDeprecated().size());
+  EXPECT_EQ(0u, query_result.size());
 
   // Update the auto-discardable state of web contents A.
   int tab_id_a = ExtensionTabUtil::GetTabId(web_contents_a);
-  update_result = RunUpdateFunction(
+  base::Value::Dict update_result = RunUpdateFunction(
       base::StringPrintf("[%u, {\"autoDiscardable\": false}]", tab_id_a));
   EXPECT_EQ(tab_id_a, api_test_utils::GetInteger(update_result, "id"));
   EXPECT_FALSE(api_test_utils::GetBoolean(update_result, "autoDiscardable"));
@@ -1510,19 +1502,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, AutoDiscardableProperty) {
   // Make sure the property is changed accordingly after updating the tab.
   tab_object_a = ExtensionTabUtil::CreateTabObject(
       web_contents_a, kDontScrubBehavior, nullptr, tab_strip_model, 0);
-  EXPECT_FALSE(tab_object_a->auto_discardable);
+  EXPECT_FALSE(tab_object_a.auto_discardable);
 
   // Get auto-discardable tabs after changing the status of web contents A.
   query_result = RunQueryFunction(kAutoDiscardableQueryInfo);
-  EXPECT_EQ(2u, query_result->GetListDeprecated().size());
+  EXPECT_EQ(2u, query_result.size());
 
   // Get non auto-discardable tabs after changing the status of web contents A.
   query_result = RunQueryFunction(kNonAutoDiscardableQueryInfo);
-  ASSERT_EQ(1u, query_result->GetListDeprecated().size());
+  ASSERT_EQ(1u, query_result.size());
 
   // Make sure the returned tab is the correct one.
-  absl::optional<int> tab_id =
-      query_result->GetListDeprecated()[0].FindIntKey(keys::kIdKey);
+  absl::optional<int> tab_id = query_result[0].FindIntKey(keys::kIdKey);
   ASSERT_TRUE(tab_id);
   EXPECT_EQ(tab_id_a, *tab_id);
 
@@ -1535,18 +1526,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, AutoDiscardableProperty) {
 
   // Get auto-discardable tabs after changing the status of both created tabs.
   query_result = RunQueryFunction(kAutoDiscardableQueryInfo);
-  EXPECT_EQ(1u, query_result->GetListDeprecated().size());
+  EXPECT_EQ(1u, query_result.size());
 
   // Make sure the returned tab is the correct one.
-  absl::optional<int> id_value =
-      query_result->GetListDeprecated()[0].FindIntKey(keys::kIdKey);
+  absl::optional<int> id_value = query_result[0].FindIntKey(keys::kIdKey);
   ASSERT_TRUE(id_value);
   EXPECT_EQ(ExtensionTabUtil::GetTabId(tab_strip_model->GetWebContentsAt(0)),
             *id_value);
 
   // Get auto-discardable tabs after changing the status of both created tabs.
   query_result = RunQueryFunction(kNonAutoDiscardableQueryInfo);
-  EXPECT_EQ(2u, query_result->GetListDeprecated().size());
+  EXPECT_EQ(2u, query_result.size());
 
   // Resets the first tab back to auto-discardable.
   update_result = RunUpdateFunction(
@@ -1556,11 +1546,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, AutoDiscardableProperty) {
 
   // Get auto-discardable tabs after resetting the status of web contents A.
   query_result = RunQueryFunction(kAutoDiscardableQueryInfo);
-  EXPECT_EQ(2u, query_result->GetListDeprecated().size());
+  EXPECT_EQ(2u, query_result.size());
 
   // Get non auto-discardable tabs after resetting the status of web contents A.
   query_result = RunQueryFunction(kNonAutoDiscardableQueryInfo);
-  EXPECT_EQ(1u, query_result->GetListDeprecated().size());
+  EXPECT_EQ(1u, query_result.size());
 }
 
 // Tester class for the tabs.zoom* api functions.
@@ -1680,7 +1670,7 @@ testing::AssertionResult ExtensionTabsZoomTest::RunGetZoomSettings(
   if (!get_zoom_settings_result)
     return testing::AssertionFailure() << "no result";
 
-  base::Value::DictStorage get_zoom_settings_dict =
+  base::Value::Dict get_zoom_settings_dict =
       utils::ToDictionary(std::move(get_zoom_settings_result));
   *mode = api_test_utils::GetString(get_zoom_settings_dict, "mode");
   *scope = api_test_utils::GetString(get_zoom_settings_dict, "scope");
@@ -2036,11 +2026,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TemporaryAddressSpoof) {
   ASSERT_TRUE(navigation_manager.WaitForRequestStart());
 
   browser()->tab_strip_model()->ActivateTabAt(
-      0, {TabStripModel::GestureType::kOther});
+      0, TabStripUserGestureDetails(
+             TabStripUserGestureDetails::GestureType::kOther));
   EXPECT_EQ(first_web_contents,
             browser()->tab_strip_model()->GetActiveWebContents());
   browser()->tab_strip_model()->ActivateTabAt(
-      1, {TabStripModel::GestureType::kOther});
+      1, TabStripUserGestureDetails(
+             TabStripUserGestureDetails::GestureType::kOther));
   EXPECT_EQ(second_web_contents,
             browser()->tab_strip_model()->GetActiveWebContents());
 
@@ -2096,17 +2088,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowsCreate_WithOpener) {
         old_contents, "window.location = '" + web_url2.spec() + "';"));
     nav_observer.Wait();
   }
-  EXPECT_EQ(web_url1, new_contents->GetMainFrame()->GetLastCommittedURL());
-  EXPECT_EQ(web_url2, old_contents->GetMainFrame()->GetLastCommittedURL());
+  EXPECT_EQ(web_url1,
+            new_contents->GetPrimaryMainFrame()->GetLastCommittedURL());
+  EXPECT_EQ(web_url2,
+            old_contents->GetPrimaryMainFrame()->GetLastCommittedURL());
 
   // Verify that the old and new tab are in the same process.
-  EXPECT_EQ(old_contents->GetMainFrame()->GetProcess(),
-            new_contents->GetMainFrame()->GetProcess());
+  EXPECT_EQ(old_contents->GetPrimaryMainFrame()->GetProcess(),
+            new_contents->GetPrimaryMainFrame()->GetProcess());
 
   // Verify the old and new contents are in the same BrowsingInstance.
-  EXPECT_TRUE(
-      old_contents->GetMainFrame()->GetSiteInstance()->IsRelatedSiteInstance(
-          new_contents->GetMainFrame()->GetSiteInstance()));
+  EXPECT_TRUE(old_contents->GetPrimaryMainFrame()
+                  ->GetSiteInstance()
+                  ->IsRelatedSiteInstance(
+                      new_contents->GetPrimaryMainFrame()->GetSiteInstance()));
 
   // Verify that the |new_contents| has |window.opener| set.
   std::string location_of_opener;
@@ -2114,7 +2109,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowsCreate_WithOpener) {
       new_contents,
       "window.domAutomationController.send(window.opener.location.href)",
       &location_of_opener));
-  EXPECT_EQ(old_contents->GetMainFrame()->GetLastCommittedURL().spec(),
+  EXPECT_EQ(old_contents->GetPrimaryMainFrame()->GetLastCommittedURL().spec(),
             location_of_opener);
 
   // Verify that |new_contents| can find |old_contents| using window.open/name.
@@ -2124,7 +2119,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowsCreate_WithOpener) {
       "var w = window.open('', 'old-contents');\n"
       "window.domAutomationController.send(w.location.href);",
       &location_of_other_window));
-  EXPECT_EQ(old_contents->GetMainFrame()->GetLastCommittedURL().spec(),
+  EXPECT_EQ(old_contents->GetPrimaryMainFrame()->GetLastCommittedURL().spec(),
             location_of_other_window);
 }
 
@@ -2156,9 +2151,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowsCreate_NoOpener) {
   }
 
   // Verify the old and new contents are NOT in the same BrowsingInstance.
-  EXPECT_FALSE(
-      old_contents->GetMainFrame()->GetSiteInstance()->IsRelatedSiteInstance(
-          new_contents->GetMainFrame()->GetSiteInstance()));
+  EXPECT_FALSE(old_contents->GetPrimaryMainFrame()
+                   ->GetSiteInstance()
+                   ->IsRelatedSiteInstance(
+                       new_contents->GetPrimaryMainFrame()->GetSiteInstance()));
 
   // Verify that the |new_contents| doesn't have |window.opener| set.
   bool opener_as_bool = true;
@@ -2245,7 +2241,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowsCreate_OpenerAndOrigin) {
         &actual_origin_str));
     EXPECT_EQ(test_case.expected_origin_str, actual_origin_str);
     const bool is_opaque_origin =
-        new_contents->GetMainFrame()->GetLastCommittedOrigin().opaque();
+        new_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin().opaque();
     EXPECT_EQ(test_case.expected_origin_str == "null", is_opaque_origin);
   };
   for (size_t i = 0; i < std::size(test_cases); ++i) {
@@ -2274,8 +2270,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToAboutBlank) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), extension_url));
   content::WebContents* extension_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(extension_origin,
-            extension_contents->GetMainFrame()->GetLastCommittedOrigin());
+  EXPECT_EQ(
+      extension_origin,
+      extension_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
 
   // Create another tab and navigate it to a web page.
   content::WebContents* test_contents = nullptr;
@@ -2287,9 +2284,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToAboutBlank) {
     test_contents = test_contents_observer.GetWebContents();
   }
   EXPECT_EQ(web_origin,
-            test_contents->GetMainFrame()->GetLastCommittedOrigin());
-  EXPECT_NE(extension_contents->GetMainFrame()->GetProcess(),
-            test_contents->GetMainFrame()->GetProcess());
+            test_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
+  EXPECT_NE(extension_contents->GetPrimaryMainFrame()->GetProcess(),
+            test_contents->GetPrimaryMainFrame()->GetProcess());
 
   // Use |chrome.tabs.update| API to navigate |test_contents| to an about:blank
   // URL.
@@ -2306,10 +2303,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToAboutBlank) {
   }
 
   // Verify the origin and process of the about:blank tab.
-  content::RenderFrameHost* test_frame = test_contents->GetMainFrame();
+  content::RenderFrameHost* test_frame = test_contents->GetPrimaryMainFrame();
   EXPECT_EQ(about_blank_url, test_frame->GetLastCommittedURL());
-  EXPECT_EQ(extension_contents->GetMainFrame()->GetProcess(),
-            test_contents->GetMainFrame()->GetProcess());
+  EXPECT_EQ(extension_contents->GetPrimaryMainFrame()->GetProcess(),
+            test_contents->GetPrimaryMainFrame()->GetProcess());
   // Note that committing with the extension origin wouldn't be possible when
   // targeting an incognito window (see also IncognitoApiTest.Incognito test).
   EXPECT_EQ(extension_origin, test_frame->GetLastCommittedOrigin());
@@ -2339,8 +2336,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToAboutNewTab) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), extension_url));
   content::WebContents* extension_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(extension_origin,
-            extension_contents->GetMainFrame()->GetLastCommittedOrigin());
+  EXPECT_EQ(
+      extension_origin,
+      extension_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
 
   // Create another tab and navigate it to a web page.
   content::WebContents* test_contents = nullptr;
@@ -2367,12 +2365,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToAboutNewTab) {
   }
 
   // Verify the origin and process of the about:newtab tab.
-  content::RenderFrameHost* test_frame = test_contents->GetMainFrame();
+  content::RenderFrameHost* test_frame = test_contents->GetPrimaryMainFrame();
   EXPECT_EQ(chrome_newtab_url, test_frame->GetLastCommittedURL());
   EXPECT_EQ(url::Origin::Create(chrome_newtab_url),
             test_frame->GetLastCommittedOrigin());
-  EXPECT_NE(extension_contents->GetMainFrame()->GetProcess(),
-            test_contents->GetMainFrame()->GetProcess());
+  EXPECT_NE(extension_contents->GetPrimaryMainFrame()->GetProcess(),
+            test_contents->GetPrimaryMainFrame()->GetProcess());
 }
 
 // Tests updating a URL of a web tab to a non-web-accessible-resource of an
@@ -2392,8 +2390,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToNonWAR) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), extension_url));
   content::WebContents* extension_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(extension_origin,
-            extension_contents->GetMainFrame()->GetLastCommittedOrigin());
+  EXPECT_EQ(
+      extension_origin,
+      extension_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
 
   // Create another tab and navigate it to a web page.
   content::WebContents* test_contents = nullptr;
@@ -2405,9 +2404,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToNonWAR) {
     test_contents = test_contents_observer.GetWebContents();
   }
   EXPECT_EQ(web_origin,
-            test_contents->GetMainFrame()->GetLastCommittedOrigin());
-  EXPECT_NE(extension_contents->GetMainFrame()->GetProcess(),
-            test_contents->GetMainFrame()->GetProcess());
+            test_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
+  EXPECT_NE(extension_contents->GetPrimaryMainFrame()->GetProcess(),
+            test_contents->GetPrimaryMainFrame()->GetProcess());
 
   // Use |chrome.tabs.update| API to navigate |test_contents| to a
   // non-web-accessible-resource of an extension.
@@ -2424,11 +2423,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsUpdate_WebToNonWAR) {
   }
 
   // Verify the origin and process of the navigated tab.
-  content::RenderFrameHost* test_frame = test_contents->GetMainFrame();
+  content::RenderFrameHost* test_frame = test_contents->GetPrimaryMainFrame();
   EXPECT_EQ(non_war_url, test_frame->GetLastCommittedURL());
   EXPECT_EQ(extension_origin, test_frame->GetLastCommittedOrigin());
-  EXPECT_EQ(extension_contents->GetMainFrame()->GetProcess(),
-            test_contents->GetMainFrame()->GetProcess());
+  EXPECT_EQ(extension_contents->GetPrimaryMainFrame()->GetProcess(),
+            test_contents->GetPrimaryMainFrame()->GetProcess());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,

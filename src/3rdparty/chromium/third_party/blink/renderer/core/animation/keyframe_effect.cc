@@ -105,7 +105,7 @@ KeyframeEffect* KeyframeEffect::Create(
         EffectModel::StringToCompositeOperation(effect_options->composite())
             .value();
     if (RuntimeEnabledFeatures::WebAnimationsAPIEnabled() &&
-        !effect_options->pseudoElement().IsEmpty()) {
+        !effect_options->pseudoElement().empty()) {
       pseudo = effect_options->pseudoElement();
       if (!ValidateAndCanonicalizePseudo(pseudo)) {
         // TODO(gtsteel): update when
@@ -124,7 +124,7 @@ KeyframeEffect* KeyframeEffect::Create(
   KeyframeEffect* effect =
       MakeGarbageCollected<KeyframeEffect>(element, model, timing);
 
-  if (!pseudo.IsEmpty()) {
+  if (!pseudo.empty()) {
     effect->target_pseudo_ = pseudo;
     if (element) {
       element->GetDocument().UpdateStyleAndLayoutTreeForNode(element);
@@ -220,7 +220,7 @@ void KeyframeEffect::RefreshTarget() {
   Element* new_target;
   if (!target_element_) {
     new_target = nullptr;
-  } else if (target_pseudo_.IsEmpty()) {
+  } else if (target_pseudo_.empty()) {
     new_target = target_element_;
   } else {
     target_element_->GetDocument().UpdateStyleAndLayoutTreeForNode(
@@ -333,22 +333,26 @@ KeyframeEffect::CheckCanStartAnimationOnCompositor(
 
   // There would be no reason to composite an effect that has no keyframes; it
   // has no visual result.
-  if (model_->Properties().IsEmpty())
+  if (model_->Properties().empty())
     reasons |= CompositorAnimations::kInvalidAnimationOrEffect;
 
   // There would be no reason to composite an effect that has no target; it has
   // no visual result.
   if (!effect_target_) {
     reasons |= CompositorAnimations::kInvalidAnimationOrEffect;
+  } else if (!IsCurrent()) {
+    // There is no reason to composite an effect that is not current, and
+    // CheckCanStartAnimationOnCompositor might assert about having some but
+    // not all properties if we call it on such an animation.
+    reasons |= CompositorAnimations::kInvalidAnimationOrEffect;
   } else {
     if (effect_target_->GetComputedStyle() &&
         effect_target_->GetComputedStyle()->HasOffset())
       reasons |= CompositorAnimations::kTargetHasCSSOffset;
 
-    // Do not put transforms on compositor if more than one of them are defined
-    // in computed style because they need to be explicitly ordered
-    if (HasMultipleTransformProperties())
-      reasons |= CompositorAnimations::kTargetHasMultipleTransformProperties;
+    // Do not animate a property on the compositor that is marked important.
+    if (AffectsImportantProperty())
+      reasons |= CompositorAnimations::kAffectsImportantProperty;
 
     reasons |= CompositorAnimations::CheckCanStartAnimationOnCompositor(
         SpecifiedTiming(), NormalizedTiming(), *effect_target_, GetAnimation(),
@@ -380,11 +384,11 @@ void KeyframeEffect::StartAnimationOnCompositor(
       *effect_target_, group, start_time, time_offset, SpecifiedTiming(),
       NormalizedTiming(), GetAnimation(), *compositor_animation, *Model(),
       compositor_keyframe_model_ids_, animation_playback_rate);
-  DCHECK(!compositor_keyframe_model_ids_.IsEmpty());
+  DCHECK(!compositor_keyframe_model_ids_.empty());
 }
 
 bool KeyframeEffect::HasActiveAnimationsOnCompositor() const {
-  return !compositor_keyframe_model_ids_.IsEmpty();
+  return !compositor_keyframe_model_ids_.empty();
 }
 
 bool KeyframeEffect::HasActiveAnimationsOnCompositor(
@@ -589,7 +593,7 @@ void KeyframeEffect::ApplyEffects() {
     HeapVector<Member<Interpolation>> interpolations;
     model_->Sample(ClampTo<int>(iteration.value(), 0), Progress().value(),
                    NormalizedTiming().iteration_duration, interpolations);
-    if (!interpolations.IsEmpty()) {
+    if (!interpolations.empty()) {
       auto* sampled_effect =
           MakeGarbageCollected<SampledEffect>(this, owner_->SequenceNumber());
       sampled_effect->MutableInterpolations().swap(interpolations);
@@ -748,26 +752,27 @@ bool KeyframeEffect::HasIncompatibleStyle() const {
           return true;
       }
     }
-    return HasMultipleTransformProperties();
   }
 
   return false;
 }
 
-bool KeyframeEffect::HasMultipleTransformProperties() const {
+bool KeyframeEffect::AffectsImportantProperty() const {
   if (!effect_target_->GetComputedStyle())
     return false;
 
-  unsigned transform_property_count = 0;
-  if (effect_target_->GetComputedStyle()->HasTransformOperations())
-    transform_property_count++;
-  if (effect_target_->GetComputedStyle()->Rotate())
-    transform_property_count++;
-  if (effect_target_->GetComputedStyle()->Scale())
-    transform_property_count++;
-  if (effect_target_->GetComputedStyle()->Translate())
-    transform_property_count++;
-  return transform_property_count > 1;
+  const CSSBitset* important_properties =
+      effect_target_->GetComputedStyle()->GetBaseImportantSet();
+
+  if (!important_properties)
+    return false;
+
+  for (CSSPropertyID property_id : *important_properties) {
+    if (Affects(PropertyHandle(CSSProperty::Get(property_id))))
+      return true;
+  }
+
+  return false;
 }
 
 ActiveInterpolationsMap KeyframeEffect::InterpolationsForCommitStyles() {

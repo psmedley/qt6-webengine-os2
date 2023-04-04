@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,46 +7,19 @@
 #include "ash/constants/ash_features.h"
 #include "base/values.h"
 #include "chrome/browser/ash/login/oobe_screen.h"
-#include "chrome/browser/ash/login/screens/smart_privacy_protection_screen.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/login/localized_values_builder.h"
 
 namespace chromeos {
 
-constexpr StaticOobeScreenId SmartPrivacyProtectionView::kScreenId;
-
 SmartPrivacyProtectionScreenHandler::SmartPrivacyProtectionScreenHandler()
-    : BaseScreenHandler(kScreenId) {
-  set_user_acted_method_path_deprecated(
-      "login.SmartPrivacyProtectionScreen.userActed");
-}
+    : BaseScreenHandler(kScreenId) {}
 
-SmartPrivacyProtectionScreenHandler::~SmartPrivacyProtectionScreenHandler() {
-  if (screen_)
-    screen_->OnViewDestroyed(this);
-}
+SmartPrivacyProtectionScreenHandler::~SmartPrivacyProtectionScreenHandler() =
+    default;
 
 void SmartPrivacyProtectionScreenHandler::Show() {
-  if (!IsJavascriptAllowed()) {
-    show_on_init_ = true;
-    return;
-  }
   ShowInWebUI();
-}
-
-void SmartPrivacyProtectionScreenHandler::Hide() {
-  show_on_init_ = false;
-}
-
-void SmartPrivacyProtectionScreenHandler::Bind(
-    ash::SmartPrivacyProtectionScreen* screen) {
-  screen_ = screen;
-  BaseScreenHandler::SetBaseScreenDeprecated(screen_);
-}
-
-void SmartPrivacyProtectionScreenHandler::Unbind() {
-  screen_ = nullptr;
-  BaseScreenHandler::SetBaseScreenDeprecated(nullptr);
 }
 
 void SmartPrivacyProtectionScreenHandler::DeclareLocalizedValues(
@@ -57,10 +30,6 @@ void SmartPrivacyProtectionScreenHandler::DeclareLocalizedValues(
                IDS_SMART_PRIVACY_PROTECTION_SCREEN_LOCK);
   builder->Add("smartPrivacyProtectionScreenLockDesc",
                IDS_SMART_PRIVACY_PROTECTION_SCREEN_LOCK_DESCRIPTION);
-  builder->Add("smartPrivacyProtectionSnoopingDetection",
-               IDS_SMART_PRIVACY_PROTECTION_SNOOPING_DETECTION);
-  builder->Add("smartPrivacyProtectionSnoopingDetectionDesc",
-               IDS_SMART_PRIVACY_PROTECTION_SNOOPING_DETECTION_DESCRIPTION);
   builder->Add("smartPrivacyProtectionContent",
                IDS_SMART_PRIVACY_PROTECTION_CONTENT);
   builder->Add("smartPrivacyProtectionTurnOnButton",
@@ -73,18 +42,6 @@ void SmartPrivacyProtectionScreenHandler::GetAdditionalParameters(
     base::Value::Dict* dict) {
   dict->Set("isQuickDimEnabled",
             base::Value(ash::features::IsQuickDimEnabled()));
-  dict->Set("isSnoopingProtectionEnabled",
-            base::Value(ash::features::IsSnoopingProtectionEnabled()));
-}
-
-void SmartPrivacyProtectionScreenHandler::InitializeDeprecated() {
-  if (!IsJavascriptAllowed() || !screen_)
-    return;
-
-  if (show_on_init_) {
-    Show();
-    show_on_init_ = false;
-  }
 }
 
 }  // namespace chromeos

@@ -22,7 +22,7 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "libavutil/intreadwrite.h"
 
 static av_cold int zero12v_decode_init(AVCodecContext *avctx)
@@ -36,12 +36,11 @@ static av_cold int zero12v_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int zero12v_decode_frame(AVCodecContext *avctx, void *data,
+static int zero12v_decode_frame(AVCodecContext *avctx, AVFrame *pic,
                                 int *got_frame, AVPacket *avpkt)
 {
     int line, ret;
     const int width = avctx->width;
-    AVFrame *pic = data;
     uint16_t *y, *u, *v;
     const uint8_t *line_end, *src = avpkt->data;
     int stride = avctx->width * 8 / 3;
@@ -147,11 +146,10 @@ static int zero12v_decode_frame(AVCodecContext *avctx, void *data,
 
 const FFCodec ff_zero12v_decoder = {
     .p.name         = "012v",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Uncompressed 4:2:2 10-bit"),
+    CODEC_LONG_NAME("Uncompressed 4:2:2 10-bit"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_012V,
     .init           = zero12v_decode_init,
-    .decode         = zero12v_decode_frame,
+    FF_CODEC_DECODE_CB(zero12v_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

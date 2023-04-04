@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/animation/timing.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -279,8 +280,8 @@ TEST_F(AnimationKeyframeEffectV8Test, SpecifiedGetters) {
       script_state, element.Get(), js_keyframes, timing_input_dictionary);
 
   EffectTiming* timing = animation->getTiming();
-  EXPECT_EQ(2, timing->delay());
-  EXPECT_EQ(0.5, timing->endDelay());
+  EXPECT_EQ(2, timing->delay()->GetAsDouble());
+  EXPECT_EQ(0.5, timing->endDelay()->GetAsDouble());
   EXPECT_EQ("backwards", timing->fill());
   EXPECT_EQ(2, timing->iterationStart());
   EXPECT_EQ(10, timing->iterations());
@@ -370,8 +371,8 @@ TEST_F(AnimationKeyframeEffectV8Test, SetKeyframesAdditiveCompositeOperation) {
 TEST_F(KeyframeEffectTest, TimeToEffectChange) {
   Timing timing;
   timing.iteration_duration = ANIMATION_TIME_DELTA_FROM_SECONDS(100);
-  timing.start_delay = ANIMATION_TIME_DELTA_FROM_SECONDS(100);
-  timing.end_delay = ANIMATION_TIME_DELTA_FROM_SECONDS(100);
+  timing.start_delay = Timing::Delay(ANIMATION_TIME_DELTA_FROM_SECONDS(100));
+  timing.end_delay = Timing::Delay(ANIMATION_TIME_DELTA_FROM_SECONDS(100));
   timing.fill_mode = Timing::FillMode::NONE;
   auto* keyframe_effect = MakeGarbageCollected<KeyframeEffect>(
       nullptr, CreateEmptyEffectModel(), timing);
@@ -478,6 +479,7 @@ TEST_F(KeyframeEffectTest, CheckCanStartAnimationOnCompositorNoTarget) {
 TEST_F(KeyframeEffectTest, CheckCanStartAnimationOnCompositorBadTarget) {
   const double animation_playback_rate = 1;
   Timing timing;
+  timing.iteration_duration = ANIMATION_TIME_DELTA_FROM_SECONDS(1);
 
   StringKeyframeVector keyframes(2);
   keyframes[0] = MakeGarbageCollected<StringKeyframe>();
@@ -494,6 +496,8 @@ TEST_F(KeyframeEffectTest, CheckCanStartAnimationOnCompositorBadTarget) {
       MakeGarbageCollected<StringKeyframeEffectModel>(keyframes);
   auto* keyframe_effect =
       MakeGarbageCollected<KeyframeEffect>(element, effect_model, timing);
+  Animation* animation = GetDocument().Timeline().Play(keyframe_effect);
+  (void)animation;
 
   // If the target has a CSS offset we can't composite it.
   element->SetInlineStyleProperty(CSSPropertyID::kOffsetPosition, "50px 50px");
@@ -503,15 +507,6 @@ TEST_F(KeyframeEffectTest, CheckCanStartAnimationOnCompositorBadTarget) {
   EXPECT_TRUE(keyframe_effect->CheckCanStartAnimationOnCompositor(
                   nullptr, animation_playback_rate) &
               CompositorAnimations::kTargetHasCSSOffset);
-
-  // If the target has multiple transform properties we can't composite it.
-  element->SetInlineStyleProperty(CSSPropertyID::kRotate, "90deg");
-  element->SetInlineStyleProperty(CSSPropertyID::kScale, "2 1");
-  UpdateAllLifecyclePhasesForTest();
-
-  EXPECT_TRUE(keyframe_effect->CheckCanStartAnimationOnCompositor(
-                  nullptr, animation_playback_rate) &
-              CompositorAnimations::kTargetHasMultipleTransformProperties);
 }
 
 TEST_F(KeyframeEffectTest, TranslationTransformsPreserveAxisAlignment) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -286,11 +286,12 @@ TEST(TimeFormattingTest, TimeFormatWithPattern) {
 
   i18n::SetICUDefaultLocale("en_US");
   EXPECT_EQ(u"Apr 30, 2011", TimeFormatWithPattern(time, "yMMMd"));
-  EXPECT_EQ(u"April 30, 3:42:07 PM", TimeFormatWithPattern(time, "MMMMdjmmss"));
+  EXPECT_EQ(u"April 30 at 3:42:07 PM",
+            TimeFormatWithPattern(time, "MMMMdjmmss"));
 
   i18n::SetICUDefaultLocale("en_GB");
   EXPECT_EQ(u"30 Apr 2011", TimeFormatWithPattern(time, "yMMMd"));
-  EXPECT_EQ(u"30 April, 15:42:07", TimeFormatWithPattern(time, "MMMMdjmmss"));
+  EXPECT_EQ(u"30 April at 15:42:07", TimeFormatWithPattern(time, "MMMMdjmmss"));
 
   i18n::SetICUDefaultLocale("ja_JP");
   EXPECT_EQ(u"2011年4月30日", TimeFormatWithPattern(time, "yMMMd"));

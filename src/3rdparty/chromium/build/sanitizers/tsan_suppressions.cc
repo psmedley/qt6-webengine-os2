@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,10 +102,6 @@ char kTSanDefaultSuppressions[] =
     "race:base::i18n::IsRTL\n"
     "race:base::i18n::SetICUDefaultLocale\n"
 
-    // https://crbug.com/794920
-    "race:base::debug::SetCrashKeyString\n"
-    "race:crash_reporter::internal::CrashKeyStringImpl::Set\n"
-
     // http://crbug.com/927330
     "race:net::(anonymous namespace)::g_network_change_notifier\n"
 
@@ -123,6 +119,10 @@ char kTSanDefaultSuppressions[] =
     // Harmless data races, see WTF::StringImpl::Release code comments.
     "race:scoped_refptr<WTF::StringImpl>::AddRef\n"
     "race:scoped_refptr<WTF::StringImpl>::Release\n"
+
+    // Harmless data race in ipcz block allocation. See comments in
+    // ipcz::BlockAllocator::Allocate().
+    "race:ipcz::BlockAllocator::Allocate\n"
 
     // End of suppressions.
     ;  // Please keep this semicolon.

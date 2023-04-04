@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,7 @@ class NavigatorDelegate {
   // BrowsingInstances. |navigation_request_to_exclude| allows the
   // NavigationRequest that initiates this process to avoid marking itself as
   // non-opted-in before it gets the chance to opt-in.
-  virtual void RegisterExistingOriginToPreventOptInIsolation(
+  virtual void RegisterExistingOriginAsHavingDefaultIsolation(
       const url::Origin& origin,
       NavigationRequest* navigation_request_to_exclude) = 0;
 };

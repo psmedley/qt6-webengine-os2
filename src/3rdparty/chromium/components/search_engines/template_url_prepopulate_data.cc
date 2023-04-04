@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/search_engines/template_url_prepopulate_data.h"
 
 #include "base/logging.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "components/country_codes/country_codes.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -1339,11 +1340,10 @@ std::vector<std::unique_ptr<TemplateURLData>> GetPrepopulatedTemplateURLData(
   if (!prefs)
     return t_urls;
 
-  const base::Value* list = prefs->GetList(prefs::kSearchProviderOverrides);
-  if (!list)
-    return t_urls;
+  const base::Value::List& list =
+      prefs->GetList(prefs::kSearchProviderOverrides);
 
-  for (const base::Value& engine : list->GetListDeprecated()) {
+  for (const base::Value& engine : list) {
     if (engine.is_dict()) {
       auto t_url = TemplateURLDataFromOverrideDictionary(engine);
       if (t_url)
@@ -1382,9 +1382,8 @@ std::vector<std::unique_ptr<TemplateURLData>> GetPrepopulatedEngines(
         country_codes::GetCountryIDFromPrefs(prefs));
   }
   if (default_search_provider_index) {
-    const auto itr = std::find_if(
-        t_urls.begin(), t_urls.end(),
-        [](const auto& t_url) { return t_url->prepopulate_id == google.id; });
+    const auto itr =
+        base::ranges::find(t_urls, google.id, &TemplateURLData::prepopulate_id);
     *default_search_provider_index =
         itr == t_urls.end() ? 0 : std::distance(t_urls.begin(), itr);
   }

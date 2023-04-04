@@ -22,6 +22,7 @@
 #include "quiche/quic/core/crypto/proof_source.h"
 #include "quiche/quic/core/crypto/quic_compressed_certs_cache.h"
 #include "quiche/quic/core/crypto/quic_crypto_proof.h"
+#include "quiche/quic/core/crypto/quic_random.h"
 #include "quiche/quic/core/proto/cached_network_parameters_proto.h"
 #include "quiche/quic/core/proto/source_address_token_proto.h"
 #include "quiche/quic/core/quic_time.h"
@@ -35,7 +36,6 @@ namespace quic {
 class CryptoHandshakeMessage;
 class ProofSource;
 class QuicClock;
-class QuicRandom;
 class QuicServerConfigProtobuf;
 struct QuicSignedServerConfig;
 
@@ -335,7 +335,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerConfig {
       quiche::QuicheReferenceCountedPointer<QuicSignedServerConfig>
           signed_config,
       QuicByteCount total_framing_overhead, QuicByteCount chlo_packet_size,
-      std::unique_ptr<ProcessClientHelloResultCallback> done_cb) const;
+      std::shared_ptr<ProcessClientHelloResultCallback> done_cb) const;
 
   // BuildServerConfigUpdateMessage invokes |cb| with a SCUP message containing
   // the current primary config, an up to date source-address token, and cert
@@ -587,7 +587,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerConfig {
         quiche::QuicheReferenceCountedPointer<QuicSignedServerConfig>
             signed_config,
         QuicByteCount total_framing_overhead, QuicByteCount chlo_packet_size,
-        std::unique_ptr<ProcessClientHelloResultCallback> done_cb)
+        std::shared_ptr<ProcessClientHelloResultCallback> done_cb)
         : validate_chlo_result_(validate_chlo_result),
           reject_only_(reject_only),
           connection_id_(connection_id),
@@ -674,7 +674,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerConfig {
         signed_config_;
     const QuicByteCount total_framing_overhead_;
     const QuicByteCount chlo_packet_size_;
-    std::unique_ptr<ProcessClientHelloResultCallback> done_cb_;
+    std::shared_ptr<ProcessClientHelloResultCallback> done_cb_;
   };
 
   // Callback class for bridging between ProcessClientHello and

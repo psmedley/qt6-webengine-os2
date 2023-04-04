@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -202,7 +202,7 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider {
 
     // `resource_` is not a raw_ptr<...> for performance reasons (based on
     // analysis of sampling profiler data and tab_search:top100:2020).
-    PoolResource* resource_ = nullptr;
+    RAW_PTR_EXCLUSION PoolResource* resource_ = nullptr;
   };
 
   // When holding gpu resources, the |context_provider| should be non-null,
@@ -347,7 +347,8 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider {
     void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                       int tracing_id,
                       const viz::ClientResourceProvider* resource_provider,
-                      bool is_free) const;
+                      bool is_free,
+                      bool is_busy) const;
 
     void set_debug_name(const std::string& name) { debug_name_ = name; }
     const std::string& debug_name() const { return debug_name_; }
@@ -392,7 +393,7 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider {
     }
 
    private:
-    ResourcePool* const resource_pool_;
+    const raw_ptr<ResourcePool> resource_pool_;
     const size_t unique_id_;
     const gfx::Size size_;
     const viz::ResourceFormat format_;

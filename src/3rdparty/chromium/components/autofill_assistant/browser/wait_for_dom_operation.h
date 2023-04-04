@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,7 +121,7 @@ class WaitForDomOperation : public ScriptExecutor::Listener,
   const base::TimeDelta max_wait_time_;
   const bool allow_interrupt_;
   const bool use_observers_;
-  raw_ptr<WaitForDomObserver> observer_;
+  std::vector<WaitForDomObserver*> observers_;
   base::RepeatingCallback<void(BatchElementChecker*,
                                base::OnceCallback<void(const ClientStatus&)>)>
       check_elements_;

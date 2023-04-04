@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
 
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
+#include "third_party/blink/renderer/platform/graphics/paint/effect_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
 
 namespace blink {
@@ -12,8 +13,9 @@ namespace blink {
 PaintPropertyChangeType ClipPaintPropertyNode::State::ComputeChange(
     const State& other) const {
   if (local_transform_space != other.local_transform_space ||
-      paint_clip_rect != other.paint_clip_rect ||
-      clip_path != other.clip_path) {
+      paint_clip_rect_ != other.paint_clip_rect_ ||
+      !ClipPathEquals(other.clip_path) ||
+      pixel_moving_filter != other.pixel_moving_filter) {
     return PaintPropertyChangeType::kChangedOnlyValues;
   }
   if (layout_clip_rect_excluding_overlay_scrollbars !=
@@ -72,7 +74,7 @@ std::unique_ptr<JSONObject> ClipPaintPropertyNode::ToJSON() const {
     json->SetString("changed", PaintPropertyChangeTypeToString(NodeChanged()));
   json->SetString("localTransformSpace",
                   String::Format("%p", state_.local_transform_space.get()));
-  json->SetString("rect", String(state_.paint_clip_rect.Rect().ToString()));
+  json->SetString("rect", String(state_.paint_clip_rect_.Rect().ToString()));
   if (state_.layout_clip_rect_excluding_overlay_scrollbars) {
     json->SetString(
         "rectExcludingOverlayScrollbars",
@@ -81,6 +83,10 @@ std::unique_ptr<JSONObject> ClipPaintPropertyNode::ToJSON() const {
   }
   if (state_.clip_path) {
     json->SetBoolean("hasClipPath", true);
+  }
+  if (state_.pixel_moving_filter) {
+    json->SetString("pixelMovingFilter",
+                    String::Format("%p", state_.pixel_moving_filter.get()));
   }
   return json;
 }

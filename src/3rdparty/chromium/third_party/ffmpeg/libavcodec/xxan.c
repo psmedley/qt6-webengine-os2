@@ -26,7 +26,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 typedef struct XanContext {
     AVCodecContext *avctx;
@@ -399,9 +399,8 @@ static int xan_decode_frame_type1(AVCodecContext *avctx)
     return 0;
 }
 
-static int xan_decode_frame(AVCodecContext *avctx,
-                            void *data, int *got_frame,
-                            AVPacket *avpkt)
+static int xan_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
+                            int *got_frame, AVPacket *avpkt)
 {
     XanContext *s = avctx->priv_data;
     int ftype;
@@ -426,7 +425,7 @@ static int xan_decode_frame(AVCodecContext *avctx,
     if (ret)
         return ret;
 
-    if ((ret = av_frame_ref(data, s->pic)) < 0)
+    if ((ret = av_frame_ref(rframe, s->pic)) < 0)
         return ret;
 
     *got_frame = 1;
@@ -436,13 +435,13 @@ static int xan_decode_frame(AVCodecContext *avctx,
 
 const FFCodec ff_xan_wc4_decoder = {
     .p.name         = "xan_wc4",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Wing Commander IV / Xxan"),
+    CODEC_LONG_NAME("Wing Commander IV / Xxan"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_XAN_WC4,
     .priv_data_size = sizeof(XanContext),
     .init           = xan_decode_init,
     .close          = xan_decode_end,
-    .decode         = xan_decode_frame,
+    FF_CODEC_DECODE_CB(xan_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_INIT_THREADSAFE,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

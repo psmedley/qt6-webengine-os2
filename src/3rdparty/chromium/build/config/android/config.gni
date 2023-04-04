@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -73,6 +73,10 @@ if (is_android || is_chromeos) {
   assert(android_static_analysis == "on" || android_static_analysis == "off" ||
          android_static_analysis == "build_server")
 
+  # This configuration has not bot coverage and has broken multiple times.
+  # Warn against it.
+  assert(!(enable_chrome_android_internal && skip_secondary_abi_for_cq))
+
   declare_args() {
     # Android API level for 32 bits platforms
     android32_ndk_api_level = default_min_sdk_version
@@ -105,10 +109,13 @@ if (is_android || is_chromeos) {
   }
 
   public_android_sdk_root = "//third_party/android_sdk/public"
-  if (android_sdk_release == "s") {
+  public_android_sdk_build_tools =
+      "${public_android_sdk_root}/build-tools/33.0.0"
+  public_android_sdk_version = "33"
+  if (android_sdk_release == "t") {
     default_android_sdk_root = public_android_sdk_root
-    default_android_sdk_version = "31"
-    default_android_sdk_build_tools_version = "31.0.0"
+    default_android_sdk_version = public_android_sdk_version
+    default_android_sdk_build_tools_version = "33.0.0"
     public_android_sdk = true
   }
 
@@ -121,7 +128,7 @@ if (is_android || is_chromeos) {
     # Purposefully repeated so that downstream can change
     # default_android_sdk_root without changing lint version.
     default_lint_android_sdk_root = public_android_sdk_root
-    default_lint_android_sdk_version = 31
+    default_lint_android_sdk_version = 33
   }
 
   if (!defined(default_extras_android_sdk_root)) {
@@ -140,11 +147,7 @@ if (is_android || is_chromeos) {
   # google_play_services_package contains the path where individual client
   # targets (e.g. google_play_services_base_java) are located.
   if (!defined(google_play_services_package)) {
-    if (is_chromecast && chromecast_branding != "public") {
-      google_play_services_package = "//chromecast/internal/android/prebuilt/google-play-services-first-party"
-    } else {
-      google_play_services_package = "//third_party/android_deps"
-    }
+    google_play_services_package = "//third_party/android_deps"
   }
 
   if (!defined(dagger_java_target)) {

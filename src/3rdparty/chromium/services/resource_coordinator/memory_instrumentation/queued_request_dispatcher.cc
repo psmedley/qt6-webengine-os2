@@ -1,14 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/resource_coordinator/memory_instrumentation/queued_request_dispatcher.h"
 
 #include <inttypes.h>
+
 #include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -57,22 +59,11 @@ uint32_t CalculatePrivateFootprintKb(const mojom::RawOSMemDump& os_dump,
   uint64_t vm_swap_bytes = os_dump.platform_private_footprint->vm_swap_bytes;
   return (rss_anon_bytes + vm_swap_bytes) / 1024;
 #elif BUILDFLAG(IS_MAC)
-  if (base::mac::IsAtLeastOS10_12()) {
-    uint64_t phys_footprint_bytes =
-        os_dump.platform_private_footprint->phys_footprint_bytes;
-    return base::saturated_cast<uint32_t>(
-        base::saturated_cast<int32_t>(phys_footprint_bytes / 1024) -
-        base::saturated_cast<int32_t>(shared_resident_kb));
-  } else {
-    uint64_t internal_bytes =
-        os_dump.platform_private_footprint->internal_bytes;
-    uint64_t compressed_bytes =
-        os_dump.platform_private_footprint->compressed_bytes;
-    return base::saturated_cast<uint32_t>(
-        base::saturated_cast<int32_t>((internal_bytes + compressed_bytes) /
-                                      1024) -
-        base::saturated_cast<int32_t>(shared_resident_kb));
-  }
+  uint64_t phys_footprint_bytes =
+      os_dump.platform_private_footprint->phys_footprint_bytes;
+  return base::saturated_cast<uint32_t>(
+      base::saturated_cast<int32_t>(phys_footprint_bytes / 1024) -
+      base::saturated_cast<int32_t>(shared_resident_kb));
 #elif BUILDFLAG(IS_WIN)
   return base::saturated_cast<int32_t>(
       os_dump.platform_private_footprint->private_bytes / 1024);
@@ -354,8 +345,7 @@ void QueuedRequestDispatcher::SetUpAndDispatchVmRegionRequest(
                                       desired_pids, std::move(callback));
 #else
   for (const auto& client_info : clients) {
-    if (std::find(desired_pids.begin(), desired_pids.end(), client_info.pid) !=
-        desired_pids.end()) {
+    if (base::Contains(desired_pids, client_info.pid)) {
       mojom::ClientProcess* client = client_info.client;
       request->pending_responses.insert(client_info.pid);
       request->responses[client_info.pid].process_id = client_info.pid;
@@ -630,7 +620,7 @@ void QueuedRequestDispatcher::Finalize(QueuedRequest* request,
       request->failed_memory_dump_count);
 
   char guid_str[20];
-  sprintf(guid_str, "0x%" PRIx64, request->dump_guid);
+  snprintf(guid_str, sizeof(guid_str), "0x%" PRIx64, request->dump_guid);
   TRACE_EVENT_NESTABLE_ASYNC_END2(
       base::trace_event::MemoryDumpManager::kTraceCategory, "GlobalMemoryDump",
       TRACE_ID_LOCAL(request->dump_guid), "dump_guid", TRACE_STR_COPY(guid_str),

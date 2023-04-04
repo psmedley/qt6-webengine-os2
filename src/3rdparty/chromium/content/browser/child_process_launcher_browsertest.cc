@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,9 +60,10 @@ IN_PROC_BROWSER_TEST_F(ChildProcessLauncherBrowserTest, ChildSpawnFail) {
   TestNavigationObserver nav_observer1(window->web_contents(), 1);
   client = new MockChildProcessLauncherClient;
   window->LoadURL(url);
-  client->client_ = static_cast<RenderProcessHostImpl*>(
-                        window->web_contents()->GetMainFrame()->GetProcess())
-                        ->child_process_launcher_->ReplaceClientForTest(client);
+  client->client_ =
+      static_cast<RenderProcessHostImpl*>(
+          window->web_contents()->GetPrimaryMainFrame()->GetProcess())
+          ->child_process_launcher_->ReplaceClientForTest(client);
   client->simulate_failure_ = true;
   {
     ScopedAllowRendererCrashes allow_renderer_crashes(shell());

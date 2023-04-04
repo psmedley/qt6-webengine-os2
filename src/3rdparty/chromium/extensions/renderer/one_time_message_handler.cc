@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
+#include "base/ranges/algorithm.h"
 #include "base/supports_user_data.h"
 #include "content/public/renderer/render_frame.h"
 #include "extensions/common/api/messaging/message.h"
@@ -94,11 +96,8 @@ void OneTimeMessageResponseHelper(
 
   v8::Local<v8::External> external = info.Data().As<v8::External>();
   auto* raw_callback = static_cast<OneTimeMessageCallback*>(external->Value());
-  auto iter = std::find_if(
-      data->pending_callbacks.begin(), data->pending_callbacks.end(),
-      [raw_callback](const std::unique_ptr<OneTimeMessageCallback>& callback) {
-        return callback.get() == raw_callback;
-      });
+  auto iter = base::ranges::find(data->pending_callbacks, raw_callback,
+                                 &std::unique_ptr<OneTimeMessageCallback>::get);
   if (iter == data->pending_callbacks.end())
     return;
 
@@ -110,41 +109,22 @@ void OneTimeMessageResponseHelper(
 // Called with the results of dispatching an onMessage event to listeners.
 // Returns true if any of the listeners responded with `true`, indicating they
 // will respond to the call asynchronously.
-bool WillListenerReplyAsync(v8::Local<v8::Context> context,
-                            v8::MaybeLocal<v8::Value> maybe_results) {
-  v8::Local<v8::Value> results;
-  // |maybe_results| can be empty if the context was destroyed before the
+bool WillListenerReplyAsync(absl::optional<base::Value> result) {
+  // `result` can be `nullopt` if the context was destroyed before the
   // listeners were ran (or while they were running).
-  if (!maybe_results.ToLocal(&results))
+  if (!result)
     return false;
 
-  if (!results->IsObject())
-    return false;
-
-  // Suppress any script errors, but bail out if they happen (in theory, we
-  // shouldn't have any).
-  v8::Isolate* isolate = context->GetIsolate();
-  v8::TryCatch try_catch(isolate);
-  // We expect results in the form of an object with an array of results as
-  // a `results` property.
-  v8::Local<v8::Value> results_property;
-  if (!results.As<v8::Object>()
-           ->Get(context, gin::StringToSymbol(isolate, "results"))
-           .ToLocal(&results_property) ||
-      !results_property->IsArray()) {
-    return false;
-  }
-
-  // Check if any of the results is `true`.
-  v8::Local<v8::Array> array = results_property.As<v8::Array>();
-  uint32_t length = array->Length();
-  for (uint32_t i = 0; i < length; ++i) {
-    v8::Local<v8::Value> val;
-    if (!array->Get(context, i).ToLocal(&val))
-      return false;
-
-    if (val->IsTrue())
-      return true;
+  if (const base::Value::Dict* dict = result->GetIfDict()) {
+    // We expect results in the form of an object with an array of results as
+    // a `results` property.
+    if (const base::Value::List* list = dict->FindList("results")) {
+      // Check if any of the results is `true`.
+      for (const base::Value& value : *list) {
+        if (value.is_bool() && value.GetBool())
+          return true;
+      }
+    }
   }
 
   return false;
@@ -201,7 +181,8 @@ v8::Local<v8::Promise> OneTimeMessageHandler::SendMessage(
 
     APIRequestHandler::RequestDetails details =
         bindings_system_->api_system()->request_handler()->AddPendingRequest(
-            script_context->v8_context(), async_type, response_callback);
+            script_context->v8_context(), async_type, response_callback,
+            binding::ResultModifierFunction());
     OneTimeOpener& port = data->openers[new_port_id];
     port.request_id = details.request_id;
     port.routing_id = routing_id;
@@ -274,6 +255,17 @@ bool OneTimeMessageHandler::Disconnect(ScriptContext* script_context,
              : DisconnectReceiver(script_context, port_id);
 }
 
+int OneTimeMessageHandler::GetPendingCallbackCountForTest(
+    ScriptContext* script_context) {
+  v8::Isolate* isolate = script_context->isolate();
+  v8::HandleScope handle_scope(isolate);
+
+  OneTimeMessageContextData* data =
+      GetPerContextData<OneTimeMessageContextData>(script_context->v8_context(),
+                                                   kDontCreateIfMissing);
+  return data ? data->pending_callbacks.size() : 0;
+}
+
 bool OneTimeMessageHandler::DeliverMessageToReceiver(
     ScriptContext* script_context,
     const Message& message,
@@ -320,8 +312,8 @@ bool OneTimeMessageHandler::DeliverMessageToReceiver(
   new GCCallback(
       script_context, response_function,
       base::BindOnce(&OneTimeMessageHandler::OnResponseCallbackCollected,
-                     weak_factory_.GetWeakPtr(), script_context,
-                     target_port_id),
+                     weak_factory_.GetWeakPtr(), script_context, target_port_id,
+                     callback.get()),
       base::OnceClosure());
 
   v8::HandleScope handle_scope(isolate);
@@ -515,7 +507,8 @@ void OneTimeMessageHandler::OnOneTimeMessageResponse(
 
 void OneTimeMessageHandler::OnResponseCallbackCollected(
     ScriptContext* script_context,
-    const PortId& port_id) {
+    const PortId& port_id,
+    void* raw_callback) {
   // Note: we know |script_context| is still valid because the GC callback won't
   // be called after context invalidation.
   v8::HandleScope handle_scope(script_context->isolate());
@@ -537,6 +530,14 @@ void OneTimeMessageHandler::OnResponseCallbackCollected(
   int routing_id = iter->second.routing_id;
   data->receivers.erase(iter);
 
+  // Since there is no way to call the callback anymore, we can remove it from
+  // the pending callbacks.
+  base::EraseIf(
+      data->pending_callbacks,
+      [raw_callback](const std::unique_ptr<OneTimeMessageCallback>& callback) {
+        return callback.get() == raw_callback;
+      });
+
   // Close the message port. There's no way to send a reply anymore. Don't
   // close the channel because another listener may reply.
   IPCMessageSender* ipc_sender = bindings_system_->GetIPCMessageSender();
@@ -546,7 +547,7 @@ void OneTimeMessageHandler::OnResponseCallbackCollected(
 
 void OneTimeMessageHandler::OnEventFired(const PortId& port_id,
                                          v8::Local<v8::Context> context,
-                                         v8::MaybeLocal<v8::Value> result) {
+                                         absl::optional<base::Value> result) {
   // The context could be tearing down by the time the event is fully
   // dispatched.
   OneTimeMessageContextData* data =
@@ -563,7 +564,7 @@ void OneTimeMessageHandler::OnEventFired(const PortId& port_id,
   int routing_id = iter->second.routing_id;
   IPCMessageSender* ipc_sender = bindings_system_->GetIPCMessageSender();
 
-  if (WillListenerReplyAsync(context, result)) {
+  if (WillListenerReplyAsync(std::move(result))) {
     // Inform the browser that one of the listeners said they would be replying
     // later and leave the channel open.
     ipc_sender->SendMessageResponsePending(routing_id, port_id);

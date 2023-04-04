@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,6 +56,9 @@ class TracingHandler : public DevToolsDomainHandler, public Tracing::Backend {
   CONTENT_EXPORT ~TracingHandler() override;
 
   static std::vector<TracingHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
+
+  // Adds an additional process to tracing configuration, if tracing is active.
+  void AddProcess(base::ProcessId pid);
 
   // DevToolsDomainHandler implementation.
   void SetRenderer(int process_host_id,
@@ -160,6 +163,7 @@ class TracingHandler : public DevToolsDomainHandler, public Tracing::Backend {
   std::unique_ptr<DevToolsVideoConsumer> video_consumer_;
   int number_of_screenshots_from_video_consumer_ = 0;
   perfetto::TraceConfig trace_config_;
+  std::unordered_set<base::ProcessId> pids_being_traced_;
   std::unique_ptr<PerfettoTracingSession> session_;
   base::WeakPtrFactory<TracingHandler> weak_factory_{this};
 

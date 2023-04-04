@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,8 @@ void MessagePort::RevalidatePort() {}
 
 void MessagePort::DispatchOnConnect(
     const std::string& channel_name,
-    std::unique_ptr<base::DictionaryValue> source_tab,
-    int source_frame_id,
-    const ExtensionApiFrameIdMap::DocumentId& source_document_id,
+    absl::optional<base::Value::Dict> source_tab,
+    const ExtensionApiFrameIdMap::FrameData& source_frame,
     int guest_process_id,
     int guest_render_frame_routing_id,
     const MessagingEndpoint& source_endpoint,

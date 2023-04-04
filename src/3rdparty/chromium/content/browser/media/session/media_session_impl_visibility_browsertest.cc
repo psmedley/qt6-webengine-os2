@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,7 +154,7 @@ class MediaSessionImplVisibilityBrowserTest
   }
 
   void RunScript(const std::string& script) {
-    ASSERT_TRUE(ExecJs(web_contents_->GetMainFrame(), script));
+    ASSERT_TRUE(ExecJs(web_contents_->GetPrimaryMainFrame(), script));
   }
 
   // TODO(zqzhang): This method is shared with

@@ -1,10 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/account_manager_core/chromeos/account_manager.h"
 
-#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -16,9 +15,11 @@
 #include "base/files/important_file_writer.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
@@ -255,8 +256,8 @@ class AccountManager::AccessTokenFetcher : public OAuth2AccessTokenFetcher {
   }
 
   const ::account_manager::AccountKey account_key_;
-  AccountManager* const account_manager_;
-  OAuth2AccessTokenConsumer* const consumer_;
+  const raw_ptr<AccountManager> account_manager_;
+  const raw_ptr<OAuth2AccessTokenConsumer> consumer_;
 
   bool are_token_requests_allowed_ = false;
   bool is_request_pending_ = false;
@@ -796,12 +797,9 @@ void AccountManager::DeletePendingTokenRevocationRequest(
     GaiaTokenRevocationRequest* request) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  auto it = std::find_if(
-      pending_token_revocation_requests_.begin(),
-      pending_token_revocation_requests_.end(),
-      [&request](
-          const std::unique_ptr<GaiaTokenRevocationRequest>& pending_request)
-          -> bool { return pending_request.get() == request; });
+  auto it =
+      base::ranges::find(pending_token_revocation_requests_, request,
+                         &std::unique_ptr<GaiaTokenRevocationRequest>::get);
 
   if (it != pending_token_revocation_requests_.end()) {
     pending_token_revocation_requests_.erase(it);

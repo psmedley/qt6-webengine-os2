@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,7 @@ class CustomWindowStateDelegate : public ash::WindowStateDelegate {
   void ToggleLockedFullscreen(ash::WindowState* window_state) override;
   std::unique_ptr<ash::PresentationTimeRecorder> OnDragStarted(
       int component) override;
+  void OnDragFinished(bool cancel, const gfx::PointF& location) override;
 
  private:
   ShellSurface* const shell_surface_;

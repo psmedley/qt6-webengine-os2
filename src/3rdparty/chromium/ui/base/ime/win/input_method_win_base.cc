@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,9 +155,10 @@ ui::EventDispatchDetails DispatcherDestroyedDetails() {
 
 }  // namespace
 
-InputMethodWinBase::InputMethodWinBase(internal::InputMethodDelegate* delegate,
-                                       HWND attached_window_handle)
-    : InputMethodBase(delegate,
+InputMethodWinBase::InputMethodWinBase(
+    ImeKeyEventDispatcher* ime_key_event_dispatcher,
+    HWND attached_window_handle)
+    : InputMethodBase(ime_key_event_dispatcher,
                       CreateKeyboardController(attached_window_handle)),
       attached_window_handle_(attached_window_handle),
       pending_requested_direction_(base::i18n::UNKNOWN_DIRECTION) {}

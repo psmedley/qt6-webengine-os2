@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,9 @@ class MODULES_EXPORT AudioEncoder final
   void encode(AudioData* data, ExceptionState& exception_state) {
     return Base::encode(data, nullptr, exception_state);
   }
+
+  // EventTarget interface
+  const AtomicString& InterfaceName() const override;
 
   static ScriptPromise isConfigSupported(ScriptState*,
                                          const AudioEncoderConfig*,

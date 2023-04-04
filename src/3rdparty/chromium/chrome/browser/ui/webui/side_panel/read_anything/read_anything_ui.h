@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "chrome/browser/ui/webui/side_panel/read_anything/read_anything.mojom.h"
+#include "chrome/common/accessibility/read_anything.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -15,7 +15,12 @@
 
 class ReadAnythingPageHandler;
 
-// WebUI that holds the distilled page contents.
+///////////////////////////////////////////////////////////////////////////////
+// ReadAnythingUI
+//
+//  A WebUI that holds distilled page contents for the Read Anything feature.
+//  This class has the same lifetime as the Side Panel view.
+//
 class ReadAnythingUI : public ui::MojoBubbleWebUIController,
                        public read_anything::mojom::PageHandlerFactory {
  public:

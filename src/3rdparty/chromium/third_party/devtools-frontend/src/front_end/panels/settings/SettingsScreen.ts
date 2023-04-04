@@ -40,7 +40,7 @@ import * as PanelComponents from './components/components.js';
 
 import settingsScreenStyles from './settingsScreen.css.js';
 
-import type {KeybindsSettingsTab} from './KeybindsSettingsTab.js';
+import {type KeybindsSettingsTab} from './KeybindsSettingsTab.js';
 
 const UIStrings = {
   /**
@@ -93,6 +93,10 @@ const UIStrings = {
   *@description Text that is usually a hyperlink to more documentation
   */
   learnMore: 'Learn more',
+  /**
+  *@description Text that is usually a hyperlink to a feedback form
+  */
+  sendFeedback: 'Send feedback',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/settings/SettingsScreen.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -281,10 +285,8 @@ export class GenericSettingsTab extends SettingsTab {
       Common.Settings.SettingCategory.PERSISTENCE,
       Common.Settings.SettingCategory.DEBUGGER,
       Common.Settings.SettingCategory.GLOBAL,
+      Common.Settings.SettingCategory.SYNC,
     ];
-    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.SYNC_SETTINGS)) {
-      explicitSectionOrder.push(Common.Settings.SettingCategory.SYNC);
-    }
 
     // Some settings define their initial ordering.
     const preRegisteredSettings = Common.Settings.getRegisteredSettings().sort(
@@ -489,6 +491,14 @@ export class ExperimentsSettingsTab extends SettingsTab {
       p.appendChild(link);
     }
 
+    if (experiment.feedbackLink) {
+      const link = UI.XLink.XLink.create(experiment.feedbackLink);
+      link.textContent = i18nString(UIStrings.sendFeedback);
+      link.classList.add('feedback-link');
+
+      p.appendChild(link);
+    }
+
     return p;
   }
 }
@@ -509,11 +519,9 @@ export class ActionDelegate implements UI.ActionRegistration.ActionDelegate {
       case 'settings.show':
         void SettingsScreen.showSettingsScreen({focusTabHeader: true} as ShowSettingsScreenOptions);
         return true;
-      // TODO(crbug.com/1253323): Cast to UrlString will be removed when migration to branded types is complete.
       case 'settings.documentation':
-        Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(
-            UI.UIUtils.addReferrerToURL('https://developer.chrome.com/docs/devtools/') as
-            Platform.DevToolsPath.UrlString);
+        Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(UI.UIUtils.addReferrerToURL(
+            'https://developer.chrome.com/docs/devtools/' as Platform.DevToolsPath.UrlString));
         return true;
       case 'settings.shortcuts':
         void SettingsScreen.showSettingsScreen({name: 'keybinds', focusTabHeader: true});

@@ -6,6 +6,8 @@
 
 #include "core/fpdfapi/page/cpdf_iccprofile.h"
 
+#include <utility>
+
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fxcodec/icc/icc_transform.h"
 
@@ -18,9 +20,9 @@ bool DetectSRGB(pdfium::span<const uint8_t> span) {
 
 }  // namespace
 
-CPDF_IccProfile::CPDF_IccProfile(const CPDF_Stream* pStream,
+CPDF_IccProfile::CPDF_IccProfile(RetainPtr<const CPDF_Stream> pStream,
                                  pdfium::span<const uint8_t> span)
-    : m_bsRGB(DetectSRGB(span)), m_pStream(pStream) {
+    : m_bsRGB(DetectSRGB(span)), m_pStream(std::move(pStream)) {
   if (m_bsRGB) {
     m_nSrcComponents = 3;
     return;
@@ -32,3 +34,18 @@ CPDF_IccProfile::CPDF_IccProfile(const CPDF_Stream* pStream,
 }
 
 CPDF_IccProfile::~CPDF_IccProfile() = default;
+
+bool CPDF_IccProfile::IsNormal() const {
+  return m_Transform->IsNormal();
+}
+
+void CPDF_IccProfile::Translate(pdfium::span<const float> pSrcValues,
+                                pdfium::span<float> pDestValues) {
+  m_Transform->Translate(pSrcValues, pDestValues);
+}
+
+void CPDF_IccProfile::TranslateScanline(pdfium::span<uint8_t> pDest,
+                                        pdfium::span<const uint8_t> pSrc,
+                                        int pixels) {
+  m_Transform->TranslateScanline(pDest, pSrc, pixels);
+}

@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ANIMATION_TIMELINE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ANIMATION_TIMELINE_H_
 
+#include "base/memory/scoped_refptr.h"
 #include "base/time/time.h"
+#include "cc/animation/animation_timeline.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_value.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
@@ -18,7 +19,7 @@ namespace blink {
 
 class Document;
 
-enum class TimelinePhase { kInactive, kBefore, kActive, kAfter };
+enum class TimelinePhase { kInactive, kActive };
 
 class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
@@ -45,12 +46,13 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
 
   virtual V8CSSNumberish* duration();
 
-  String phase();
   TimelinePhase Phase() { return CurrentPhaseAndTime().phase; }
 
   virtual bool IsDocumentTimeline() const { return false; }
   virtual bool IsScrollTimeline() const { return false; }
   virtual bool IsCSSScrollTimeline() const { return false; }
+  virtual bool IsViewTimeline() const { return false; }
+
   virtual bool IsActive() const = 0;
   virtual AnimationTimeDelta ZeroTime() = 0;
   // https://w3.org/TR/web-animations-1/#monotonically-increasing-timeline
@@ -70,7 +72,17 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
       const Timing&) {
     return AnimationTimeDelta();
   }
-  Document* GetDocument() { return document_; }
+
+  // Converts timeline offsets to start and end delays in time units based on
+  // the timeline duration. In the event that the timeline is not an instance
+  // of a view timeline, the delays are zero.
+  using TimeDelayPair = std::pair<AnimationTimeDelta, AnimationTimeDelta>;
+  virtual TimeDelayPair TimelineOffsetsToTimeDelays(
+      const Timing& timing) const {
+    return std::make_pair(AnimationTimeDelta(), AnimationTimeDelta());
+  }
+
+  Document* GetDocument() const { return document_; }
   virtual void AnimationAttached(Animation*);
   virtual void AnimationDetached(Animation*);
 
@@ -84,7 +96,7 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   Animation* Play(AnimationEffect*, ExceptionState& = ASSERT_NO_EXCEPTION);
 
   virtual bool NeedsAnimationTimingUpdate();
-  virtual bool HasAnimations() const { return !animations_.IsEmpty(); }
+  virtual bool HasAnimations() const { return !animations_.empty(); }
   virtual bool HasOutdatedAnimation() const {
     return outdated_animation_count_ > 0;
   }
@@ -96,10 +108,10 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
     return animations_;
   }
 
-  CompositorAnimationTimeline* CompositorTimeline() const {
+  cc::AnimationTimeline* CompositorTimeline() const {
     return compositor_timeline_.get();
   }
-  virtual CompositorAnimationTimeline* EnsureCompositorTimeline() = 0;
+  virtual cc::AnimationTimeline* EnsureCompositorTimeline() = 0;
   virtual void UpdateCompositorTimeline() {}
 
   void MarkAnimationsCompositorPending(bool source_changed = false);
@@ -131,7 +143,7 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   // All animations attached to this timeline.
   HeapHashSet<WeakMember<Animation>> animations_;
 
-  std::unique_ptr<CompositorAnimationTimeline> compositor_timeline_;
+  scoped_refptr<cc::AnimationTimeline> compositor_timeline_;
 
   absl::optional<PhaseAndTime> last_current_phase_and_time_;
 };

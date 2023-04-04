@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/mojo/mojom/audio_data_pipe.mojom.h"
 #include "mojo/public/cpp/system/platform_handle.h"
+#include "third_party/abseil-cpp/absl/utility/utility.h"
 
 namespace media {
 
@@ -91,7 +92,7 @@ void MojoAudioOutputStream::OnStreamCreated(
 
   std::move(stream_created_callback_)
       .Run(std::move(pending_stream),
-           {base::in_place, std::move(shared_memory_region),
+           {absl::in_place, std::move(shared_memory_region),
             std::move(socket_handle)});
 }
 

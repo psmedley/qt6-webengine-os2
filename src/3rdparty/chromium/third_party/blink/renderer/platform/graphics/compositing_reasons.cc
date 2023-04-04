@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,9 @@ struct CompositingReasonStringMap {
 
 constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
     {CompositingReason::k3DTransform, "transform3D", "Has a 3d transform"},
+    {CompositingReason::k3DScale, "scale3D", "Has a 3d scale"},
+    {CompositingReason::k3DRotate, "rotate3D", "Has a 3d rotate"},
+    {CompositingReason::k3DTranslate, "translate3D", "Has a 3d translate"},
     {CompositingReason::kTrivial3DTransform, "trivialTransform3D",
      "Has a trivial 3d transform"},
     {CompositingReason::kVideo, "video", "Is an accelerated video"},
@@ -31,6 +34,12 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "Has backface-visibility: hidden"},
     {CompositingReason::kActiveTransformAnimation, "activeTransformAnimation",
      "Has an active accelerated transform animation or transition"},
+    {CompositingReason::kActiveScaleAnimation, "activeScaleAnimation",
+     "Has an active accelerated scale animation or transition"},
+    {CompositingReason::kActiveRotateAnimation, "activeRotateAnimation",
+     "Has an active accelerated rotate animation or transition"},
+    {CompositingReason::kActiveTranslateAnimation, "activeTranslateAnimation",
+     "Has an active accelerated translate animation or transition"},
     {CompositingReason::kActiveOpacityAnimation, "activeOpacityAnimation",
      "Has an active accelerated opacity animation or transition"},
     {CompositingReason::kActiveFilterAnimation, "activeFilterAnimation",
@@ -45,6 +54,12 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "Is a scrollable overflow element"},
     {CompositingReason::kWillChangeTransform, "willChangeTransform",
      "Has a will-change: transform compositing hint"},
+    {CompositingReason::kWillChangeScale, "willChangeScale",
+     "Has a will-change: scale compositing hint"},
+    {CompositingReason::kWillChangeRotate, "willChangeRotate",
+     "Has a will-change: rotate compositing hint"},
+    {CompositingReason::kWillChangeTranslate, "willChangeTranslate",
+     "Has a will-change: translate compositing hint"},
     {CompositingReason::kWillChangeOpacity, "willChangeOpacity",
      "Has a will-change: opacity compositing hint"},
     {CompositingReason::kWillChangeFilter, "willChangeFilter",
@@ -91,9 +106,8 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "Secondary layer, the horizontal scrollbar layer"},
     {CompositingReason::kLayerForVerticalScrollbar, "layerForVerticalScrollbar",
      "Secondary layer, the vertical scrollbar layer"},
-    {CompositingReason::kFixedToViewport,
-     "layerForViewportAttachedFixedPositionElement",
-     "Layer for fixed position elements that are fixed to the viewport."},
+    {CompositingReason::kUndoOverscroll, "UndoOverscroll",
+     "The layer is fixed to viewport and doesn't move with overscroll"},
     {CompositingReason::kLayerForOther, "layerForOther",
      "Layer for link highlight, frame overlay, etc."},
     {CompositingReason::kBackfaceInvisibility3DAncestor,

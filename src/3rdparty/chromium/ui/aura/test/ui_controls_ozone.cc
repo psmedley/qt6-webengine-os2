@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -208,7 +208,7 @@ bool UIControlsOzone::SendMouseClick(ui_controls::MouseButton type) {
                          ui_controls::kNoAccelerator);
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 bool UIControlsOzone::SendTouchEvents(int action, int id, int x, int y) {
   return SendTouchEventsNotifyWhenDone(action, id, x, y, base::OnceClosure());
 }
@@ -252,7 +252,7 @@ void UIControlsOzone::SendEventToSink(ui::Event* event,
     base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                                   std::move(closure));
   }
-  WindowTreeHost* host = optional_host ? optional_host : host_;
+  WindowTreeHost* host = optional_host ? optional_host : host_.get();
   ui::EventSourceTestApi event_source_test(host->GetEventSource());
   std::ignore = event_source_test.SendEventToSink(event);
 }

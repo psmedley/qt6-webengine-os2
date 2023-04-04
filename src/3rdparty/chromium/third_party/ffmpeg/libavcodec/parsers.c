@@ -50,8 +50,10 @@ extern const AVCodecParser ff_h261_parser;
 extern const AVCodecParser ff_h263_parser;
 extern const AVCodecParser ff_h264_parser;
 extern const AVCodecParser ff_hevc_parser;
+extern const AVCodecParser ff_hdr_parser;
 extern const AVCodecParser ff_ipu_parser;
 extern const AVCodecParser ff_jpeg2000_parser;
+extern const AVCodecParser ff_misc4_parser;
 extern const AVCodecParser ff_mjpeg_parser;
 extern const AVCodecParser ff_mlp_parser;
 extern const AVCodecParser ff_mpeg4video_parser;
@@ -60,6 +62,7 @@ extern const AVCodecParser ff_mpegvideo_parser;
 extern const AVCodecParser ff_opus_parser;
 extern const AVCodecParser ff_png_parser;
 extern const AVCodecParser ff_pnm_parser;
+extern const AVCodecParser ff_qoi_parser;
 extern const AVCodecParser ff_rv30_parser;
 extern const AVCodecParser ff_rv40_parser;
 extern const AVCodecParser ff_sbc_parser;
@@ -73,6 +76,7 @@ extern const AVCodecParser ff_vp9_parser;
 extern const AVCodecParser ff_webp_parser;
 extern const AVCodecParser ff_xbm_parser;
 extern const AVCodecParser ff_xma_parser;
+extern const AVCodecParser ff_xwd_parser;
 
 #include "libavcodec/parser_list.c"
 

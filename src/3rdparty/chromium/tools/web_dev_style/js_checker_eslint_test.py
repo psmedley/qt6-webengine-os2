@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -54,17 +54,6 @@ class JsCheckerEsLintTest(unittest.TestCase):
     message = results[0]
     self.assertEqual(rule_id, message.get('ruleId'))
     self.assertEqual(line, message.get('line'))
-
-  def testGetElementByIdCheck(self):
-    results = self._runChecks("const a = document.getElementById('foo');", 'js')
-    self._assertError(results, 'no-restricted-properties', 1)
-
-    results = self._runChecks(
-        '''
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const a: HTMLELement = document.getElementById('foo');
-''', 'ts')
-    self._assertError(results, 'no-restricted-properties', 3)
 
   def testPrimitiveWrappersCheck(self):
     results = self._runChecks('const a = new Number(1);', 'js')

@@ -150,15 +150,14 @@ bool CPDF_CrossRefAvail::CheckCrossRefV4Trailer() {
     return false;
   }
 
-  const int32_t xrefpos =
-      GetDirectInteger(trailer.Get(), kPrevCrossRefFieldKey);
-  if (xrefpos &&
+  const int32_t xrefpos = trailer->GetDirectIntegerFor(kPrevCrossRefFieldKey);
+  if (xrefpos > 0 &&
       pdfium::base::IsValueInRangeForNumericType<FX_FILESIZE>(xrefpos))
     AddCrossRefForCheck(static_cast<FX_FILESIZE>(xrefpos));
 
   const int32_t stream_xref_offset =
-      GetDirectInteger(trailer.Get(), kPrevCrossRefStreamOffsetFieldKey);
-  if (stream_xref_offset &&
+      trailer->GetDirectIntegerFor(kPrevCrossRefStreamOffsetFieldKey);
+  if (stream_xref_offset > 0 &&
       pdfium::base::IsValueInRangeForNumericType<FX_FILESIZE>(
           stream_xref_offset))
     AddCrossRefForCheck(static_cast<FX_FILESIZE>(stream_xref_offset));
@@ -174,7 +173,7 @@ bool CPDF_CrossRefAvail::CheckCrossRefStream() {
   if (CheckReadProblems())
     return false;
 
-  const CPDF_Dictionary* trailer =
+  RetainPtr<const CPDF_Dictionary> trailer =
       cross_ref && cross_ref->IsStream() ? cross_ref->GetDict() : nullptr;
   if (!trailer) {
     status_ = CPDF_DataAvail::kDataError;
@@ -188,7 +187,7 @@ bool CPDF_CrossRefAvail::CheckCrossRefStream() {
 
   if (trailer->GetNameFor(kTypeFieldKey) == kXRefKeyword) {
     const int32_t xrefpos = trailer->GetIntegerFor(kPrevCrossRefFieldKey);
-    if (xrefpos &&
+    if (xrefpos > 0 &&
         pdfium::base::IsValueInRangeForNumericType<FX_FILESIZE>(xrefpos)) {
       AddCrossRefForCheck(static_cast<FX_FILESIZE>(xrefpos));
     }

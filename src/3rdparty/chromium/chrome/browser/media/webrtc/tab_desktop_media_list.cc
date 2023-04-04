@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/containers/adapters.h"
 #include "base/hash/hash.h"
 #include "base/task/bind_post_task.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/media/webrtc/desktop_media_list_layout_config.h"
@@ -196,7 +197,7 @@ void TabDesktopMediaList::Refresh(bool update_thumnails) {
   for (auto* contents : contents_list) {
     if (!includable_web_contents_filter_.Run(contents))
       continue;
-    content::RenderFrameHost* main_frame = contents->GetMainFrame();
+    content::RenderFrameHost* main_frame = contents->GetPrimaryMainFrame();
     DCHECK(main_frame);
     DesktopMediaID media_id(
         DesktopMediaID::TYPE_WEB_CONTENTS, DesktopMediaID::kNullId,

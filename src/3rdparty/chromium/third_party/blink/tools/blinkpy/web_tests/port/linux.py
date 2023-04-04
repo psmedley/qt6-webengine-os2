@@ -75,7 +75,8 @@ class LinuxPort(base.Port):
 
         # See //testing/xvfb.py for an explanation of parsing -help output.
         try:
-            output = self.host.executive.run_command(['Xvfb', '-help'])
+            output = self.host.executive.run_command(['Xvfb', '-help'],
+                                                     debug_logging=False)
             self._xvfb_supports_maxclients = (type(output) is str
                                               and '-maxclients' in output)
         except Exception:
@@ -115,9 +116,15 @@ class LinuxPort(base.Port):
     def operating_system(self):
         return 'linux'
 
+    def use_system_httpd(self):
+        if (self.host.platform.is_linux() and
+                self.host.platform.get_machine() == 'x86_64'):
+            return False
+        # use the system httpd on linux-arm64 and freebsd
+        return True
+
     def path_to_apache(self):
-        if self.host.platform.is_linux():
-            # use the system httpd on freebsd
+        if not self.use_system_httpd():
             return self._path_from_chromium_base(
                 'third_party', 'apache-linux', 'bin', 'httpd')
         # The Apache binary path can vary depending on OS and distribution

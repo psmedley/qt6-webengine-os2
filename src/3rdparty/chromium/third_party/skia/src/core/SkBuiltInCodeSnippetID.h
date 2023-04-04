@@ -11,27 +11,41 @@
 #include "include/core/SkTypes.h"
 
 // TODO: this needs to be expanded into a more flexible dictionary (esp. for user-supplied SkSL)
-enum class SkBuiltInCodeSnippetID : uint8_t {
-    // TODO: It seems like this requires some refinement. Fundamentally this doesn't seem like a
-    // draw that originated from a PaintParams.
-    kDepthStencilOnlyDraw,
-
+enum class SkBuiltInCodeSnippetID : int32_t {
     // This isn't just a signal for a failure during paintparams key creation. It also actually
     // implements the default behavior for an erroneous draw. Currently it just draws solid
     // magenta.
     kError,
 
     // SkShader code snippets
+    kPassthroughShader,
     kSolidColorShader,
-    kLinearGradientShader,
-    kRadialGradientShader,
-    kSweepGradientShader,
-    kConicalGradientShader,
+    kLinearGradientShader4,
+    kLinearGradientShader8,
+    kRadialGradientShader4,
+    kRadialGradientShader8,
+    kSweepGradientShader4,
+    kSweepGradientShader8,
+    kConicalGradientShader4,
+    kConicalGradientShader8,
 
+    kLocalMatrixShader,
     kImageShader,
-    kBlendShader,     // aka ComposeShader
+    kPorterDuffBlendShader,     // ComposeShader (lightweight, only supports Porter-Duff blends)
+    kBlendShader,               // ComposeShader (more code, but supports every SkBlendMode)
+    kRuntimeShader,
 
-    // BlendMode code snippets
+    // SkColorFilter code snippets
+    kMatrixColorFilter,
+    kBlendColorFilter,
+    kComposeColorFilter,
+    kTableColorFilter,
+    kGaussianColorFilter,
+
+    // SkBlender code snippets (evaluating a blend as part of the shader graph)
+    kPassthroughBlender,
+
+    // BlendMode code snippets (applying a blend to the destination)
     kFixedFunctionBlender,
     kShaderBasedBlender,
 

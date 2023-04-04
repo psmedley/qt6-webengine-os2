@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/dns/dns_transaction.h"
 
-#include <algorithm>
 #include <memory>
 #include <set>
 #include <string>
@@ -26,6 +25,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
@@ -72,9 +72,6 @@
 #include "net/socket/stream_socket.h"
 #include "net/third_party/uri_template/uri_template.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "net/url_request/url_fetcher_response_writer.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -126,10 +123,10 @@ bool IsIPLiteral(const std::string& hostname) {
 }
 
 base::Value NetLogStartParams(const std::string& hostname, uint16_t qtype) {
-  base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetStringKey("hostname", hostname);
-  dict.SetIntKey("query_type", qtype);
-  return dict;
+  base::Value::Dict dict;
+  dict.Set("hostname", hostname);
+  dict.Set("query_type", qtype);
+  return base::Value(std::move(dict));
 }
 
 // ----------------------------------------------------------------------------
@@ -169,23 +166,23 @@ class DnsAttempt {
   // to the NetLog source source of the UDP socket used.  The request must have
   // completed before this is called.
   base::Value NetLogResponseParams(NetLogCaptureMode capture_mode) const {
-    base::Value dict(base::Value::Type::DICTIONARY);
+    base::Value::Dict dict;
 
     if (GetResponse()) {
       DCHECK(GetResponse()->IsValid());
-      dict.SetIntKey("rcode", GetResponse()->rcode());
-      dict.SetIntKey("answer_count", GetResponse()->answer_count());
-      dict.SetIntKey("additional_answer_count",
-                     GetResponse()->additional_answer_count());
+      dict.Set("rcode", GetResponse()->rcode());
+      dict.Set("answer_count", static_cast<int>(GetResponse()->answer_count()));
+      dict.Set("additional_answer_count",
+               static_cast<int>(GetResponse()->additional_answer_count()));
     }
 
-    GetSocketNetLog().source().AddToEventParameters(&dict);
+    GetSocketNetLog().source().AddToEventParameters(dict);
 
     if (capture_mode == NetLogCaptureMode::kEverything) {
-      dict.SetKey("response_buffer", GetRawResponseBufferForLog());
+      dict.Set("response_buffer", GetRawResponseBufferForLog());
     }
 
-    return dict;
+    return base::Value(std::move(dict));
   }
 
   // True if current attempt is pending (waiting for server response).
@@ -203,7 +200,6 @@ class DnsUDPAttempt : public DnsAttempt {
                 std::unique_ptr<DnsQuery> query,
                 DnsUdpTracker* udp_tracker)
       : DnsAttempt(server_index),
-        next_state_(STATE_NONE),
         socket_(std::move(socket)),
         server_(server),
         query_(std::move(query)),
@@ -244,9 +240,7 @@ class DnsUDPAttempt : public DnsAttempt {
   base::Value GetRawResponseBufferForLog() const override {
     if (!response_)
       return base::Value();
-
-    return NetLogBinaryValue(response_->io_buffer()->data(),
-                             response_->io_buffer_size());
+    return NetLogBinaryValue(response_->io_buffer()->data(), read_size_);
   }
 
   const NetLogWithSource& GetSocketNetLog() const override {
@@ -328,6 +322,7 @@ class DnsUDPAttempt : public DnsAttempt {
     DCHECK_NE(ERR_IO_PENDING, rv);
     if (rv < 0)
       return rv;
+    read_size_ = rv;
 
     DCHECK(rv);
     bool parse_result = response_->InitParse(rv, *query_);
@@ -352,7 +347,7 @@ class DnsUDPAttempt : public DnsAttempt {
       std::move(callback_).Run(rv);
   }
 
-  State next_state_;
+  State next_state_ = STATE_NONE;
   base::TimeTicks start_time_;
 
   std::unique_ptr<DatagramClientSocket> socket_;
@@ -364,6 +359,7 @@ class DnsUDPAttempt : public DnsAttempt {
   const raw_ptr<DnsUdpTracker> udp_tracker_;
 
   std::unique_ptr<DnsResponse> response_;
+  int read_size_ = 0;
 
   CompletionOnceCallback callback_;
 };
@@ -595,7 +591,7 @@ class DnsHTTPAttempt : public DnsAttempt, public URLRequest::Delegate {
     buffer_->set_offset(0);
     if (size == 0u)
       return ERR_DNS_MALFORMED_RESPONSE;
-    response_ = std::make_unique<DnsResponse>(buffer_, size + 1);
+    response_ = std::make_unique<DnsResponse>(buffer_, size);
     if (!response_->InitParse(size, *query_))
       return ERR_DNS_MALFORMED_RESPONSE;
     if (response_->rcode() == dns_protocol::kRcodeNXDOMAIN)
@@ -652,12 +648,10 @@ class DnsTCPAttempt : public DnsAttempt {
                 std::unique_ptr<StreamSocket> socket,
                 std::unique_ptr<DnsQuery> query)
       : DnsAttempt(server_index),
-        next_state_(STATE_NONE),
         socket_(std::move(socket)),
         query_(std::move(query)),
         length_buffer_(
-            base::MakeRefCounted<IOBufferWithSize>(sizeof(uint16_t))),
-        response_length_(0) {}
+            base::MakeRefCounted<IOBufferWithSize>(sizeof(uint16_t))) {}
 
   DnsTCPAttempt(const DnsTCPAttempt&) = delete;
   DnsTCPAttempt& operator=(const DnsTCPAttempt&) = delete;
@@ -828,8 +822,7 @@ class DnsTCPAttempt : public DnsAttempt {
     // Check if advertised response is too short. (Optimization only.)
     if (response_length_ < query_->io_buffer()->size())
       return ERR_DNS_MALFORMED_RESPONSE;
-    // Allocate more space so that DnsResponse::InitParse sanity check passes.
-    response_ = std::make_unique<DnsResponse>(response_length_ + 1);
+    response_ = std::make_unique<DnsResponse>(response_length_);
     buffer_ = base::MakeRefCounted<DrainableIOBuffer>(response_->io_buffer(),
                                                       response_length_);
     next_state_ = STATE_READ_RESPONSE;
@@ -881,7 +874,7 @@ class DnsTCPAttempt : public DnsAttempt {
         base::BindOnce(&DnsTCPAttempt::OnIOComplete, base::Unretained(this)));
   }
 
-  State next_state_;
+  State next_state_ = STATE_NONE;
   base::TimeTicks start_time_;
 
   std::unique_ptr<StreamSocket> socket_;
@@ -889,15 +882,13 @@ class DnsTCPAttempt : public DnsAttempt {
   scoped_refptr<IOBufferWithSize> length_buffer_;
   scoped_refptr<DrainableIOBuffer> buffer_;
 
-  uint16_t response_length_;
+  uint16_t response_length_ = 0;
   std::unique_ptr<DnsResponse> response_;
 
   CompletionOnceCallback callback_;
 };
 
 // ----------------------------------------------------------------------------
-
-const char kDoHProbeHostname[] = "www.gstatic.com";
 
 const net::BackoffEntry::Policy kProbeBackoffPolicy = {
     // Apply exponential backoff rules after the first error.
@@ -933,7 +924,7 @@ class DnsOverHttpsProbeRunner : public DnsProbeRunner {
     DCHECK(!session_->config().doh_config.servers().empty());
     DCHECK(context_);
 
-    DNSDomainFromDot(kDoHProbeHostname, &formatted_probe_hostname_);
+    DNSDomainFromDot(kDohProbeHostname, &formatted_probe_hostname_);
 
     for (size_t i = 0; i < session_->config().doh_config.servers().size();
          i++) {
@@ -1053,7 +1044,7 @@ class DnsOverHttpsProbeRunner : public DnsProbeRunner {
         DnsResponseResultExtractor::ExtractionError extraction_error =
             extractor.ExtractDnsResults(
                 DnsQueryType::A,
-                /*original_domain_name=*/kDoHProbeHostname,
+                /*original_domain_name=*/kDohProbeHostname,
                 /*request_port=*/0, &results);
 
         if (extraction_error ==
@@ -1123,11 +1114,7 @@ class DnsTransactionImpl : public DnsTransaction,
         secure_dns_mode_(secure_dns_mode),
         fast_timeout_(fast_timeout),
         net_log_(net_log),
-        qnames_initial_size_(0),
-        attempts_count_(0),
-        had_tcp_retry_(false),
-        resolve_context_(resolve_context->AsSafeRef()),
-        request_priority_(DEFAULT_PRIORITY) {
+        resolve_context_(resolve_context->AsSafeRef()) {
     DCHECK(session_.get());
     DCHECK(!hostname_.empty());
     DCHECK(!IsIPLiteral(hostname_));
@@ -1235,9 +1222,9 @@ class DnsTransactionImpl : public DnsTransaction,
     }
 
     std::string qname;
-    for (size_t i = 0; i < config.search.size(); ++i) {
+    for (const auto& suffix : config.search) {
       // Ignore invalid (too long) combinations.
-      if (!DNSDomainFromDot(hostname_ + "." + config.search[i], &qname))
+      if (!DNSDomainFromDot(hostname_ + "." + suffix, &qname))
         continue;
       if (qname.size() == labeled_hostname.size()) {
         if (had_hostname)
@@ -1270,14 +1257,7 @@ class DnsTransactionImpl : public DnsTransaction,
     net_log_.EndEventWithNetErrorCode(NetLogEventType::DNS_TRANSACTION,
                                       result.rv);
 
-    absl::optional<std::string> doh_provider_id;
-    if (secure_ && result.attempt) {
-      size_t server_index = result.attempt->server_index();
-      doh_provider_id = GetDohProviderIdForHistogramFromServerConfig(
-          session_->config().doh_config.servers()[server_index]);
-    }
-
-    std::move(callback_).Run(result.rv, response, doh_provider_id);
+    std::move(callback_).Run(result.rv, response);
   }
 
   void RecordAttemptUma(DnsAttemptType attempt_type) {
@@ -1549,7 +1529,6 @@ class DnsTransactionImpl : public DnsTransaction,
             result = StartQuery();
           }
           break;
-        case ERR_CONNECTION_REFUSED:
         case ERR_DNS_TIMED_OUT:
           timer_.Stop();
 
@@ -1632,10 +1611,10 @@ class DnsTransactionImpl : public DnsTransaction,
   }
 
   bool AnyAttemptPending() {
-    return std::any_of(attempts_.begin(), attempts_.end(),
-                       [](std::unique_ptr<DnsAttempt>& attempt) {
-                         return attempt->IsPending();
-                       });
+    return base::ranges::any_of(attempts_,
+                                [](std::unique_ptr<DnsAttempt>& attempt) {
+                                  return attempt->IsPending();
+                                });
   }
 
   void OnFallbackPeriodExpired() {
@@ -1689,15 +1668,15 @@ class DnsTransactionImpl : public DnsTransaction,
 
   // Search list of fully-qualified DNS names to query next (in DNS format).
   base::circular_deque<std::string> qnames_;
-  size_t qnames_initial_size_;
+  size_t qnames_initial_size_ = 0;
 
   // List of attempts for the current name.
   std::vector<std::unique_ptr<DnsAttempt>> attempts_;
   // Count of attempts, not reset when |attempts_| vector is cleared.
-  int attempts_count_;
+  int attempts_count_ = 0;
 
   // Records when an attempt was retried via TCP due to a truncation error.
-  bool had_tcp_retry_;
+  bool had_tcp_retry_ = false;
 
   // Iterator to get the index of the DNS server for each search query.
   std::unique_ptr<DnsServerIterator> dns_server_iterator_;
@@ -1706,7 +1685,7 @@ class DnsTransactionImpl : public DnsTransaction,
   std::unique_ptr<base::ElapsedTimer> time_from_start_;
 
   base::SafeRef<ResolveContext> resolve_context_;
-  RequestPriority request_priority_;
+  RequestPriority request_priority_ = DEFAULT_PRIORITY;
 
   THREAD_CHECKER(thread_checker_);
 };
@@ -1740,11 +1719,12 @@ class DnsTransactionFactoryImpl : public DnsTransactionFactory {
         session_->GetWeakPtr(), resolve_context->GetWeakPtr());
   }
 
-  void AddEDNSOption(const OptRecordRdata::Opt& opt) override {
+  void AddEDNSOption(std::unique_ptr<OptRecordRdata::Opt> opt) override {
+    DCHECK(opt);
     if (opt_rdata_ == nullptr)
       opt_rdata_ = std::make_unique<OptRecordRdata>();
 
-    opt_rdata_->AddOpt(opt);
+    opt_rdata_->AddOpt(std::move(opt));
   }
 
   SecureDnsMode GetSecureDnsModeForTest() override {
@@ -1764,8 +1744,7 @@ DnsTransactionFactory::~DnsTransactionFactory() = default;
 // static
 std::unique_ptr<DnsTransactionFactory> DnsTransactionFactory::CreateFactory(
     DnsSession* session) {
-  return std::unique_ptr<DnsTransactionFactory>(
-      new DnsTransactionFactoryImpl(session));
+  return std::make_unique<DnsTransactionFactoryImpl>(session);
 }
 
 }  // namespace net

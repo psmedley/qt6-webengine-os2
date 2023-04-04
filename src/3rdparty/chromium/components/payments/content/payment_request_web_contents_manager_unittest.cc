@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ class PaymentRequestWebContentsManagerTest : public testing::Test {
 
     // PaymentRequest is a DocumentService, whose lifetime is managed by the
     // RenderFrameHost passed in here.
-    return new PaymentRequest(web_contents()->GetMainFrame(),
+    return new PaymentRequest(*web_contents()->GetPrimaryMainFrame(),
                               std::move(delegate), std::move(display_manager),
                               std::move(receiver), mode,
                               /*observer_for_testing=*/nullptr);

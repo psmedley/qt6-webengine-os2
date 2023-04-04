@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,6 +134,22 @@ em::RemoteCommandResult::ResultType CommandStatusToResultType(
   NOTREACHED();
   return em::RemoteCommandResult_ResultType_RESULT_IGNORED;
 }
+
+std::string ToString(
+    enterprise_management::RemoteCommandResult::ResultType type) {
+#define CASE(_name)                                       \
+  case enterprise_management::RemoteCommandResult::_name: \
+    return #_name;
+
+  switch (type) {
+    CASE(RESULT_IGNORED);
+    CASE(RESULT_FAILURE);
+    CASE(RESULT_SUCCESS);
+  }
+  return base::StringPrintf("Unknown type %i", type);
+#undef CASE
+}
+
 }  // namespace
 
 // static
@@ -371,7 +387,8 @@ void RemoteCommandsService::OnJobFinished(RemoteCommandJob* command) {
     result.set_payload(std::move(*result_payload));
 
   SYSLOG(INFO) << "Remote command " << command->unique_id()
-               << " finished with result " << result.result();
+               << " finished with result " << ToString(result.result()) << " ("
+               << result.result() << ")";
 
   unsent_results_.push_back(result);
 

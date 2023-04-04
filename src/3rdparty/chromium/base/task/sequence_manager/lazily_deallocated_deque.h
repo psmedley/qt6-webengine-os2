@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/debug/alias.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -373,7 +374,7 @@ class LazilyDeallocatedDeque {
 
   // `tail_` is not a raw_ptr<...> for performance reasons (based on analysis of
   // sampling profiler data and tab_search:top100:2020).
-  Ring* tail_ = nullptr;
+  RAW_PTR_EXCLUSION Ring* tail_ = nullptr;
 
   size_t size_ = 0;
   size_t max_size_ = 0;

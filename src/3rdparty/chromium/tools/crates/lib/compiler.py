@@ -1,5 +1,5 @@
 # python3
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Provide abstractions around concepts from the Rust compiler.
@@ -55,7 +55,9 @@ class ArchSet:
         """A string representation of the `ArchSet`."""
         return "ArchSet({})".format(repr(self._set))
 
-    def __eq__(self, other: ArchSet) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ArchSet):
+            return NotImplemented
         """Whether `self` and `other` contain the same architectures."""
         return self._set == other._set
 
@@ -300,7 +302,9 @@ class BuildConditionSet:
         """A string representation of a `BuildConditionSet`."""
         return "BuildConditionSet({})".format(repr(self.arch_set))
 
-    def __eq__(self, other: BuildConditionSet) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, BuildConditionSet):
+            return NotImplemented
         """Whether two sets cover the same BUILD file configurations."""
         return self.arch_set == other.arch_set
 

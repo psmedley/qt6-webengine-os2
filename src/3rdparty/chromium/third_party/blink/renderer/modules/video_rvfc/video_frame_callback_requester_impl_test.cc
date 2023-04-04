@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/platform/testing/empty_web_media_player.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 using testing::_;
@@ -170,13 +169,8 @@ class VfcRequesterParameterVerifierCallback
 
 }  // namespace
 
-class VideoFrameCallbackRequesterImplTest
-    : public PageTestBase,
-      private ScopedRequestVideoFrameCallbackForTest {
+class VideoFrameCallbackRequesterImplTest : public PageTestBase {
  public:
-  VideoFrameCallbackRequesterImplTest()
-      : ScopedRequestVideoFrameCallbackForTest(true) {}
-
   virtual void SetUpWebMediaPlayer() {
     auto mock_media_player = std::make_unique<MockWebMediaPlayer>();
     media_player_ = mock_media_player.get();

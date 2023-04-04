@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,8 @@ class BookmarkEventRouter : public bookmarks::BookmarkModelObserver {
                          size_t new_index) override;
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override;
+                         size_t index,
+                         bool added_by_user) override;
   void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
                            const bookmarks::BookmarkNode* parent,
                            size_t old_index,
@@ -88,7 +89,7 @@ class BookmarkEventRouter : public bookmarks::BookmarkModelObserver {
   // Helper to actually dispatch an event to extension listeners.
   void DispatchEvent(events::HistogramValue histogram_value,
                      const std::string& event_name,
-                     std::vector<base::Value> event_args);
+                     base::Value::List event_args);
 
   raw_ptr<content::BrowserContext> browser_context_;
   raw_ptr<bookmarks::BookmarkModel> model_;
@@ -158,7 +159,6 @@ class BookmarksFunction : public ExtensionFunction,
   const bookmarks::BookmarkNode* CreateBookmarkNode(
       bookmarks::BookmarkModel* model,
       const api::bookmarks::CreateDetails& details,
-      const bookmarks::BookmarkNode::MetaInfoMap* meta_info,
       std::string* error);
 
   // Helper that checks if bookmark editing is enabled.

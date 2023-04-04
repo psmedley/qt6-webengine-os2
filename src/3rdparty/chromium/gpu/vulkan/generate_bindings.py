@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -270,7 +270,7 @@ VULKAN_DEVICE_FUNCTIONS = [
 SELF_LOCATION = os.path.dirname(os.path.abspath(__file__))
 
 LICENSE_AND_HEADER = """\
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -354,8 +354,7 @@ def WriteMacros(out_file, functions):
     n = len(params)
 
     callstat = ''
-    if (func == 'vkQueueSubmit' or func == 'vkQueueWaitIdle'
-        or func == 'vkQueuePresentKHR'):
+    if func in ('vkQueueSubmit', 'vkQueueWaitIdle', 'vkQueuePresentKHR'):
         callstat = '''base::AutoLockMaybe auto_lock
         (gpu::GetVulkanFunctionPointers()->per_queue_lock_map[queue].get());
         \n'''

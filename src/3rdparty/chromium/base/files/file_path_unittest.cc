@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -803,8 +803,12 @@ TEST_F(FilePathTest, Extension2) {
     { FPL("/foo.tar.bz"),            FPL(".tar.bz") },
     { FPL("/foo.tar.bz2"),           FPL(".tar.bz2") },
     { FPL("/foo.tar.gz"),            FPL(".tar.gz") },
+    { FPL("/foo.tar.lz"),            FPL(".tar.lz") },
+    { FPL("/foo.tar.lzma"),          FPL(".tar.lzma") },
+    { FPL("/foo.tar.lzo"),           FPL(".tar.lzo") },
     { FPL("/foo.tar.xz"),            FPL(".tar.xz") },
     { FPL("/foo.tar.z"),             FPL(".tar.z") },
+    { FPL("/foo.tar.zst"),           FPL(".tar.zst") },
     // `kCommonDoubleExtensions` cases.
     { FPL("/foo.1234.user.js"),      FPL(".user.js") },
     { FPL("foo.user.js"),            FPL(".user.js") },

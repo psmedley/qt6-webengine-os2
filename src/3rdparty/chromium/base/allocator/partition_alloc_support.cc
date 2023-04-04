@@ -1,10 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_alloc_support.h"
 
 #include <array>
+#include <cinttypes>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -14,22 +15,25 @@
 #include "base/allocator/partition_allocator/allocation_guard.h"
 #include "base/allocator/partition_allocator/dangling_raw_ptr_checks.h"
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/debug/alias.h"
+#include "base/allocator/partition_allocator/partition_alloc_buildflags.h"
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
 #include "base/allocator/partition_allocator/partition_lock.h"
-#include "base/allocator/partition_allocator/starscan/pcscan.h"
-#include "base/allocator/partition_allocator/starscan/stats_collector.h"
-#include "base/allocator/partition_allocator/starscan/stats_reporter.h"
 #include "base/allocator/partition_allocator/thread_cache.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/check.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/debug/stack_trace.h"
+#include "base/debug/task_trace.h"
 #include "base/feature_list.h"
 #include "base/immediate_crash.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_annotations.h"
 #include "base/threading/platform_thread.h"
@@ -39,6 +43,12 @@
 #include "base/trace_event/base_tracing.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
+#if BUILDFLAG(STARSCAN)
+#include "base/allocator/partition_allocator/starscan/pcscan.h"
+#include "base/allocator/partition_allocator/starscan/stats_collector.h"
+#include "base/allocator/partition_allocator/starscan/stats_reporter.h"
+#endif  // BUILDFLAG(STARSCAN)
+
 namespace base {
 namespace allocator {
 
@@ -46,18 +56,19 @@ namespace {
 
 #if defined(PA_ALLOW_PCSCAN)
 
+#if BUILDFLAG(ENABLE_BASE_TRACING)
 constexpr const char* ScannerIdToTracingString(
-    internal::StatsCollector::ScannerId id) {
+    partition_alloc::internal::StatsCollector::ScannerId id) {
   switch (id) {
-    case internal::StatsCollector::ScannerId::kClear:
+    case partition_alloc::internal::StatsCollector::ScannerId::kClear:
       return "PCScan.Scanner.Clear";
-    case internal::StatsCollector::ScannerId::kScan:
+    case partition_alloc::internal::StatsCollector::ScannerId::kScan:
       return "PCScan.Scanner.Scan";
-    case internal::StatsCollector::ScannerId::kSweep:
+    case partition_alloc::internal::StatsCollector::ScannerId::kSweep:
       return "PCScan.Scanner.Sweep";
-    case internal::StatsCollector::ScannerId::kOverall:
+    case partition_alloc::internal::StatsCollector::ScannerId::kOverall:
       return "PCScan.Scanner";
-    case internal::StatsCollector::ScannerId::kNumIds:
+    case partition_alloc::internal::StatsCollector::ScannerId::kNumIds:
 #if defined(__GNUC__) || defined(__clang__)
       __builtin_unreachable();
 #endif
@@ -66,51 +77,66 @@ constexpr const char* ScannerIdToTracingString(
 }
 
 constexpr const char* MutatorIdToTracingString(
-    internal::StatsCollector::MutatorId id) {
+    partition_alloc::internal::StatsCollector::MutatorId id) {
   switch (id) {
-    case internal::StatsCollector::MutatorId::kClear:
+    case partition_alloc::internal::StatsCollector::MutatorId::kClear:
       return "PCScan.Mutator.Clear";
-    case internal::StatsCollector::MutatorId::kScanStack:
+    case partition_alloc::internal::StatsCollector::MutatorId::kScanStack:
       return "PCScan.Mutator.ScanStack";
-    case internal::StatsCollector::MutatorId::kScan:
+    case partition_alloc::internal::StatsCollector::MutatorId::kScan:
       return "PCScan.Mutator.Scan";
-    case internal::StatsCollector::MutatorId::kOverall:
+    case partition_alloc::internal::StatsCollector::MutatorId::kOverall:
       return "PCScan.Mutator";
-    case internal::StatsCollector::MutatorId::kNumIds:
+    case partition_alloc::internal::StatsCollector::MutatorId::kNumIds:
 #if defined(__GNUC__) || defined(__clang__)
       __builtin_unreachable();
 #endif
       return nullptr;
   }
 }
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
 // Inject TRACE_EVENT_BEGIN/END, TRACE_COUNTER1, and UmaHistogramTimes.
 class StatsReporterImpl final : public partition_alloc::StatsReporter {
  public:
-  void ReportTraceEvent(internal::StatsCollector::ScannerId id,
-                        [[maybe_unused]] const PlatformThreadId tid,
-                        TimeTicks start_time,
-                        TimeTicks end_time) override {
+  void ReportTraceEvent(
+      partition_alloc::internal::StatsCollector::ScannerId id,
+      [[maybe_unused]] partition_alloc::internal::base::PlatformThreadId tid,
+      int64_t start_time_ticks_internal_value,
+      int64_t end_time_ticks_internal_value) override {
+#if BUILDFLAG(ENABLE_BASE_TRACING)
     // TRACE_EVENT_* macros below drop most parameters when tracing is
     // disabled at compile time.
     const char* tracing_id = ScannerIdToTracingString(id);
+    const TimeTicks start_time =
+        TimeTicks::FromInternalValue(start_time_ticks_internal_value);
+    const TimeTicks end_time =
+        TimeTicks::FromInternalValue(end_time_ticks_internal_value);
     TRACE_EVENT_BEGIN(kTraceCategory, perfetto::StaticString(tracing_id),
                       perfetto::ThreadTrack::ForThread(tid), start_time);
     TRACE_EVENT_END(kTraceCategory, perfetto::ThreadTrack::ForThread(tid),
                     end_time);
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
   }
 
-  void ReportTraceEvent(internal::StatsCollector::MutatorId id,
-                        [[maybe_unused]] const PlatformThreadId tid,
-                        TimeTicks start_time,
-                        TimeTicks end_time) override {
+  void ReportTraceEvent(
+      partition_alloc::internal::StatsCollector::MutatorId id,
+      [[maybe_unused]] partition_alloc::internal::base::PlatformThreadId tid,
+      int64_t start_time_ticks_internal_value,
+      int64_t end_time_ticks_internal_value) override {
+#if BUILDFLAG(ENABLE_BASE_TRACING)
     // TRACE_EVENT_* macros below drop most parameters when tracing is
     // disabled at compile time.
     const char* tracing_id = MutatorIdToTracingString(id);
+    const TimeTicks start_time =
+        TimeTicks::FromInternalValue(start_time_ticks_internal_value);
+    const TimeTicks end_time =
+        TimeTicks::FromInternalValue(end_time_ticks_internal_value);
     TRACE_EVENT_BEGIN(kTraceCategory, perfetto::StaticString(tracing_id),
                       perfetto::ThreadTrack::ForThread(tid), start_time);
     TRACE_EVENT_END(kTraceCategory, perfetto::ThreadTrack::ForThread(tid),
                     end_time);
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
   }
 
   void ReportSurvivedQuarantineSize(size_t survived_size) override {
@@ -126,7 +152,8 @@ class StatsReporterImpl final : public partition_alloc::StatsReporter {
                    1000 * survived_rate);
   }
 
-  void ReportStats(const char* stats_name, TimeDelta sample) override {
+  void ReportStats(const char* stats_name, int64_t sample_in_usec) override {
+    TimeDelta sample = Microseconds(sample_in_usec);
     UmaHistogramTimes(stats_name, sample);
   }
 
@@ -146,7 +173,7 @@ void RegisterPCScanStatsReporter() {
 
   DCHECK(!registered);
 
-  internal::PCScan::RegisterStatsReporter(&s_reporter);
+  partition_alloc::internal::PCScan::RegisterStatsReporter(&s_reporter);
   registered = true;
 }
 #endif  // defined(PA_ALLOW_PCSCAN)
@@ -281,6 +308,13 @@ std::map<std::string, std::string> ProposeSyntheticFinchTrials() {
         brp_group_name = "EnabledBeforeAlloc";
 #endif
         break;
+      case features::BackupRefPtrMode::kEnabledWithoutZapping:
+#if BUILDFLAG(PUT_REF_COUNT_IN_PREVIOUS_SLOT)
+        brp_group_name = "EnabledPrevSlotWithoutZapping";
+#else
+        brp_group_name = "EnabledBeforeAllocWithoutZapping";
+#endif
+        break;
       case features::BackupRefPtrMode::kDisabledButSplitPartitions2Way:
         brp_group_name = "DisabledBut2WaySplit";
         break;
@@ -340,14 +374,6 @@ std::map<std::string, std::string> ProposeSyntheticFinchTrials() {
   trials.emplace("PCScan_Effective_Fallback", pcscan_group_name_fallback);
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 
-  trials.emplace("FakeBinaryExperiment",
-#if BUILDFLAG(USE_FAKE_BINARY_EXPERIMENT)
-                 "Enabled"
-#else
-                 "Disabled"
-#endif
-  );
-
   return trials;
 }
 
@@ -366,6 +392,7 @@ DanglingRawPtrBuffer g_stack_trace_buffer GUARDED_BY(g_stack_trace_buffer_lock);
 
 void DanglingRawPtrDetected(uintptr_t id) {
   // This is called from inside the allocator. No allocation is allowed.
+
   internal::PartitionAutoLock guard(g_stack_trace_buffer_lock);
 
 #if DCHECK_IS_ON()
@@ -384,37 +411,104 @@ void DanglingRawPtrDetected(uintptr_t id) {
   // enough.
 }
 
-void DanglingRawPtrReleased(uintptr_t id) {
+// From the StackTrace recorded in |DanglingRawPtrDetected|, extract the one
+// whose id match |id|. Return nullopt if not found.
+absl::optional<debug::StackTrace> TakeStackTrace(uintptr_t id) {
+  internal::PartitionAutoLock guard(g_stack_trace_buffer_lock);
+  for (absl::optional<StackTraceWithID>& entry : g_stack_trace_buffer) {
+    if (entry && entry->id == id) {
+      debug::StackTrace stack_trace = std::move(entry->stack_trace);
+      entry = absl::nullopt;
+      return stack_trace;
+    }
+  }
+  return absl::nullopt;
+}
+
+// Extract from the StackTrace output, the signature of the pertinent caller.
+// This function is meant to be used only by Chromium developers, to list what
+// are all the dangling raw_ptr occurrences in a table.
+std::string ExtractDanglingPtrSignature(std::string stacktrace) {
+  std::vector<StringPiece> lines = SplitStringPiece(
+      stacktrace, "\r\n", TRIM_WHITESPACE, SPLIT_WANT_NONEMPTY);
+
+  // We are looking for the callers of the function releasing the raw_ptr and
+  // freeing memory:
+  const StringPiece callees[] = {
+      "internal::BackupRefPtrImpl<>::ReleaseInternal()",
+      "internal::PartitionFree()",
+      "base::(anonymous namespace)::FreeFn()",
+  };
+  size_t caller_index = 0;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    for (const auto& callee : callees) {
+      if (lines[i].find(callee) != StringPiece::npos) {
+        caller_index = i + 1;
+      }
+    }
+  }
+  if (caller_index >= lines.size()) {
+    return "undefined";
+  }
+  StringPiece caller = lines[caller_index];
+
+  // |callers| follows the following format:
+  //
+  //    #4 0x56051fe3404b content::GeneratedCodeCache::DidCreateBackend()
+  //    -- -------------- -----------------------------------------------
+  // Depth Address        Function
+
+  size_t address_start = caller.find(' ');
+  size_t function_start = caller.find(' ', address_start + 1);
+
+  if (address_start == caller.npos || function_start == caller.npos) {
+    return "undefined";
+  }
+
+  return std::string(caller.substr(function_start + 1));
+}
+
+void DanglingRawPtrReleasedLogSignature(uintptr_t id) {
   // This is called from raw_ptr<>'s release operation. Making allocations is
   // allowed. In particular, symbolizing and printing the StackTraces may
   // allocate memory.
 
-  internal::PartitionAutoLock guard(g_stack_trace_buffer_lock);
-
-  absl::optional<std::string> stack_trace_free;
-  std::string stack_trace_release = base::debug::StackTrace().ToString();
-  for (absl::optional<StackTraceWithID>& entry : g_stack_trace_buffer) {
-    if (entry && entry->id == id) {
-      stack_trace_free = entry->stack_trace.ToString();
-      entry = absl::nullopt;
-      break;
-    }
-  }
+  debug::StackTrace stack_trace_release;
+  absl::optional<debug::StackTrace> stack_trace_free = TakeStackTrace(id);
 
   if (stack_trace_free) {
-    LOG(ERROR) << base::StringPrintf(
-        "Detected dangling raw_ptr with id=0x%016" PRIxPTR
-        ":\n\n"
-        "The memory was freed at:\n%s\n"
-        "The dangling raw_ptr was released at:\n%s",
-        id, stack_trace_free->c_str(), stack_trace_release.c_str());
+    LOG(ERROR) << StringPrintf(
+        "[DanglingSignature]\t%s\t%s",
+        ExtractDanglingPtrSignature(stack_trace_release.ToString()).c_str(),
+        ExtractDanglingPtrSignature(stack_trace_free->ToString()).c_str());
   } else {
-    LOG(ERROR) << base::StringPrintf(
-        "Detected dangling raw_ptr with id=0x%016" PRIxPTR
-        ":\n\n"
-        "It was not recorded where the memory was freed.\n\n"
-        "The dangling raw_ptr was released at:\n%s",
-        id, stack_trace_release.c_str());
+    LOG(ERROR) << StringPrintf(
+        "[DanglingSignature]\t%s\tmissing-stacktrace",
+        ExtractDanglingPtrSignature(stack_trace_release.ToString()).c_str());
+  }
+}
+
+void DanglingRawPtrReleasedCrash(uintptr_t id) {
+  // This is called from raw_ptr<>'s release operation. Making allocations is
+  // allowed. In particular, symbolizing and printing the StackTraces may
+  // allocate memory.
+  debug::StackTrace stack_trace_release;
+  debug::TaskTrace task_trace_release;
+  absl::optional<debug::StackTrace> stack_trace_free = TakeStackTrace(id);
+
+  if (stack_trace_free) {
+    LOG(ERROR) << "Detected dangling raw_ptr with id="
+               << StringPrintf("0x%016" PRIxPTR, id) << ":\n\n"
+               << "The memory was freed at:\n"
+               << *stack_trace_free << "\n"
+               << "The dangling raw_ptr was released at:\n"
+               << stack_trace_release << task_trace_release;
+  } else {
+    LOG(ERROR) << "Detected dangling raw_ptr with id="
+               << StringPrintf("0x%016" PRIxPTR, id) << ":\n\n"
+               << "It was not recorded where the memory was freed.\n\n"
+               << "The dangling raw_ptr was released at:\n"
+               << stack_trace_release << task_trace_release;
   }
   IMMEDIATE_CRASH();
 }
@@ -431,8 +525,24 @@ void InstallDanglingRawPtrChecks() {
   // restarting the test executable.
   ClearDanglingRawPtrBuffer();
 
-  partition_alloc::SetDanglingRawPtrDetectedFn(DanglingRawPtrDetected);
-  partition_alloc::SetDanglingRawPtrReleasedFn(DanglingRawPtrReleased);
+  if (!FeatureList::IsEnabled(features::kPartitionAllocDanglingPtr)) {
+    partition_alloc::SetDanglingRawPtrDetectedFn([](uintptr_t) {});
+    partition_alloc::SetDanglingRawPtrReleasedFn([](uintptr_t) {});
+    return;
+  }
+
+  switch (features::kDanglingPtrModeParam.Get()) {
+    case features::DanglingPtrMode::kCrash:
+      partition_alloc::SetDanglingRawPtrDetectedFn(DanglingRawPtrDetected);
+      partition_alloc::SetDanglingRawPtrReleasedFn(DanglingRawPtrReleasedCrash);
+      break;
+
+    case features::DanglingPtrMode::kLogSignature:
+      partition_alloc::SetDanglingRawPtrDetectedFn(DanglingRawPtrDetected);
+      partition_alloc::SetDanglingRawPtrReleasedFn(
+          DanglingRawPtrReleasedLogSignature);
+      break;
+  }
 }
 
 // TODO(arthursonzogni): There might exist long lived dangling raw_ptr. If there
@@ -442,6 +552,41 @@ void InstallDanglingRawPtrChecks() {
 #else   // BUILDFLAG(ENABLE_DANGLING_RAW_PTR_CHECKS)
 void InstallDanglingRawPtrChecks() {}
 #endif  // BUILDFLAG(ENABLE_DANGLING_RAW_PTR_CHECKS)
+
+void UnretainedDanglingRawPtrDetectedDumpWithoutCrashing(uintptr_t id) {
+  PA_NO_CODE_FOLDING();
+  debug::DumpWithoutCrashing();
+}
+
+void UnretainedDanglingRawPtrDetectedCrash(uintptr_t id) {
+  debug::TaskTrace task_trace;
+  debug::StackTrace stack_trace;
+  LOG(ERROR) << "Detected dangling raw_ptr in unretained with id="
+             << StringPrintf("0x%016" PRIxPTR, id) << ":\n\n"
+             << task_trace << stack_trace;
+  IMMEDIATE_CRASH();
+}
+
+void InstallUnretainedDanglingRawPtrChecks() {
+  if (!FeatureList::IsEnabled(features::kPartitionAllocUnretainedDanglingPtr)) {
+    partition_alloc::SetUnretainedDanglingRawPtrDetectedFn([](uintptr_t) {});
+    partition_alloc::SetUnretainedDanglingRawPtrCheckEnabled(/*enabled=*/false);
+    return;
+  }
+
+  partition_alloc::SetUnretainedDanglingRawPtrCheckEnabled(/*enabled=*/true);
+  switch (features::kUnretainedDanglingPtrModeParam.Get()) {
+    case features::UnretainedDanglingPtrMode::kCrash:
+      partition_alloc::SetUnretainedDanglingRawPtrDetectedFn(
+          &UnretainedDanglingRawPtrDetectedCrash);
+      break;
+
+    case features::UnretainedDanglingPtrMode::kDumpWithoutCrashing:
+      partition_alloc::SetUnretainedDanglingRawPtrDetectedFn(
+          &UnretainedDanglingRawPtrDetectedDumpWithoutCrashing);
+      break;
+  }
+}
 
 }  // namespace allocator
 }  // namespace base

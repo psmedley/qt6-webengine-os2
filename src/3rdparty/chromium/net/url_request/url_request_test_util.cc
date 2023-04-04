@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,8 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/do_nothing_ct_verifier.h"
-#include "net/cookies/same_party_context.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/first_party_sets/same_party_context.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_server_properties.h"
@@ -58,7 +58,7 @@ const char kTestNetworkDelegateRequestIdKey[] =
 
 class TestRequestId : public base::SupportsUserData::Data {
  public:
-  TestRequestId(int id) : id_(id) {}
+  explicit TestRequestId(int id) : id_(id) {}
   ~TestRequestId() override = default;
 
   int id() const { return id_; }
@@ -84,10 +84,8 @@ std::unique_ptr<URLRequestContextBuilder> CreateTestURLRequestContextBuilder() {
   builder->SetHttpAuthHandlerFactory(HttpAuthHandlerFactory::CreateDefault());
   builder->SetHttpServerProperties(std::make_unique<HttpServerProperties>());
   builder->set_quic_context(std::make_unique<QuicContext>());
-  builder->SetCookieStore(
-      std::make_unique<CookieMonster>(/*store=*/nullptr,
-                                      /*netlog=*/nullptr,
-                                      /*first_party_sets_enabled=*/false));
+  builder->SetCookieStore(std::make_unique<CookieMonster>(/*store=*/nullptr,
+                                                          /*netlog=*/nullptr));
   builder->set_http_user_agent_settings(
       std::make_unique<StaticHttpUserAgentSettings>("en-us,fr", std::string()));
   return builder;
@@ -304,24 +302,7 @@ void TestDelegate::OnResponseCompleted(URLRequest* request) {
     std::move(on_complete_).Run();
 }
 
-TestNetworkDelegate::TestNetworkDelegate()
-    : last_error_(0),
-      error_count_(0),
-      created_requests_(0),
-      destroyed_requests_(0),
-      completed_requests_(0),
-      canceled_requests_(0),
-      cookie_options_bit_mask_(0),
-      blocked_annotate_cookies_count_(0),
-      blocked_set_cookie_count_(0),
-      set_cookie_count_(0),
-      before_start_transaction_count_(0),
-      headers_received_count_(0),
-      has_load_timing_info_before_redirect_(false),
-      cancel_request_with_policy_violating_referrer_(false),
-      before_start_transaction_fails_(false),
-      add_header_to_first_response_(false),
-      next_request_id_(0) {}
+TestNetworkDelegate::TestNetworkDelegate() = default;
 
 TestNetworkDelegate::~TestNetworkDelegate() {
   for (auto i = next_states_.begin(); i != next_states_.end(); ++i) {
@@ -407,8 +388,8 @@ int TestNetworkDelegate::OnHeadersReceived(
   next_states_[req_id] |= kStageBeforeStartTransaction;
 
   if (!redirect_on_headers_received_url_.is_empty()) {
-    *override_response_headers =
-        new HttpResponseHeaders(original_response_headers->raw_headers());
+    *override_response_headers = base::MakeRefCounted<HttpResponseHeaders>(
+        original_response_headers->raw_headers());
     (*override_response_headers)->ReplaceStatusLine("HTTP/1.1 302 Found");
     (*override_response_headers)->RemoveHeader("Location");
     (*override_response_headers)
@@ -419,8 +400,8 @@ int TestNetworkDelegate::OnHeadersReceived(
     // Since both values are absl::optionals, can just copy this over.
     *preserve_fragment_on_redirect_url = preserve_fragment_on_redirect_url_;
   } else if (add_header_to_first_response_ && is_first_response) {
-    *override_response_headers =
-        new HttpResponseHeaders(original_response_headers->raw_headers());
+    *override_response_headers = base::MakeRefCounted<HttpResponseHeaders>(
+        original_response_headers->raw_headers());
     (*override_response_headers)
         ->AddHeader("X-Network-Delegate", "Greetings, planet");
   }
@@ -518,10 +499,10 @@ void TestNetworkDelegate::OnURLRequestDestroyed(URLRequest* request) {
 
 bool TestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
     const URLRequest& request,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
     net::CookieAccessResultList& maybe_included_cookies,
-    net::CookieAccessResultList& excluded_cookies,
-    bool allowed_from_caller) {
-  bool allow = allowed_from_caller;
+    net::CookieAccessResultList& excluded_cookies) {
+  bool allow = true;
   if (cookie_options_bit_mask_ & NO_GET_COOKIES)
     allow = false;
 
@@ -544,9 +525,8 @@ NetworkDelegate::PrivacySetting TestNetworkDelegate::OnForcePrivacyMode(
 
 bool TestNetworkDelegate::OnCanSetCookie(const URLRequest& request,
                                          const net::CanonicalCookie& cookie,
-                                         CookieOptions* options,
-                                         bool allowed_from_caller) {
-  bool allow = allowed_from_caller;
+                                         CookieOptions* options) {
+  bool allow = true;
   if (cookie_options_bit_mask_ & NO_SET_COOKIE)
     allow = false;
 
@@ -566,6 +546,14 @@ bool TestNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(
   return cancel_request_with_policy_violating_referrer_;
 }
 
+absl::optional<FirstPartySetsCacheFilter::MatchInfo>
+TestNetworkDelegate::OnGetFirstPartySetsCacheFilterMatchInfoMaybeAsync(
+    const SchemefulSite& request_site,
+    base::OnceCallback<void(FirstPartySetsCacheFilter::MatchInfo)> callback)
+    const {
+  return fps_cache_filter_.GetMatchInfo(request_site);
+}
+
 int TestNetworkDelegate::GetRequestId(URLRequest* request) {
   TestRequestId* test_request_id = reinterpret_cast<TestRequestId*>(
       request->GetUserData(kTestNetworkDelegateRequestIdKey));
@@ -583,18 +571,19 @@ FilteringTestNetworkDelegate::~FilteringTestNetworkDelegate() = default;
 bool FilteringTestNetworkDelegate::OnCanSetCookie(
     const URLRequest& request,
     const net::CanonicalCookie& cookie,
-    CookieOptions* options,
-    bool allowed_from_caller) {
+    CookieOptions* options) {
   // Filter out cookies with the same name as |cookie_name_filter_| and
   // combine with |allowed_from_caller|.
-  bool allowed = allowed_from_caller && !(cookie.Name() == cookie_name_filter_);
+  bool allowed = cookie.Name() != cookie_name_filter_;
 
   ++set_cookie_called_count_;
 
   if (!allowed)
     ++blocked_set_cookie_count_;
 
-  return TestNetworkDelegate::OnCanSetCookie(request, cookie, options, allowed);
+  // Call the nested delegate's method first to avoid a short circuit.
+  return TestNetworkDelegate::OnCanSetCookie(request, cookie, options) &&
+         allowed;
 }
 
 NetworkDelegate::PrivacySetting
@@ -615,12 +604,12 @@ FilteringTestNetworkDelegate::OnForcePrivacyMode(
 
 bool FilteringTestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
     const URLRequest& request,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
     net::CookieAccessResultList& maybe_included_cookies,
-    net::CookieAccessResultList& excluded_cookies,
-    bool allowed_from_caller) {
+    net::CookieAccessResultList& excluded_cookies) {
   // Filter out cookies if |block_annotate_cookies_| is set and
   // combine with |allowed_from_caller|.
-  bool allowed = allowed_from_caller && !block_annotate_cookies_;
+  bool allowed = !block_annotate_cookies_;
 
   ++annotate_cookies_called_count_;
 
@@ -647,8 +636,11 @@ bool FilteringTestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
     MoveExcludedCookies(maybe_included_cookies, excluded_cookies);
   }
 
+  // Call the nested delegate's method first to avoid a short circuit.
   return TestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
-      request, maybe_included_cookies, excluded_cookies, allowed);
+             request, first_party_set_metadata, maybe_included_cookies,
+             excluded_cookies) &&
+         allowed;
 }
 
 // URLRequestInterceptor that intercepts only the first request it sees,

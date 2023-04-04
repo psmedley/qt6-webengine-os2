@@ -15,8 +15,20 @@ import {BodyCellFocusedEvent, ColumnHeaderClickEvent, ContextMenuHeaderResetClic
 const coordinator = Coordinator.RenderCoordinator.RenderCoordinator.instance();
 
 import {addColumnVisibilityCheckboxes, addSortableColumnItems} from './DataGridContextMenuUtils.js';
-import type {CellPosition, Column, Row, SortState} from './DataGridUtils.js';
-import {calculateColumnWidthPercentageFromWeighting, calculateFirstFocusableCell, getCellTitleFromCellContent, getRowEntryForColumnId, handleArrowKeyNavigation, renderCellValue, SortDirection} from './DataGridUtils.js';
+
+import {
+  calculateColumnWidthPercentageFromWeighting,
+  calculateFirstFocusableCell,
+  getCellTitleFromCellContent,
+  getRowEntryForColumnId,
+  handleArrowKeyNavigation,
+  renderCellValue,
+  SortDirection,
+  type CellPosition,
+  type Column,
+  type Row,
+  type SortState,
+} from './DataGridUtils.js';
 
 import * as i18n from '../../../core/i18n/i18n.js';
 const UIStrings = {
@@ -45,6 +57,8 @@ export interface DataGridData {
   rows: Row[];
   activeSort: SortState|null;
   contextMenus?: DataGridContextMenusConfiguration;
+  label?: string;
+  paddingRowsCount?: number;
 }
 
 const enum UserScrollState {
@@ -56,7 +70,6 @@ const enum UserScrollState {
 const KEYS_TREATED_AS_CLICKS = new Set([' ', 'Enter']);
 
 const ROW_HEIGHT_PIXELS = 18;
-const PADDING_ROWS_COUNT = 10;
 
 export class DataGrid extends HTMLElement {
   static readonly litTagName = LitHtml.literal`devtools-data-grid`;
@@ -68,6 +81,8 @@ export class DataGrid extends HTMLElement {
   #isRendering = false;
   #userScrollState: UserScrollState = UserScrollState.NOT_SCROLLED;
   #contextMenus?: DataGridContextMenusConfiguration = undefined;
+  #label?: string = undefined;
+  #paddingRowsCount = 10;
   #currentResize: {
     rightCellCol: HTMLTableColElement,
     leftCellCol: HTMLTableColElement,
@@ -124,6 +139,8 @@ export class DataGrid extends HTMLElement {
       rows: this.#rows as Row[],
       activeSort: this.#sortState,
       contextMenus: this.#contextMenus,
+      label: this.#label,
+      paddingRowsCount: this.#paddingRowsCount,
     };
   }
 
@@ -135,6 +152,7 @@ export class DataGrid extends HTMLElement {
     });
     this.#sortState = data.activeSort;
     this.#contextMenus = data.contextMenus;
+    this.#label = data.label;
 
     /**
      * On first render, now we have data, we can figure out which cell is the
@@ -153,6 +171,10 @@ export class DataGrid extends HTMLElement {
      */
     if (!this.#hasRenderedAtLeastOnce) {
       this.#cellToFocusIfUserTabsIn = calculateFirstFocusableCell({columns: this.#columns, rows: this.#rows});
+    }
+
+    if (data.paddingRowsCount !== undefined) {
+      this.#paddingRowsCount = data.paddingRowsCount;
     }
 
     if (this.#hasRenderedAtLeastOnce && this.#userHasCellFocused()) {
@@ -204,15 +226,14 @@ export class DataGrid extends HTMLElement {
       return;
     }
 
-    void coordinator.read(() => {
-      const wrapper = this.#shadow.querySelector('.wrapping-container');
-      if (!wrapper) {
-        return;
-      }
+    const wrapper = this.#shadow.querySelector('.wrapping-container');
+    if (!wrapper) {
+      return;
+    }
+
+    void coordinator.scroll(() => {
       const scrollHeight = wrapper.scrollHeight;
-      void coordinator.scroll(() => {
-        wrapper.scrollTo(0, scrollHeight);
-      });
+      wrapper.scrollTo(0, scrollHeight);
     });
   }
 
@@ -470,7 +491,7 @@ export class DataGrid extends HTMLElement {
     this.#cleanUpAfterResizeColumnComplete();
   }
 
-  #renderResizeForCell(column: Column, position: CellPosition): LitHtml.TemplateResult|typeof LitHtml.nothing {
+  #renderResizeForCell(column: Column, position: CellPosition): LitHtml.LitTemplate {
     /**
      * A resizer for a column is placed at the far right of the _previous column
      * cell_. So when we get called with [1, 0] that means this dragger is
@@ -627,7 +648,7 @@ export class DataGrid extends HTMLElement {
         scrollTop = wrapper.scrollTop;
         clientHeight = wrapper.clientHeight;
       }
-      const padding = ROW_HEIGHT_PIXELS * PADDING_ROWS_COUNT;
+      const padding = ROW_HEIGHT_PIXELS * this.#paddingRowsCount;
       let topVisibleRow = Math.floor((scrollTop - padding) / ROW_HEIGHT_PIXELS);
       let bottomVisibleRow = Math.ceil((scrollTop + clientHeight + padding) / ROW_HEIGHT_PIXELS);
 
@@ -703,6 +724,7 @@ export class DataGrid extends HTMLElement {
       })}
       <div class="wrapping-container" @scroll=${this.#onScroll} @focusout=${this.#onFocusOut}>
         <table
+          aria-label=${LitHtml.Directives.ifDefined(this.#label)}
           aria-rowcount=${this.#rows.length}
           aria-colcount=${this.#columns.length}
           @keydown=${this.#onTableKeyDown}

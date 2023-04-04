@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ class AutofillVirtualCardEnrollmentInfoBarDelegateMobile
   std::u16string GetLearnMoreLinkText() const;
 
   // Issuer icon for the card.
-  raw_ptr<const gfx::ImageSkia> GetIssuerIcon() const;
+  const gfx::ImageSkia* GetIssuerIcon() const;
 
   // The label for the card to show in the content of the infobar.
   std::u16string GetCardLabel() const;

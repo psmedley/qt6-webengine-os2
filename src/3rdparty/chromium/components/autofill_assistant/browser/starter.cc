@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "components/autofill_assistant/browser/assistant_field_trial_util.h"
+#include "components/autofill_assistant/browser/common_dependencies.h"
 #include "components/autofill_assistant/browser/features.h"
 #include "components/autofill_assistant/browser/intent_strings.h"
 #include "components/autofill_assistant/browser/service/api_key_fetcher.h"
@@ -26,11 +27,14 @@
 #include "components/autofill_assistant/browser/service/service_request_sender_impl.h"
 #include "components/autofill_assistant/browser/service/service_request_sender_local_impl.h"
 #include "components/autofill_assistant/browser/service/simple_url_loader_factory.h"
+#include "components/autofill_assistant/browser/starter_heuristic_configs/finch_configs.h"
+#include "components/autofill_assistant/browser/starter_heuristic_configs/finch_starter_heuristic_config.h"
+#include "components/autofill_assistant/browser/starter_heuristic_configs/launched_configs.h"
+#include "components/autofill_assistant/browser/starter_heuristic_configs/launched_starter_heuristic_config.h"
 #include "components/autofill_assistant/browser/switches.h"
 #include "components/autofill_assistant/browser/trigger_scripts/dynamic_trigger_conditions.h"
 #include "components/autofill_assistant/browser/trigger_scripts/static_trigger_conditions.h"
 #include "components/autofill_assistant/browser/url_utils.h"
-#include "components/ukm/content/source_url_recorder.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -58,27 +62,6 @@ constexpr base::TimeDelta kMaxFailedTriggerScriptsCacheDuration =
     base::Hours(1);
 constexpr base::TimeDelta kMaxUserDenylistedCacheDuration = base::Hours(1);
 
-// Synthetic field trial names and group names should match those specified
-// in google3/analysis/uma/dashboards/
-// .../variations/generate_server_hashes.py and
-// .../website/components/variations_dash/variations_histogram_entry.js.
-const char kTriggeredSyntheticTrial[] = "AutofillAssistantTriggered";
-const char kEnabledGroupName[] = "Enabled";
-const char kExperimentsSyntheticTrial[] = "AutofillAssistantExperimentsTrial";
-
-// Creates a service request sender that serves the pre-specified response.
-// Creation may fail (return null) if the parameter fails to decode.
-std::unique_ptr<ServiceRequestSender> CreateBase64TriggerScriptRequestSender(
-    const std::string& base64_trigger_script) {
-  std::string response;
-  if (!base::Base64UrlDecode(base64_trigger_script,
-                             base::Base64UrlDecodePolicy::IGNORE_PADDING,
-                             &response)) {
-    return nullptr;
-  }
-  return std::make_unique<ServiceRequestSenderLocalImpl>(response);
-}
-
 // Creates a service request sender that communicates with a remote endpoint.
 std::unique_ptr<ServiceRequestSender> CreateRpcTriggerScriptRequestSender(
     content::BrowserContext* browser_context,
@@ -91,21 +74,9 @@ std::unique_ptr<ServiceRequestSender> CreateRpcTriggerScriptRequestSender(
       ApiKeyFetcher().GetAPIKey(delegate->GetChannel()));
 }
 
-// Returns whether |trigger_context| contains either the REQUEST_TRIGGER_SCRIPT
-// or the TRIGGER_SCRIPTS_BASE64 script parameter.
+// Returns whether |trigger_context| contains the REQUEST_TRIGGER_SCRIPT
 bool IsTriggerScriptContext(const TriggerContext& trigger_context) {
-  const auto& script_parameters = trigger_context.GetScriptParameters();
-  return script_parameters.GetRequestsTriggerScript() ||
-         script_parameters.GetBase64TriggerScriptsResponseProto();
-}
-
-// The heuristic is shared across all instances and initialized on first use. As
-// such, we do not support updating the heuristic while Chrome is running.
-const scoped_refptr<StarterHeuristic> GetOrCreateStarterHeuristic() {
-  static const base::NoDestructor<scoped_refptr<StarterHeuristic>>
-      starter_heuristic(
-          [] { return base::MakeRefCounted<StarterHeuristic>(); }());
-  return *starter_heuristic;
+  return trigger_context.GetScriptParameters().GetRequestsTriggerScript();
 }
 
 // The cache of failed trigger script fetches is shared across all instances and
@@ -170,6 +141,16 @@ GetImplicitTriggeringDebugParametersFromCommandLine() {
   return proto;
 }
 
+bool NavigatedToTargetDomain(const GURL& url,
+                             const TriggerContext& trigger_context) {
+  const GURL& url_for_intent =
+      StartupUtil().ChooseStartupUrlForIntent(trigger_context).value_or(GURL());
+  bool navigated_to_target_domain =
+      url_utils::IsSamePublicSuffixDomain(url_for_intent, url) &&
+      url_utils::IsAllowedSchemaTransition(url_for_intent, url);
+  return navigated_to_target_domain;
+}
+
 }  // namespace
 
 Starter::Starter(content::WebContents* web_contents,
@@ -180,7 +161,7 @@ Starter::Starter(content::WebContents* web_contents,
     : content::WebContentsObserver(web_contents),
       content::WebContentsUserData<Starter>(*web_contents),
       current_ukm_source_id_(
-          ukm::GetSourceIdForWebContentsDocument(web_contents)),
+          web_contents->GetPrimaryMainFrame()->GetPageUkmSourceId()),
       cached_failed_trigger_script_fetches_(
           GetOrCreateFailedTriggerScriptFetchesCache()),
       user_denylisted_domains_(kMaxUserDenylistedCacheSize),
@@ -189,26 +170,38 @@ Starter::Starter(content::WebContents* web_contents,
       platform_delegate_(platform_delegate),
       ukm_recorder_(ukm_recorder),
       runtime_manager_(runtime_manager),
-      starter_heuristic_(GetOrCreateStarterHeuristic()),
-      tick_clock_(tick_clock) {}
+      starter_heuristic_(base::MakeRefCounted<StarterHeuristic>()),
+      tick_clock_(tick_clock) {
+  heuristic_configs_.emplace_back(
+      launched_configs::GetOrCreateShoppingConfig());
+  heuristic_configs_.emplace_back(launched_configs::GetOrCreateCouponsConfig());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic1());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic2());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic3());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic4());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic5());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic6());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic7());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic8());
+  heuristic_configs_.emplace_back(finch_configs::GetOrCreateUrlHeuristic9());
+}
 
 Starter::~Starter() = default;
 
 void Starter::PrimaryPageChanged(content::Page& page) {
+  // Early return if we want to use DidFinishNavigation instead.
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillAssistantUseDidFinishNavigation)) {
+    return;
+  }
+
   // Navigating away from the deeplink domain during startup OR ending up on an
   // error page will break the flow, unless a trigger script is currently
   // running (in which case, the trigger script will handle this event).
   content::RenderFrameHost& rfh = page.GetMainDocument();
   const GURL& gurl = rfh.GetLastCommittedURL();
   if (IsStartupPending() && !trigger_script_coordinator_) {
-    const GURL& url_for_intent =
-        StartupUtil()
-            .ChooseStartupUrlForIntent(*GetPendingTriggerContext())
-            .value_or(GURL());
-    bool navigated_to_target_domain =
-        url_utils::IsSamePublicSuffixDomain(url_for_intent, gurl) &&
-        url_utils::IsAllowedSchemaTransition(url_for_intent, gurl);
-    if (navigated_to_target_domain) {
+    if (NavigatedToTargetDomain(gurl, *GetPendingTriggerContext())) {
       current_ukm_source_id_ = page.GetMainDocument().GetPageUkmSourceId();
       if (waiting_for_deeplink_navigation_) {
         Start(std::move(pending_trigger_context_));
@@ -216,40 +209,82 @@ void Starter::PrimaryPageChanged(content::Page& page) {
       // Ignore; navigations to the target domain during startup are allowed.
       return;
     }
-
-    if (waiting_for_deeplink_navigation_) {
-      if (navigated_to_target_domain) {
-        Start(std::move(pending_trigger_context_));
-        return;
-      }
-      // Note: this will record for the current domain, not the target domain.
-      // There seems to be no way to avoid this.
-      Metrics::RecordTriggerScriptStarted(
-          ukm_recorder_, page.GetMainDocument().GetPageUkmSourceId(),
-          rfh.IsErrorDocument()
-              ? Metrics::TriggerScriptStarted::NAVIGATION_ERROR
-              : Metrics::TriggerScriptStarted::NAVIGATED_AWAY);
-      CancelPendingStartup(absl::nullopt);
-    } else {
-      // Regular startup was interrupted (most likely during the onboarding).
-      Metrics::RecordDropOut(waiting_for_onboarding_
-                                 ? Metrics::DropOutReason::ONBOARDING_NAVIGATION
-                                 : Metrics::DropOutReason::NAVIGATION,
-                             GetPendingTriggerContext()
-                                 ->GetScriptParameters()
-                                 .GetIntent()
-                                 .value_or(std::string()));
-      CancelPendingStartup(absl::nullopt);
-    }
+    RecordNavigatedAwayMetrics(rfh.GetPageUkmSourceId(), rfh.IsErrorDocument(),
+                               GetPendingTriggerContext()
+                                   ->GetScriptParameters()
+                                   .GetRequestsTriggerScript());
     // Note: do not early-return here. While the previous startup has failed, we
     // may have navigated to a new supported domain and may need to start
     // implicitly.
+    CancelPendingStartup(absl::nullopt);
   }
-
   if (!rfh.IsErrorDocument()) {
     current_ukm_source_id_ = page.GetMainDocument().GetPageUkmSourceId();
     MaybeStartImplicitlyForUrl(gurl, current_ukm_source_id_);
   }
+}
+
+void Starter::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // Early return if we want to use PrimaryPageChanged instead.
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillAssistantUseDidFinishNavigation)) {
+    return;
+  }
+
+  // Navigating away from the deeplink domain during startup OR ending up on an
+  // error page will break the flow, unless a trigger script is currently
+  // running (in which case, the trigger script will handle this event).
+  if (!navigation_handle->IsInPrimaryMainFrame() ||
+      !navigation_handle->HasCommitted()) {
+    return;
+  }
+  content::RenderFrameHost* rfh = web_contents()->GetPrimaryMainFrame();
+  const GURL& new_url = navigation_handle->GetURL();
+  if (IsStartupPending() && !trigger_script_coordinator_) {
+    if (NavigatedToTargetDomain(new_url, *GetPendingTriggerContext())) {
+      current_ukm_source_id_ = rfh->GetPageUkmSourceId();
+      if (waiting_for_deeplink_navigation_) {
+        Start(std::move(pending_trigger_context_));
+      }
+      // Ignore; navigations to the target domain during startup are allowed.
+      return;
+    }
+    RecordNavigatedAwayMetrics(rfh->GetPageUkmSourceId(),
+                               rfh->IsErrorDocument(),
+                               GetPendingTriggerContext()
+                                   ->GetScriptParameters()
+                                   .GetRequestsTriggerScript());
+    // Note: do not early-return here. While the previous startup has failed, we
+    // may have navigated to a new supported domain and may need to start
+    // implicitly.
+    CancelPendingStartup(absl::nullopt);
+  }
+
+  if (!rfh->IsErrorDocument()) {
+    current_ukm_source_id_ = rfh->GetPageUkmSourceId();
+    MaybeStartImplicitlyForUrl(new_url, current_ukm_source_id_);
+  }
+}
+
+void Starter::RecordNavigatedAwayMetrics(ukm::SourceId source_id,
+                                         bool is_error_document,
+                                         bool is_trigger_script) const {
+  if (is_trigger_script) {
+    // Note: this will record for the current domain, not the target domain.
+    // There seems to be no way to avoid this.
+    Metrics::RecordTriggerScriptStarted(
+        ukm_recorder_, source_id,
+        is_error_document ? Metrics::TriggerScriptStarted::NAVIGATION_ERROR
+                          : Metrics::TriggerScriptStarted::NAVIGATED_AWAY);
+    return;
+  }
+  // Regular startup was interrupted (most likely during the onboarding).
+  Metrics::RecordDropOut(
+      waiting_for_onboarding_ ? Metrics::DropOutReason::ONBOARDING_NAVIGATION
+                              : Metrics::DropOutReason::NAVIGATION,
+      GetPendingTriggerContext()->GetScriptParameters().GetIntent().value_or(
+          std::string()));
 }
 
 void Starter::MaybeStartImplicitlyForUrl(const GURL& url,
@@ -318,12 +353,17 @@ void Starter::OnHeuristicMatch(const GURL& url,
 
   Start(std::make_unique<TriggerContext>(
       std::make_unique<ScriptParameters>(script_parameters),
-      TriggerContext::Options{/* experiment_ids = */ std::string(),
-                              /* is_cct = */ is_custom_tab_,
-                              /* onboarding_shown = */ false,
-                              /* is_direct_action = */ false,
-                              /* initial_url = */ std::string(),
-                              /* is_in_chrome_triggered = */ true}));
+      TriggerContext::Options{
+          /* experiment_ids = */ std::string(),
+          /* is_cct = */ is_custom_tab_,
+          /* onboarding_shown = */ false,
+          /* is_direct_action = */ false,
+          /* initial_url = */ std::string(),
+          /* is_in_chrome_triggered = */ true,
+          /* is_externally_triggered = */ false,
+          /* skip_autofill_assistant_onboarding = */ false,
+          /* suppress_browsing_features = */ true,
+      }));
 }
 
 bool Starter::IsStartupPending() const {
@@ -346,15 +386,8 @@ void Starter::RegisterSyntheticFieldTrials(
     NOTREACHED();
     return;
   }
-
-  field_trial_util->RegisterSyntheticFieldTrial(kTriggeredSyntheticTrial,
-                                                kEnabledGroupName);
-  // Synthetic trial for experiments.
-  for (const std::string& experiment_id :
-       trigger_context.GetScriptParameters().GetExperiments()) {
-    field_trial_util->RegisterSyntheticFieldTrial(kExperimentsSyntheticTrial,
-                                                  experiment_id);
-  }
+  field_trial_util->RegisterSyntheticFieldTrialsForParameters(
+      trigger_context.GetScriptParameters());
 }
 
 void Starter::OnTabInteractabilityChanged(bool is_interactable) {
@@ -378,24 +411,17 @@ void Starter::Init() {
   bool switched_from_cct_to_tab = prev_is_custom_tab && !is_custom_tab_;
   bool proactive_help_setting_enabled =
       platform_delegate_->GetProactiveHelpSettingEnabled();
-  bool msbb_setting_enabled =
-      platform_delegate_->GetMakeSearchesAndBrowsingBetterEnabled();
+  bool msbb_setting_enabled = platform_delegate_->GetCommonDependencies()
+                                  ->GetMakeSearchesAndBrowsingBetterEnabled();
   bool feature_module_installed =
       platform_delegate_->GetFeatureModuleInstalled();
   bool prev_fetch_trigger_scripts_on_navigation =
       fetch_trigger_scripts_on_navigation_;
-  // Note: the feature flag must be the last thing tested in this if-statement,
-  // to avoid tagging tabs that otherwise don't qualify for in-cct triggering,
-  // which leads to pollution of our metrics.
-  fetch_trigger_scripts_on_navigation_ =
-      proactive_help_setting_enabled && msbb_setting_enabled &&
-      (!platform_delegate_->GetIsWebLayer() ||
-       platform_delegate_->GetIsLoggedIn()) &&
-      ((is_custom_tab_ && platform_delegate_->GetIsTabCreatedByGSA() &&
-        base::FeatureList::IsEnabled(
-            features::kAutofillAssistantInCCTTriggering)) ||
-       (!is_custom_tab_ && base::FeatureList::IsEnabled(
-                               features::kAutofillAssistantInTabTriggering)));
+
+  starter_heuristic_->InitFromHeuristicConfigs(
+      heuristic_configs_, platform_delegate_.get(),
+      web_contents()->GetBrowserContext());
+  fetch_trigger_scripts_on_navigation_ = starter_heuristic_->HasConditionSets();
 
   // If there is a pending startup, re-check that the settings are still
   // allowing the startup to proceed. If not, cancel the startup.
@@ -407,7 +433,6 @@ void Starter::Init() {
     switch (startup_mode) {
       case StartupMode::START_REGULAR:
         return;
-      case StartupMode::START_BASE64_TRIGGER_SCRIPT:
       case StartupMode::START_RPC_TRIGGER_SCRIPT:
         if (!switched_from_cct_to_tab) {
           return;
@@ -426,7 +451,7 @@ void Starter::Init() {
              fetch_trigger_scripts_on_navigation_) {
     MaybeStartImplicitlyForUrl(
         web_contents()->GetLastCommittedURL(),
-        ukm::GetSourceIdForWebContentsDocument(web_contents()));
+        web_contents()->GetPrimaryMainFrame()->GetPageUkmSourceId());
   }
 }
 
@@ -450,6 +475,7 @@ void Starter::OnDependenciesInvalidated() {
 void Starter::CanStart(
     std::unique_ptr<TriggerContext> trigger_context,
     base::OnceCallback<void(bool success,
+                            const OnboardingState& onboarding_state,
                             absl::optional<GURL> url,
                             std::unique_ptr<TriggerContext> trigger_contexts)>
         preconditions_checked_callback) {
@@ -471,7 +497,14 @@ void Starter::Start(std::unique_ptr<TriggerContext> trigger_context) {
   CancelPendingStartup(Metrics::TriggerScriptFinishedState::CANCELED);
   pending_trigger_context_ = std::move(trigger_context);
   if (!platform_delegate_->IsAttached()) {
-    OnStartDone(/* start_regular_script = */ false);
+    OnStartDone(/* start_script= */ false);
+    return;
+  }
+
+  if (platform_delegate_->GetIsSupervisedUser() ||
+      !platform_delegate_->GetIsAllowedForMachineLearning()) {
+    OnStartDone(/* start_script= */ false);
+    return;
   }
 
   if (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
@@ -485,7 +518,8 @@ void Starter::Start(std::unique_ptr<TriggerContext> trigger_context) {
 
   StartupMode startup_mode = StartupUtil().ChooseStartupModeForIntent(
       *pending_trigger_context_,
-      {platform_delegate_->GetMakeSearchesAndBrowsingBetterEnabled(),
+      {platform_delegate_->GetCommonDependencies()
+           ->GetMakeSearchesAndBrowsingBetterEnabled(),
        platform_delegate_->GetProactiveHelpSettingEnabled(),
        platform_delegate_->GetFeatureModuleInstalled()});
   Metrics::RecordStartRequest(ukm_recorder_, current_ukm_source_id_,
@@ -508,14 +542,14 @@ void Starter::Start(std::unique_ptr<TriggerContext> trigger_context) {
 
   if (IsTriggerScriptContext(*pending_trigger_context_) &&
       !url_utils::IsSamePublicSuffixDomain(
-          web_contents()->GetMainFrame()->GetLastCommittedURL(),
+          web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL(),
           startup_url.value_or(GURL()))) {
     waiting_for_deeplink_navigation_ = true;
     return;
   }
 
-  // Record startup metrics for trigger scripts as soon as possible to establish
-  // a baseline.
+  // Record startup metrics for trigger scripts as soon as possible to
+  // establish a baseline.
   if (IsTriggerScriptContext(*pending_trigger_context_)) {
     Metrics::RecordTriggerScriptStarted(
         ukm_recorder_, current_ukm_source_id_, startup_mode,
@@ -530,7 +564,6 @@ void Starter::Start(std::unique_ptr<TriggerContext> trigger_context) {
     case StartupMode::NO_INITIAL_URL:
       OnStartDone(/* start_script = */ false);
       return;
-    case StartupMode::START_BASE64_TRIGGER_SCRIPT:
     case StartupMode::START_RPC_TRIGGER_SCRIPT:
     case StartupMode::START_REGULAR:
       MaybeInstallFeatureModule(startup_mode);
@@ -593,7 +626,6 @@ void Starter::OnFeatureModuleInstalled(
     case StartupMode::START_REGULAR:
       MaybeShowOnboarding();
       return;
-    case StartupMode::START_BASE64_TRIGGER_SCRIPT:
     case StartupMode::START_RPC_TRIGGER_SCRIPT:
       StartTriggerScript();
       return;
@@ -616,20 +648,7 @@ void Starter::StartTriggerScript() {
   std::unique_ptr<ServiceRequestSender> service_request_sender =
       platform_delegate_->GetTriggerScriptRequestSenderToInject();
   if (!service_request_sender) {
-    if (script_parameters.GetBase64TriggerScriptsResponseProto().has_value()) {
-      service_request_sender = CreateBase64TriggerScriptRequestSender(
-          script_parameters.GetBase64TriggerScriptsResponseProto().value());
-      if (!service_request_sender) {
-        Metrics::RecordTriggerScriptFinished(
-            ukm_recorder_, current_ukm_source_id_,
-            TriggerScriptProto::UNSPECIFIED_TRIGGER_UI_TYPE,
-            Metrics::TriggerScriptFinishedState::BASE64_DECODING_ERROR);
-        OnTriggerScriptFinished(
-            Metrics::TriggerScriptFinishedState::BASE64_DECODING_ERROR,
-            std::move(pending_trigger_context_), absl::nullopt);
-        return;
-      }
-    } else if (script_parameters.GetRequestsTriggerScript().value_or(false)) {
+    if (script_parameters.GetRequestsTriggerScript()) {
       service_request_sender = CreateRpcTriggerScriptRequestSender(
           web_contents()->GetBrowserContext(), platform_delegate_);
     } else {
@@ -655,6 +674,7 @@ void Starter::StartTriggerScript() {
           /* enable_full_stack_traces= */ false),
       std::move(service_request_sender),
       url_fetcher.GetTriggerScriptsEndpoint(),
+      url_fetcher.GetTriggerScriptsByHashPrefixEndpoint(),
       std::make_unique<StaticTriggerConditions>(
           platform_delegate_, pending_trigger_context_.get(), startup_url),
       std::make_unique<DynamicTriggerConditions>(), ukm_recorder_,
@@ -728,15 +748,29 @@ void Starter::OnTriggerScriptFinished(
 
 void Starter::MaybeShowOnboarding(
     absl::optional<TriggerScriptProto> trigger_script) {
+  // For external runs, the onboarding is handled externally unless specified
+  // otherwise.
+  if (pending_trigger_context_ &&
+      pending_trigger_context_->GetSkipAutofillAssistantOnboarding()) {
+    Metrics::RecordRegularScriptOnboarding(ukm_recorder_,
+                                           current_ukm_source_id_,
+                                           Metrics::Onboarding::OB_EXTERNAL);
+    OnStartDone(/* start_script = */ true, trigger_script,
+                {.onboarding_shown = false,
+                 .onboarding_skipped = true,
+                 .onboarding_result = absl::nullopt});
+    return;
+  }
+
   if (platform_delegate_->GetOnboardingAccepted()) {
     OnOnboardingFinished(trigger_script, /* shown = */ false,
                          OnboardingResult::ACCEPTED);
     return;
   }
 
-  // Always use bottom sheet onboarding here. Trigger scripts may show a dialog
-  // onboarding, but if we have reached this part, we're already starting the
-  // regular script, where we don't offer dialog onboarding.
+  // Always use bottom sheet onboarding here. Trigger scripts may show a
+  // dialog onboarding, but if we have reached this part, we're already
+  // starting the regular script, where we don't offer dialog onboarding.
   runtime_manager_->SetUIState(UIState::kShown);
   waiting_for_onboarding_ = true;
   platform_delegate_->ShowOnboarding(
@@ -799,22 +833,29 @@ void Starter::OnOnboardingFinished(
 
   if (result != OnboardingResult::ACCEPTED) {
     runtime_manager_->SetUIState(UIState::kNotShown);
-    OnStartDone(/* start_script = */ false);
+    OnStartDone(/* start_script = */ false, trigger_script,
+                {.onboarding_shown = shown,
+                 .onboarding_skipped = false,
+                 .onboarding_result = result});
     return;
   }
 
   // Onboarding is the last step before regular startup.
   platform_delegate_->SetOnboardingAccepted(true);
   pending_trigger_context_->SetOnboardingShown(shown);
-  OnStartDone(/* start_script = */ true, trigger_script);
+  OnStartDone(/* start_script = */ true, trigger_script,
+              {.onboarding_shown = shown,
+               .onboarding_skipped = false,
+               .onboarding_result = result});
 }
 
 void Starter::OnStartDone(bool start_script,
-                          absl::optional<TriggerScriptProto> trigger_script) {
+                          absl::optional<TriggerScriptProto> trigger_script,
+                          OnboardingState onboarding_state) {
   // If a callback is present, we notify that the checks are done instead of
   // directly starting the script with the default UI.
   if (preconditions_checked_callback_) {
-    ReportPreconditionsChecked(start_script);
+    ReportPreconditionsChecked(start_script, onboarding_state);
     return;
   }
 
@@ -836,15 +877,25 @@ void Starter::OnStartDone(bool start_script,
       *startup_url, std::move(pending_trigger_context_), trigger_script);
 }
 
-void Starter::ReportPreconditionsChecked(bool start_script) {
+void Starter::ReportPreconditionsChecked(bool start_script,
+                                         OnboardingState onboarding_state) {
   auto startup_url =
       StartupUtil().ChooseStartupUrlForIntent(*pending_trigger_context_);
   std::move(preconditions_checked_callback_)
-      .Run(start_script, startup_url, std::move(pending_trigger_context_));
+      .Run(start_script, onboarding_state, startup_url,
+           std::move(pending_trigger_context_));
 }
 
 void Starter::DeleteTriggerScriptCoordinator() {
   trigger_script_coordinator_.reset();
+}
+
+const CommonDependencies* Starter::GetCommonDependencies() {
+  return platform_delegate_->GetCommonDependencies();
+}
+
+const PlatformDependencies* Starter::GetPlatformDependencies() {
+  return platform_delegate_->GetPlatformDependencies();
 }
 
 base::WeakPtr<Starter> Starter::GetWeakPtr() {

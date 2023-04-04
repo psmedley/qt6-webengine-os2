@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,6 @@
 #define CHROME_BROWSER_UI_WEBUI_HISTORY_NAVIGATION_HANDLER_H_
 
 #include "content/public/browser/web_ui_message_handler.h"
-
-namespace base {
-class ListValue;
-}
 
 namespace webui {
 
@@ -27,7 +23,7 @@ class NavigationHandler : public content::WebUIMessageHandler {
   void RegisterMessages() override;
 
  private:
-  void HandleNavigateToUrl(const base::ListValue* args);
+  void HandleNavigateToUrl(const base::Value::List& args);
 };
 
 }  // namespace webui

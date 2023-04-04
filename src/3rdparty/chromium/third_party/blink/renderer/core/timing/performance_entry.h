@@ -44,9 +44,12 @@ namespace blink {
 class ScriptState;
 class ScriptValue;
 class V8ObjectBuilder;
+class ExecutionContext;
 
 using PerformanceEntryType = unsigned;
 using PerformanceEntryTypeMask = unsigned;
+
+constexpr uint32_t kNavigationIdDefaultValue = 1;
 
 class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
@@ -69,6 +72,8 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
     kLayoutShift = 1 << 10,
     kLargestContentfulPaint = 1 << 11,
     kVisibilityState = 1 << 12,
+    kBackForwardCacheRestoration = 1 << 13,
+    kSoftNavigation = 1 << 14,
   };
 
   const AtomicString& name() const { return name_; }
@@ -107,14 +112,15 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
     if (entry_type == kInvalid) {
       return true;
     }
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(HashSet<PerformanceEntryType>,
-                                    valid_timeline_entry_types,
-                                    ({kNavigation, kMark, kMeasure, kResource,
-                                      kTaskAttribution, kPaint, kFirstInput}));
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(
+        HashSet<PerformanceEntryType>, valid_timeline_entry_types,
+        ({kNavigation, kMark, kMeasure, kResource, kTaskAttribution, kPaint,
+          kFirstInput, kBackForwardCacheRestoration, kSoftNavigation}));
     return valid_timeline_entry_types.Contains(entry_type);
   }
 
   static uint32_t GetNavigationId(ScriptState* script_state);
+  static uint32_t GetNavigationId(ExecutionContext* context);
 
   // PerformanceMark/Measure override this and it returns Mojo structure pointer
   // which has all members of PerformanceMark/Measure. Common data members are
@@ -127,11 +133,11 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
   PerformanceEntry(const AtomicString& name,
                    double start_time,
                    double finish_time,
-                   uint32_t navigation_id = 1);
+                   uint32_t navigation_id);
   PerformanceEntry(double duration,
                    const AtomicString& name,
                    double start_time,
-                   uint32_t navigation_id = 1);
+                   uint32_t navigation_id);
 
   virtual void BuildJSONValue(V8ObjectBuilder&) const;
 

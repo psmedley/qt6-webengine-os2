@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "media/base/cdm_promise.h"
+#include "media/base/win/hresults.h"
 #include "media/base/win/media_foundation_cdm_proxy.h"
 #include "media/base/win/mf_helpers.h"
 #include "media/cdm/win/media_foundation_cdm_module.h"
@@ -33,18 +34,6 @@ using Microsoft::WRL::Make;
 using Microsoft::WRL::RuntimeClass;
 using Microsoft::WRL::RuntimeClassFlags;
 using Exception = CdmPromise::Exception;
-
-// GUID is little endian. The byte array in network order is big endian.
-std::vector<uint8_t> ByteArrayFromGUID(REFGUID guid) {
-  std::vector<uint8_t> byte_array(sizeof(GUID));
-  GUID* reversed_guid = reinterpret_cast<GUID*>(byte_array.data());
-  *reversed_guid = guid;
-  reversed_guid->Data1 = _byteswap_ulong(guid.Data1);
-  reversed_guid->Data2 = _byteswap_ushort(guid.Data2);
-  reversed_guid->Data3 = _byteswap_ushort(guid.Data3);
-  // Data4 is already a byte array so no need to byte swap.
-  return byte_array;
-}
 
 HRESULT CreatePolicySetEvent(ComPtr<IMFMediaEvent>& policy_set_event) {
   base::win::ScopedPropVariant policy_set_prop;
@@ -231,11 +220,11 @@ class CdmProxyImpl : public MediaFoundationCdmProxy {
   }
 
   void OnSignificantPlayback() override {
-    cdm_event_cb_.Run(CdmEvent::kSignificantPlayback);
+    cdm_event_cb_.Run(CdmEvent::kSignificantPlayback, S_OK);
   }
 
-  void OnPlaybackError() override {
-    cdm_event_cb_.Run(CdmEvent::kPlaybackError);
+  void OnPlaybackError(HRESULT hresult) override {
+    cdm_event_cb_.Run(CdmEvent::kPlaybackError, hresult);
   }
 
  private:
@@ -249,7 +238,7 @@ class CdmProxyImpl : public MediaFoundationCdmProxy {
     RETURN_IF_FAILED(
         mf_cdm_->GetProtectionSystemIds(&protection_system_ids, &count));
     if (count == 0)
-      return E_FAIL;
+      return kErrorZeroProtectionSystemId;
 
     *protection_system_id = *protection_system_ids;
     DVLOG(2) << __func__ << " protection_system_id="
@@ -326,7 +315,7 @@ HRESULT MediaFoundationCdm::Initialize() {
     // Only report CdmEvent::kCdmError here as this is where most failures
     // happen, and other errors can be easily triggered by sites, e.g. a bad
     // server certificate or a bad license.
-    OnCdmEvent(CdmEvent::kCdmError);
+    OnCdmEvent(CdmEvent::kCdmError, hresult);
     return hresult;
   }
 
@@ -630,9 +619,9 @@ void MediaFoundationCdm::OnHardwareContextReset() {
   }
 }
 
-void MediaFoundationCdm::OnCdmEvent(CdmEvent event) {
+void MediaFoundationCdm::OnCdmEvent(CdmEvent event, HRESULT hresult) {
   DVLOG_FUNC(1);
-  cdm_event_cb_.Run(event);
+  cdm_event_cb_.Run(event, hresult);
 }
 
 void MediaFoundationCdm::OnIsTypeSupportedResult(

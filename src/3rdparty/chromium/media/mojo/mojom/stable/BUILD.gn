@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -30,6 +30,10 @@ mojom("stable_video_decoder") {
   cpp_typemaps = [
     {
       types = [
+        {
+          mojom = "media.stable.mojom.CdmContextEvent"
+          cpp = "::media::CdmContext::Event"
+        },
         {
           mojom = "media.stable.mojom.ColorSpacePrimaryID"
           cpp = "::gfx::ColorSpace::PrimaryID"
@@ -64,6 +68,10 @@ mojom("stable_video_decoder") {
           cpp = "::std::unique_ptr<::media::DecryptConfig>"
           move_only = true
           nullable_is_same_type = true
+        },
+        {
+          mojom = "media.stable.mojom.DecryptStatus"
+          cpp = "::media::Decryptor::Status"
         },
         {
           mojom = "media.stable.mojom.EncryptionScheme"

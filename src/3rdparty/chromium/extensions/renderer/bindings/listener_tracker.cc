@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,8 @@ ListenerTracker::RemoveFilteredListener(const std::string& context_owner_id,
   EventMatcher* matcher = event_filter_.GetEventMatcher(filter_id);
   DCHECK(matcher);
   std::unique_ptr<base::DictionaryValue> filter_copy =
-      matcher->value()->CreateDeepCopy();
+      base::DictionaryValue::From(
+          base::Value::ToUniquePtrValue(matcher->value()->Clone()));
 
   FilteredEventListenerKey key(context_owner_id, event_name);
   FilteredListeners::const_iterator counts = filtered_listeners_.find(key);

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -407,6 +407,19 @@ TEST_F(TaskEnvironmentTest,
 }
 #endif  // BUILDFLAG(IS_POSIX)
 
+TEST_F(TaskEnvironmentTest, MockTimeStartsWithWholeMilliseconds) {
+  TaskEnvironment task_environment(TaskEnvironment::TimeSource::MOCK_TIME);
+  const TickClock* mock_tick_clock = task_environment.GetMockTickClock();
+  const Clock* mock_clock = task_environment.GetMockClock();
+  EXPECT_TRUE(
+      (mock_tick_clock->NowTicks().since_origin() % Milliseconds(1)).is_zero());
+  // The Windows epoch has no submillisecond components, so any submillisecond
+  // components in `Time::Now()` will appear in their difference.
+  EXPECT_TRUE((mock_clock->Now().since_origin() % Milliseconds(1)).is_zero());
+  EXPECT_TRUE((Time::Now().since_origin() % Milliseconds(1)).is_zero());
+  EXPECT_TRUE((TimeTicks::Now().since_origin() % Milliseconds(1)).is_zero());
+}
+
 // Verify that the TickClock returned by
 // |TaskEnvironment::GetMockTickClock| gets updated when the
 // FastForward(By|UntilNoTasksRemain) functions are called.
@@ -782,7 +795,10 @@ TEST_F(TaskEnvironmentTest, MultiThreadedMockTimeAndThreadPoolQueuedMode) {
       TaskEnvironment::TimeSource::MOCK_TIME,
       TaskEnvironment::ThreadPoolExecutionMode::QUEUED);
 
-  int count = 0;
+  // Atomic because it's updated from concurrent tasks in the ThreadPool
+  // (could use std::memory_order_releaxed on all accesses but keeping implicit
+  // operators because the test reads better that way).
+  std::atomic_int count = 0;
   const TimeTicks start_time = task_environment.NowTicks();
 
   RunLoop run_loop;
@@ -878,11 +894,19 @@ TEST_F(TaskEnvironmentTest, SetsDefaultRunTimeout) {
       EXPECT_LT(run_timeout->timeout, TestTimeouts::test_launcher_timeout());
     }
     static auto& static_on_timeout_cb = run_timeout->on_timeout;
+#if defined(__clang__) && defined(_MSC_VER)
+    EXPECT_FATAL_FAILURE(
+        static_on_timeout_cb.Run(FROM_HERE),
+        "RunLoop::Run() timed out. Timeout set at "
+        // We don't test the line number but it would be present.
+        "TaskEnvironment@base\\test\\task_environment.cc:");
+#else
     EXPECT_FATAL_FAILURE(
         static_on_timeout_cb.Run(FROM_HERE),
         "RunLoop::Run() timed out. Timeout set at "
         // We don't test the line number but it would be present.
         "TaskEnvironment@base/test/task_environment.cc:");
+#endif
   }
 
   EXPECT_EQ(ScopedRunLoopTimeout::GetTimeoutForCurrentThread(),
@@ -1376,7 +1400,13 @@ TEST_F(TaskEnvironmentTest, NoCOMEnvironment) {
 }
 #endif  // BUILDFLAG(IS_WIN)
 
-TEST_F(TaskEnvironmentTest, ParallelExecutionFence) {
+// TODO(crbug.com/1318840): Re-enable this test
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX)
+#define MAYBE_ParallelExecutionFence DISABLED_ParallelExecutionFence
+#else
+#define MAYBE_ParallelExecutionFence ParallelExecutionFence
+#endif
+TEST_F(TaskEnvironmentTest, MAYBE_ParallelExecutionFence) {
   TaskEnvironment task_environment;
 
   constexpr int kNumParallelTasks =

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -179,8 +179,8 @@ TEST(ProfilerGroupTest, OverflowSamplingInterval) {
   profiler_group->OnProfilingContextAdded(scope.GetExecutionContext());
 
   ProfilerInitOptions* init_options = ProfilerInitOptions::Create();
-  init_options->setSampleInterval(
-      static_cast<double>(std::numeric_limits<int>::max()) + 1.f);
+  init_options->setSampleInterval((double)std::numeric_limits<int>::max() +
+                                  1.f);
   profiler_group->CreateProfiler(scope.GetScriptState(), *init_options,
                                  base::TimeTicks(), scope.GetExceptionState());
 

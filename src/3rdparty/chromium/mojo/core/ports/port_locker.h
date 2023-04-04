@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include "base/memory/raw_ptr_exclusion.h"
 #include "mojo/core/ports/port_ref.h"
 
 namespace mojo {
@@ -64,7 +65,7 @@ class PortLocker {
   // `port_refs_` is not a raw_ptr<T> for performance reasons: PortLocker is
   // usually short-lived (e.g. allocated on the stack) + the stack (not on the
   // heap).
-  const PortRef** const port_refs_;
+  RAW_PTR_EXCLUSION const PortRef** const port_refs_;
   const size_t num_ports_;
 };
 

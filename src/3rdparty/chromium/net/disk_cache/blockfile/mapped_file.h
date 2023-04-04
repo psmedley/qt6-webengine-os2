@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@ namespace disk_cache {
 // time).
 class NET_EXPORT_PRIVATE MappedFile : public File {
  public:
-  MappedFile() : File(true), init_(false) {}
+  MappedFile() : File(true) {}
 
   MappedFile(const MappedFile&) = delete;
   MappedFile& operator=(const MappedFile&) = delete;
@@ -56,7 +56,7 @@ class NET_EXPORT_PRIVATE MappedFile : public File {
  private:
   ~MappedFile() override;
 
-  bool init_;
+  bool init_ = false;
 #if BUILDFLAG(IS_WIN)
   HANDLE section_;
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/memory/scoped_refptr.h"
+#include "base/values.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
@@ -16,10 +17,6 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 class PrefRegistrySimple;
-
-namespace base {
-class ListValue;
-}  // namespace base
 
 namespace chromeos {
 
@@ -56,11 +53,11 @@ class EduCoexistenceLoginHandler : public content::WebUIMessageHandler,
 
  private:
   // Registered WebUi Message handlers.
-  void InitializeEduArgs(const base::ListValue* args);
+  void InitializeEduArgs(const base::Value::List& args);
   void SendInitializeEduArgs();
-  void ConsentValid(const base::ListValue* args);
-  void ConsentLogged(const base::ListValue* args);
-  void OnError(const base::ListValue* args);
+  void ConsentValid(const base::Value::List& args);
+  void ConsentLogged(const base::Value::List& args);
+  void OnError(const base::Value::List& args);
 
   // Used for getting child access token.
   std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>

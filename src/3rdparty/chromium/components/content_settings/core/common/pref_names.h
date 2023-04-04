@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ extern const char kContentSettingsVersion[];
 extern const char kContentSettingsWindowLastTabIndex[];
 
 extern const char kManagedDefaultAdsSetting[];
+extern const char kManagedDefaultClipboardSetting[];
 extern const char kManagedDefaultCookiesSetting[];
 extern const char kManagedDefaultImagesSetting[];
 extern const char kManagedDefaultInsecureContentSetting[];
@@ -39,6 +40,8 @@ extern const char kManagedDefaultWebHidGuardSetting[];
 extern const char kManagedDefaultWindowPlacementSetting[];
 extern const char kManagedDefaultLocalFontsSetting[];
 
+extern const char kManagedClipboardAllowedForUrls[];
+extern const char kManagedClipboardBlockedForUrls[];
 extern const char kManagedCookiesAllowedForUrls[];
 extern const char kManagedCookiesBlockedForUrls[];
 extern const char kManagedCookiesSessionOnlyForUrls[];
@@ -84,6 +87,8 @@ extern const char kQuietNotificationPermissionUiDisabledTime[];
 
 #if BUILDFLAG(IS_ANDROID)
 extern const char kNotificationsVibrateEnabled[];
+extern const char kDesktopSitePeripheralSettingEnabled[];
+extern const char kDesktopSiteDisplaySettingEnabled[];
 #endif
 
 }  // namespace prefs

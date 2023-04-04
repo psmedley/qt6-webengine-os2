@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -917,9 +917,12 @@ class IDLParser(object):
                            | SEQUENCE '<' TypeWithExtendedAttributes '>' Null
                            | FROZENARRAY '<' TypeWithExtendedAttributes '>' Null
                            | OBSERVABLEARRAY '<' TypeWithExtendedAttributes '>' Null
-                           | RecordType Null"""
+                           | RecordType Null
+                           | UNDEFINED Null"""
     if len(p) == 3:
-      if type(p[1]) == str:
+      if p[1] == 'undefined':
+        typeref = self.BuildProduction('Undefined', p, 1)
+      elif type(p[1]) == str:
         typeref = self.BuildNamed('Typeref', p, 1)
       else:
         typeref = p[1]
@@ -1042,9 +1045,10 @@ class IDLParser(object):
   #    [ identifier = identifier ]
   #    [ identifier = ( IdentifierList ) ]
   #    [ identifier = identifier ( ArgumentList ) ]
+  #    [ identifier = StringLiteral ]
   #    [ identifier = ( StringList ) ]
-  # The first five patterns are specified in the Web IDL spec and the last
-  # pattern is Blink's custom extension to support [ReflectOnly].
+  # The first five patterns are specified in the Web IDL spec and the last two
+  # patterns are Blink's custom extension to support [ReflectOnly].
   def p_ExtendedAttribute(self, p):
     """ExtendedAttribute : ExtendedAttributeNoArgs
                          | ExtendedAttributeArgList
@@ -1095,11 +1099,6 @@ class IDLParser(object):
     args = self.BuildProduction('Arguments', p, 4, p[5])
     value = self.BuildNamed('Call', p, 3, args)
     p[0] = self.BuildNamed('ExtAttribute', p, 1, value)
-
-
-
-
-
 
   # Blink extension: Add support for string literal Extended Attribute values
   def p_ExtendedAttributeStringLiteral(self, p):

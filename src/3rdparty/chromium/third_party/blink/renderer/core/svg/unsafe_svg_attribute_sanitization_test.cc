@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@ void PasteAndVerifySanitization(const char* html_to_paste,
 
   // Make the body editable, and put the caret in it.
   body->setAttribute(html_names::kContenteditableAttr, "true");
-  body->focus();
+  body->Focus();
   frame.GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kTest);
   frame.Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder().SelectAllChildren(*body).Build());
@@ -234,7 +234,7 @@ TEST(UnsafeSVGAttributeSanitizationTest, stringsShouldNotSupportAddition) {
 
 TEST(UnsafeSVGAttributeSanitizationTest,
      stripScriptingAttributes_animateElement) {
-  Vector<Attribute> attributes;
+  Vector<Attribute, kAttributePrealloc> attributes;
   attributes.push_back(Attribute(xlink_names::kHrefAttr, "javascript:alert()"));
   attributes.push_back(Attribute(svg_names::kHrefAttr, "javascript:alert()"));
   attributes.push_back(Attribute(svg_names::kFromAttr, "/home"));

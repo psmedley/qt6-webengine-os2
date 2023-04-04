@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,9 +96,10 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   bool HasAction(ax::mojom::Action action) const override;
   bool HasTextStyle(ax::mojom::TextStyle text_style) const override;
   ax::mojom::NameFrom GetNameFrom() const override;
+  ax::mojom::DescriptionFrom GetDescriptionFrom() const override;
   std::u16string GetTextContentUTF16() const override;
   std::u16string GetValueForControl() const override;
-  const AXTree::Selection GetUnignoredSelection() const override;
+  const AXSelection GetUnignoredSelection() const override;
 
   AXNodePosition::AXPositionInstance CreatePositionAt(
       int offset,
@@ -120,13 +121,13 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   gfx::NativeViewAccessible GetParent() const override;
 
   // Get the index in parent. Typically this is the AXNode's index_in_parent_.
-  int GetIndexInParent() override;
+  absl::optional<size_t> GetIndexInParent() override;
 
   // Get the number of children of this node.
-  int GetChildCount() const override;
+  size_t GetChildCount() const override;
 
   // Get the child of a node given a 0-based index.
-  gfx::NativeViewAccessible ChildAtIndex(int index) override;
+  gfx::NativeViewAccessible ChildAtIndex(size_t index) override;
 
   // Returns true if it has a modal dialog.
   bool HasModalDialog() const override;
@@ -138,6 +139,7 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
 
   bool IsChildOfLeaf() const override;
   bool IsDescendantOfAtomicTextField() const override;
+  bool IsPlatformDocument() const override;
   bool IsLeaf() const override;
   bool IsFocused() const override;
   bool IsToplevelBrowserWindow() override;
@@ -148,22 +150,20 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
 
   class ChildIteratorBase : public ChildIterator {
    public:
-    ChildIteratorBase(AXPlatformNodeDelegateBase* parent, int index);
+    ChildIteratorBase(AXPlatformNodeDelegateBase* parent, size_t index);
     ChildIteratorBase(const ChildIteratorBase& it);
     ~ChildIteratorBase() override = default;
-    bool operator==(const ChildIterator& rhs) const override;
-    bool operator!=(const ChildIterator& rhs) const override;
     ChildIteratorBase& operator++() override;
     ChildIteratorBase& operator++(int) override;
     ChildIteratorBase& operator--() override;
     ChildIteratorBase& operator--(int) override;
     gfx::NativeViewAccessible GetNativeViewAccessible() const override;
-    int GetIndexInParent() const override;
+    absl::optional<size_t> GetIndexInParent() const override;
     AXPlatformNodeDelegate& operator*() const override;
     AXPlatformNodeDelegate* operator->() const override;
 
    private:
-    int index_;
+    size_t index_;
     raw_ptr<AXPlatformNodeDelegateBase> parent_;
   };
   std::unique_ptr<AXPlatformNodeDelegate::ChildIterator> ChildrenBegin()
@@ -171,6 +171,7 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   std::unique_ptr<AXPlatformNodeDelegate::ChildIterator> ChildrenEnd() override;
 
   const std::string& GetName() const override;
+  const std::string& GetDescription() const override;
   std::u16string GetHypertext() const override;
   const std::map<int, int>& GetHypertextOffsetToHyperlinkChildIndex()
       const override;
@@ -231,6 +232,12 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
 
   // Get whether this node is in web content.
   bool IsWebContent() const override;
+
+  // Get whether this node can be marked as read-only.
+  bool IsReadOnlySupported() const override;
+
+  // Get whether this node is marked as read-only or is disabled.
+  bool IsReadOnlyOrDisabled() const override;
 
   // Returns true if the caret or selection is visible on this object.
   bool HasVisibleCaretOrSelection() const override;
@@ -312,7 +319,7 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
                                     int col_index) const override;
   absl::optional<int32_t> CellIndexToId(int cell_index) const override;
   bool IsCellOrHeaderOfAriaGrid() const override;
-  bool IsWebAreaForPresentationalIframe() const override;
+  bool IsRootWebAreaForPresentationalIframe() const override;
 
   // Ordered-set-like and item-like nodes.
   bool IsOrderedSetItem() const override;

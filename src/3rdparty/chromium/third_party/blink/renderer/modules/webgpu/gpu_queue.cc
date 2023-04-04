@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context_host.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
+#include "third_party/blink/renderer/core/html/canvas/predefined_color_space.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -96,17 +97,6 @@ bool IsValidExternalImageDestinationFormat(
       return true;
     default:
       return false;
-  }
-}
-
-PredefinedColorSpace GetPredefinedColorSpace(
-    WGPUPredefinedColorSpace color_space) {
-  switch (color_space) {
-    case WGPUPredefinedColorSpace_Srgb:
-      return PredefinedColorSpace::kSRGB;
-    default:
-      NOTREACHED();
-      return PredefinedColorSpace::kSRGB;
   }
 }
 
@@ -260,60 +250,65 @@ ScriptPromise GPUQueue::onSubmittedWorkDone(ScriptState* script_state) {
   ScriptPromise promise = resolver->Promise();
 
   auto* callback =
-      BindDawnOnceCallback(&GPUQueue::OnWorkDoneCallback, WrapPersistent(this),
+      BindWGPUOnceCallback(&GPUQueue::OnWorkDoneCallback, WrapPersistent(this),
                            WrapPersistent(resolver));
 
   GetProcs().queueOnSubmittedWorkDone(
       GetHandle(), 0u, callback->UnboundCallback(), callback->AsUserdata());
   // WebGPU guarantees that promises are resolved in finite time so we
   // need to ensure commands are flushed.
-  EnsureFlush();
+  EnsureFlush(ToEventLoop(script_state));
   return promise;
 }
 
-void GPUQueue::writeBuffer(GPUBuffer* buffer,
+void GPUQueue::writeBuffer(ScriptState* script_state,
+                           GPUBuffer* buffer,
                            uint64_t buffer_offset,
                            const MaybeShared<DOMArrayBufferView>& data,
                            uint64_t data_element_offset,
                            ExceptionState& exception_state) {
-  WriteBufferImpl(buffer, buffer_offset, data->byteLength(),
+  WriteBufferImpl(script_state, buffer, buffer_offset, data->byteLength(),
                   data->BaseAddressMaybeShared(), data->TypeSize(),
                   data_element_offset, {}, exception_state);
 }
 
-void GPUQueue::writeBuffer(GPUBuffer* buffer,
+void GPUQueue::writeBuffer(ScriptState* script_state,
+                           GPUBuffer* buffer,
                            uint64_t buffer_offset,
                            const MaybeShared<DOMArrayBufferView>& data,
                            uint64_t data_element_offset,
                            uint64_t data_element_count,
                            ExceptionState& exception_state) {
-  WriteBufferImpl(buffer, buffer_offset, data->byteLength(),
+  WriteBufferImpl(script_state, buffer, buffer_offset, data->byteLength(),
                   data->BaseAddressMaybeShared(), data->TypeSize(),
                   data_element_offset, data_element_count, exception_state);
 }
 
-void GPUQueue::writeBuffer(GPUBuffer* buffer,
+void GPUQueue::writeBuffer(ScriptState* script_state,
+                           GPUBuffer* buffer,
                            uint64_t buffer_offset,
                            const DOMArrayBufferBase* data,
                            uint64_t data_byte_offset,
                            ExceptionState& exception_state) {
-  WriteBufferImpl(buffer, buffer_offset, data->ByteLength(),
+  WriteBufferImpl(script_state, buffer, buffer_offset, data->ByteLength(),
                   data->DataMaybeShared(), 1, data_byte_offset, {},
                   exception_state);
 }
 
-void GPUQueue::writeBuffer(GPUBuffer* buffer,
+void GPUQueue::writeBuffer(ScriptState* script_state,
+                           GPUBuffer* buffer,
                            uint64_t buffer_offset,
                            const DOMArrayBufferBase* data,
                            uint64_t data_byte_offset,
                            uint64_t byte_size,
                            ExceptionState& exception_state) {
-  WriteBufferImpl(buffer, buffer_offset, data->ByteLength(),
+  WriteBufferImpl(script_state, buffer, buffer_offset, data->ByteLength(),
                   data->DataMaybeShared(), 1, data_byte_offset, byte_size,
                   exception_state);
 }
 
-void GPUQueue::WriteBufferImpl(GPUBuffer* buffer,
+void GPUQueue::WriteBufferImpl(ScriptState* script_state,
+                               GPUBuffer* buffer,
                                uint64_t buffer_offset,
                                uint64_t data_byte_length,
                                const void* data_base_ptr,
@@ -362,29 +357,33 @@ void GPUQueue::WriteBufferImpl(GPUBuffer* buffer,
   const uint8_t* data_ptr = data_base_ptr_bytes + data_byte_offset;
   GetProcs().queueWriteBuffer(GetHandle(), buffer->GetHandle(), buffer_offset,
                               data_ptr, static_cast<size_t>(write_byte_size));
-  EnsureFlush();
+  EnsureFlush(ToEventLoop(script_state));
 }
 
-void GPUQueue::writeTexture(GPUImageCopyTexture* destination,
+void GPUQueue::writeTexture(ScriptState* script_state,
+                            GPUImageCopyTexture* destination,
                             const MaybeShared<DOMArrayBufferView>& data,
                             GPUImageDataLayout* data_layout,
                             const V8GPUExtent3D* write_size,
                             ExceptionState& exception_state) {
-  WriteTextureImpl(destination, data->BaseAddressMaybeShared(),
+  WriteTextureImpl(script_state, destination, data->BaseAddressMaybeShared(),
                    data->byteLength(), data_layout, write_size,
                    exception_state);
 }
 
-void GPUQueue::writeTexture(GPUImageCopyTexture* destination,
+void GPUQueue::writeTexture(ScriptState* script_state,
+                            GPUImageCopyTexture* destination,
                             const DOMArrayBufferBase* data,
                             GPUImageDataLayout* data_layout,
                             const V8GPUExtent3D* write_size,
                             ExceptionState& exception_state) {
-  WriteTextureImpl(destination, data->DataMaybeShared(), data->ByteLength(),
-                   data_layout, write_size, exception_state);
+  WriteTextureImpl(script_state, destination, data->DataMaybeShared(),
+                   data->ByteLength(), data_layout, write_size,
+                   exception_state);
 }
 
-void GPUQueue::WriteTextureImpl(GPUImageCopyTexture* destination,
+void GPUQueue::WriteTextureImpl(ScriptState* script_state,
+                                GPUImageCopyTexture* destination,
                                 const void* data,
                                 size_t data_size,
                                 GPUImageDataLayout* data_layout,
@@ -408,22 +407,28 @@ void GPUQueue::WriteTextureImpl(GPUImageCopyTexture* destination,
     return;
   }
 
-  WGPUTextureFormat format = destination->texture()->Format();
-  size_t required_copy_size = 0;
-  if (!ComputeAndValidateRequiredBytesInCopy(
-          data_size, dawn_data_layout, dawn_write_size, format,
-          dawn_destination.aspect, &required_copy_size, device_)) {
-    return;
-  }
-
-  // Only send the data which is really required.
+  // Handle the data layout offset by offsetting the data pointer instead. This
+  // helps move less data between then renderer and GPU process (otherwise all
+  // the data from 0 to offset would be copied over as well).
   const void* data_ptr =
       static_cast<const uint8_t*>(data) + dawn_data_layout.offset;
+  data_size -= dawn_data_layout.offset;
   dawn_data_layout.offset = 0;
+
+  // Compute a tight upper bound of the number of bytes to send for this
+  // WriteTexture. This can be 0 for some cases that produce validation errors,
+  // but we don't create an error in Blink since Dawn can produce better error
+  // messages (and this is more up-to-spec because the errors must be created on
+  // the device timeline).
+  size_t data_size_upper_bound = EstimateWriteTextureBytesUpperBound(
+      dawn_data_layout, dawn_write_size, destination->texture()->Format(),
+      dawn_destination.aspect);
+  size_t required_copy_size = std::min(data_size, data_size_upper_bound);
+
   GetProcs().queueWriteTexture(GetHandle(), &dawn_destination, data_ptr,
                                required_copy_size, &dawn_data_layout,
                                &dawn_write_size);
-  EnsureFlush();
+  EnsureFlush(ToEventLoop(script_state));
   return;
 }
 
@@ -512,6 +517,12 @@ void GPUQueue::copyExternalImageToTexture(
     return;
   }
 
+  PredefinedColorSpace color_space;
+  if (!ValidateAndConvertColorSpace(destination->colorSpace(), color_space,
+                                    exception_state)) {
+    return;
+  }
+
   // Issue the noop copy to continue validation to destination textures
   if (dawn_copy_size.width == 0 || dawn_copy_size.height == 0 ||
       dawn_copy_size.depthOrArrayLayers == 0) {
@@ -520,13 +531,10 @@ void GPUQueue::copyExternalImageToTexture(
         "({width|height|depthOrArrayLayers} equals to 0).");
   }
 
-  WGPUPredefinedColorSpace dawn_predefined_color_space =
-      AsDawnEnum(destination->colorSpace());
-
   if (!UploadContentToTexture(
           static_bitmap_image.get(), origin_in_external_image, dawn_copy_size,
-          dawn_destination, destination->premultipliedAlpha(),
-          dawn_predefined_color_space, copyImage->flipY())) {
+          dawn_destination, destination->premultipliedAlpha(), color_space,
+          copyImage->flipY())) {
     exception_state.ThrowTypeError(
         "Failed to copy content from external image.");
     return;
@@ -538,7 +546,7 @@ bool GPUQueue::UploadContentToTexture(StaticBitmapImage* image,
                                       const WGPUExtent3D& copy_size,
                                       const WGPUImageCopyTexture& destination,
                                       bool dst_premultiplied_alpha,
-                                      WGPUPredefinedColorSpace dst_color_space,
+                                      PredefinedColorSpace dst_color_space,
                                       bool flipY) {
   PaintImage paint_image = image->PaintImageForCurrentFrame();
   SkColorType source_color_type = paint_image.GetSkImageInfo().colorType();
@@ -572,8 +580,8 @@ bool GPUQueue::UploadContentToTexture(StaticBitmapImage* image,
   if (sk_src_color_space == nullptr) {
     sk_src_color_space = SkColorSpace::MakeSRGB();
   }
-  sk_sp<SkColorSpace> sk_dst_color_space = PredefinedColorSpaceToSkColorSpace(
-      GetPredefinedColorSpace(dst_color_space));
+  sk_sp<SkColorSpace> sk_dst_color_space =
+      PredefinedColorSpaceToSkColorSpace(dst_color_space);
   std::array<float, 7> gamma_decode_params;
   std::array<float, 7> gamma_encode_params;
   std::array<float, 9> conversion_matrix;

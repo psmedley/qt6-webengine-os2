@@ -423,17 +423,18 @@ static const FFCodecDefault v4l2_m2m_defaults[] = {
     M2MENC_CLASS(NAME, OPTIONS_NAME) \
     const FFCodec ff_ ## NAME ## _v4l2m2m_encoder = { \
         .p.name         = #NAME "_v4l2m2m" , \
-        .p.long_name    = NULL_IF_CONFIG_SMALL("V4L2 mem2mem " LONGNAME " encoder wrapper"), \
+        CODEC_LONG_NAME("V4L2 mem2mem " LONGNAME " encoder wrapper"), \
         .p.type         = AVMEDIA_TYPE_VIDEO, \
         .p.id           = CODEC , \
         .priv_data_size = sizeof(V4L2m2mPriv), \
         .p.priv_class   = &v4l2_m2m_ ## NAME ##_enc_class, \
         .init           = v4l2_encode_init, \
-        .receive_packet = v4l2_receive_packet, \
+        FF_CODEC_RECEIVE_PACKET_CB(v4l2_receive_packet), \
         .close          = v4l2_encode_close, \
         .defaults       = v4l2_m2m_defaults, \
         .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY, \
-        .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP, \
+        .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | \
+                          FF_CODEC_CAP_INIT_CLEANUP, \
         .p.wrapper_name = "v4l2m2m", \
     }
 

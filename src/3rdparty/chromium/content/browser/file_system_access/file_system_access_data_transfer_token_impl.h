@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
+#include "base/thread_annotations.h"
 #include "base/unguessable_token.h"
 #include "content/browser/file_system_access/file_system_access_manager_impl.h"
 #include "content/common/content_export.h"
@@ -60,6 +61,8 @@ class CONTENT_EXPORT FileSystemAccessDataTransferTokenImpl
  private:
   void OnMojoDisconnect();
 
+  SEQUENCE_CHECKER(sequence_checker_);
+
   // Raw pointer since FileSystemAccessManagerImpl owns `this`.
   const raw_ptr<FileSystemAccessManagerImpl> manager_;
   const FileSystemAccessManagerImpl::PathType path_type_;
@@ -71,7 +74,8 @@ class CONTENT_EXPORT FileSystemAccessDataTransferTokenImpl
   // the originally constructed instance and then additional receivers for
   // each clone. `manager_` must not remove this token until `receivers_` is
   // empty.
-  mojo::ReceiverSet<blink::mojom::FileSystemAccessDataTransferToken> receivers_;
+  mojo::ReceiverSet<blink::mojom::FileSystemAccessDataTransferToken> receivers_
+      GUARDED_BY_CONTEXT(sequence_checker_);
 };
 
 }  // namespace content

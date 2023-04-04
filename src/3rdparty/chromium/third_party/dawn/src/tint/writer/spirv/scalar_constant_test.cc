@@ -21,35 +21,32 @@ namespace {
 using SpirvScalarConstantTest = TestHelper;
 
 TEST_F(SpirvScalarConstantTest, Equality) {
-  ScalarConstant a{};
-  ScalarConstant b{};
-  EXPECT_EQ(a, b);
+    ScalarConstant a{};
+    ScalarConstant b{};
+    EXPECT_EQ(a, b);
 
-  a.kind = ScalarConstant::Kind::kU32;
-  EXPECT_NE(a, b);
-  b.kind = ScalarConstant::Kind::kU32;
-  EXPECT_EQ(a, b);
+    a.kind = ScalarConstant::Kind::kU32;
+    EXPECT_NE(a, b);
+    b.kind = ScalarConstant::Kind::kU32;
+    EXPECT_EQ(a, b);
 
-  a.value.b = true;
-  EXPECT_NE(a, b);
-  b.value.b = true;
-  EXPECT_EQ(a, b);
-
-  a.is_spec_op = true;
-  EXPECT_NE(a, b);
-  b.is_spec_op = true;
-  EXPECT_EQ(a, b);
-
-  a.constant_id = 3;
-  EXPECT_NE(a, b);
-  b.constant_id = 3;
-  EXPECT_EQ(a, b);
+    a.value.b = true;
+    EXPECT_NE(a, b);
+    b.value.b = true;
+    EXPECT_EQ(a, b);
 }
 
 TEST_F(SpirvScalarConstantTest, U32) {
-  auto c = ScalarConstant::U32(123);
-  EXPECT_EQ(c.value.u32, 123u);
-  EXPECT_EQ(c.kind, ScalarConstant::Kind::kU32);
+    auto c = ScalarConstant::U32(123);
+    EXPECT_EQ(c.value.u32, 123u);
+    EXPECT_EQ(c.kind, ScalarConstant::Kind::kU32);
+}
+
+TEST_F(SpirvScalarConstantTest, F16) {
+    auto c = ScalarConstant::F16(123.456f);
+    // 123.456f will be quantized to f16 123.4375h, bit pattern 0x57b7
+    EXPECT_EQ(c.value.f16.bits_representation, 0x57b7u);
+    EXPECT_EQ(c.kind, ScalarConstant::Kind::kF16);
 }
 
 }  // namespace

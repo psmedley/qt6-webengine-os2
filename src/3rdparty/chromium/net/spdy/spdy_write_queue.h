@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,7 +106,7 @@ class NET_EXPORT_PRIVATE SpdyWriteQueue {
     ~PendingWrite();
   };
 
-  bool removing_writes_;
+  bool removing_writes_ = false;
 
   // Number of currently queued capped frames including all priorities.
   int num_queued_capped_frames_ = 0;

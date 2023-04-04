@@ -7,15 +7,23 @@
 
 #include "src/utils/SkPolyUtils.h"
 
-#include <limits>
-
-#include "include/private/SkNx.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkTypes.h"
+#include "include/private/SkFloatingPoint.h"
+#include "include/private/SkMalloc.h"
 #include "include/private/SkTArray.h"
+#include "include/private/SkTDArray.h"
 #include "include/private/SkTemplates.h"
+#include "include/private/SkVx.h"
 #include "src/core/SkPointPriv.h"
 #include "src/core/SkRectPriv.h"
 #include "src/core/SkTDPQueue.h"
 #include "src/core/SkTInternalLList.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <new>
 
 //////////////////////////////////////////////////////////////////////////////////
 // Helper data structures and functions
@@ -342,7 +350,7 @@ bool SkInsetConvexPolygon(const SkPoint* inputPolygonVerts, int inputPolygonSize
     // insetting close to zero just returns the original poly
     if (inset <= SK_ScalarNearlyZero) {
         for (int i = 0; i < inputPolygonSize; ++i) {
-            *insetPolygon->push() = inputPolygonVerts[i];
+            *insetPolygon->append() = inputPolygonVerts[i];
         }
         return true;
     }
@@ -447,16 +455,16 @@ bool SkInsetConvexPolygon(const SkPoint* inputPolygonVerts, int inputPolygonSize
 
     static constexpr SkScalar kCleanupTolerance = 0.01f;
     if (insetVertexCount >= 0) {
-        insetPolygon->setReserve(insetVertexCount);
+        insetPolygon->reserve(insetVertexCount);
     }
     int currIndex = 0;
-    *insetPolygon->push() = head->fIntersection;
+    *insetPolygon->append() = head->fIntersection;
     currEdge = head->fNext;
     while (currEdge != head) {
         if (!SkPointPriv::EqualsWithinTolerance(currEdge->fIntersection,
                                                 (*insetPolygon)[currIndex],
                                                 kCleanupTolerance)) {
-            *insetPolygon->push() = currEdge->fIntersection;
+            *insetPolygon->append() = currEdge->fIntersection;
             currIndex++;
         }
         currEdge = currEdge->fNext;
@@ -465,10 +473,10 @@ bool SkInsetConvexPolygon(const SkPoint* inputPolygonVerts, int inputPolygonSize
     if (currIndex >= 1 &&
         SkPointPriv::EqualsWithinTolerance((*insetPolygon)[0], (*insetPolygon)[currIndex],
                                             kCleanupTolerance)) {
-        insetPolygon->pop();
+        insetPolygon->pop_back();
     }
 
-    return SkIsConvexPolygon(insetPolygon->begin(), insetPolygon->count());
+    return SkIsConvexPolygon(insetPolygon->begin(), insetPolygon->size());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -1204,9 +1212,9 @@ bool SkOffsetSimplePolygon(const SkPoint* inputPolygonVerts, int inputPolygonSiz
     // offsetting close to zero just returns the original poly
     if (SkScalarNearlyZero(offset)) {
         for (int i = 0; i < inputPolygonSize; ++i) {
-            *offsetPolygon->push() = inputPolygonVerts[i];
+            *offsetPolygon->append() = inputPolygonVerts[i];
             if (polygonIndices) {
-                *polygonIndices->push() = i;
+                *polygonIndices->append() = i;
             }
         }
         return true;
@@ -1418,20 +1426,20 @@ bool SkOffsetSimplePolygon(const SkPoint* inputPolygonVerts, int inputPolygonSiz
     }
 
     static constexpr SkScalar kCleanupTolerance = 0.01f;
-    offsetPolygon->setReserve(offsetVertexCount);
+    offsetPolygon->reserve(offsetVertexCount);
     int currIndex = 0;
-    *offsetPolygon->push() = head->fIntersection;
+    *offsetPolygon->append() = head->fIntersection;
     if (polygonIndices) {
-        *polygonIndices->push() = head->fIndex;
+        *polygonIndices->append() = head->fIndex;
     }
     currEdge = head->fNext;
     while (currEdge != head) {
         if (!SkPointPriv::EqualsWithinTolerance(currEdge->fIntersection,
                                                 (*offsetPolygon)[currIndex],
                                                 kCleanupTolerance)) {
-            *offsetPolygon->push() = currEdge->fIntersection;
+            *offsetPolygon->append() = currEdge->fIntersection;
             if (polygonIndices) {
-                *polygonIndices->push() = currEdge->fIndex;
+                *polygonIndices->append() = currEdge->fIndex;
             }
             currIndex++;
         }
@@ -1441,17 +1449,17 @@ bool SkOffsetSimplePolygon(const SkPoint* inputPolygonVerts, int inputPolygonSiz
     if (currIndex >= 1 &&
         SkPointPriv::EqualsWithinTolerance((*offsetPolygon)[0], (*offsetPolygon)[currIndex],
                                             kCleanupTolerance)) {
-        offsetPolygon->pop();
+        offsetPolygon->pop_back();
         if (polygonIndices) {
-            polygonIndices->pop();
+            polygonIndices->pop_back();
         }
     }
 
     // check winding of offset polygon (it should be same as the original polygon)
-    SkScalar offsetWinding = SkGetPolygonWinding(offsetPolygon->begin(), offsetPolygon->count());
+    SkScalar offsetWinding = SkGetPolygonWinding(offsetPolygon->begin(), offsetPolygon->size());
 
     return (winding*offsetWinding > 0 &&
-            SkIsSimplePolygon(offsetPolygon->begin(), offsetPolygon->count()));
+            SkIsSimplePolygon(offsetPolygon->begin(), offsetPolygon->size()));
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -1470,11 +1478,11 @@ struct TriangulationVertex {
 
 static void compute_triangle_bounds(const SkPoint& p0, const SkPoint& p1, const SkPoint& p2,
                                     SkRect* bounds) {
-    Sk4s min, max;
-    min = max = Sk4s(p0.fX, p0.fY, p0.fX, p0.fY);
-    Sk4s xy(p1.fX, p1.fY, p2.fX, p2.fY);
-    min = Sk4s::Min(min, xy);
-    max = Sk4s::Max(max, xy);
+    skvx::float4 min, max;
+    min = max = skvx::float4(p0.fX, p0.fY, p0.fX, p0.fY);
+    skvx::float4 xy(p1.fX, p1.fY, p2.fX, p2.fY);
+    min = skvx::min(min, xy);
+    max = skvx::max(max, xy);
     bounds->setLTRB(std::min(min[0], min[2]), std::min(min[1], min[3]),
                     std::max(max[0], max[2]), std::max(max[1], max[3]));
 }
@@ -1531,8 +1539,8 @@ public:
             return false;
         }
 
-        fGrid.setCount(fHCount*fVCount);
-        for (int i = 0; i < fGrid.count(); ++i) {
+        fGrid.resize(fHCount*fVCount);
+        for (int i = 0; i < fGrid.size(); ++i) {
             fGrid[i].reset();
         }
 
@@ -1697,7 +1705,7 @@ bool SkTriangulateSimplePolygon(const SkPoint* polygonVerts, uint16_t* indexMap,
     // In the worst case this is an n^2 algorithm. We can cut down the search space somewhat by
     // noting that only convex vertices can be potential ears, and we only need to check whether
     // any reflex vertices lie inside the ear.
-    triangleIndices->setReserve(triangleIndices->count() + 3 * (polygonSize - 2));
+    triangleIndices->reserve(triangleIndices->size() + 3 * (polygonSize - 2));
     int vertexCount = polygonSize;
     while (vertexCount > 3) {
         bool success = false;
@@ -1751,121 +1759,8 @@ bool SkTriangulateSimplePolygon(const SkPoint* polygonVerts, uint16_t* indexMap,
     for (SkTInternalLList<TriangulationVertex>::Iter vertexIter = convexList.begin();
          vertexIter != convexList.end(); ++vertexIter) {
         TriangulationVertex* vertex = *vertexIter;
-        *triangleIndices->push() = indexMap[vertex->fIndex];
+        *triangleIndices->append() = indexMap[vertex->fIndex];
     }
 
     return true;
 }
-
-///////////
-
-static double crs(SkVector a, SkVector b) {
-    return a.fX * b.fY - a.fY * b.fX;
-}
-
-static int sign(SkScalar v) {
-    return v < 0 ? -1 : (v > 0);
-}
-
-struct SignTracker {
-    int fSign;
-    int fSignChanges;
-
-    void reset() {
-        fSign = 0;
-        fSignChanges = 0;
-    }
-
-    void init(int s) {
-        SkASSERT(fSignChanges == 0);
-        SkASSERT(s == 1 || s == -1 || s == 0);
-        fSign = s;
-        fSignChanges = 1;
-    }
-
-    void update(int s) {
-        if (s) {
-            if (fSign != s) {
-                fSignChanges += 1;
-                fSign = s;
-            }
-        }
-    }
-};
-
-struct ConvexTracker {
-    SkVector    fFirst, fPrev;
-    SignTracker fDSign, fCSign;
-    int         fVecCounter;
-    bool        fIsConcave;
-
-    ConvexTracker() { this->reset(); }
-
-    void reset() {
-        fPrev = {0, 0};
-        fDSign.reset();
-        fCSign.reset();
-        fVecCounter = 0;
-        fIsConcave = false;
-    }
-
-    void addVec(SkPoint p1, SkPoint p0) {
-        this->addVec(p1 - p0);
-    }
-    void addVec(SkVector v) {
-        if (v.fX == 0 && v.fY == 0) {
-            return;
-        }
-
-        fVecCounter += 1;
-        if (fVecCounter == 1) {
-            fFirst = fPrev = v;
-            fDSign.update(sign(v.fX));
-            return;
-        }
-
-        SkScalar d = v.fX;
-        SkScalar c = crs(fPrev, v);
-        int sign_c;
-        if (c) {
-            sign_c = sign(c);
-        } else {
-            if (d >= 0) {
-                sign_c = fCSign.fSign;
-            } else {
-                sign_c = -fCSign.fSign;
-            }
-        }
-
-        fDSign.update(sign(d));
-        fCSign.update(sign_c);
-        fPrev = v;
-
-        if (fDSign.fSignChanges > 3 || fCSign.fSignChanges > 1) {
-            fIsConcave = true;
-        }
-    }
-
-    void finalCross() {
-        this->addVec(fFirst);
-    }
-};
-
-bool SkIsPolyConvex_experimental(const SkPoint pts[], int count) {
-    if (count <= 3) {
-        return true;
-    }
-
-    ConvexTracker tracker;
-
-    for (int i = 0; i < count - 1; ++i) {
-        tracker.addVec(pts[i + 1], pts[i]);
-        if (tracker.fIsConcave) {
-            return false;
-        }
-    }
-    tracker.addVec(pts[0], pts[count - 1]);
-    tracker.finalCross();
-    return !tracker.fIsConcave;
-}
-

@@ -1,28 +1,28 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import './elements/viewer-error-dialog.js';
 import './elements/viewer-page-indicator.js';
-import './elements/shared-vars.js';
+import './elements/shared-vars.css.js';
 import './elements/viewer-zoom-toolbar.js';
-import './pdf_viewer_shared_style.js';
+import './pdf_viewer_shared_style.css.js';
 
 import {assertNotReached} from 'chrome://resources/js/assert_ts.js';
-import {isRTL} from 'chrome://resources/js/util.m.js';
+import {isRTL} from 'chrome://resources/js/util.js';
 
 import {BrowserApi} from './browser_api.js';
 import {ExtendedKeyEvent, FittingType} from './constants.js';
 import {MessageData, PluginController, PrintPreviewParams} from './controller.js';
 import {ViewerPageIndicatorElement} from './elements/viewer-page-indicator.js';
 import {ViewerZoomToolbarElement} from './elements/viewer-zoom-toolbar.js';
-import {DeserializeKeyEvent, LoadState, SerializeKeyEvent} from './pdf_scripting_api.js';
-import {KeyEventData, PDFViewerBaseElement} from './pdf_viewer_base.js';
+import {deserializeKeyEvent, LoadState, serializeKeyEvent} from './pdf_scripting_api.js';
+import {KeyEventData, PdfViewerBaseElement} from './pdf_viewer_base.js';
 import {getTemplate} from './pdf_viewer_pp.html.js';
 import {DestinationMessageData, DocumentDimensionsMessageData, hasCtrlModifier, shouldIgnoreKeyEvents} from './pdf_viewer_utils.js';
 import {ToolbarManager} from './toolbar_manager.js';
 
-export interface PDFViewerPPElement {
+export interface PdfViewerPpElement {
   $: {
     content: HTMLElement,
     pageIndicator: ViewerPageIndicatorElement,
@@ -31,7 +31,7 @@ export interface PDFViewerPPElement {
   };
 }
 
-export class PDFViewerPPElement extends PDFViewerBaseElement {
+export class PdfViewerPpElement extends PdfViewerBaseElement {
   static get is() {
     return 'pdf-viewer-pp';
   }
@@ -98,7 +98,7 @@ export class PDFViewerPPElement extends PDFViewerBaseElement {
     // Give print preview a chance to handle the key event.
     if (!e.fromScriptingAPI) {
       this.sendScriptingMessage(
-          {type: 'sendKeyEvent', keyEvent: SerializeKeyEvent(e)});
+          {type: 'sendKeyEvent', keyEvent: serializeKeyEvent(e)});
     } else {
       // Show toolbar as a fallback.
       if (!(e.shiftKey || e.ctrlKey || e.altKey)) {
@@ -202,7 +202,7 @@ export class PDFViewerPPElement extends PDFViewerBaseElement {
           this.inPrintPreviewMode_ = true;
           this.isUserInitiatedEvent = false;
           this.forceFit(FittingType.FIT_TO_PAGE);
-          this.updateViewportFit(FittingType.FIT_TO_PAGE);
+          this.viewport.setFittingType(FittingType.FIT_TO_PAGE);
           this.isUserInitiatedEvent = true;
         }
 
@@ -215,7 +215,7 @@ export class PDFViewerPPElement extends PDFViewerBaseElement {
         return true;
       case 'sendKeyEvent':
         const keyEvent =
-            DeserializeKeyEvent((message.data as KeyEventData).keyEvent);
+            deserializeKeyEvent((message.data as KeyEventData).keyEvent);
         const extendedKeyEvent = keyEvent as ExtendedKeyEvent;
         extendedKeyEvent.fromScriptingAPI = true;
         this.handleKeyEvent(extendedKeyEvent);
@@ -284,7 +284,7 @@ export class PDFViewerPPElement extends PDFViewerBaseElement {
         // TODO(crbug.com/1069370): Draw a focus rect around plugin.
         return;
       case 'sendKeyEvent':
-        const keyEvent = DeserializeKeyEvent((data as KeyEventData).keyEvent) as
+        const keyEvent = deserializeKeyEvent((data as KeyEventData).keyEvent) as
             ExtendedKeyEvent;
         keyEvent.fromPlugin = true;
         this.handleKeyEvent(keyEvent);
@@ -350,8 +350,8 @@ const PRINT_PREVIEW_DARK_BACKGROUND_COLOR: number = 0xff5f6368;
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pdf-viewer-pp': PDFViewerPPElement;
+    'pdf-viewer-pp': PdfViewerPpElement;
   }
 }
 
-customElements.define(PDFViewerPPElement.is, PDFViewerPPElement);
+customElements.define(PdfViewerPpElement.is, PdfViewerPpElement);

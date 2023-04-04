@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "net/android/dummy_spnego_authenticator.h"
@@ -133,8 +133,8 @@ DummySpnegoAuthenticator::SecurityContextQuery::SecurityContextQuery()
 DummySpnegoAuthenticator::SecurityContextQuery::SecurityContextQuery(
     const SecurityContextQuery& other) = default;
 
-DummySpnegoAuthenticator::SecurityContextQuery::~SecurityContextQuery() {
-}
+DummySpnegoAuthenticator::SecurityContextQuery::~SecurityContextQuery() =
+    default;
 
 base::android::ScopedJavaLocalRef<jstring>
 DummySpnegoAuthenticator::SecurityContextQuery::GetTokenToReturn(
@@ -158,11 +158,9 @@ void DummySpnegoAuthenticator::SecurityContextQuery::CheckGetTokenArguments(
 }
 
 // Needed to satisfy "complex class" clang requirements.
-DummySpnegoAuthenticator::DummySpnegoAuthenticator() {
-}
+DummySpnegoAuthenticator::DummySpnegoAuthenticator() = default;
 
-DummySpnegoAuthenticator::~DummySpnegoAuthenticator() {
-}
+DummySpnegoAuthenticator::~DummySpnegoAuthenticator() = default;
 
 void DummySpnegoAuthenticator::EnsureTestAccountExists() {
   Java_DummySpnegoAuthenticator_ensureTestAccountExists(

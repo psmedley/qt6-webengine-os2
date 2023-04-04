@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,33 +11,35 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/clock.h"
+#include "components/segmentation_platform/internal/execution/execution_request.h"
 #include "components/segmentation_platform/internal/execution/model_executor.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace segmentation_platform {
 
+namespace processing {
 class FeatureListQueryProcessor;
+}
 
-// Uses SignalDatabase (raw signals), and uses a FeatureListQueryProcessor for
-// each feature to go from metadata and raw signals to create an input tensor to
-// use when executing the ML model. It then uses this input tensor to execute
-// the model and returns the result through a callback. Uses a state within
-// callbacks for executing multiple models simultaneously, or the same model
-// multiple times without waiting for the requests to finish.
+// Uses SignalDatabase (raw signals), and uses a
+// processing::FeatureListQueryProcessor for each feature to go from metadata
+// and raw signals to create an input tensor to use when executing the ML model.
+// It then uses this input tensor to execute the model and returns the result
+// through a callback. Uses a state within callbacks for executing multiple
+// models simultaneously, or the same model multiple times without waiting for
+// the requests to finish.
 class ModelExecutorImpl : public ModelExecutor {
  public:
-  ModelExecutorImpl(base::Clock* clock,
-                    FeatureListQueryProcessor* feature_list_query_processor);
+  ModelExecutorImpl(
+      base::Clock* clock,
+      processing::FeatureListQueryProcessor* feature_list_query_processor);
   ~ModelExecutorImpl() override;
 
   ModelExecutorImpl(ModelExecutorImpl&) = delete;
   ModelExecutorImpl& operator=(ModelExecutorImpl&) = delete;
 
   // ModelExecutionManager impl:.
-  void ExecuteModel(const proto::SegmentInfo& segment_info,
-                    ModelProvider* model_provider,
-                    bool record_metrics_for_default,
-                    ModelExecutionCallback callback) override;
+  void ExecuteModel(std::unique_ptr<ExecutionRequest> request) override;
 
  private:
   struct ExecutionState;
@@ -48,7 +50,8 @@ class ModelExecutorImpl : public ModelExecutor {
   // for executing the model.
   void OnProcessingFeatureListComplete(std::unique_ptr<ExecutionState> state,
                                        bool error,
-                                       const std::vector<float>& input_tensor);
+                                       const std::vector<float>& input_tensor,
+                                       const std::vector<float>& output_tensor);
 
   // ExecuteModel takes the current input tensor and passes it to the ML
   // model for execution.
@@ -63,13 +66,13 @@ class ModelExecutorImpl : public ModelExecutor {
   // Helper function for synchronously invoking the callback with the given
   // result and status.
   void RunModelExecutionCallback(std::unique_ptr<ExecutionState> state,
-                                 float result,
-                                 ModelExecutionStatus status);
+                                 std::unique_ptr<ModelExecutionResult> result);
 
   const raw_ptr<base::Clock> clock_;
 
   // Feature list processor for processing a model metadata's feature list.
-  const raw_ptr<FeatureListQueryProcessor> feature_list_query_processor_;
+  const raw_ptr<processing::FeatureListQueryProcessor>
+      feature_list_query_processor_;
 
   base::WeakPtrFactory<ModelExecutorImpl> weak_ptr_factory_{this};
 };

@@ -79,7 +79,7 @@ void LayoutSVGShape::StyleDidChange(StyleDifference diff,
 
   transform_uses_reference_box_ =
       TransformHelper::DependsOnReferenceBox(StyleRef());
-  SVGResources::UpdatePaints(*GetElement(), old_style, StyleRef());
+  SVGResources::UpdatePaints(*this, old_style, StyleRef());
 
   // Most of the stroke attributes (caps, joins, miters, width, etc.) will cause
   // a re-layout which will clear the stroke-path cache; however, there are a
@@ -98,7 +98,7 @@ void LayoutSVGShape::StyleDidChange(StyleDifference diff,
 
 void LayoutSVGShape::WillBeDestroyed() {
   NOT_DESTROYED();
-  SVGResources::ClearPaints(*GetElement(), Style());
+  SVGResources::ClearPaints(*this, Style());
   LayoutSVGModelObject::WillBeDestroyed();
 }
 
@@ -211,7 +211,7 @@ bool LayoutSVGShape::ShapeDependentStrokeContains(
       // Un-scale to get back to the root-transform (cheaper than re-computing
       // the root transform from scratch).
       root_transform.Scale(StyleRef().EffectiveZoom())
-          .Multiply(NonScalingStrokeTransform());
+          .PreConcat(NonScalingStrokeTransform());
 
       path = &NonScalingStrokePath();
     } else {
@@ -359,7 +359,7 @@ AffineTransform LayoutSVGShape::ComputeNonScalingStrokeTransform() const {
   // better to apply this effect during rasterization?
   AffineTransform host_transform;
   host_transform.Scale(1 / StyleRef().EffectiveZoom())
-      .Multiply(ComputeRootTransform());
+      .PreConcat(ComputeRootTransform());
 
   // Width of non-scaling stroke is independent of translation, so zero it out
   // here.
@@ -391,11 +391,11 @@ void LayoutSVGShape::Paint(const PaintInfo& paint_info) const {
 bool LayoutSVGShape::NodeAtPoint(HitTestResult& result,
                                  const HitTestLocation& hit_test_location,
                                  const PhysicalOffset& accumulated_offset,
-                                 HitTestAction hit_test_action) {
+                                 HitTestPhase phase) {
   NOT_DESTROYED();
   DCHECK_EQ(accumulated_offset, PhysicalOffset());
   // We only draw in the foreground phase, so we only hit-test then.
-  if (hit_test_action != kHitTestForeground)
+  if (phase != HitTestPhase::kForeground)
     return false;
   if (IsShapeEmpty())
     return false;

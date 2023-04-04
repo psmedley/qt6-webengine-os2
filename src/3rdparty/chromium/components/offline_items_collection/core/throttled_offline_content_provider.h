@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,8 +61,6 @@ class ThrottledOfflineContentProvider
   void RenameItem(const ContentId& id,
                   const std::string& name,
                   RenameCallback callback) override;
-  void ChangeSchedule(const ContentId& id,
-                      absl::optional<OfflineItemSchedule> schedule) override;
 
   // Visible for testing. Overrides the time at which this throttle last pushed
   // updates to observers.

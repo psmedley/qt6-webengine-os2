@@ -36,6 +36,7 @@
 #include "avcodec.h"
 #include "codec.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "hwconfig.h"
 #include "thread.h"
 #include "threadframe.h"
@@ -74,13 +75,17 @@ void av_fast_padded_mallocz(void *ptr, unsigned int *size, size_t min_size)
 int av_codec_is_encoder(const AVCodec *avcodec)
 {
     const FFCodec *const codec = ffcodec(avcodec);
-    return codec && (codec->encode_sub || codec->encode2 || codec->receive_packet);
+    return codec && (codec->cb_type == FF_CODEC_CB_TYPE_ENCODE     ||
+                     codec->cb_type == FF_CODEC_CB_TYPE_ENCODE_SUB ||
+                     codec->cb_type == FF_CODEC_CB_TYPE_RECEIVE_PACKET);
 }
 
 int av_codec_is_decoder(const AVCodec *avcodec)
 {
     const FFCodec *const codec = ffcodec(avcodec);
-    return codec && (codec->decode || codec->receive_frame);
+    return codec && (codec->cb_type == FF_CODEC_CB_TYPE_DECODE     ||
+                     codec->cb_type == FF_CODEC_CB_TYPE_DECODE_SUB ||
+                     codec->cb_type == FF_CODEC_CB_TYPE_RECEIVE_FRAME);
 }
 
 int ff_set_dimensions(AVCodecContext *s, int width, int height)
@@ -491,6 +496,8 @@ const char *avcodec_profile_name(enum AVCodecID codec_id, int profile)
 int av_get_exact_bits_per_sample(enum AVCodecID codec_id)
 {
     switch (codec_id) {
+    case AV_CODEC_ID_DFPWM:
+        return 1;
     case AV_CODEC_ID_8SVX_EXP:
     case AV_CODEC_ID_8SVX_FIB:
     case AV_CODEC_ID_ADPCM_ARGO:
@@ -675,6 +682,10 @@ static int get_audio_frame_duration(enum AVCodecID id, int sr, int ch, int ba,
             return 256 * (frame_bytes / 64);
         if (id == AV_CODEC_ID_RA_144)
             return 160 * (frame_bytes / 20);
+        if (id == AV_CODEC_ID_APTX)
+            return 4 * (frame_bytes / 4);
+        if (id == AV_CODEC_ID_APTX_HD)
+            return 4 * (frame_bytes / 6);
 
         if (bps > 0) {
             /* calc from frame_bytes and bits_per_coded_sample */
@@ -943,7 +954,7 @@ void ff_thread_report_progress(ThreadFrame *f, int progress, int field)
 {
 }
 
-void ff_thread_await_progress(ThreadFrame *f, int progress, int field)
+void ff_thread_await_progress(const ThreadFrame *f, int progress, int field)
 {
 }
 
@@ -952,13 +963,14 @@ int ff_thread_can_start_frame(AVCodecContext *avctx)
     return 1;
 }
 
-int ff_alloc_entries(AVCodecContext *avctx, int count)
+int ff_slice_thread_init_progress(AVCodecContext *avctx)
 {
     return 0;
 }
 
-void ff_reset_entries(AVCodecContext *avctx)
+int ff_slice_thread_allocz_entries(AVCodecContext *avctx, int count)
 {
+    return 0;
 }
 
 void ff_thread_await_progress2(AVCodecContext *avctx, int field, int thread, int shift)

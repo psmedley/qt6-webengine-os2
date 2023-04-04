@@ -13,7 +13,6 @@
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
 #include "base/strings/string_split.h"
-#include "base/task/post_task.h"
 #include "base/task/sequence_manager/thread_controller_with_message_pump_impl.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_restrictions.h"
@@ -55,6 +54,7 @@
 #include "content/public/common/network_service_util.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "media/audio/audio_manager.h"
 #include "media/base/media_switches.h"
 #include "mojo/core/embedder/embedder.h"
@@ -117,13 +117,19 @@ Q_GUI_EXPORT QOpenGLContext *qt_gl_global_share_context();
 QT_END_NAMESPACE
 #endif
 
+#define STRINGIFY_LITERAL(x) #x
+#define STRINGIFY_EXPANDED(x) STRINGIFY_LITERAL(x)
+
 namespace QtWebEngineCore {
+
+Q_LOGGING_CATEGORY(webEngineContextLog, "qt.webenginecontext")
 
 #if QT_CONFIG(opengl)
 
 static bool usingSupportedSGBackend()
 {
-    if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL)
+    if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL
+        && QQuickWindow::graphicsApi() != QSGRendererInterface::Vulkan)
         return false;
 
     const QStringList args = QGuiApplication::arguments();
@@ -234,8 +240,7 @@ void dummyGetPluginCallback(const std::vector<content::WebPluginInfo>&)
 
 static void logContext(const char *glType, base::CommandLine *cmd)
 {
-    QLoggingCategory webEngineContextLog("qt.webenginecontext");
-    if (webEngineContextLog.isInfoEnabled()) {
+    if (Q_UNLIKELY(webEngineContextLog().isDebugEnabled())) {
 #if QT_CONFIG(opengl)
         const QSurfaceFormat sharedFormat = qt_gl_global_share_context()->format();
         const auto profile = QMetaEnum::fromType<QSurfaceFormat::OpenGLContextProfile>().valueToKey(
@@ -247,24 +252,24 @@ static void logContext(const char *glType, base::CommandLine *cmd)
         for (const auto &pair : switch_map)
             params << " * " << toQt(pair.first)
                    << toQt(pair.second) << "\n";
-        qCInfo(webEngineContextLog,
-               "\n\nGL Type: %s\n"
-               "Surface Type: %s\n"
-               "Surface Profile: %s\n"
-               "Surface Version: %d.%d\n"
-               "QSG RHI Backend: %s\n"
-               "Using Supported QSG Backend: %s\n"
-               "Using Software Dynamic GL: %s\n"
-               "Using Multithreaded OpenGL: %s\n\n"
-               "Init Parameters:\n %s",
-               glType, type, profile, sharedFormat.majorVersion(), sharedFormat.minorVersion(),
-               qUtf8Printable(QSGRhiSupport::instance()->rhiBackendName()),
-               usingSupportedSGBackend() ? "yes" : "no", usingSoftwareDynamicGL() ? "yes" : "no",
-               !WebEngineContext::isGpuServiceOnUIThread() ? "yes" : "no",
-               qPrintable(params.join(" ")));
+        qCDebug(webEngineContextLog,
+                "\n\nGL Type: %s\n"
+                "Surface Type: %s\n"
+                "Surface Profile: %s\n"
+                "Surface Version: %d.%d\n"
+                "QSG RHI Backend: %s\n"
+                "Using Supported QSG Backend: %s\n"
+                "Using Software Dynamic GL: %s\n"
+                "Using Multithreaded OpenGL: %s\n\n"
+                "Init Parameters:\n %s",
+                glType, type, profile, sharedFormat.majorVersion(), sharedFormat.minorVersion(),
+                qUtf8Printable(QSGRhiSupport::instance()->rhiBackendName()),
+                usingSupportedSGBackend() ? "yes" : "no", usingSoftwareDynamicGL() ? "yes" : "no",
+                !WebEngineContext::isGpuServiceOnUIThread() ? "yes" : "no",
+                qPrintable(params.join(" ")));
 #else
 #ifndef Q_OS_OS2 // We dont' have opengl on OS/2, so suppress the warning
-        qCInfo(webEngineContextLog) << "WebEngine compiled with no opengl enabled.";
+        qCDebug(webEngineContextLog) << "WebEngine compiled with no opengl enabled.";
 #endif
 #endif //QT_CONFIG(opengl)
     }
@@ -687,6 +692,14 @@ WebEngineContext::WebEngineContext()
         parsedCommandLine->AppendSwitch(cc::switches::kDisableCompositedAntialiasing);
     }
 
+#if QT_CONFIG(webengine_vulkan)
+    if (QQuickWindow::graphicsApi() == QSGRendererInterface::Vulkan) {
+        enableFeatures.push_back(features::kVulkan.name);
+        parsedCommandLine->AppendSwitchASCII(switches::kUseVulkan,
+                                             switches::kVulkanImplementationNameNative);
+    }
+#endif
+
     initializeFeatureList(parsedCommandLine, enableFeatures, disableFeatures);
 
     GLContextHelper::initialize();
@@ -749,7 +762,7 @@ WebEngineContext::WebEngineContext()
     m_mainDelegate->PreBrowserMain();
     base::MessagePump::OverrideMessagePumpForUIFactory(messagePumpFactory);
     content::BrowserTaskExecutor::Create();
-    m_mainDelegate->PostEarlyInitialization(false);
+    m_mainDelegate->PostEarlyInitialization({});
     content::StartBrowserThreadPool();
     content::BrowserTaskExecutor::PostFeatureListSetup();
     tracing::InitTracingPostThreadPoolStartAndFeatureList(false);
@@ -836,44 +849,49 @@ gpu::SyncPointManager *WebEngineContext::syncPointManager()
 base::CommandLine *WebEngineContext::initCommandLine(bool &useEmbeddedSwitches,
                                                      bool &enableGLSoftwareRendering)
 {
-    if (base::CommandLine::CreateEmpty()) {
-        base::CommandLine* parsedCommandLine = base::CommandLine::ForCurrentProcess();
-        QStringList appArgs = QCoreApplication::arguments();
-        if (qEnvironmentVariableIsSet(kChromiumFlagsEnv)) {
-            appArgs = appArgs.mid(0, 1); // Take application name and drop the rest
-            appArgs.append(parseEnvCommandLine(qEnvironmentVariable(kChromiumFlagsEnv)));
-        } else {
-            int index = appArgs.indexOf(QLatin1String("--webEngineArgs"));
-            if (index > -1) {
-                appArgs.erase(appArgs.begin() + 1, appArgs.begin() + index + 1);
-            } else {
-                appArgs = appArgs.mid(0, 1);
-            }
-        }
-#if defined(QTWEBENGINE_EMBEDDED_SWITCHES)
-        useEmbeddedSwitches = !appArgs.contains(QStringLiteral("--disable-embedded-switches"));
-#else
-        useEmbeddedSwitches = appArgs.contains(QStringLiteral("--enable-embedded-switches"));
-#endif
-        enableGLSoftwareRendering =
-            appArgs.removeAll(QStringLiteral("--enable-webgl-software-rendering"));
-        appArgs.removeAll(QStringLiteral("--disable-embedded-switches"));
-        appArgs.removeAll(QStringLiteral("--enable-embedded-switches"));
+    if (!base::CommandLine::CreateEmpty())
+        qFatal("base::CommandLine has been initialized unexpectedly.");
 
-        base::CommandLine::StringVector argv;
-        argv.resize(appArgs.size());
-#if defined(Q_OS_WIN)
-        for (int i = 0; i < appArgs.size(); ++i)
-            argv[i] = appArgs[i].toStdWString();
-#else
-        for (int i = 0; i < appArgs.size(); ++i)
-            argv[i] = appArgs[i].toStdString();
-#endif
-        parsedCommandLine->InitFromArgv(argv);
-        return parsedCommandLine;
-    } else {
-        return base::CommandLine::ForCurrentProcess();
+    QStringList appArgs = QCoreApplication::arguments();
+    if (appArgs.empty()) {
+        qFatal("Argument list is empty, the program name is not passed to QCoreApplication. "
+               "base::CommandLine cannot be properly initialized.");
     }
+
+    base::CommandLine *parsedCommandLine = base::CommandLine::ForCurrentProcess();
+    if (qEnvironmentVariableIsSet(kChromiumFlagsEnv)) {
+        appArgs = appArgs.mid(0, 1); // Take application name and drop the rest
+        appArgs.append(parseEnvCommandLine(qEnvironmentVariable(kChromiumFlagsEnv)));
+    } else {
+        int index = appArgs.indexOf(QLatin1String("--webEngineArgs"));
+        if (index > -1) {
+            appArgs.erase(appArgs.begin() + 1, appArgs.begin() + index + 1);
+        } else {
+            appArgs = appArgs.mid(0, 1);
+        }
+    }
+#if defined(QTWEBENGINE_EMBEDDED_SWITCHES)
+    useEmbeddedSwitches = !appArgs.contains(QStringLiteral("--disable-embedded-switches"));
+#else
+    useEmbeddedSwitches = appArgs.contains(QStringLiteral("--enable-embedded-switches"));
+#endif
+    enableGLSoftwareRendering =
+            appArgs.removeAll(QStringLiteral("--enable-webgl-software-rendering"));
+    appArgs.removeAll(QStringLiteral("--disable-embedded-switches"));
+    appArgs.removeAll(QStringLiteral("--enable-embedded-switches"));
+
+    base::CommandLine::StringVector argv;
+    argv.resize(appArgs.size());
+#if defined(Q_OS_WIN)
+    for (int i = 0; i < appArgs.size(); ++i)
+        argv[i] = appArgs[i].toStdWString();
+#else
+    for (int i = 0; i < appArgs.size(); ++i)
+        argv[i] = appArgs[i].toStdString();
+#endif
+    parsedCommandLine->InitFromArgv(argv);
+
+    return parsedCommandLine;
 }
 
 bool WebEngineContext::closingDown()
@@ -886,16 +904,22 @@ bool WebEngineContext::closingDown()
 QT_BEGIN_NAMESPACE
 const char *qWebEngineVersion() noexcept
 {
-    return QTWEBENGINECORE_VERSION_STR;
+    return STRINGIFY_EXPANDED(QTWEBENGINECORE_VERSION_STR);
+}
+
+const char *qWebEngineProcessName() noexcept
+{
+    return STRINGIFY_EXPANDED(QTWEBENGINEPROCESS_NAME);
 }
 
 const char *qWebEngineChromiumVersion() noexcept
 {
-    return CHROMIUM_VERSION;
+    return STRINGIFY_EXPANDED(CHROMIUM_VERSION);
 }
+
 const char *qWebEngineChromiumSecurityPatchVersion() noexcept
 {
-    return "110.0.5481.78"; // FIXME: Remember to update
+    return "110.0.5481.104"; // FIXME: Remember to update
 }
 
 QT_END_NAMESPACE

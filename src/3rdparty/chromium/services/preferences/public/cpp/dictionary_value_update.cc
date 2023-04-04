@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/values.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace prefs {
@@ -21,7 +20,9 @@ DictionaryValueUpdate::DictionaryValueUpdate(UpdateCallback report_update,
                                              std::vector<std::string> path)
     : report_update_(std::move(report_update)),
       value_(value),
-      path_(std::move(path)) {}
+      path_(std::move(path)) {
+  DCHECK(value_);
+}
 
 DictionaryValueUpdate::~DictionaryValueUpdate() = default;
 
@@ -99,13 +100,14 @@ std::unique_ptr<DictionaryValueUpdate> DictionaryValueUpdate::SetDictionary(
       report_update_, dictionary_value, ConcatPath(path_, path));
 }
 
-void DictionaryValueUpdate::SetKey(base::StringPiece key, base::Value value) {
-  const base::Value* found = value_->FindKey(key);
+base::Value* DictionaryValueUpdate::SetKey(base::StringPiece key,
+                                           base::Value value) {
+  base::Value* found = value_->FindKey(key);
   if (found && *found == value)
-    return;
+    return found;
 
   RecordKey(key);
-  value_->SetKey(key, std::move(value));
+  return value_->SetKey(key, std::move(value));
 }
 
 void DictionaryValueUpdate::SetWithoutPathExpansion(
@@ -165,7 +167,7 @@ bool DictionaryValueUpdate::GetString(base::StringPiece path,
 bool DictionaryValueUpdate::GetDictionary(
     base::StringPiece path,
     const base::DictionaryValue** out_value) const {
-  return AsConstDictionary()->GetDictionary(path, out_value);
+  return std::as_const(value_)->GetDictionary(path, out_value);
 }
 
 bool DictionaryValueUpdate::GetDictionary(
@@ -178,17 +180,6 @@ bool DictionaryValueUpdate::GetDictionary(
   *out_value = std::make_unique<DictionaryValueUpdate>(
       report_update_, dictionary_value, ConcatPath(path_, path));
   return true;
-}
-
-bool DictionaryValueUpdate::GetList(base::StringPiece path,
-                                    const base::ListValue** out_value) const {
-  return AsConstDictionary()->GetList(path, out_value);
-}
-
-bool DictionaryValueUpdate::GetList(base::StringPiece path,
-                                    base::ListValue** out_value) {
-  RecordPath(path);
-  return value_->GetList(path, out_value);
 }
 
 bool DictionaryValueUpdate::GetBooleanWithoutPathExpansion(
@@ -249,15 +240,22 @@ bool DictionaryValueUpdate::GetStringWithoutPathExpansion(
 bool DictionaryValueUpdate::GetDictionaryWithoutPathExpansion(
     base::StringPiece key,
     const base::DictionaryValue** out_value) const {
-  return value_->GetDictionaryWithoutPathExpansion(key, out_value);
+  const base::Value* value = value_->GetDict().Find(key);
+  if (!value || !value->is_dict())
+    return false;
+  if (out_value)
+    *out_value = static_cast<const base::DictionaryValue*>(value);
+  return true;
 }
 
 bool DictionaryValueUpdate::GetDictionaryWithoutPathExpansion(
     base::StringPiece key,
     std::unique_ptr<DictionaryValueUpdate>* out_value) {
   base::DictionaryValue* dictionary_value = nullptr;
-  if (!value_->GetDictionaryWithoutPathExpansion(key, &dictionary_value))
+  if (!std::as_const(*this).GetDictionaryWithoutPathExpansion(
+          key, const_cast<const base::DictionaryValue**>(&dictionary_value))) {
     return false;
+  }
 
   std::vector<std::string> full_path = path_;
   full_path.push_back(std::string(key));
@@ -268,15 +266,21 @@ bool DictionaryValueUpdate::GetDictionaryWithoutPathExpansion(
 
 bool DictionaryValueUpdate::GetListWithoutPathExpansion(
     base::StringPiece key,
-    const base::ListValue** out_value) const {
-  return value_->GetListWithoutPathExpansion(key, out_value);
+    const base::Value::List** out_value) const {
+  const base::Value::List* list = value_->GetDict().FindList(key);
+  if (!list)
+    return false;
+  if (out_value)
+    *out_value = list;
+  return true;
 }
 
 bool DictionaryValueUpdate::GetListWithoutPathExpansion(
     base::StringPiece key,
-    base::ListValue** out_value) {
+    base::Value::List** out_value) {
   RecordKey(key);
-  return value_->GetListWithoutPathExpansion(key, out_value);
+  return std::as_const(*this).GetListWithoutPathExpansion(
+      key, const_cast<const base::Value::List**>(out_value));
 }
 
 bool DictionaryValueUpdate::Remove(base::StringPiece path) {
@@ -313,7 +317,8 @@ bool DictionaryValueUpdate::RemoveWithoutPathExpansion(
 bool DictionaryValueUpdate::RemovePath(
     base::StringPiece path,
     std::unique_ptr<base::Value>* out_value) {
-  absl::optional<base::Value> value = value_->ExtractPath(path);
+  absl::optional<base::Value> value =
+      value_->GetDict().ExtractByDottedPath(path);
   if (!value)
     return false;
 
@@ -331,13 +336,13 @@ bool DictionaryValueUpdate::RemovePath(
   return true;
 }
 
-base::DictionaryValue* DictionaryValueUpdate::AsDictionary() {
+base::Value::Dict* DictionaryValueUpdate::AsDict() {
   RecordSplitPath(std::vector<base::StringPiece>());
-  return value_;
+  return &value_->GetDict();
 }
 
-const base::DictionaryValue* DictionaryValueUpdate::AsConstDictionary() const {
-  return value_;
+const base::Value::Dict* DictionaryValueUpdate::AsConstDict() const {
+  return &value_->GetDict();
 }
 
 void DictionaryValueUpdate::RecordKey(base::StringPiece key) {

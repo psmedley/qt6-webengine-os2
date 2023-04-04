@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -131,14 +131,17 @@ consoles.list_view(
 exec("./try/presubmit.star")
 exec("./try/tryserver.blink.star")
 exec("./try/tryserver.chromium.star")
+exec("./try/tryserver.chromium.accessibility.star")
 exec("./try/tryserver.chromium.android.star")
 exec("./try/tryserver.chromium.angle.star")
 exec("./try/tryserver.chromium.chromiumos.star")
 exec("./try/tryserver.chromium.dawn.star")
+exec("./try/tryserver.chromium.fuchsia.star")
 exec("./try/tryserver.chromium.linux.star")
 exec("./try/tryserver.chromium.mac.star")
 exec("./try/tryserver.chromium.packager.star")
 exec("./try/tryserver.chromium.rust.star")
+exec("./try/tryserver.chromium.tricium.star")
 exec("./try/tryserver.chromium.updater.star")
 exec("./try/tryserver.chromium.win.star")
 
@@ -199,7 +202,7 @@ branches.cq_tryjob_verifier(
     cq_group = "cq",
     experiment_percentage = 100,
     includable_only = False,
-    location_regexp = [".+/[+]/third_party/nearby/README.chromium"],
+    location_filters = [cq.location_filter(path_regexp = "third_party/nearby/README.chromium")],
     owner_whitelist = [
         "googlers",
         "project-chromium-robot-committers",
@@ -220,6 +223,10 @@ chrome_internal_verifier(
 
 chrome_internal_verifier(
     builder = "chromeos-octopus-compile-chrome",
+)
+
+chrome_internal_verifier(
+    builder = "chromeos-reven-chrome",
 )
 
 chrome_internal_verifier(
@@ -249,6 +256,10 @@ chrome_internal_verifier(
 
 chrome_internal_verifier(
     builder = "lacros-arm-generic-chrome-skylab",
+)
+
+chrome_internal_verifier(
+    builder = "lacros-arm64-generic-chrome-skylab",
 )
 
 chrome_internal_verifier(

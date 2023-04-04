@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,6 +130,8 @@ class AXRange {
   //   nullopt - If positions are not comparable (see AXPosition::CompareTo).
   static absl::optional<int> CompareEndpoints(const AXPositionType* first,
                                               const AXPositionType* second) {
+    DCHECK(first->IsValid());
+    DCHECK(second->IsValid());
     absl::optional<int> tree_position_comparison =
         first->AsTreePosition()->CompareTo(*second->AsTreePosition());
 
@@ -204,8 +206,14 @@ class AXRange {
   //
   // This class allows AXRange to be iterated through all "leaf text ranges"
   // contained between its endpoints, composing the entire range.
-  class Iterator : public std::iterator<std::input_iterator_tag, AXRange> {
+  class Iterator {
    public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = AXRange;
+    using difference_type = std::ptrdiff_t;
+    using pointer = AXRange*;
+    using reference = AXRange&;
+
     Iterator()
         : current_start_(AXPositionType::CreateNullPosition()),
           iterator_end_(AXPositionType::CreateNullPosition()) {}
@@ -366,8 +374,12 @@ class AXRange {
                              current_end_offset - start->text_offset())
                   : current_end_offset - start->text_offset();
 
-          range_text += start->GetText(embedded_object_behavior)
-                            .substr(start->text_offset(), characters_to_append);
+          std::u16string position_text =
+              start->GetText(embedded_object_behavior);
+          if (start->text_offset() < static_cast<int>(position_text.length())) {
+            range_text += position_text.substr(start->text_offset(),
+                                               characters_to_append);
+          }
 
           // To minimize user confusion, collapse all whitespace following any
           // line break unless it is a hard line break (<br> or a text node with

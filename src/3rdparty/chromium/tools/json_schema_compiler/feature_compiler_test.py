@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -365,8 +365,8 @@ class FeatureCompilerTest(unittest.TestCase):
           'contexts': ['webui'],
         }])
 
-    with self.assertRaisesRegexp(AssertionError,
-                                 'No default parent found for bookmarks'):
+    with self.assertRaisesRegex(AssertionError,
+                                'No default parent found for bookmarks'):
       c._CompileFeature('bookmarks.export', { "allowlist": ["asdf"] })
 
   def testRealIdsDisallowedInAllowlist(self):

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 namespace user_notes {
 
-UserNoteBody::UserNoteBody(const std::string& plain_text_value)
+UserNoteBody::UserNoteBody(const std::u16string& plain_text_value)
     : plain_text_value_(plain_text_value) {}
 
 UserNoteBody::~UserNoteBody() = default;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,7 +134,7 @@ NativeFileUtil::CopyOrMoveMode NativeFileUtil::CopyOrMoveModeForDestination(
 }
 
 base::File NativeFileUtil::CreateOrOpen(const base::FilePath& path,
-                                        int file_flags) {
+                                        uint32_t file_flags) {
   if (!base::DirectoryExists(path.DirName())) {
     // If its parent does not exist, should return NOT_FOUND error.
     return base::File(base::File::FILE_ERROR_NOT_FOUND);

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 #include <memory>
 
 #include "base/memory/raw_ptr.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/chromeos_buildflags.h"
 #include "ui/color/color_id.h"
 #include "ui/color/color_provider.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/events/test/test_event.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image_unittest_util.h"
@@ -32,6 +34,11 @@
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget_utils.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_features.h"
+#include "chromeos/constants/chromeos_features.h"
+#endif  // IS_CHROMEOS_ASH
 
 namespace message_center {
 
@@ -98,12 +105,6 @@ class NotificationTestDelegate : public NotificationDelegate {
   bool disable_notification_called_ = false;
 };
 
-class DummyEvent : public ui::Event {
- public:
-  DummyEvent() : Event(ui::ET_UNKNOWN, base::TimeTicks(), 0) {}
-  ~DummyEvent() override = default;
-};
-
 }  // namespace
 
 class NotificationViewTest : public views::ViewObserver,
@@ -118,6 +119,18 @@ class NotificationViewTest : public views::ViewObserver,
 
   // views::ViewsTestBase:
   void SetUp() override {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    // Since ash will use ash::AshNotificationView instead of
+    // message_center::NotificationView when
+    // kNotificationsRefresh/kDarkLightMode is enabled, these unit tests are
+    // only applicable when the features are disabled.
+    scoped_feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
+    scoped_feature_list_->InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/{ash::features::kNotificationsRefresh,
+                               chromeos::features::kDarkLightMode});
+#endif  // IS_CHROMEOS_ASH
+
     views::ViewsTestBase::SetUp();
     MessageCenter::Initialize();
     delegate_ = new NotificationTestDelegate();
@@ -148,11 +161,11 @@ class NotificationViewTest : public views::ViewObserver,
   std::unique_ptr<Notification> CreateSimpleNotificationWithRichData(
       const RichNotificationData& optional_fields) const {
     std::unique_ptr<Notification> notification = std::make_unique<Notification>(
-        NOTIFICATION_TYPE_BASE_FORMAT, std::string(kDefaultNotificationId),
-        u"title", u"message",
-        ui::ImageModel::FromImage(CreateTestImage(80, 80)), u"display source",
-        GURL(), NotifierId(NotifierType::APPLICATION, "extension_id"),
-        optional_fields, delegate_);
+        NOTIFICATION_TYPE_SIMPLE, std::string(kDefaultNotificationId), u"title",
+        u"message", ui::ImageModel::FromImage(CreateTestImage(80, 80)),
+        u"display source", GURL(),
+        NotifierId(NotifierType::APPLICATION, "extension_id"), optional_fields,
+        delegate_);
     notification->set_small_image(CreateTestImage(16, 16));
     notification->set_image(CreateTestImage(320, 240));
 
@@ -225,9 +238,13 @@ class NotificationViewTest : public views::ViewObserver,
     return rect.size();
   }
 
+  void ToggleExpanded() {
+    notification_view_->SetExpanded(!notification_view_->IsExpanded());
+  }
+
   // Toggle inline settings with a dummy event.
   void ToggleInlineSettings() {
-    notification_view_->ToggleInlineSettings(DummyEvent());
+    notification_view_->ToggleInlineSettings(ui::test::TestEvent());
   }
 
  protected:
@@ -240,6 +257,9 @@ class NotificationViewTest : public views::ViewObserver,
   views::Label* message_label() { return notification_view_->message_label(); }
   views::View* inline_settings_row() {
     return notification_view_->inline_settings_row();
+  }
+  std::vector<views::LabelButton*> action_buttons() {
+    return notification_view()->action_buttons();
   }
   views::RadioButton* block_all_button() {
     return notification_view_->block_all_button_;
@@ -290,13 +310,14 @@ class NotificationViewTest : public views::ViewObserver,
   raw_ptr<NotificationView> notification_view_ = nullptr;
   bool delete_on_notification_removed_ = false;
   bool ink_drop_stopped_ = false;
+  std::unique_ptr<base::test::ScopedFeatureList> scoped_feature_list_;
 };
 
 TEST_F(NotificationViewTest, UpdateViewsOrderingTest) {
   EXPECT_NE(nullptr, title_view());
   EXPECT_NE(nullptr, message_label());
-  EXPECT_EQ(0, left_content()->GetIndexOf(title_view()));
-  EXPECT_EQ(1, left_content()->GetIndexOf(message_label()));
+  EXPECT_EQ(0u, left_content()->GetIndexOf(title_view()));
+  EXPECT_EQ(1u, left_content()->GetIndexOf(message_label()));
 
   std::unique_ptr<Notification> notification = CreateSimpleNotification();
   notification->set_title(std::u16string());
@@ -305,7 +326,7 @@ TEST_F(NotificationViewTest, UpdateViewsOrderingTest) {
 
   EXPECT_EQ(nullptr, title_view());
   EXPECT_NE(nullptr, message_label());
-  EXPECT_EQ(0, left_content()->GetIndexOf(message_label()));
+  EXPECT_EQ(0u, left_content()->GetIndexOf(message_label()));
 
   notification->set_title(u"title");
 
@@ -313,8 +334,8 @@ TEST_F(NotificationViewTest, UpdateViewsOrderingTest) {
 
   EXPECT_NE(nullptr, title_view());
   EXPECT_NE(nullptr, message_label());
-  EXPECT_EQ(0, left_content()->GetIndexOf(title_view()));
-  EXPECT_EQ(1, left_content()->GetIndexOf(message_label()));
+  EXPECT_EQ(0u, left_content()->GetIndexOf(title_view()));
+  EXPECT_EQ(1u, left_content()->GetIndexOf(message_label()));
 }
 
 TEST_F(NotificationViewTest, CreateOrUpdateTitle) {
@@ -391,6 +412,22 @@ TEST_F(NotificationViewTest, LeftContentResizeForIcon) {
   EXPECT_LT(notification_view()->left_content_->width(), left_content_width);
 }
 
+TEST_F(NotificationViewTest, ManuallyExpandedOrCollapsed) {
+  // Test |manually_expanded_or_collapsed| being set when the toggle is done by
+  // user interaction.
+  EXPECT_FALSE(notification_view()->IsManuallyExpandedOrCollapsed());
+
+  // Construct a mouse click event inside the header.
+  gfx::Point done_cursor_location =
+      notification_view()->header_row_->GetBoundsInScreen().CenterPoint();
+  ui::test::EventGenerator generator(
+      GetRootWindow(notification_view()->GetWidget()));
+  generator.MoveMouseTo(done_cursor_location);
+  generator.ClickLeftButton();
+
+  EXPECT_TRUE(notification_view()->IsManuallyExpandedOrCollapsed());
+}
+
 TEST_F(NotificationViewTest, InlineSettingsNotBlock) {
   std::unique_ptr<Notification> notification = CreateSimpleNotification();
   notification->set_type(NOTIFICATION_TYPE_SIMPLE);
@@ -461,7 +498,7 @@ TEST_F(NotificationViewTest, TestAccentColor) {
 
   // Action buttons are hidden by collapsed state.
   if (!notification_view()->expanded_)
-    notification_view()->ToggleExpanded();
+    ToggleExpanded();
   EXPECT_TRUE(notification_view()->actions_row_->GetVisible());
 
   const auto* color_provider = notification_view()->GetColorProvider();
@@ -584,8 +621,8 @@ TEST_F(NotificationViewTest, AppIconWebAppNotification) {
   data.settings_button_handler = SettingsButtonHandler::INLINE;
 
   std::unique_ptr<Notification> notification = std::make_unique<Notification>(
-      NOTIFICATION_TYPE_BASE_FORMAT, std::string(kDefaultNotificationId),
-      u"title", u"message", ui::ImageModel::FromImage(CreateTestImage(80, 80)),
+      NOTIFICATION_TYPE_SIMPLE, std::string(kDefaultNotificationId), u"title",
+      u"message", ui::ImageModel::FromImage(CreateTestImage(80, 80)),
       u"display source", GURL(), notifier_id, data, delegate_);
   notification->set_small_image(gfx::Image::CreateFrom1xBitmap(small_bitmap));
   notification->set_image(CreateTestImage(320, 240));
@@ -647,13 +684,13 @@ TEST_F(NotificationViewTest, ExpandLongMessage) {
   EXPECT_LT(0, collapsed_height);
   EXPECT_LT(0, collapsed_preferred_height);
 
-  notification_view()->ToggleExpanded();
+  ToggleExpanded();
   EXPECT_TRUE(notification_view()->expanded_);
   EXPECT_LT(collapsed_height, message_label()->height());
   EXPECT_LT(collapsed_preferred_height,
             notification_view()->GetPreferredSize().height());
 
-  notification_view()->ToggleExpanded();
+  ToggleExpanded();
   EXPECT_FALSE(notification_view()->expanded_);
   EXPECT_EQ(collapsed_height, message_label()->height());
   EXPECT_EQ(collapsed_preferred_height,
@@ -706,13 +743,47 @@ TEST_F(NotificationViewTest, TestDeleteOnDisableNotification) {
   notification->set_type(NOTIFICATION_TYPE_SIMPLE);
   UpdateNotificationViews(*notification);
 
-  notification_view()->OnSettingsButtonPressed(DummyEvent());
-  block_all_button()->NotifyClick(DummyEvent());
+  notification_view()->OnSettingsButtonPressed(ui::test::TestEvent());
+  block_all_button()->NotifyClick(ui::test::TestEvent());
 
   // After DisableNotification() is called, |notification_view| can be deleted.
   // https://crbug.com/924922
   set_delete_on_notification_removed(true);
-  views::test::ButtonTestApi(settings_done_button()).NotifyClick(DummyEvent());
+  views::test::ButtonTestApi(settings_done_button())
+      .NotifyClick(ui::test::TestEvent());
+}
+
+// Tests that action buttons (e.g. the inline reply button) ignores the
+// notification's accent color when the flag is present.
+TEST_F(NotificationViewTest, TestAccentColorTextFlagAffectsActionButtons) {
+  RichNotificationData data;
+  data.settings_button_handler = SettingsButtonHandler::INLINE;
+  data.accent_color = SK_ColorGREEN;
+  std::unique_ptr<Notification> notification;
+
+  data.ignore_accent_color_for_text = true;
+  notification = CreateSimpleNotificationWithRichData(data);
+  notification->set_buttons(CreateButtons(2));
+  notification->set_type(NotificationType::NOTIFICATION_TYPE_SIMPLE);
+  UpdateNotificationViews(*notification);
+  EXPECT_EQ(action_buttons().size(), 2u);
+  for (views::LabelButton* action_button : action_buttons()) {
+    EXPECT_NE(
+        notification_view()->GetActionButtonColorForTesting(action_button),
+        data.accent_color);
+  }
+
+  data.ignore_accent_color_for_text = false;
+  notification = CreateSimpleNotificationWithRichData(data);
+  notification->set_buttons(CreateButtons(2));
+  notification->set_type(NotificationType::NOTIFICATION_TYPE_SIMPLE);
+  UpdateNotificationViews(*notification);
+  EXPECT_EQ(action_buttons().size(), 2u);
+  for (views::LabelButton* action_button : action_buttons()) {
+    EXPECT_EQ(
+        notification_view()->GetActionButtonColorForTesting(action_button),
+        data.accent_color);
+  }
 }
 
 }  // namespace message_center

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,19 +21,6 @@
 #include "base/values.h"
 #include "components/sessions/core/base_session_service_commands.h"
 #include "components/tab_groups/tab_group_color.h"
-
-namespace {
-
-bool ReadSessionIdFromPickle(base::PickleIterator* iterator, SessionID* id) {
-  SessionID::id_type value;
-  if (!iterator->ReadInt(&value)) {
-    return false;
-  }
-  *id = SessionID::FromSerializedValue(value);
-  return true;
-}
-
-}  // namespace
 
 namespace sessions {
 
@@ -186,8 +173,8 @@ enum PersistedWindowShowState {
 // Assert to ensure PersistedWindowShowState is updated if ui::WindowShowState
 // is changed.
 static_assert(ui::SHOW_STATE_END ==
-                  (static_cast<ui::WindowShowState>(PERSISTED_SHOW_STATE_END) -
-                   2),
+                  static_cast<ui::WindowShowState>(PERSISTED_SHOW_STATE_END -
+                                                   2),
               "SHOW_STATE_END must equal PERSISTED_SHOW_STATE_END minus the "
               "deprecated entries");
 // Returns the show state to store to disk based |state|.
@@ -857,36 +844,29 @@ bool CreateTabsAndWindows(
       }
 
       case kCommandAddTabExtraData: {
-        std::unique_ptr<base::Pickle> pickle(command->PayloadAsPickle());
-        base::PickleIterator it(*pickle);
-
         SessionID tab_id = SessionID::InvalidValue();
         std::string key;
-        std::string data;
-        if (!ReadSessionIdFromPickle(&it, &tab_id) || !it.ReadString(&key) ||
-            !it.ReadString(&data)) {
+        std::string extra_data;
+        if (!RestoreAddExtraDataCommand(*command, &tab_id, &key, &extra_data)) {
           DVLOG(1) << "Failed reading command " << command->id();
           return true;
         }
 
-        GetTab(tab_id, tabs)->extra_data[key] = std::move(data);
+        GetTab(tab_id, tabs)->extra_data[key] = std::move(extra_data);
         break;
       }
 
       case kCommandAddWindowExtraData: {
-        std::unique_ptr<base::Pickle> pickle(command->PayloadAsPickle());
-        base::PickleIterator it(*pickle);
-
         SessionID window_id = SessionID::InvalidValue();
         std::string key;
-        std::string data;
-        if (!ReadSessionIdFromPickle(&it, &window_id) || !it.ReadString(&key) ||
-            !it.ReadString(&data)) {
+        std::string extra_data;
+        if (!RestoreAddExtraDataCommand(*command, &window_id, &key,
+                                        &extra_data)) {
           DVLOG(1) << "Failed reading command " << command->id();
           return true;
         }
 
-        GetWindow(window_id, windows)->extra_data[key] = std::move(data);
+        GetWindow(window_id, windows)->extra_data[key] = std::move(extra_data);
         break;
       }
 
@@ -1145,19 +1125,6 @@ std::unique_ptr<SessionCommand> CreateSetTabDataCommand(
     pickle.WriteString(kv.second);
   }
   return std::make_unique<SessionCommand>(kCommandSetTabData, pickle);
-}
-
-std::unique_ptr<SessionCommand> CreateAddExtraDataCommand(
-    SessionCommand::id_type command,
-    const SessionID& session_id,
-    const std::string& key,
-    const std::string& data) {
-  base::Pickle pickle;
-  pickle.WriteInt(session_id.id());
-  pickle.WriteString(key);
-  pickle.WriteString(data);
-
-  return std::make_unique<SessionCommand>(command, pickle);
 }
 
 std::unique_ptr<SessionCommand> CreateAddTabExtraDataCommand(

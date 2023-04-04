@@ -26,7 +26,7 @@
 #include "libavutil/opt.h"
 
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "dolby_e.h"
 #include "kbdwin.h"
@@ -1084,7 +1084,7 @@ static int filter_frame(DBEDecodeContext *s, AVFrame *frame)
     return 0;
 }
 
-static int dolby_e_decode_frame(AVCodecContext *avctx, void *data,
+static int dolby_e_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                                 int *got_frame_ptr, AVPacket *avpkt)
 {
     DBEDecodeContext *s1 = avctx->priv_data;
@@ -1135,7 +1135,7 @@ static int dolby_e_decode_frame(AVCodecContext *avctx, void *data,
         return ret;
     if ((ret = parse_meter(s1)) < 0)
         return ret;
-    if ((ret = filter_frame(s1, data)) < 0)
+    if ((ret = filter_frame(s1, frame)) < 0)
         return ret;
 
     *got_frame_ptr = 1;
@@ -1299,16 +1299,16 @@ static const AVClass dolby_e_decoder_class = {
 
 const FFCodec ff_dolby_e_decoder = {
     .p.name         = "dolby_e",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Dolby E"),
+    CODEC_LONG_NAME("Dolby E"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_DOLBY_E,
     .priv_data_size = sizeof(DBEDecodeContext),
     .p.priv_class   = &dolby_e_decoder_class,
     .init           = dolby_e_init,
-    .decode         = dolby_e_decode_frame,
+    FF_CODEC_DECODE_CB(dolby_e_decode_frame),
     .close          = dolby_e_close,
     .flush          = dolby_e_flush,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

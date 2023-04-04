@@ -44,7 +44,6 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -382,7 +381,7 @@ TEST_F(AnimationDocumentTimelineTest, PauseForTesting) {
 
 TEST_F(AnimationDocumentTimelineTest, DelayBeforeAnimationStart) {
   timing.iteration_duration = ANIMATION_TIME_DELTA_FROM_SECONDS(2);
-  timing.start_delay = ANIMATION_TIME_DELTA_FROM_SECONDS(5);
+  timing.start_delay = Timing::Delay(ANIMATION_TIME_DELTA_FROM_SECONDS(5));
 
   auto* keyframe_effect = MakeGarbageCollected<KeyframeEffect>(
       element.Get(), CreateEmptyEffectModel(), timing);
@@ -391,14 +390,16 @@ TEST_F(AnimationDocumentTimelineTest, DelayBeforeAnimationStart) {
 
   // TODO: Put the animation startTime in the future when we add the capability
   // to change animation startTime
-  EXPECT_CALL(*platform_timing,
-              WakeAfter(base::Seconds(timing.start_delay.InSecondsF() -
-                                      MinimumDelay())));
+  EXPECT_CALL(
+      *platform_timing,
+      WakeAfter(base::Seconds(timing.start_delay.AsTimeValue().InSecondsF() -
+                              MinimumDelay())));
   UpdateClockAndService(0);
 
-  EXPECT_CALL(*platform_timing,
-              WakeAfter(base::Seconds(timing.start_delay.InSecondsF() -
-                                      MinimumDelay() - 1.5)));
+  EXPECT_CALL(
+      *platform_timing,
+      WakeAfter(base::Seconds(timing.start_delay.AsTimeValue().InSecondsF() -
+                              MinimumDelay() - 1.5)));
   UpdateClockAndService(1500);
 
   timeline->ScheduleServiceOnNextFrame();
@@ -418,7 +419,7 @@ TEST_F(AnimationDocumentTimelineTest, UseAnimationAfterTimelineDeref) {
 
 TEST_F(AnimationDocumentTimelineTest, PlayAfterDocumentDeref) {
   timing.iteration_duration = ANIMATION_TIME_DELTA_FROM_SECONDS(2);
-  timing.start_delay = ANIMATION_TIME_DELTA_FROM_SECONDS(5);
+  timing.start_delay = Timing::Delay(ANIMATION_TIME_DELTA_FROM_SECONDS(5));
 
   DocumentTimeline* timeline = &document->Timeline();
   document = nullptr;

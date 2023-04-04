@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -47,8 +47,6 @@ static_library("engine") {
     "cycle/sync_cycle_snapshot.h",
     "data_type_activation_response.cc",
     "data_type_activation_response.h",
-    "data_type_debug_info_listener.cc",
-    "data_type_debug_info_listener.h",
     "debug_info_event_listener.cc",
     "debug_info_event_listener.h",
     "engine_components_factory.h",

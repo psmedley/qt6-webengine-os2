@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_fragmentation_utils.h"
 #include "third_party/blink/renderer/core/paint/clip_path_clipper.h"
 #include "third_party/blink/renderer/core/paint/ng/ng_box_fragment_painter.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
@@ -73,42 +74,6 @@ PhysicalRect PaintLayerPainter::ContentsVisualRect(const FragmentData& fragment,
   return contents_visual_rect;
 }
 
-PaintResult PaintLayerPainter::Paint(GraphicsContext& context,
-                                     PaintFlags paint_flags) {
-  const LayoutObject& layout_object = paint_layer_.GetLayoutObject();
-  if (UNLIKELY(layout_object.NeedsLayout() &&
-               !layout_object.ChildLayoutBlockedByDisplayLock())) {
-    // Skip if we need layout. This should never happen. See crbug.com/1244130
-    NOTREACHED();
-    return kFullyPainted;
-  }
-
-  if (layout_object.GetFrameView()->ShouldThrottleRendering())
-    return kFullyPainted;
-
-  // Non self-painting layers without self-painting descendants don't need to be
-  // painted as their layoutObject() should properly paint itself.
-  if (!paint_layer_.IsSelfPaintingLayer() &&
-      !paint_layer_.HasSelfPaintingLayerDescendant())
-    return kFullyPainted;
-
-  // If the transform can't be inverted, don't paint anything. We still need to
-  // paint if there are animations to ensure the animation can be setup to run
-  // on the compositor.
-  bool paint_non_invertible_transforms = false;
-  const auto* properties = layout_object.FirstFragment().PaintProperties();
-  if (properties && properties->Transform() &&
-      properties->Transform()->HasActiveTransformAnimation()) {
-    paint_non_invertible_transforms = true;
-  }
-  if (!paint_non_invertible_transforms && paint_layer_.Transform() &&
-      !paint_layer_.Transform()->IsInvertible()) {
-    return kFullyPainted;
-  }
-
-  return PaintLayerContents(context, paint_flags);
-}
-
 static bool ShouldCreateSubsequence(const PaintLayer& paint_layer,
                                     const GraphicsContext& context,
                                     PaintFlags paint_flags) {
@@ -130,76 +95,6 @@ static bool ShouldCreateSubsequence(const PaintLayer& paint_layer,
   return true;
 }
 
-static bool IsUnclippedLayoutView(const PaintLayer& layer) {
-  if (IsA<LayoutView>(layer.GetLayoutObject())) {
-    const auto* frame = layer.GetLayoutObject().GetFrame();
-    if (frame && !frame->ClipsContent())
-      return true;
-  }
-  return false;
-}
-
-bool PaintLayerPainter::ShouldUseInfiniteCullRect() {
-  bool is_printing = paint_layer_.GetLayoutObject().GetDocument().Printing();
-  if (IsUnclippedLayoutView(paint_layer_) && !is_printing)
-    return true;
-
-  // Cull rects and clips can't be propagated across a filter which moves
-  // pixels, since the input of the filter may be outside the cull rect /
-  // clips yet still result in painted output.
-  // TODO(wangxianzhu): We can let CullRect support mapping for pixel moving
-  // filters to avoid this infinite cull rect.
-  if (paint_layer_.HasFilterThatMovesPixels() &&
-      // However during printing, we don't want filter outset to cross page
-      // boundaries. This also avoids performance issue because the PDF renderer
-      // is super slow for big filters. Otherwise all filtered contents would
-      // appear in the painted result of every page.
-      // TODO(crbug.com/1098995): For now we don't adjust cull rect for clips.
-      // When we do, we need to check if we are painting under a real clip.
-      // This won't be a problem when we use block fragments for printing.
-      !is_printing)
-    return true;
-
-  // Cull rect mapping doesn't work under perspective in some cases.
-  // See http://crbug.com/887558 for details.
-  if (paint_layer_.GetLayoutObject().StyleRef().HasPerspective())
-    return true;
-
-  if (const auto* properties =
-          paint_layer_.GetLayoutObject().FirstFragment().PaintProperties()) {
-    // Cull rect mapping doesn't work under perspective in some cases.
-    // See http://crbug.com/887558 for details.
-    if (properties->Perspective())
-      return true;
-
-    if (const auto* transform = properties->Transform()) {
-      // A CSS transform can also have perspective like
-      // "transform: perspective(100px) rotateY(45deg)". In these cases, we
-      // also want to skip cull rect mapping. See http://crbug.com/887558 for
-      // details.
-      if (!transform->IsIdentityOr2DTranslation() &&
-          transform->Matrix().HasPerspective()) {
-        return true;
-      }
-
-      // Ensure content under animating transforms is not culled out.
-      if (transform->HasActiveTransformAnimation())
-        return true;
-
-      // As an optimization, skip cull rect updating for non-composited
-      // transforms which have already been painted. This is because the cull
-      // rect update, which needs to do complex mapping of the cull rect, can
-      // be more expensive than over-painting.
-      if (!transform->HasDirectCompositingReasons() &&
-          paint_layer_.PreviousPaintResult() == kFullyPainted) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 static gfx::Rect FirstFragmentVisualRect(const LayoutBoxModelObject& object) {
   // We don't want to include overflowing contents.
   PhysicalRect overflow_rect =
@@ -209,15 +104,24 @@ static gfx::Rect FirstFragmentVisualRect(const LayoutBoxModelObject& object) {
   return ToEnclosingRect(overflow_rect);
 }
 
-PaintResult PaintLayerPainter::PaintLayerContents(GraphicsContext& context,
-                                                  PaintFlags paint_flags) {
-  DCHECK(paint_layer_.IsSelfPaintingLayer() ||
-         paint_layer_.HasSelfPaintingLayerDescendant());
-
+PaintResult PaintLayerPainter::Paint(GraphicsContext& context,
+                                     PaintFlags paint_flags) {
   const auto& object = paint_layer_.GetLayoutObject();
-  PaintResult result = kFullyPainted;
+  if (UNLIKELY(object.NeedsLayout() &&
+               !object.ChildLayoutBlockedByDisplayLock())) {
+    // Skip if we need layout. This should never happen. See crbug.com/1244130
+    NOTREACHED();
+    return kFullyPainted;
+  }
+
   if (object.GetFrameView()->ShouldThrottleRendering())
-    return result;
+    return kFullyPainted;
+
+  // Non self-painting layers without self-painting descendants don't need to be
+  // painted as their layoutObject() should properly paint itself.
+  if (!paint_layer_.IsSelfPaintingLayer() &&
+      !paint_layer_.HasSelfPaintingLayerDescendant())
+    return kFullyPainted;
 
   // A paint layer should always have LocalBorderBoxProperties when it's ready
   // for paint.
@@ -231,7 +135,7 @@ PaintResult PaintLayerPainter::PaintLayerContents(GraphicsContext& context,
   bool selection_drag_image_only =
       paint_flags & PaintFlag::kSelectionDragImageOnly;
   if (selection_drag_image_only && !object.IsSelected())
-    return result;
+    return kFullyPainted;
 
   IgnorePaintTimingScope ignore_paint_timing;
   if (object.StyleRef().Opacity() == 0.0f) {
@@ -250,8 +154,6 @@ PaintResult PaintLayerPainter::PaintLayerContents(GraphicsContext& context,
       is_document_element_invisible);
 
   bool is_self_painting_layer = paint_layer_.IsSelfPaintingLayer();
-  bool is_unclipped_layout_view = IsUnclippedLayoutView(paint_layer_);
-
   bool should_paint_content =
       paint_layer_.HasVisibleContent() &&
       // Content under a LayoutSVGHiddenContainer is auxiliary resources for
@@ -259,7 +161,12 @@ PaintResult PaintLayerPainter::PaintLayerContents(GraphicsContext& context,
       // is primary, not auxiliary.
       !paint_layer_.IsUnderSVGHiddenContainer() && is_self_painting_layer;
 
-  if (object.FirstFragment().NextFragment() || is_unclipped_layout_view) {
+  PaintResult result = kFullyPainted;
+  if (object.FirstFragment().NextFragment() ||
+      // When printing, the LayoutView's background should extend infinitely
+      // regardless of LayoutView's visual rect, so don't check intersection
+      // between the visual rect and the cull rect (custom for each page).
+      (IsA<LayoutView>(object) && object.GetDocument().Printing())) {
     result = kMayBeClippedByCullRect;
   } else {
     gfx::Rect visual_rect = FirstFragmentVisualRect(object);
@@ -283,7 +190,7 @@ PaintResult PaintLayerPainter::PaintLayerContents(GraphicsContext& context,
     }
 
     if (!cull_rect_intersects_self && !cull_rect_intersects_contents) {
-      if (!is_unclipped_layout_view && paint_layer_.KnownToClipSubtree()) {
+      if (paint_layer_.KnownToClipSubtreeToPaddingBox()) {
         paint_layer_.SetPreviousPaintResult(kMayBeClippedByCullRect);
         return kMayBeClippedByCullRect;
       }
@@ -455,7 +362,9 @@ void PaintLayerPainter::PaintFragmentWithPhase(
     const auto* properties = fragment_data.PaintProperties();
     DCHECK(properties);
     DCHECK(properties->Mask());
+    DCHECK(properties->Mask()->OutputClip());
     chunk_properties.SetEffect(*properties->Mask());
+    chunk_properties.SetClip(*properties->Mask()->OutputClip());
   }
   ScopedPaintChunkProperties fragment_paint_chunk_properties(
       context.GetPaintController(), chunk_properties, paint_layer_,
@@ -479,6 +388,14 @@ void PaintLayerPainter::PaintWithPhase(PaintPhase phase,
   const auto* layout_box_with_fragments =
       paint_layer_.GetLayoutBoxWithBlockFragments();
   wtf_size_t fragment_idx = 0u;
+
+  // The NG paint code guards against painting multiple fragments for content
+  // that doesn't support it, but the legacy paint code has no such guards.
+  // TODO(crbug.com/1229581): Remove this when everything is handled by NG.
+  bool multiple_fragments_allowed =
+      layout_box_with_fragments ||
+      CanPaintMultipleFragments(paint_layer_.GetLayoutObject());
+
   for (const auto* fragment = &paint_layer_.GetLayoutObject().FirstFragment();
        fragment; fragment = fragment->NextFragment(), ++fragment_idx) {
     const NGPhysicalBoxFragment* physical_fragment = nullptr;
@@ -494,6 +411,9 @@ void PaintLayerPainter::PaintWithPhase(PaintPhase phase,
 
     PaintFragmentWithPhase(phase, *fragment, physical_fragment, context,
                            paint_flags);
+
+    if (!multiple_fragments_allowed)
+      break;
   }
 }
 

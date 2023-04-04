@@ -50,19 +50,25 @@ import {BackgroundServiceView} from './BackgroundServiceView.js';
 import * as ApplicationComponents from './components/components.js';
 import resourcesSidebarStyles from './resourcesSidebar.css.js';
 
-import type {Database as DatabaseModelDatabase} from './DatabaseModel.js';
-import {DatabaseModel, Events as DatabaseModelEvents} from './DatabaseModel.js';
+import {DatabaseModel, Events as DatabaseModelEvents, type Database as DatabaseModelDatabase} from './DatabaseModel.js';
 import {DatabaseQueryView, Events as DatabaseQueryViewEvents} from './DatabaseQueryView.js';
 import {DatabaseTableView} from './DatabaseTableView.js';
-import type {DOMStorage} from './DOMStorageModel.js';
-import {DOMStorageModel, Events as DOMStorageModelEvents} from './DOMStorageModel.js';
-import type {Database as IndexedDBModelDatabase, DatabaseId, Index, ObjectStore} from './IndexedDBModel.js';
-import {Events as IndexedDBModelEvents, IndexedDBModel} from './IndexedDBModel.js';
+
+import {DOMStorageModel, Events as DOMStorageModelEvents, type DOMStorage} from './DOMStorageModel.js';
+
+import {
+  Events as IndexedDBModelEvents,
+  IndexedDBModel,
+  type Database as IndexedDBModelDatabase,
+  type DatabaseId,
+  type Index,
+  type ObjectStore,
+} from './IndexedDBModel.js';
 import {IDBDatabaseView, IDBDataView} from './IndexedDBViews.js';
 import {InterestGroupStorageModel, Events as InterestGroupModelEvents} from './InterestGroupStorageModel.js';
 import {InterestGroupTreeElement} from './InterestGroupTreeElement.js';
 import {OpenedWindowDetailsView, WorkerDetailsView} from './OpenedWindowDetailsView.js';
-import type {ResourcesPanel} from './ResourcesPanel.js';
+import {type ResourcesPanel} from './ResourcesPanel.js';
 import {ServiceWorkersView} from './ServiceWorkersView.js';
 import {StorageView} from './StorageView.js';
 import {TrustTokensTreeElement} from './TrustTokensTreeElement.js';
@@ -170,6 +176,24 @@ const UIStrings = {
   *@description Default name for worker
   */
   worker: 'worker',
+  /**
+   * @description Aria text for screen reader to announce they can scroll to top of manifest if invoked
+   */
+  onInvokeManifestAlert: 'Manifest: Invoke to scroll to the top of manifest',
+  /**
+   * @description Aria text for screen reader to announce they can scroll to a section if invoked
+   * @example {"Identity"} PH1
+   */
+  beforeInvokeAlert: '{PH1}: Invoke to scroll to this section in manifest',
+  /**
+   * @description Alert message for screen reader to announce which subsection is being scrolled to
+   * @example {"Identity"} PH1
+   */
+  onInvokeAlert: 'Scrolled to {PH1}',
+  /**
+   * @description Application sidebar panel
+   */
+  applicationSidebarPanel: 'Application panel sidebar',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/ApplicationPanelSidebar.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -231,8 +255,13 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
 
     const applicationSectionTitle = i18nString(UIStrings.application);
     this.applicationTreeElement = this.addSidebarSection(applicationSectionTitle);
+    const applicationPanelSidebar = this.applicationTreeElement.treeOutline?.contentElement;
+    if (applicationPanelSidebar) {
+      applicationPanelSidebar.ariaLabel = i18nString(UIStrings.applicationSidebarPanel);
+    }
     const manifestTreeElement = new AppManifestTreeElement(panel);
     this.applicationTreeElement.appendChild(manifestTreeElement);
+    manifestTreeElement.generateChildren();
     this.serviceWorkersTreeElement = new ServiceWorkersTreeElement(panel);
     this.applicationTreeElement.appendChild(this.serviceWorkersTreeElement);
     const clearStorageTreeElement = new ClearStorageTreeElement(panel);
@@ -243,7 +272,8 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
     this.localStorageListTreeElement =
         new ExpandableApplicationPanelTreeElement(panel, i18nString(UIStrings.localStorage), 'LocalStorage');
     this.localStorageListTreeElement.setLink(
-        'https://developer.chrome.com/docs/devtools/storage/localstorage/?utm_source=devtools');
+        'https://developer.chrome.com/docs/devtools/storage/localstorage/?utm_source=devtools' as
+        Platform.DevToolsPath.UrlString);
     const localStorageIcon = UI.Icon.Icon.create('mediumicon-table', 'resource-tree-item');
     this.localStorageListTreeElement.setLeadingIcons([localStorageIcon]);
 
@@ -251,19 +281,22 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
     this.sessionStorageListTreeElement =
         new ExpandableApplicationPanelTreeElement(panel, i18nString(UIStrings.sessionStorage), 'SessionStorage');
     this.sessionStorageListTreeElement.setLink(
-        'https://developer.chrome.com/docs/devtools/storage/sessionstorage/?utm_source=devtools');
+        'https://developer.chrome.com/docs/devtools/storage/sessionstorage/?utm_source=devtools' as
+        Platform.DevToolsPath.UrlString);
     const sessionStorageIcon = UI.Icon.Icon.create('mediumicon-table', 'resource-tree-item');
     this.sessionStorageListTreeElement.setLeadingIcons([sessionStorageIcon]);
 
     storageTreeElement.appendChild(this.sessionStorageListTreeElement);
     this.indexedDBListTreeElement = new IndexedDBTreeElement(panel);
     this.indexedDBListTreeElement.setLink(
-        'https://developer.chrome.com/docs/devtools/storage/indexeddb/?utm_source=devtools');
+        'https://developer.chrome.com/docs/devtools/storage/indexeddb/?utm_source=devtools' as
+        Platform.DevToolsPath.UrlString);
     storageTreeElement.appendChild(this.indexedDBListTreeElement);
     this.databasesListTreeElement =
         new ExpandableApplicationPanelTreeElement(panel, i18nString(UIStrings.webSql), 'Databases');
     this.databasesListTreeElement.setLink(
-        'https://developer.chrome.com/docs/devtools/storage/websql/?utm_source=devtools');
+        'https://developer.chrome.com/docs/devtools/storage/websql/?utm_source=devtools' as
+        Platform.DevToolsPath.UrlString);
     const databaseIcon = UI.Icon.Icon.create('mediumicon-database', 'resource-tree-item');
     this.databasesListTreeElement.setLeadingIcons([databaseIcon]);
 
@@ -271,7 +304,8 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
     this.cookieListTreeElement =
         new ExpandableApplicationPanelTreeElement(panel, i18nString(UIStrings.cookies), 'Cookies');
     this.cookieListTreeElement.setLink(
-        'https://developer.chrome.com/docs/devtools/storage/cookies/?utm_source=devtools');
+        'https://developer.chrome.com/docs/devtools/storage/cookies/?utm_source=devtools' as
+        Platform.DevToolsPath.UrlString);
     const cookieIcon = UI.Icon.Icon.create('mediumicon-cookie', 'resource-tree-item');
     this.cookieListTreeElement.setLeadingIcons([cookieIcon]);
     storageTreeElement.appendChild(this.cookieListTreeElement);
@@ -319,10 +353,8 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
             new BackgroundServiceTreeElement(panel, Protocol.BackgroundService.ServiceName.PushMessaging);
         backgroundServiceTreeElement.appendChild(this.pushMessagingTreeElement);
       }
-      if (Root.Runtime.experiments.isEnabled('reportingApiDebugging')) {
-        this.reportingApiTreeElement = new ReportingApiTreeElement(panel);
-        backgroundServiceTreeElement.appendChild(this.reportingApiTreeElement);
-      }
+      this.reportingApiTreeElement = new ReportingApiTreeElement(panel);
+      backgroundServiceTreeElement.appendChild(this.reportingApiTreeElement);
     }
     const resourcesSectionTitle = i18nString(UIStrings.frames);
     const resourcesTreeElement = this.addSidebarSection(resourcesSectionTitle);
@@ -370,6 +402,7 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
     treeElement.setCollapsible(false);
     treeElement.selectable = false;
     this.sidebarTree.appendChild(treeElement);
+    UI.ARIAUtils.markAsHeading(treeElement.listItemElement, 3);
     UI.ARIAUtils.setAccessibleName(treeElement.childrenListElement, title);
     return treeElement;
   }
@@ -598,6 +631,7 @@ export class ApplicationPanelSidebar extends UI.Widget.VBox implements SDK.Targe
 
   private addDOMStorage(domStorage: DOMStorage): void {
     console.assert(!this.domStorageTreeElements.get(domStorage));
+    console.assert(Boolean(domStorage.storageKey) || Boolean(domStorage.securityOrigin));
 
     const domStorageTreeElement = new DOMStorageTreeElement(this.panel, domStorage);
     this.domStorageTreeElements.set(domStorage, domStorageTreeElement);
@@ -924,11 +958,18 @@ export class ServiceWorkersTreeElement extends ApplicationPanelTreeElement {
 }
 
 export class AppManifestTreeElement extends ApplicationPanelTreeElement {
-  private view?: AppManifestView;
+  private view: AppManifestView;
   constructor(storagePanel: ResourcesPanel) {
-    super(storagePanel, i18nString(UIStrings.manifest), false);
+    super(storagePanel, i18nString(UIStrings.manifest), true);
     const icon = UI.Icon.Icon.create('mediumicon-manifest', 'resource-tree-item');
     this.setLeadingIcons([icon]);
+    self.onInvokeElement(this.listItemElement, this.onInvoke.bind(this));
+    this.view = new AppManifestView();
+    UI.ARIAUtils.setAccessibleName(this.listItemElement, i18nString(UIStrings.onInvokeManifestAlert));
+    const handleExpansion = (evt: Event): void => {
+      this.setExpandable((evt as CustomEvent).detail);
+    };
+    this.view.contentElement.addEventListener('manifestDetection', handleExpansion);
   }
 
   get itemURL(): Platform.DevToolsPath.UrlString {
@@ -937,12 +978,76 @@ export class AppManifestTreeElement extends ApplicationPanelTreeElement {
 
   onselect(selectedByUser?: boolean): boolean {
     super.onselect(selectedByUser);
-    if (!this.view) {
-      this.view = new AppManifestView();
-    }
     this.showView(this.view);
     Host.userMetrics.panelShown(Host.UserMetrics.PanelCodes[Host.UserMetrics.PanelCodes.app_manifest]);
     return false;
+  }
+
+  generateChildren(): void {
+    const staticSections = this.view.getStaticSections();
+    for (const section of staticSections) {
+      const sectionElement = section.getTitleElement();
+      const childTitle = section.title();
+      const sectionFieldElement = section.getFieldElement();
+      const child = new ManifestChildTreeElement(this.resourcesPanel, sectionElement, childTitle, sectionFieldElement);
+      this.appendChild(child);
+    }
+  }
+
+  onInvoke(): void {
+    this.view.getManifestElement().scrollIntoView();
+    UI.ARIAUtils.alert(i18nString(UIStrings.onInvokeAlert, {PH1: this.listItemElement.title}));
+  }
+
+  showManifestView(): void {
+    this.showView(this.view);
+  }
+}
+
+export class ManifestChildTreeElement extends ApplicationPanelTreeElement {
+  #sectionElement: Element;
+  #sectionFieldElement: HTMLElement;
+  constructor(storagePanel: ResourcesPanel, element: Element, childTitle: string, fieldElement: HTMLElement) {
+    super(storagePanel, childTitle, false);
+    const icon = UI.Icon.Icon.create('mediumicon-manifest', 'resource-tree-item');
+    this.setLeadingIcons([icon]);
+    this.#sectionElement = element;
+    this.#sectionFieldElement = fieldElement;
+    self.onInvokeElement(this.listItemElement, this.onInvoke.bind(this));
+    this.listItemElement.addEventListener('keydown', this.onInvokeElementKeydown.bind(this));
+    UI.ARIAUtils.setAccessibleName(
+        this.listItemElement, i18nString(UIStrings.beforeInvokeAlert, {PH1: this.listItemElement.title}));
+  }
+
+  get itemURL(): Platform.DevToolsPath.UrlString {
+    return 'manifest://' + this.title as Platform.DevToolsPath.UrlString;
+  }
+
+  onInvoke(): void {
+    (this.parent as AppManifestTreeElement)?.showManifestView();
+    this.#sectionElement.scrollIntoView();
+    UI.ARIAUtils.alert(i18nString(UIStrings.onInvokeAlert, {PH1: this.listItemElement.title}));
+    Host.userMetrics.manifestSectionSelected(this.listItemElement.title);
+  }
+  // direct focus to the corresponding element
+  onInvokeElementKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Tab' || event.shiftKey) {
+      return;
+    }
+    const checkBoxElement = this.#sectionFieldElement.querySelector('.mask-checkbox');
+    let focusableElement: HTMLElement|null = this.#sectionFieldElement.querySelector('[tabindex="0"]');
+    if (checkBoxElement && checkBoxElement.shadowRoot) {
+      focusableElement = checkBoxElement.shadowRoot.querySelector('input') || null;
+    } else if (!focusableElement) {
+      // special case for protocol handler section since it is a custom Element and has different structure than the others
+      focusableElement = this.#sectionFieldElement.querySelector('devtools-protocol-handlers-view')
+                             ?.shadowRoot?.querySelector('[tabindex="0"]') ||
+          null;
+    }
+    if (focusableElement) {
+      focusableElement?.focus();
+      event.consume(true);
+    }
   }
 }
 
@@ -1093,7 +1198,7 @@ export class IDBDatabaseTreeElement extends ApplicationPanelTreeElement {
   private view?: IDBDatabaseView;
 
   constructor(storagePanel: ResourcesPanel, model: IndexedDBModel, databaseId: DatabaseId) {
-    super(storagePanel, databaseId.name + ' - ' + databaseId.securityOrigin, false);
+    super(storagePanel, databaseId.name + ' - ' + databaseId.getOriginOrStorageKey(), false);
     this.model = model;
     this.databaseId = databaseId;
     this.idbObjectStoreTreeElements = new Map();
@@ -1103,7 +1208,7 @@ export class IDBDatabaseTreeElement extends ApplicationPanelTreeElement {
   }
 
   get itemURL(): Platform.DevToolsPath.UrlString {
-    return 'indexedDB://' + this.databaseId.securityOrigin + '/' + this.databaseId.name as
+    return 'indexedDB://' + this.databaseId.getOriginOrStorageKey() + '/' + this.databaseId.name as
         Platform.DevToolsPath.UrlString;
   }
 
@@ -1218,8 +1323,8 @@ export class IDBObjectStoreTreeElement extends ApplicationPanelTreeElement {
   }
 
   get itemURL(): Platform.DevToolsPath.UrlString {
-    return 'indexedDB://' + this.databaseId.securityOrigin + '/' + this.databaseId.name + '/' + this.objectStore.name as
-        Platform.DevToolsPath.UrlString;
+    return 'indexedDB://' + this.databaseId.getOriginOrStorageKey() + '/' + this.databaseId.name + '/' +
+        this.objectStore.name as Platform.DevToolsPath.UrlString;
   }
 
   onattach(): void {
@@ -1355,8 +1460,8 @@ export class IDBIndexTreeElement extends ApplicationPanelTreeElement {
   }
 
   get itemURL(): Platform.DevToolsPath.UrlString {
-    return 'indexedDB://' + this.databaseId.securityOrigin + '/' + this.databaseId.name + '/' + this.objectStore.name +
-        '/' + this.index.name as Platform.DevToolsPath.UrlString;
+    return 'indexedDB://' + this.databaseId.getOriginOrStorageKey() + '/' + this.databaseId.name + '/' +
+        this.objectStore.name + '/' + this.index.name as Platform.DevToolsPath.UrlString;
   }
 
   markNeedsRefresh(): void {
@@ -1417,7 +1522,10 @@ export class DOMStorageTreeElement extends ApplicationPanelTreeElement {
   private readonly domStorage: DOMStorage;
   constructor(storagePanel: ResourcesPanel, domStorage: DOMStorage) {
     super(
-        storagePanel, domStorage.securityOrigin ? domStorage.securityOrigin : i18nString(UIStrings.localFiles), false);
+        storagePanel,
+        domStorage.securityOrigin ? domStorage.securityOrigin :
+                                    (domStorage.storageKey ? domStorage.storageKey : i18nString(UIStrings.localFiles)),
+        false);
     this.domStorage = domStorage;
     const icon = UI.Icon.Icon.create('mediumicon-table', 'resource-tree-item');
     this.setLeadingIcons([icon]);
@@ -1505,7 +1613,7 @@ export class StorageCategoryView extends UI.Widget.VBox {
     this.emptyWidget.text = text;
   }
 
-  setLink(link: string|null): void {
+  setLink(link: Platform.DevToolsPath.UrlString|null): void {
     if (link && !this.linkElement) {
       this.linkElement = this.emptyWidget.appendLink(link);
     }

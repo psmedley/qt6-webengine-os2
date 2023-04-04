@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,12 +99,7 @@ ReferrerPolicy ProcessReferrerPolicyHeaderOnRedirect(
 
 }  // namespace
 
-RedirectInfo::RedirectInfo()
-    : status_code(-1),
-      insecure_scheme_was_upgraded(false),
-      is_signed_exchange_fallback_redirect(false),
-      new_referrer_policy(
-          ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE) {}
+RedirectInfo::RedirectInfo() = default;
 
 RedirectInfo::RedirectInfo(const RedirectInfo& other) = default;
 

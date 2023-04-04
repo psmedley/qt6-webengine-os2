@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -158,7 +158,7 @@ std::unique_ptr<base::ListValue> HidDeviceManager::GetApiDevicesFromList(
     hid::HidDeviceInfo device_info;
     device_info.device_id = device_entry->second;
     PopulateHidDeviceInfo(&device_info, *device);
-    device_list->Append(base::Value::FromUniquePtrValue(device_info.ToValue()));
+    device_list->Append(device_info.ToValue());
   }
   return device_list;
 }
@@ -356,8 +356,7 @@ std::unique_ptr<base::ListValue> HidDeviceManager::CreateApiDeviceList(
 
     // Expose devices with which user can communicate.
     if (api_device_info.collections.size() > 0) {
-      api_devices->Append(
-          base::Value::FromUniquePtrValue(api_device_info.ToValue()));
+      api_devices->Append(api_device_info.ToValue());
     }
   }
 
@@ -385,7 +384,7 @@ void HidDeviceManager::OnEnumerationComplete(
 void HidDeviceManager::DispatchEvent(
     events::HistogramValue histogram_value,
     const std::string& event_name,
-    std::vector<base::Value> event_args,
+    base::Value::List event_args,
     const device::mojom::HidDeviceInfo& device_info) {
   std::unique_ptr<Event> event(
       new Event(histogram_value, event_name, std::move(event_args)));

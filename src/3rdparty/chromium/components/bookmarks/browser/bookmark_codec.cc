@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/containers/contains.h"
 #include "base/guid.h"
 #include "base/json/json_string_value_serializer.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -45,9 +46,11 @@ const char BookmarkCodec::kURLKey[] = "url";
 const char BookmarkCodec::kDateModifiedKey[] = "date_modified";
 const char BookmarkCodec::kChildrenKey[] = "children";
 const char BookmarkCodec::kMetaInfo[] = "meta_info";
+const char BookmarkCodec::kUnsyncedMetaInfo[] = "unsynced_meta_info";
 const char BookmarkCodec::kTypeURL[] = "url";
 const char BookmarkCodec::kTypeFolder[] = "folder";
 const char BookmarkCodec::kSyncMetadata[] = "sync_metadata";
+const char BookmarkCodec::kDateLastUsed[] = "date_last_used";
 
 // Current version of the file.
 static const int kCurrentVersion = 1;
@@ -76,6 +79,7 @@ base::Value BookmarkCodec::Encode(BookmarkModel* model,
                                   std::string sync_metadata_str) {
   return Encode(model->bookmark_bar_node(), model->other_node(),
                 model->mobile_node(), model->root_node()->GetMetaInfoMap(),
+                model->root_node()->GetUnsyncedMetaInfoMap(),
                 std::move(sync_metadata_str));
 }
 
@@ -84,6 +88,7 @@ base::Value BookmarkCodec::Encode(
     const BookmarkNode* other_folder_node,
     const BookmarkNode* mobile_folder_node,
     const BookmarkNode::MetaInfoMap* model_meta_info_map,
+    const BookmarkNode::MetaInfoMap* model_unsynced_meta_info_map,
     std::string sync_metadata_str) {
   ids_reassigned_ = false;
   guids_reassigned_ = false;
@@ -106,6 +111,11 @@ base::Value BookmarkCodec::Encode(
   roots.SetKey(kMobileBookmarkFolderNameKey, EncodeNode(mobile_folder_node));
   if (model_meta_info_map)
     roots.SetKey(kMetaInfo, EncodeMetaInfo(*model_meta_info_map));
+  if (model_unsynced_meta_info_map) {
+    roots.SetKey(kUnsyncedMetaInfo,
+                 EncodeMetaInfo(*model_unsynced_meta_info_map));
+  }
+
   FinalizeChecksum();
   // We are going to store the computed checksum. So set stored checksum to be
   // the same as computed checksum.
@@ -156,6 +166,9 @@ base::Value BookmarkCodec::EncodeNode(const BookmarkNode* node) {
   // TODO(crbug.com/634507): Avoid ToInternalValue().
   value.SetStringKey(kDateAddedKey, base::NumberToString(
                                         node->date_added().ToInternalValue()));
+  value.SetStringKey(
+      kDateLastUsed,
+      base::NumberToString(node->date_last_used().ToInternalValue()));
   if (node->is_url()) {
     value.SetStringKey(kTypeKey, kTypeURL);
     std::string url = node->url().possibly_invalid_spec();
@@ -168,14 +181,18 @@ base::Value BookmarkCodec::EncodeNode(const BookmarkNode* node) {
         base::NumberToString(node->date_folder_modified().ToInternalValue()));
     UpdateChecksumWithFolderNode(id, title);
 
-    base::Value child_values(base::Value::Type::LIST);
+    base::Value::List child_values;
     for (const auto& child : node->children())
       child_values.Append(EncodeNode(child.get()));
-    value.SetKey(kChildrenKey, std::move(child_values));
+    value.SetKey(kChildrenKey, base::Value(std::move(child_values)));
   }
   const BookmarkNode::MetaInfoMap* meta_info_map = node->GetMetaInfoMap();
   if (meta_info_map)
     value.SetKey(kMetaInfo, EncodeMetaInfo(*meta_info_map));
+  const BookmarkNode::MetaInfoMap* unsynced_meta_info_map =
+      node->GetUnsyncedMetaInfoMap();
+  if (unsynced_meta_info_map)
+    value.SetKey(kUnsyncedMetaInfo, EncodeMetaInfo(*unsynced_meta_info_map));
   return value;
 }
 
@@ -226,6 +243,8 @@ bool BookmarkCodec::DecodeHelper(BookmarkNode* bb_node,
 
   if (!DecodeMetaInfo(*roots, &model_meta_info_map_))
     return false;
+  if (!DecodeUnsyncedMetaInfo(*roots, &model_unsynced_meta_info_map_))
+    return false;
 
   if (sync_metadata_str) {
     const std::string* sync_metadata_str_base64 =
@@ -248,7 +267,7 @@ bool BookmarkCodec::DecodeHelper(BookmarkNode* bb_node,
 bool BookmarkCodec::DecodeChildren(const base::Value& child_value_list,
                                    BookmarkNode* parent) {
   DCHECK(child_value_list.is_list());
-  for (const base::Value& child_value : child_value_list.GetListDeprecated()) {
+  for (const base::Value& child_value : child_value_list.GetList()) {
     if (!child_value.is_dict())
       return false;
     DecodeNode(child_value, parent, nullptr);
@@ -334,6 +353,15 @@ bool BookmarkCodec::DecodeNode(const base::Value& value,
   int64_t date_added_time;
   base::StringToInt64(date_added_string, &date_added_time);
 
+  std::string date_last_used_string;
+  string_value = value.FindStringKey(kDateLastUsed);
+  if (string_value)
+    date_last_used_string = *string_value;
+  else
+    date_last_used_string = base::NumberToString(0);
+  int64_t date_last_used;
+  base::StringToInt64(date_last_used_string, &date_last_used);
+
   const std::string* type_string = value.FindStringKey(kTypeKey);
   if (!type_string)
     return false;
@@ -392,11 +420,17 @@ bool BookmarkCodec::DecodeNode(const base::Value& value,
 
   node->SetTitle(title);
   node->set_date_added(Time::FromInternalValue(date_added_time));
+  node->set_date_last_used(Time::FromInternalValue(date_last_used));
 
   BookmarkNode::MetaInfoMap meta_info_map;
   if (!DecodeMetaInfo(value, &meta_info_map))
     return false;
   node->SetMetaInfoMap(meta_info_map);
+
+  BookmarkNode::MetaInfoMap unsynced_meta_info_map;
+  if (!DecodeUnsyncedMetaInfo(value, &unsynced_meta_info_map))
+    return false;
+  node->SetUnsyncedMetaInfoMap(unsynced_meta_info_map);
 
   return true;
 }
@@ -428,6 +462,24 @@ bool BookmarkCodec::DecodeMetaInfo(const base::Value& value,
   // dictionary of meta info values.
   if (!meta_info->is_dict())
     return false;
+  DecodeMetaInfoHelper(*meta_info, std::string(), meta_info_map);
+
+  return true;
+}
+
+bool BookmarkCodec::DecodeUnsyncedMetaInfo(
+    const base::Value& value,
+    BookmarkNode::MetaInfoMap* meta_info_map) {
+  DCHECK(value.is_dict());
+  DCHECK(meta_info_map);
+  meta_info_map->clear();
+
+  const base::Value* meta_info = value.FindKey(kUnsyncedMetaInfo);
+  if (!meta_info)
+    return true;
+  if (!meta_info->is_dict())
+    return false;
+
   DecodeMetaInfoHelper(*meta_info, std::string(), meta_info_map);
 
   return true;

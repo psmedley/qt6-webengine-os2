@@ -616,11 +616,11 @@ static const AVClass class = {
 
 const FFCodec ff_librav1e_encoder = {
     .p.name         = "librav1e",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("librav1e AV1"),
+    CODEC_LONG_NAME("librav1e AV1"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_AV1,
     .init           = librav1e_encode_init,
-    .receive_packet = librav1e_receive_packet,
+    FF_CODEC_RECEIVE_PACKET_CB(librav1e_receive_packet),
     .close          = librav1e_encode_close,
     .priv_data_size = sizeof(librav1eContext),
     .p.priv_class   = &class,
@@ -628,6 +628,7 @@ const FFCodec ff_librav1e_encoder = {
     .p.pix_fmts     = librav1e_pix_fmts,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_OTHER_THREADS |
                       AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_AUTO_THREADS,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_AUTO_THREADS,
     .p.wrapper_name = "librav1e",
 };

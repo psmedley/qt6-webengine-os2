@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Copyright 2015 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,7 @@ const char kDiskChanged[] = "DiskChanged";
 const char kDiskRemoved[] = "DiskRemoved";
 const char kFormatCompleted[] = "FormatCompleted";
 const char kMountCompleted[] = "MountCompleted";
+const char kMountProgress[] = "MountProgress";
 const char kRenameCompleted[] = "RenameCompleted";
 
 // Properties.
@@ -94,9 +95,12 @@ enum FormatErrorType {
   FORMAT_ERROR_INVALID_CHARACTER = 11,
 };
 
-// TODO(benchan): After both Chrome and cros-disks use these enum values,
-// make these error values contiguous so that they can be directly reported
-// via UMA.
+// TODO(crbug.com/1368408): After both Chrome and cros-disks use these enum
+// values, make these error values contiguous so that they can be directly
+// reported via UMA. See
+// https://source.chromium.org/chromium/chromium/src/+/main:chromeos/ash/components/dbus/cros_disks/cros_disks_client.h?q=MountError.
+//
+// The *_EX values are used during the transition.
 enum MountErrorType {
   MOUNT_ERROR_NONE = 0,
   MOUNT_ERROR_UNKNOWN = 1,
@@ -109,9 +113,29 @@ enum MountErrorType {
   MOUNT_ERROR_INVALID_MOUNT_OPTIONS = 8,
   MOUNT_ERROR_INVALID_UNMOUNT_OPTIONS = 9,
   MOUNT_ERROR_INSUFFICIENT_PERMISSIONS = 10,
+
+  // The FUSE mounter cannot be found.
   MOUNT_ERROR_MOUNT_PROGRAM_NOT_FOUND = 11,
+
+  // The FUSE mounter finished with an error.
   MOUNT_ERROR_MOUNT_PROGRAM_FAILED = 12,
+
+  // Either the FUSE mounter needs a password, or the provided password is
+  // incorrect.
   MOUNT_ERROR_NEED_PASSWORD = 13,
+  MOUNT_ERROR_NEED_PASSWORD_EX = 117,
+
+  // The FUSE mounter is currently launching, and it hasn't daemonized yet.
+  MOUNT_ERROR_IN_PROGRESS = 14,
+  MOUNT_ERROR_IN_PROGRESS_EX = 118,
+
+  // The FUSE mounter was cancelled (killed) while it was launching.
+  MOUNT_ERROR_CANCELLED = 15,
+  MOUNT_ERROR_CANCELLED_EX = 119,
+
+  // The device is busy.
+  MOUNT_ERROR_BUSY = 20,
+
   MOUNT_ERROR_INVALID_DEVICE_PATH = 100,
   MOUNT_ERROR_UNKNOWN_FILESYSTEM = 101,
   MOUNT_ERROR_UNSUPPORTED_FILESYSTEM = 102,

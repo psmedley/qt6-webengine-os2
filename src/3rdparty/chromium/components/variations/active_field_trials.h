@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,14 @@ struct COMPONENT_EXPORT(VARIATIONS) ActiveGroupIdCompare {
     return lhs.name < rhs.name;
   }
 };
+
+// Populates |name_group_ids| based on |active_groups|. Field trial names are
+// suffixed with |suffix| before hashing is executed.
+COMPONENT_EXPORT(VARIATIONS)
+void GetFieldTrialActiveGroupIdsForActiveGroups(
+    base::StringPiece suffix,
+    const base::FieldTrial::ActiveGroups& active_groups,
+    std::vector<ActiveGroupId>* name_group_ids);
 
 // Fills the supplied vector |name_group_ids| (which must be empty when called)
 // with unique ActiveGroupIds for each Field Trial that has a chosen group.

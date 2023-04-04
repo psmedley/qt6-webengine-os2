@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,6 +75,12 @@ class VIEWS_EXPORT WidgetFadeAnimator : public AnimationDelegateViews,
   // Plays the fade-in animation. If the widget is not currently visible, it
   // will be made visible.
   void FadeIn();
+
+  // Cancels any pending fade-in, leaves the widget at the current opacity to
+  // avoid abrupt visual changes. CancelFadeIn() should be followed with
+  // something, either another FadeIn(), or widget closing. It has no effect
+  // if the widget is not fading in.
+  void CancelFadeIn();
 
   // Plays the fade-out animation. At the end of the fade, the widget will be
   // hidden or closed, as per |close_on_hide|. If the widget is already hidden

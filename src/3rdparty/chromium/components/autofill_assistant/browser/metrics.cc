@@ -1,8 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill_assistant/browser/metrics.h"
+
+#include <algorithm>
+#include <numeric>
+#include <vector>
 
 #include "base/containers/flat_map.h"
 #include "base/logging.h"
@@ -10,9 +14,11 @@
 #include "base/no_destructor.h"
 #include "components/autofill_assistant/browser/features.h"
 #include "components/autofill_assistant/browser/intent_strings.h"
+#include "components/autofill_assistant/browser/script_parameters.h"
 #include "components/autofill_assistant/browser/startup_util.h"
-#include "components/ukm/content/source_url_recorder.h"
+#include "services/metrics/public/cpp/metrics_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace autofill_assistant {
 namespace {
@@ -44,15 +50,26 @@ const char kPaymentRequestFirstNameOnly[] =
     "Android.AutofillAssistant.PaymentRequest.FirstNameOnly";
 const char kCupRpcVerificationEvent[] =
     "Android.AutofillAssistant.CupRpcVerificationEvent";
+const char kJsFlowStartedEvent[] =
+    "Android.AutofillAssistant.JsFlowStartedEvent";
 const char kDependenciesInvalidated[] =
     "Android.AutofillAssistant.DependenciesInvalidated";
 const char kOnboardingFetcherResultStatus[] =
     "Android.AutofillAssistant.OnboardingFetcher.ResultStatus";
+const char kServiceRequestSuccessRetryCount[] =
+    "Android.AutofillAssistant.ServiceRequestSender.SuccessRetryCount";
+const char kServiceRequestFailureRetryCount[] =
+    "Android.AutofillAssistant.ServiceRequestSender.FailureRetryCount";
+const char kCudAutofillProfileDeduplicatedContact[] =
+    "Android.AutofillAssistant.Cud.AutofillProfileDeduplicatedContact";
+const char kCudAutofillProfileDeduplicatedAddress[] =
+    "Android.AutofillAssistant.Cud.AutofillProfileDeduplicatedAddress";
 static bool DROPOUT_RECORDED = false;
 
 std::string GetSuffixForIntent(const std::string& intent) {
   base::flat_map<std::string, std::string> histogramsSuffixes = {
       {kBuyMovieTicket, ".BuyMovieTicket"},
+      {kChromeFastCheckout, ".ChromeFastCheckout"},
       {kFlightsCheckin, ".FlightsCheckin"},
       {kFoodOrdering, ".FoodOrdering"},
       {kFoodOrderingDelivery, ".FoodOrderingDelivery"},
@@ -71,46 +88,6 @@ std::string GetSuffixForIntent(const std::string& intent) {
   }
   return histogramsSuffixes[intent];
 }
-
-// Extracts the enum value corresponding to the intent specified in
-// |script_parameters|.
-Metrics::AutofillAssistantIntent ExtractIntentFromScriptParameters(
-    const ScriptParameters& script_parameters) {
-  auto intent = script_parameters.GetIntent();
-  if (!intent) {
-    return Metrics::AutofillAssistantIntent::UNDEFINED_INTENT;
-  }
-  // The list of intents that is known at compile-time. Intents not in this list
-  // will be recorded as UNDEFINED_INTENT.
-  static const base::NoDestructor<
-      base::flat_map<std::string, Metrics::AutofillAssistantIntent>>
-      intents(
-          {{"BUY_MOVIE_TICKET",
-            Metrics::AutofillAssistantIntent::BUY_MOVIE_TICKET},
-           {"RENT_CAR", Metrics::AutofillAssistantIntent::RENT_CAR},
-           {"SHOPPING", Metrics::AutofillAssistantIntent::SHOPPING},
-           {"TELEPORT", Metrics::AutofillAssistantIntent::TELEPORT},
-           {"SHOPPING_ASSISTED_CHECKOUT",
-            Metrics::AutofillAssistantIntent::SHOPPING_ASSISTED_CHECKOUT},
-           {"FLIGHTS_CHECKIN",
-            Metrics::AutofillAssistantIntent::FLIGHTS_CHECKIN},
-           {"FOOD_ORDERING", Metrics::AutofillAssistantIntent::FOOD_ORDERING},
-           {"PASSWORD_CHANGE",
-            Metrics::AutofillAssistantIntent::PASSWORD_CHANGE},
-           {"FOOD_ORDERING_PICKUP",
-            Metrics::AutofillAssistantIntent::FOOD_ORDERING_PICKUP},
-           {"FOOD_ORDERING_DELIVERY",
-            Metrics::AutofillAssistantIntent::FOOD_ORDERING_DELIVERY},
-           {"UNLAUNCHED_VERTICAL_1",
-            Metrics::AutofillAssistantIntent::UNLAUNCHED_VERTICAL_1},
-           {"FIND_COUPONS", Metrics::AutofillAssistantIntent::FIND_COUPONS}});
-
-  auto enum_value_iter = intents->find(*intent);
-  if (enum_value_iter == intents->end()) {
-    return Metrics::AutofillAssistantIntent::UNDEFINED_INTENT;
-  }
-  return enum_value_iter->second;
-}  // namespace
 
 // Extracts the enum value corresponding to the caller specified in
 // |script_parameters|.
@@ -172,7 +149,6 @@ Metrics::AutofillAssistantStarted ToAutofillAssistantStarted(
       return Metrics::AutofillAssistantStarted::FAILED_NO_INITIAL_URL;
     case StartupMode::START_REGULAR:
       return Metrics::AutofillAssistantStarted::OK_IMMEDIATE_START;
-    case StartupMode::START_BASE64_TRIGGER_SCRIPT:
     case StartupMode::START_RPC_TRIGGER_SCRIPT:
       return Metrics::AutofillAssistantStarted::OK_DELAYED_START;
   }
@@ -329,6 +305,26 @@ void Metrics::RecordPaymentRequestAutofillChanged(
 }
 
 // static
+void Metrics::RecordCollectUserDataProfileDeduplicationForContact(
+    int number_of_profiles_deduplicated_for_contact) {
+  base::UmaHistogramEnumeration(
+      kCudAutofillProfileDeduplicatedContact,
+      Metrics::UserDataEntryCount(
+          ToEntryCountBucket(number_of_profiles_deduplicated_for_contact)));
+  return;
+}
+
+// static
+void Metrics::RecordCollectUserDataProfileDeduplicationForAddress(
+    int number_of_profiles_deduplicated_for_address) {
+  base::UmaHistogramEnumeration(
+      kCudAutofillProfileDeduplicatedAddress,
+      Metrics::UserDataEntryCount(
+          ToEntryCountBucket(number_of_profiles_deduplicated_for_address)));
+  return;
+}
+
+// static
 void Metrics::RecordPaymentRequestFirstNameOnly(bool first_name_only) {
   base::UmaHistogramBoolean(kPaymentRequestFirstNameOnly, first_name_only);
 }
@@ -368,7 +364,6 @@ void Metrics::RecordTriggerScriptStarted(ukm::UkmRecorder* ukm_recorder,
     case StartupMode::MANDATORY_PARAMETERS_MISSING:
       event = TriggerScriptStarted::MANDATORY_PARAMETER_MISSING;
       break;
-    case StartupMode::START_BASE64_TRIGGER_SCRIPT:
     case StartupMode::START_RPC_TRIGGER_SCRIPT:
       event = is_first_time_user ? TriggerScriptStarted::FIRST_TIME_USER
                                  : TriggerScriptStarted::RETURNING_USER;
@@ -556,10 +551,63 @@ void Metrics::RecordCupRpcVerificationEvent(CupRpcVerificationEvent event) {
 }
 
 // static
+void Metrics::RecordJsFlowStartedEvent(JsFlowStartedEvent event) {
+  DCHECK_LE(event, JsFlowStartedEvent::kMaxValue);
+  base::UmaHistogramEnumeration(kJsFlowStartedEvent, event);
+}
+
+// static
 void Metrics::RecordOnboardingFetcherResult(
     OnboardingFetcherResultStatus status) {
   DCHECK_LE(status, OnboardingFetcherResultStatus::kMaxValue);
   base::UmaHistogramEnumeration(kOnboardingFetcherResultStatus, status);
+}
+
+void Metrics::RecordServiceRequestRetryCount(int count, bool success) {
+  DCHECK_GE(count, 0);
+  base::UmaHistogramExactLinear(success ? kServiceRequestSuccessRetryCount
+                                        : kServiceRequestFailureRetryCount,
+                                /* sample= */ count,
+                                /* exclusive_max= */ 11);
+}
+
+// static
+void Metrics::RecordFlowFinished(ukm::UkmRecorder* ukm_recorder,
+                                 ukm::SourceId source_id,
+                                 FlowFinishedState state,
+                                 RoundtripNetworkStats flow_network_stats) {
+  int num_js_flow_actions = 0;
+  size_t total_decoded_js_flow_size_in_bytes = 0;
+  for (const auto& action : flow_network_stats.action_stats()) {
+    if (action.action_info_case() !=
+        static_cast<int>(ActionProto::ActionInfoCase::kJsFlow)) {
+      continue;
+    }
+    num_js_flow_actions++;
+    total_decoded_js_flow_size_in_bytes += action.decoded_size_bytes();
+  }
+
+  ukm::builders::AutofillAssistant_FlowFinished(source_id)
+      .SetFlowFinishedState(static_cast<int64_t>(state))
+      .SetNumJsFlowActions(num_js_flow_actions)
+      .SetTotalDecodedJsFlowSizeInBytes(ukm::GetExponentialBucketMinForBytes(
+          total_decoded_js_flow_size_in_bytes))
+      .SetNumActions(flow_network_stats.action_stats().size())
+      .SetNumRoundtrips(flow_network_stats.num_roundtrips())
+      .SetTotalEncodedGetActionsSizeInBytes(
+          ukm::GetExponentialBucketMinForBytes(
+              flow_network_stats.roundtrip_encoded_body_size_bytes()))
+      .SetTotalDecodedGetActionsSizeInBytes(
+          ukm::GetExponentialBucketMinForBytes(
+              flow_network_stats.roundtrip_decoded_body_size_bytes()))
+      .Record(ukm_recorder);
+}
+
+// static
+AutofillAssistantIntent Metrics::ExtractIntentFromScriptParameters(
+    const ScriptParameters& script_parameters) {
+  absl::optional<std::string> intent = script_parameters.GetIntent();
+  return ExtractIntentFromString(intent);
 }
 
 std::ostream& operator<<(std::ostream& out,
@@ -687,6 +735,9 @@ std::ostream& operator<<(std::ostream& out, const Metrics::Onboarding& metric) {
     case Metrics::Onboarding::OB_NO_ANSWER:
       out << "OB_NO_ANSWER";
       break;
+    case Metrics::Onboarding::OB_EXTERNAL:
+      out << "OB_EXTERNAL";
+      break;
       // Do not add default case to force compilation error for new values.
   }
   return out;
@@ -744,7 +795,7 @@ std::ostream& operator<<(std::ostream& out,
       out << "DISABLED_PROACTIVE_HELP_SETTING";
       break;
     case Metrics::TriggerScriptFinishedState::BASE64_DECODING_ERROR:
-      out << "BASE64_DECODING_ERROR";
+      out << "BASE64 DECODING ERROR";
       break;
     case Metrics::TriggerScriptFinishedState::BOTTOMSHEET_ONBOARDING_REJECTED:
       out << "BOTTOMSHEET_ONBOARDING_REJECTED";

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,6 +155,21 @@ class ChannelMac : public Channel,
     }
 
     *handles = std::move(incoming_handles);
+    return true;
+  }
+
+  bool GetReadPlatformHandlesForIpcz(
+      size_t num_handles,
+      std::vector<PlatformHandle>& handles) override {
+    if (incoming_handles_.size() != num_handles) {
+      // ChannelMac messages are transmitted all at once or not at all, so this
+      // method should always be invoked with the exact, correct number of
+      // handles already in `incoming_handles_`.
+      return false;
+    }
+
+    DCHECK(handles.empty());
+    incoming_handles_.swap(handles);
     return true;
   }
 

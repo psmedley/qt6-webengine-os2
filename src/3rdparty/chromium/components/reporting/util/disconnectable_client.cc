@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/rand_util.h"
 #include "base/sequence_checker.h"
 #include "base/task/sequenced_task_runner.h"
 #include "components/reporting/util/status.h"
@@ -32,14 +31,12 @@ void DisconnectableClient::MaybeMakeCall(std::unique_ptr<Delegate> delegate) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Bail out, if missive daemon is not available over dBus.
   if (!is_available_) {
-    delegate->Respond(
-        Status(reporting::error::UNAVAILABLE, "Service is unavailable"));
+    delegate->Respond(Status(error::UNAVAILABLE, "Service is unavailable"));
     return;
   }
   // Add the delegate to the map.
-  const auto id = base::RandUint64();
+  const auto id = ++last_id_;
   auto res = outstanding_delegates_.emplace(id, std::move(delegate));
-  DCHECK(res.second) << "Duplicate call id " << id;
   // Make a call, resume on CallResponded, when response is received.
   res.first->second->DoCall(base::BindOnce(&DisconnectableClient::CallResponded,
                                            weak_ptr_factory_.GetWeakPtr(), id));
@@ -52,10 +49,10 @@ void DisconnectableClient::CallResponded(uint64_t id) {
     // Callback has already been removed, no action needed.
     return;
   }
-  // Respond through the |delegate|.
-  auto delegate = std::move(it->second);
+  // Remove delegate from |outstanding_delegates_|.
+  const auto delegate = std::move(it->second);
   outstanding_delegates_.erase(it);
-  // Respond.
+  // Respond through the |delegate|.
   delegate->Respond(Status::StatusOK());
 }
 
@@ -66,13 +63,13 @@ void DisconnectableClient::SetAvailability(bool is_available) {
                << "available";
   if (!is_available_) {
     // Cancel all pending calls.
-    for (auto& p : outstanding_delegates_) {
-      p.second->Respond(
-          Status(reporting::error::UNAVAILABLE, "Service is unavailable"));
-      // Release the delegate sooner, don't wait until clear().
-      p.second.reset();
+    while (!outstanding_delegates_.empty()) {
+      // Remove the first delegate from |outstanding_delegates_|.
+      const auto delegate = std::move(outstanding_delegates_.begin()->second);
+      outstanding_delegates_.erase(outstanding_delegates_.begin());
+      // Respond through the |delegate|.
+      delegate->Respond(Status(error::UNAVAILABLE, "Service is unavailable"));
     }
-    outstanding_delegates_.clear();
   }
 }
 

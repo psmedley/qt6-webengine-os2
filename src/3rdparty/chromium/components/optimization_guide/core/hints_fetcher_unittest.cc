@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,8 +42,7 @@ class HintsFetcherTest : public testing::Test,
         shared_url_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_url_loader_factory_)) {
-    base::test::ScopedFeatureList scoped_list;
-    scoped_list.InitWithFeaturesAndParameters(
+    scoped_list_.InitWithFeaturesAndParameters(
         {{features::kRemoteOptimizationGuideFetching, {}},
          {features::kOptimizationHints,
           {{"persist_hints_to_disk",
@@ -76,11 +75,11 @@ class HintsFetcherTest : public testing::Test,
   // expire at |host_invalid_time|.
   void SeedCoveredHosts(const std::vector<std::string>& hosts,
                         base::Time host_invalid_time) {
-    DictionaryPrefUpdate hosts_fetched(
+    ScopedDictPrefUpdate hosts_fetched(
         pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
 
     for (const std::string& host : hosts) {
-      hosts_fetched->SetDoubleKey(
+      hosts_fetched->Set(
           HashHostForDictionary(host),
           host_invalid_time.ToDeltaSinceWindowsEpoch().InSecondsF());
     }
@@ -156,6 +155,7 @@ class HintsFetcherTest : public testing::Test,
   variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
       variations::VariationsIdsProvider::Mode::kUseSignedInState};
   bool hints_fetched_ = false;
+  base::test::ScopedFeatureList scoped_list_;
   base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<HintsFetcher> hints_fetcher_;
@@ -241,6 +241,8 @@ TEST_P(HintsFetcherTest, FetchInProgress) {
 // Tests that the hints are refreshed again for hosts for whom hints were
 // fetched recently.
 TEST_P(HintsFetcherTest, FetchInProgress_HostsHintsRefreshed) {
+  if (!ShouldPersistHintsToDisk())
+    return;
   base::SimpleTestClock test_clock;
   SetTimeClockForTesting(&test_clock);
 
@@ -352,18 +354,19 @@ TEST_P(HintsFetcherTest, HintsFetchSuccessfulHostsRecorded) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::Value* hosts_fetched = pref_service()->GetDictionary(
-      prefs::kHintsFetcherHostsSuccessfullyFetched);
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
   absl::optional<double> value;
   for (const std::string& host : hosts) {
-    value = hosts_fetched->FindDoubleKey(HashHostForDictionary(host));
+    value = hosts_fetched.FindDouble(HashHostForDictionary(host));
     // This reduces the necessary precision for the check on the expiry time for
     // the hosts stored in the pref. The exact time is not necessary, being
     // within 10 minutes is acceptable.
     EXPECT_NEAR((base::Time::FromDeltaSinceWindowsEpoch(base::Seconds(*value)) -
                  GetMockClock()->Now())
                     .InMinutes(),
-                base::Days(7).InMinutes(), 10);
+                features::StoredFetchedHintsFreshnessDuration().InMinutes(),
+                10);
   }
 }
 
@@ -379,10 +382,10 @@ TEST_P(HintsFetcherTest, HintsFetchFailsHostNotRecorded) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::Value* hosts_fetched = pref_service()->GetDictionary(
-      prefs::kHintsFetcherHostsSuccessfullyFetched);
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
   for (const std::string& host : hosts) {
-    EXPECT_FALSE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
+    EXPECT_FALSE(hosts_fetched.FindDouble(HashHostForDictionary(host)));
   }
 }
 
@@ -398,17 +401,21 @@ TEST_P(HintsFetcherTest, HintsFetchClearHostsSuccessfullyFetched) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::Value* hosts_fetched = pref_service()->GetDictionary(
-      prefs::kHintsFetcherHostsSuccessfullyFetched);
-  for (const std::string& host : hosts) {
-    EXPECT_TRUE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
+  {
+    const base::Value::Dict& hosts_fetched =
+        pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+    for (const std::string& host : hosts) {
+      EXPECT_TRUE(hosts_fetched.FindDouble(HashHostForDictionary(host)));
+    }
   }
 
   HintsFetcher::ClearHostsSuccessfullyFetched(pref_service());
-  hosts_fetched = pref_service()->GetDictionary(
-      prefs::kHintsFetcherHostsSuccessfullyFetched);
-  for (const std::string& host : hosts) {
-    EXPECT_FALSE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
+  {
+    const base::Value::Dict& hosts_fetched =
+        pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+    for (const std::string& host : hosts) {
+      EXPECT_FALSE(hosts_fetched.FindDouble(HashHostForDictionary(host)));
+    }
   }
 }
 
@@ -424,19 +431,22 @@ TEST_P(HintsFetcherTest, HintsFetchClearSingleFetchedHost) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  const base::Value* hosts_fetched = pref_service()->GetDictionary(
-      prefs::kHintsFetcherHostsSuccessfullyFetched);
-  for (const std::string& host : hosts) {
-    EXPECT_TRUE(hosts_fetched->FindDoubleKey(HashHostForDictionary(host)));
+  {
+    const base::Value::Dict& hosts_fetched =
+        pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+    for (const std::string& host : hosts) {
+      EXPECT_TRUE(hosts_fetched.FindDouble(HashHostForDictionary(host)));
+    }
   }
 
   HintsFetcher::ClearSingleFetchedHost(pref_service(), "host1.com");
-  hosts_fetched = pref_service()->GetDictionary(
-      prefs::kHintsFetcherHostsSuccessfullyFetched);
+  {
+    const base::Value::Dict& hosts_fetched =
+        pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
 
-  EXPECT_FALSE(
-      hosts_fetched->FindDoubleKey(HashHostForDictionary("host1.com")));
-  EXPECT_TRUE(hosts_fetched->FindDoubleKey(HashHostForDictionary("host2.com")));
+    EXPECT_FALSE(hosts_fetched.FindDouble(HashHostForDictionary("host1.com")));
+    EXPECT_TRUE(hosts_fetched.FindDouble(HashHostForDictionary("host2.com")));
+  }
 }
 
 TEST_P(HintsFetcherTest, HintsFetcherHostsCovered) {
@@ -476,9 +486,9 @@ TEST_P(HintsFetcherTest, HintsFetcherCoveredHostExpired) {
 
   // The first pair of hosts should be removed from the dictionary
   // pref as they have expired.
-  DictionaryPrefUpdate hosts_fetched(
-      pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(2u, hosts_fetched->DictSize());
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+  EXPECT_EQ(2u, hosts_fetched.size());
 
   // Navigations to the valid hosts should be recorded as successfully
   // covered.
@@ -491,9 +501,12 @@ TEST_P(HintsFetcherTest, HintsFetcherHostNotCovered) {
   base::Time host_invalid_time = base::Time::Now() + base::Hours(1);
 
   SeedCoveredHosts(hosts, host_invalid_time);
-  DictionaryPrefUpdate hosts_fetched(
-      pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(2u, hosts_fetched->DictSize());
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+  EXPECT_EQ(2u, hosts_fetched.size());
+
+  if (!ShouldPersistHintsToDisk())
+    return;
 
   EXPECT_TRUE(WasHostCoveredByFetch(hosts[0]));
   EXPECT_TRUE(WasHostCoveredByFetch(hosts[1]));
@@ -519,9 +532,9 @@ TEST_P(HintsFetcherTest, HintsFetcherRemoveExpiredOnSuccessfullyFetched) {
 
   // The two expired hosts should be removed from the dictionary pref as they
   // have expired.
-  DictionaryPrefUpdate hosts_fetched(
-      pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(2u, hosts_fetched->DictSize());
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+  EXPECT_EQ(2u, hosts_fetched.size());
 
   EXPECT_FALSE(WasHostCoveredByFetch(hosts_expired[0]));
   EXPECT_FALSE(WasHostCoveredByFetch(hosts_expired[1]));
@@ -553,9 +566,9 @@ TEST_P(HintsFetcherTest, HintsFetcherSuccessfullyFetchedHostsFull) {
   EXPECT_TRUE(hints_fetched());
 
   // Navigations to both the extra hosts should be recorded.
-  DictionaryPrefUpdate hosts_fetched(
-      pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(200u, hosts_fetched->DictSize());
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+  EXPECT_EQ(200u, hosts_fetched.size());
 
   EXPECT_TRUE(WasHostCoveredByFetch(extra_hosts[0]));
   EXPECT_TRUE(WasHostCoveredByFetch(extra_hosts[1]));
@@ -589,9 +602,9 @@ TEST_P(HintsFetcherTest, MaxHostsForOptimizationGuideServiceHintsFetch) {
   if (!ShouldPersistHintsToDisk())
     return;
 
-  DictionaryPrefUpdate hosts_fetched(
-      pref_service(), prefs::kHintsFetcherHostsSuccessfullyFetched);
-  EXPECT_EQ(max_hosts_in_fetch_request, hosts_fetched->DictSize());
+  const base::Value::Dict& hosts_fetched =
+      pref_service()->GetDict(prefs::kHintsFetcherHostsSuccessfullyFetched);
+  EXPECT_EQ(max_hosts_in_fetch_request, hosts_fetched.size());
   EXPECT_EQ(all_hosts.size(), max_hosts_in_fetch_request + 5);
 
   for (size_t i = 0; i < max_hosts_in_fetch_request; ++i) {

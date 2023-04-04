@@ -1,24 +1,24 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'chrome://resources/cr_components/managed_footnote/managed_footnote.js';
-import 'chrome://resources/cr_elements/shared_style_css.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_shared_style.css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
 import 'chrome://resources/cr_elements/cr_splitter/cr_splitter.js';
 import './folder_node.js';
 import './list.js';
 import './router.js';
-import './shared_vars.js';
+import './shared_vars.css.js';
 import './strings.m.js';
 import './command_manager.js';
 import './toolbar.js';
 
 import {CrSplitterElement} from 'chrome://resources/cr_elements/cr_splitter/cr_splitter.js';
 import {FindShortcutMixin, FindShortcutMixinInterface} from 'chrome://resources/cr_elements/find_shortcut_mixin.js';
-import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {IronScrollTargetBehavior} from 'chrome://resources/polymer/v3_0/iron-scroll-target-behavior/iron-scroll-target-behavior.js';
 import {mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
@@ -181,7 +181,7 @@ export class BookmarksAppElement extends BookmarksAppElementBase {
       this.dispatchEvent(new CustomEvent('iron-announce', {
         bubbles: true,
         composed: true,
-        detail: {text: loadTimeData.getString('searchCleared')}
+        detail: {text: loadTimeData.getString('searchCleared')},
       }));
     }
 
@@ -200,8 +200,8 @@ export class BookmarksAppElement extends BookmarksAppElementBase {
         detail: {
           text: ids.length > 0 ?
               loadTimeData.getStringF('searchResults', this.searchTerm_) :
-              loadTimeData.getString('noSearchResults')
-        }
+              loadTimeData.getString('noSearchResults'),
+        },
       }));
     });
   }
@@ -233,6 +233,7 @@ export class BookmarksAppElement extends BookmarksAppElementBase {
   }
 
   /** Overridden from IronScrollTargetBehavior */
+  /* eslint-disable-next-line @typescript-eslint/naming-convention */
   override _scrollHandler() {
     this.toolbarShadow_ = this.scrollTarget!.scrollTop !== 0;
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -64,7 +64,7 @@ class NET_EXPORT_PRIVATE HttpBasicStream : public HttpStream {
 
   void Close(bool not_reusable) override;
 
-  HttpStream* RenewStreamForAuth() override;
+  std::unique_ptr<HttpStream> RenewStreamForAuth() override;
 
   bool IsResponseBodyComplete() const override;
 
@@ -87,7 +87,7 @@ class NET_EXPORT_PRIVATE HttpBasicStream : public HttpStream {
 
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
 
-  bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
+  int GetRemoteEndpoint(IPEndPoint* endpoint) override;
 
   void Drain(HttpNetworkSession* session) override;
 

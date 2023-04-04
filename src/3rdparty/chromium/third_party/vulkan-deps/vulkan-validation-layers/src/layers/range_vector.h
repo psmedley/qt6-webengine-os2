@@ -1,7 +1,7 @@
-/* Copyright (c) 2019-2021 The Khronos Group Inc.
- * Copyright (c) 2019-2021 Valve Corporation
- * Copyright (c) 2019-2021 LunarG, Inc.
- * Copyright (C) 2019-2021 Google Inc.
+/* Copyright (c) 2019-2022 The Khronos Group Inc.
+ * Copyright (c) 2019-2022 Valve Corporation
+ * Copyright (c) 2019-2022 LunarG, Inc.
+ * Copyright (C) 2019-2022 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -112,6 +112,7 @@ struct range {
         return range();  // Empty default range on non-intersection
     }
 
+    index_type size() const { return end - begin; }
     range() : begin(), end() {}
     range(const index_type &begin_, const index_type &end_) : begin(begin_), end(end_) {}
     range(const range &other) : begin(other.begin), end(other.end) {}
@@ -183,6 +184,7 @@ class range_map {
     using value_type = typename ImplMap::value_type;
     using key_type = typename ImplMap::key_type;
     using index_type = typename key_type::index_type;
+    using size_type = typename ImplMap::size_type;
 
   protected:
     template <typename ThisType>
@@ -283,7 +285,7 @@ class range_map {
             return split_it;  // this is a noop we're keeping the upper half which is the same as split_it;
         }
         // Save the contents of it and erase it
-        auto value = std::move(split_it->second);
+        auto value = split_it->second;
         auto next_it = impl_map_.erase(split_it);  // Keep this, just in case the split point results in an empty "keep" set
 
         if (lower_range.empty() && !SplitOp::keep_upper()) {
@@ -661,7 +663,7 @@ class range_map {
     }
 
     bool empty() const { return impl_map_.empty(); }
-    size_t size() const { return impl_map_.size(); }
+    size_type size() const { return impl_map_.size(); }
 
     // For configuration/debug use // Use with caution...
     ImplMap &get_implementation_map() { return impl_map_; }
@@ -1820,6 +1822,45 @@ bool update_range_value(Map &map, const Range &range, MapValue &&value, value_pr
         }
     }
     return updated;
+}
+
+//  combines directly adjacent ranges with equal RangeMap::mapped_type .
+template <typename RangeMap>
+void consolidate(RangeMap &map) {
+    using Value = typename RangeMap::value_type;
+    using Key = typename RangeMap::key_type;
+    using It = typename RangeMap::iterator;
+
+    It current = map.begin();
+    const It map_end = map.end();
+
+    // To be included in a merge range there must be no gap in the Key space, and the mapped_type values must match
+    auto can_merge = [](const It &last, const It &cur) {
+        return cur->first.begin == last->first.end && cur->second == last->second;
+    };
+
+    while (current != map_end) {
+        // Establish a trival merge range at the current location, advancing current. Merge range is inclusive of merge_last
+        const It merge_first = current;
+        It merge_last = current;
+        ++current;
+
+        // Expand the merge range as much as possible
+        while (current != map_end && can_merge(merge_last, current)) {
+            merge_last = current;
+            ++current;
+        }
+
+        // Current isn't in the active merge range. If there is a non-trivial merge range, we resolve it here.
+        if (merge_first != merge_last) {
+            // IFF there is more than one range in (merge_first, merge_last)  <- again noting the *inclusive* last
+            // Create a new Val spanning (first, last), substitute it for the multiple entries.
+            Value merged_value = std::make_pair(Key(merge_first->first.begin, merge_last->first.end), merge_last->second);
+            // Note that current points to merge_last + 1, and is valid even if at map_end for these operations
+            map.erase(merge_first, current);
+            map.insert(current, std::move(merged_value));
+        }
+    }
 }
 
 }  // namespace sparse_container

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory_mapping.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
@@ -52,9 +55,10 @@ class VROrientationDeviceProviderTest : public testing::Test {
 
     fake_sensor_ = std::make_unique<FakeOrientationSensor>(
         sensor_.InitWithNewPipeAndPassReceiver());
-    shared_buffer_handle_ = mojo::SharedBufferHandle::Create(
+    mapped_region_ = base::ReadOnlySharedMemoryRegion::Create(
         sizeof(SensorReadingSharedBuffer) *
         (static_cast<uint64_t>(mojom::SensorType::kMaxValue) + 1));
+    ASSERT_TRUE(mapped_region_.IsValid());
 
     mojo::PendingRemote<device::mojom::SensorProvider> sensor_provider;
     fake_sensor_provider_->Bind(
@@ -85,8 +89,7 @@ class VROrientationDeviceProviderTest : public testing::Test {
 
     init_params->client_receiver = sensor_client_.BindNewPipeAndPassReceiver();
 
-    init_params->memory = shared_buffer_handle_->Clone(
-        mojo::SharedBufferHandle::AccessMode::READ_ONLY);
+    init_params->memory = mapped_region_.region.Duplicate();
 
     init_params->buffer_offset =
         SensorReadingSharedBuffer::GetOffset(kOrientationSensorType);
@@ -105,7 +108,7 @@ class VROrientationDeviceProviderTest : public testing::Test {
   // Fake Sensor Init params objects
   std::unique_ptr<FakeOrientationSensor> fake_sensor_;
   mojo::PendingRemote<mojom::Sensor> sensor_;
-  mojo::ScopedSharedBufferHandle shared_buffer_handle_;
+  base::MappedReadOnlyRegion mapped_region_;
   mojo::Remote<mojom::SensorClient> sensor_client_;
 };
 
@@ -117,11 +120,9 @@ class MockOrientationDeviceProviderClient : public VRDeviceProviderClient {
   ~MockOrientationDeviceProviderClient() override = default;
   void AddRuntime(
       device::mojom::XRDeviceId id,
-      device::mojom::VRDisplayInfoPtr info,
       device::mojom::XRDeviceDataPtr device_data,
       mojo::PendingRemote<device::mojom::XRRuntime> runtime) override {
     if (wait_for_device_) {
-      ASSERT_TRUE(info);
       ASSERT_TRUE(device_data);
       ASSERT_TRUE(runtime);
       wait_for_device_->Quit();
@@ -155,8 +156,8 @@ class MockOrientationDeviceProviderClient : public VRDeviceProviderClient {
   }
 
  private:
-  base::RunLoop* wait_for_device_ = nullptr;
-  base::RunLoop* wait_for_init_ = nullptr;
+  raw_ptr<base::RunLoop> wait_for_device_ = nullptr;
+  raw_ptr<base::RunLoop> wait_for_init_ = nullptr;
 };
 
 TEST_F(VROrientationDeviceProviderTest, InitializationTest) {

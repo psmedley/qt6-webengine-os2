@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,8 +55,9 @@ enum class ExpectedCorruptionReason {
   DUPLICATED_CLIENT_TAG_HASH = 10,
   TRACKED_MANAGED_NODE = 11,
   MISSING_CLIENT_TAG_HASH = 12,
+  MISSING_FAVICON_HASH = 13,
 
-  kMaxValue = MISSING_CLIENT_TAG_HASH
+  kMaxValue = MISSING_FAVICON_HASH
 };
 
 sync_pb::EntitySpecifics GenerateSpecifics(const std::string& title,
@@ -82,6 +83,10 @@ sync_pb::BookmarkMetadata CreateNodeMetadata(
       syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS,
                                           node->guid().AsLowercaseString())
           .value());
+  // Required by the validation logic.
+  if (!node->is_folder()) {
+    bookmark_metadata.mutable_metadata()->set_bookmark_favicon_hash(123);
+  }
   return bookmark_metadata;
 }
 
@@ -138,12 +143,12 @@ TEST(SyncedBookmarkTrackerTest, ShouldAddEntity) {
   EXPECT_THAT(entity->GetClientTagHash(),
               Eq(syncer::ClientTagHash::FromUnhashed(
                   syncer::BOOKMARKS, kGuid.AsLowercaseString())));
-  EXPECT_THAT(entity->metadata()->server_id(), Eq(kSyncId));
-  EXPECT_THAT(entity->metadata()->server_version(), Eq(kServerVersion));
-  EXPECT_THAT(entity->metadata()->creation_time(),
+  EXPECT_THAT(entity->metadata().server_id(), Eq(kSyncId));
+  EXPECT_THAT(entity->metadata().server_version(), Eq(kServerVersion));
+  EXPECT_THAT(entity->metadata().creation_time(),
               Eq(syncer::TimeToProtoTime(kCreationTime)));
   EXPECT_TRUE(
-      syncer::UniquePosition::FromProto(entity->metadata()->unique_position())
+      syncer::UniquePosition::FromProto(entity->metadata().unique_position())
           .Equals(syncer::UniquePosition::FromProto(
               specifics.bookmark().unique_position())));
   EXPECT_THAT(tracker->GetEntityForSyncId(kSyncId), Eq(entity));
@@ -235,8 +240,6 @@ TEST(SyncedBookmarkTrackerTest,
   EXPECT_THAT(tracker->HasLocalChanges(), Eq(false));
   tracker->IncrementSequenceNumber(entity);
   EXPECT_THAT(tracker->HasLocalChanges(), Eq(true));
-  // TODO(crbug.com/516866): Test HasLocalChanges after submitting commit
-  // request in a separate test probably.
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldAckSequenceNumber) {
@@ -299,9 +302,9 @@ TEST(SyncedBookmarkTrackerTest, ShouldUpdateUponCommitResponseWithNewId) {
   EXPECT_THAT(tracker->GetEntityForSyncId(kSyncId), IsNull());
   EXPECT_THAT(tracker->GetEntityForSyncId(kNewSyncId), Eq(entity));
 
-  EXPECT_THAT(entity->metadata()->server_id(), Eq(kNewSyncId));
+  EXPECT_THAT(entity->metadata().server_id(), Eq(kNewSyncId));
   EXPECT_THAT(entity->bookmark_node(), Eq(&node));
-  EXPECT_THAT(entity->metadata()->server_version(), Eq(kNewServerVersion));
+  EXPECT_THAT(entity->metadata().server_version(), Eq(kNewServerVersion));
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldUpdateId) {
@@ -328,9 +331,9 @@ TEST(SyncedBookmarkTrackerTest, ShouldUpdateId) {
   EXPECT_THAT(tracker->GetEntityForSyncId(kSyncId), IsNull());
   EXPECT_THAT(tracker->GetEntityForSyncId(kNewSyncId), Eq(entity));
 
-  EXPECT_THAT(entity->metadata()->server_id(), Eq(kNewSyncId));
+  EXPECT_THAT(entity->metadata().server_id(), Eq(kNewSyncId));
   EXPECT_THAT(entity->bookmark_node(), Eq(&node));
-  EXPECT_THAT(entity->metadata()->server_version(), Eq(kServerVersion));
+  EXPECT_THAT(entity->metadata().server_version(), Eq(kServerVersion));
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -485,7 +488,7 @@ TEST(SyncedBookmarkTrackerTest, ShouldMarkDeleted) {
       tracker->GetEntityForClientTagHash(syncer::ClientTagHash::FromUnhashed(
           syncer::BOOKMARKS, kGuid.AsLowercaseString())),
       Eq(entity));
-  ASSERT_FALSE(entity->metadata()->is_deleted());
+  ASSERT_FALSE(entity->metadata().is_deleted());
   ASSERT_THAT(entity->bookmark_node(), Eq(&node));
 
   // Delete the bookmark, leading to a pending deletion (local tombstone).
@@ -498,7 +501,7 @@ TEST(SyncedBookmarkTrackerTest, ShouldMarkDeleted) {
       tracker->GetEntityForClientTagHash(syncer::ClientTagHash::FromUnhashed(
           syncer::BOOKMARKS, kGuid.AsLowercaseString())),
       Eq(entity));
-  EXPECT_TRUE(entity->metadata()->is_deleted());
+  EXPECT_TRUE(entity->metadata().is_deleted());
   EXPECT_THAT(entity->bookmark_node(), IsNull());
 }
 
@@ -523,7 +526,7 @@ TEST(SyncedBookmarkTrackerTest, ShouldUndeleteTombstone) {
   // Delete the bookmark, leading to a pending deletion (local tombstone).
   tracker->MarkDeleted(entity);
   ASSERT_THAT(entity->bookmark_node(), IsNull());
-  ASSERT_TRUE(entity->metadata()->is_deleted());
+  ASSERT_TRUE(entity->metadata().is_deleted());
   ASSERT_THAT(tracker->TrackedUncommittedTombstonesCount(), Eq(1U));
   ASSERT_THAT(tracker->GetEntityForBookmarkNode(&node), IsNull());
   ASSERT_THAT(
@@ -535,7 +538,7 @@ TEST(SyncedBookmarkTrackerTest, ShouldUndeleteTombstone) {
   tracker->UndeleteTombstoneForBookmarkNode(entity, &node);
 
   EXPECT_THAT(entity->bookmark_node(), NotNull());
-  EXPECT_FALSE(entity->metadata()->is_deleted());
+  EXPECT_FALSE(entity->metadata().is_deleted());
   EXPECT_THAT(tracker->TrackedUncommittedTombstonesCount(), Eq(0U));
   ASSERT_THAT(tracker->GetEntityForBookmarkNode(&node), Eq(entity));
   EXPECT_THAT(
@@ -601,11 +604,11 @@ TEST(SyncedBookmarkTrackerTest,
 
   ASSERT_THAT(entities_with_local_change.size(), Eq(4U));
   // Verify updates are in parent before child order node0 --> node1 --> node2.
-  EXPECT_THAT(entities_with_local_change[0]->metadata()->server_id(), Eq(kId0));
-  EXPECT_THAT(entities_with_local_change[1]->metadata()->server_id(), Eq(kId1));
-  EXPECT_THAT(entities_with_local_change[2]->metadata()->server_id(), Eq(kId2));
+  EXPECT_THAT(entities_with_local_change[0]->metadata().server_id(), Eq(kId0));
+  EXPECT_THAT(entities_with_local_change[1]->metadata().server_id(), Eq(kId1));
+  EXPECT_THAT(entities_with_local_change[2]->metadata().server_id(), Eq(kId2));
   // Verify that deletion is the last entry.
-  EXPECT_THAT(entities_with_local_change[3]->metadata()->server_id(), Eq(kId3));
+  EXPECT_THAT(entities_with_local_change[3]->metadata().server_id(), Eq(kId3));
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldNotInvalidateMetadata) {
@@ -636,7 +639,8 @@ TEST(SyncedBookmarkTrackerTest, ShouldNotInvalidateMetadata) {
 
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::NO_CORRUPTION, /*expected_count=*/1);
+      /*sample=*/ExpectedCorruptionReason::NO_CORRUPTION,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldNotRequireClientTagsForPermanentNodes) {
@@ -686,7 +690,8 @@ TEST(SyncedBookmarkTrackerTest, ShouldInvalidateMetadataIfMissingMobileFolder) {
 
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::UNTRACKED_BOOKMARK, /*count=*/1);
+      /*sample=*/ExpectedCorruptionReason::UNTRACKED_BOOKMARK,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldInvalidateMetadataIfMissingServerId) {
@@ -709,7 +714,8 @@ TEST(SyncedBookmarkTrackerTest, ShouldInvalidateMetadataIfMissingServerId) {
 
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::MISSING_SERVER_ID, /*count=*/1);
+      /*sample=*/ExpectedCorruptionReason::MISSING_SERVER_ID,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -736,7 +742,8 @@ TEST(SyncedBookmarkTrackerTest,
 
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::MISSING_BOOKMARK_ID, /*count=*/1);
+      /*sample=*/ExpectedCorruptionReason::MISSING_BOOKMARK_ID,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -763,7 +770,7 @@ TEST(SyncedBookmarkTrackerTest,
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
       /*sample=*/ExpectedCorruptionReason::BOOKMARK_ID_IN_TOMBSTONE,
-      /*count=*/1);
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -791,7 +798,7 @@ TEST(SyncedBookmarkTrackerTest,
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
       /*sample=*/ExpectedCorruptionReason::UNKNOWN_BOOKMARK_ID,
-      /*count=*/1);
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldInvalidateMetadataIfGuidMismatch) {
@@ -819,7 +826,8 @@ TEST(SyncedBookmarkTrackerTest, ShouldInvalidateMetadataIfGuidMismatch) {
 
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::BOOKMARK_GUID_MISMATCH, /*count=*/1);
+      /*sample=*/ExpectedCorruptionReason::BOOKMARK_GUID_MISMATCH,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -861,7 +869,7 @@ TEST(SyncedBookmarkTrackerTest,
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
       /*sample=*/ExpectedCorruptionReason::DUPLICATED_CLIENT_TAG_HASH,
-      /*count=*/1);
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -889,7 +897,7 @@ TEST(SyncedBookmarkTrackerTest,
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
       /*sample=*/ExpectedCorruptionReason::MISSING_CLIENT_TAG_HASH,
-      /*count=*/1);
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -920,7 +928,36 @@ TEST(SyncedBookmarkTrackerTest,
               IsNull());
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::TRACKED_MANAGED_NODE, /*count=*/1);
+      /*sample=*/ExpectedCorruptionReason::TRACKED_MANAGED_NODE,
+      /*expected_bucket_count=*/1);
+}
+
+TEST(SyncedBookmarkTrackerTest, ShouldInvalidateMetadataIfMissingFaviconHash) {
+  std::unique_ptr<bookmarks::BookmarkModel> model =
+      bookmarks::TestBookmarkClient::CreateModel();
+
+  const bookmarks::BookmarkNode* bookmark_bar_node = model->bookmark_bar_node();
+  const bookmarks::BookmarkNode* node0 =
+      model->AddURL(/*parent=*/bookmark_bar_node, /*index=*/0, u"Title",
+                    GURL("http://www.url.com"));
+
+  sync_pb::BookmarkModelMetadata model_metadata =
+      CreateMetadataForPermanentNodes(model.get());
+  sync_pb::BookmarkMetadata* node0_metadata =
+      model_metadata.add_bookmarks_metadata();
+  *node0_metadata = CreateNodeMetadata(node0, /*server_id=*/"id0");
+
+  node0_metadata->mutable_metadata()->clear_bookmark_favicon_hash();
+
+  base::HistogramTester histogram_tester;
+  EXPECT_THAT(SyncedBookmarkTracker::CreateFromBookmarkModelAndMetadata(
+                  model.get(), std::move(model_metadata)),
+              IsNull());
+
+  histogram_tester.ExpectUniqueSample(
+      "Sync.BookmarksModelMetadataCorruptionReason",
+      /*sample=*/ExpectedCorruptionReason::MISSING_FAVICON_HASH,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -946,7 +983,8 @@ TEST(SyncedBookmarkTrackerTest,
               NotNull());
   histogram_tester.ExpectUniqueSample(
       "Sync.BookmarksModelMetadataCorruptionReason",
-      /*sample=*/ExpectedCorruptionReason::NO_CORRUPTION, /*count=*/1);
+      /*sample=*/ExpectedCorruptionReason::NO_CORRUPTION,
+      /*expected_bucket_count=*/1);
 }
 
 TEST(SyncedBookmarkTrackerTest,
@@ -969,7 +1007,7 @@ TEST(SyncedBookmarkTrackerTest,
   const SyncedBookmarkTrackerEntity* entity =
       tracker->Add(&node, kSyncId, kServerVersion, kCreationTime, specifics);
 
-  EXPECT_TRUE(entity->metadata()->has_bookmark_favicon_hash());
+  EXPECT_TRUE(entity->metadata().has_bookmark_favicon_hash());
   EXPECT_TRUE(entity->MatchesFaviconHash(kFaviconPngBytes));
   EXPECT_FALSE(entity->MatchesFaviconHash("otherhash"));
 }
@@ -1004,7 +1042,6 @@ TEST(SyncedBookmarkTrackerTest, ShouldPopulateFaviconHashUponUpdate) {
   const SyncedBookmarkTrackerEntity* entity =
       tracker->GetEntityForSyncId(kSyncId);
   ASSERT_THAT(entity, NotNull());
-  ASSERT_FALSE(entity->metadata()->has_bookmark_favicon_hash());
   ASSERT_FALSE(entity->MatchesFaviconHash(kFaviconPngBytes));
 
   sync_pb::EntitySpecifics specifics = GenerateSpecifics(kTitle, kUrl.spec());
@@ -1012,48 +1049,9 @@ TEST(SyncedBookmarkTrackerTest, ShouldPopulateFaviconHashUponUpdate) {
 
   tracker->Update(entity, kServerVersion, kModificationTime, specifics);
 
-  EXPECT_TRUE(entity->metadata()->has_bookmark_favicon_hash());
+  EXPECT_TRUE(entity->metadata().has_bookmark_favicon_hash());
   EXPECT_TRUE(entity->MatchesFaviconHash(kFaviconPngBytes));
   EXPECT_FALSE(entity->MatchesFaviconHash("otherhash"));
-}
-
-TEST(SyncedBookmarkTrackerTest, ShouldPopulateFaviconHashExplicitly) {
-  const std::string kSyncId = "SYNC_ID";
-  const std::string kFaviconPngBytes = "fakefaviconbytes";
-
-  std::unique_ptr<bookmarks::BookmarkModel> model =
-      bookmarks::TestBookmarkClient::CreateModel();
-
-  const bookmarks::BookmarkNode* bookmark_bar_node = model->bookmark_bar_node();
-  const bookmarks::BookmarkNode* node =
-      model->AddURL(/*parent=*/bookmark_bar_node, /*index=*/0, u"Title",
-                    GURL("http://www.url.com"));
-
-  sync_pb::BookmarkModelMetadata model_metadata =
-      CreateMetadataForPermanentNodes(model.get());
-
-  // Add entry for the URL node.
-  *model_metadata.add_bookmarks_metadata() = CreateNodeMetadata(node, kSyncId);
-
-  std::unique_ptr<SyncedBookmarkTracker> tracker =
-      SyncedBookmarkTracker::CreateFromBookmarkModelAndMetadata(
-          model.get(), std::move(model_metadata));
-  ASSERT_THAT(tracker, NotNull());
-
-  const SyncedBookmarkTrackerEntity* entity =
-      tracker->GetEntityForSyncId(kSyncId);
-  ASSERT_THAT(entity, NotNull());
-  ASSERT_FALSE(entity->metadata()->has_bookmark_favicon_hash());
-  ASSERT_FALSE(entity->MatchesFaviconHash(kFaviconPngBytes));
-
-  tracker->PopulateFaviconHashIfUnset(entity, kFaviconPngBytes);
-  EXPECT_TRUE(entity->metadata()->has_bookmark_favicon_hash());
-  EXPECT_TRUE(entity->MatchesFaviconHash(kFaviconPngBytes));
-  EXPECT_FALSE(entity->MatchesFaviconHash("otherhash"));
-
-  // Further calls should be ignored.
-  tracker->PopulateFaviconHashIfUnset(entity, "otherpngbytes");
-  EXPECT_TRUE(entity->MatchesFaviconHash(kFaviconPngBytes));
 }
 
 TEST(SyncedBookmarkTrackerTest, ShouldNotReuploadEntitiesAfterMergeAndRestart) {

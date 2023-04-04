@@ -8,7 +8,7 @@
   #infoContainer {
     bottom: 0;
     box-sizing: border-box;
-    margin-bottom: 58px;
+    margin-bottom: min(58px, calc(5px + 0.5 * (100vh - var(--view-min-size))));
     position: absolute;
     text-align: center;
     width: 100%;
@@ -84,7 +84,7 @@
             --theme-text-color:[[profileThemeInfo.themeFrameTextColor]];">
   <cr-icon-button id="backButton" iron-icon="cr:arrow-back"
       on-click="onBackClick_" aria-label$="[[getBackButtonAriaLabel_()]]"
-      disabled="[[loadSigninInProgess_]]">
+      disabled="[[profileCreationInProgress]]">
   </cr-icon-button>
   <div id="avatarContainer">
     <img class="avatar" alt="" src="[[profileThemeInfo.themeGenericAvatar]]">
@@ -96,12 +96,11 @@
 </div>
 <div id="actionContainer">
   <cr-button id="signInButton" class="action-button" on-click="onSignInClick_"
-      disabled="[[loadSigninInProgess_]]">
+      disabled="[[profileCreationInProgress]]">
     $i18n{signInButtonLabel}
   </cr-button>
   <cr-button id="notNowButton" on-click="onNotNowClick_"
-      hidden="[[!localProfileCreationFlowSupported_]]"
-      disabled="[[loadSigninInProgess_]]">
+      disabled="[[profileCreationInProgress]]">
     $i18n{notNowButtonLabel}
   </cr-button>
 </div>

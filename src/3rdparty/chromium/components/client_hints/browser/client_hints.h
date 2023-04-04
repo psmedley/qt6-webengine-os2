@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/client_hints_controller_delegate.h"
+#include "ui/gfx/geometry/size_f.h"
 
 class GURL;
 class HostContentSettingsMap;
@@ -45,13 +46,15 @@ class ClientHints : public KeyedService,
       const url::Origin& origin,
       blink::EnabledClientHints* client_hints) override;
 
-  bool IsJavaScriptAllowed(const GURL& url) override;
+  bool IsJavaScriptAllowed(const GURL& url,
+                           content::RenderFrameHost* parent_rfh) override;
 
   bool AreThirdPartyCookiesBlocked(const GURL& url) override;
 
   blink::UserAgentMetadata GetUserAgentMetadata() override;
 
   void PersistClientHints(const url::Origin& primary_origin,
+                          content::RenderFrameHost* parent_rfh,
                           const std::vector<network::mojom::WebClientHintsType>&
                               client_hints) override;
 
@@ -60,6 +63,10 @@ class ClientHints : public KeyedService,
 
   void ClearAdditionalClientHints() override;
 
+  void SetMostRecentMainFrameViewportSize(
+      const gfx::Size& viewport_size) override;
+  gfx::Size GetMostRecentMainFrameViewportSize() override;
+
  private:
   raw_ptr<content::BrowserContext> context_ = nullptr;
   raw_ptr<network::NetworkQualityTracker> network_quality_tracker_ = nullptr;
@@ -67,6 +74,11 @@ class ClientHints : public KeyedService,
   scoped_refptr<content_settings::CookieSettings> cookie_settings_;
   std::vector<network::mojom::WebClientHintsType> additional_hints_;
   raw_ptr<PrefService> pref_service_;
+
+  // This stores the viewport size of the most recent visible main frame tree
+  // node. This value is only used when the viewport size cannot be directly
+  // queried such as for prefetch requests and for tab restores.
+  gfx::Size viewport_size_;
 };
 
 }  // namespace client_hints

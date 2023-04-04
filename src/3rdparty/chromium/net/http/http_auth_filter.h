@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ namespace net {
 // allowed for a particular peer.
 class NET_EXPORT_PRIVATE HttpAuthFilter {
  public:
-  virtual ~HttpAuthFilter() {}
+  virtual ~HttpAuthFilter() = default;
 
   // Checks if (`scheme_host_port`, `target`) is supported by the authentication
   // scheme. Only the host of `scheme_host_port` is examined.

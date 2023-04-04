@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ bool IsOfferValid(AutofillOfferData* offer) {
   if (!offer)
     return false;
 
-  if (offer->merchant_origins.empty())
+  if (offer->GetMerchantOrigins().empty())
     return false;
 
   if (offer->IsPromoCodeOffer() &&
@@ -43,7 +43,7 @@ OfferNotificationHandler::~OfferNotificationHandler() = default;
 
 void OfferNotificationHandler::UpdateOfferNotificationVisibility(
     AutofillClient* client) {
-  GURL url = client->GetLastCommittedURL();
+  GURL url = client->GetLastCommittedPrimaryMainFrameURL();
   if (!offer_manager_->IsUrlEligible(url)) {
     client->DismissOfferNotification();
     return;
@@ -63,8 +63,8 @@ void OfferNotificationHandler::UpdateOfferNotificationVisibility(
   }
 
   client->UpdateOfferNotification(
-      offer, shown_notification_ids_.contains(offer->offer_id));
-  shown_notification_ids_.insert(offer->offer_id);
+      offer, shown_notification_ids_.contains(offer->GetOfferId()));
+  shown_notification_ids_.insert(offer->GetOfferId());
 }
 
 void OfferNotificationHandler::ClearShownNotificationIdForTesting() {

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,8 @@ class CORE_EXPORT NGGridTrackList {
   // if the repeater is auto.
   wtf_size_t RepeatCount(const wtf_size_t index,
                          const wtf_size_t auto_value) const;
+  // Returns the position of the first track size in the repeater at |index|.
+  wtf_size_t RepeatIndex(const wtf_size_t index) const;
   // Returns the number of tracks in the repeater at |index|.
   wtf_size_t RepeatSize(const wtf_size_t index) const;
   // Returns the repeat type of the repeater at |index|.
@@ -115,6 +117,8 @@ class GridTrackList {
 
   NGGridTrackList& NGTrackList();
   const NGGridTrackList& NGTrackList() const;
+
+  void SetNGGridTrackList(const NGGridTrackList& other);
 
   void operator=(const GridTrackList& other);
   bool operator==(const GridTrackList& other) const;

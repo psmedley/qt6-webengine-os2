@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -291,7 +291,7 @@ void NetErrorAutoReloader::ReloadMainFrame() {
 
   ++num_reloads_for_current_error_;
   is_auto_reload_in_progress_ = true;
-  web_contents()->GetMainFrame()->Reload();
+  web_contents()->GetPrimaryMainFrame()->Reload();
 }
 
 std::unique_ptr<content::NavigationThrottle>

@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,6 +11,7 @@ source_set("safety_check_ui") {
     "safety_check_consumer.h",
     "safety_check_navigation_commands.h",
     "safety_check_service_delegate.h",
+    "safety_check_table_view_controller.h",
   ]
   public_deps = [
     "//components/strings",
@@ -31,7 +32,12 @@ source_set("safety_check_ui") {
 swift_source_set("safety_check_ui_swift") {
   bridge_header = "safety_check_bridge.h"
   sources = [ "safety_check_table_view_controller.swift" ]
-  deps = [ ":safety_check_ui" ]
+  deps = [
+    ":safety_check_ui",
+    "//ios/chrome/browser/ui/settings:settings_root",
+    "//ios/chrome/browser/ui/settings/cells",
+    "//ui/base",
+  ]
 }
 
 source_set("safety_check") {
@@ -67,6 +73,8 @@ source_set("safety_check") {
     "//ios/chrome/browser/ui:feature_flags",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/coordinators:chrome_coordinators",
+    "//ios/chrome/browser/ui/icons:settings_icons",
+    "//ios/chrome/browser/ui/icons:symbols",
     "//ios/chrome/browser/ui/resources:legacy_password_key",
     "//ios/chrome/browser/ui/resources:password_key",
     "//ios/chrome/browser/ui/settings:settings_root",
@@ -75,6 +83,7 @@ source_set("safety_check") {
     "//ios/chrome/browser/ui/settings/elements:enterprise_info_popover_view_controller",
     "//ios/chrome/browser/ui/settings/google_services",
     "//ios/chrome/browser/ui/settings/password",
+    "//ios/chrome/browser/ui/settings/privacy:privacy_ui",
     "//ios/chrome/browser/ui/settings/utils",
     "//ios/chrome/browser/ui/table_view",
     "//ios/chrome/browser/ui/table_view:utils",
@@ -82,6 +91,7 @@ source_set("safety_check") {
     "//ios/chrome/browser/upgrade",
     "//ios/chrome/browser/upgrade:public",
     "//ios/chrome/common",
+    "//ios/chrome/common:string_util",
     "//ios/chrome/common/ui/colors",
     "//ios/chrome/common/ui/elements:popover_label_view_controller",
     "//ios/chrome/common/ui/table_view:cells_constants",
@@ -122,7 +132,7 @@ source_set("unit_tests") {
     "//ios/chrome/browser/ui/table_view/cells",
     "//ios/chrome/browser/upgrade",
     "//ios/chrome/browser/upgrade:public",
-    "//ios/chrome/common",
+    "//ios/chrome/common:string_util",
     "//ios/chrome/test:test_support",
     "//ios/web/public/test",
     "//testing/gtest",

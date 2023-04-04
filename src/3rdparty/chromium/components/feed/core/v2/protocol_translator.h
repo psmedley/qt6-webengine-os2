@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,8 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace feed {
+
+constexpr const char kDiscoverFeedExperiments[] = "DiscoverFeedExperiments";
 
 // Data for updating StreamModel. This can be sourced from the network or
 // persistent storage.
@@ -77,10 +79,13 @@ struct RefreshResponseData {
   // List of experiments from the server, if provided.
   absl::optional<Experiments> experiments;
 
-  // Server-reported network timestamps (nanoseconds). They can be compared to
+  // Server-reported network timestamps. They can be compared to
   // each other but not to client timestamps.
-  int64_t server_request_received_timestamp_ns;
-  int64_t server_response_sent_timestamp_ns;
+  base::Time server_request_received_timestamp;
+  base::Time server_response_sent_timestamp;
+
+  // The client-side timestamp that the response is fetched.
+  base::Time last_fetch_timestamp;
 
   bool web_and_app_activity_enabled = false;
   bool discover_personalization_enabled = false;

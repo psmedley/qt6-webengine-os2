@@ -7,7 +7,6 @@
 
 #include "include/core/SkMallocPixelRef.h"
 #include "include/core/SkPaint.h"
-#include "include/core/SkPicture.h"
 #include "include/core/SkScalar.h"
 #include "src/core/SkArenaAlloc.h"
 #include "src/core/SkColorSpacePriv.h"
@@ -16,13 +15,9 @@
 #include "src/core/SkRasterPipeline.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkTLazy.h"
-#include "src/core/SkVM.h"
 #include "src/core/SkWriteBuffer.h"
 #include "src/shaders/SkBitmapProcShader.h"
-#include "src/shaders/SkColorShader.h"
-#include "src/shaders/SkEmptyShader.h"
 #include "src/shaders/SkImageShader.h"
-#include "src/shaders/SkPictureShader.h"
 #include "src/shaders/SkShaderBase.h"
 #include "src/shaders/SkTransformShader.h"
 
@@ -32,40 +27,19 @@
 
 #ifdef SK_ENABLE_SKSL
 #include "src/core/SkKeyHelpers.h"
+#include "src/core/SkPaintParamsKey.h"
 #endif
 
-SkShaderBase::SkShaderBase(const SkMatrix* localMatrix)
-    : fLocalMatrix(localMatrix ? *localMatrix : SkMatrix::I()) {
-    // Pre-cache so future calls to fLocalMatrix.getType() are threadsafe.
-    (void)fLocalMatrix.getType();
-}
+SkShaderBase::SkShaderBase() = default;
 
-SkShaderBase::~SkShaderBase() {}
+SkShaderBase::~SkShaderBase() = default;
 
-void SkShaderBase::flatten(SkWriteBuffer& buffer) const {
-    this->INHERITED::flatten(buffer);
-    bool hasLocalM = !fLocalMatrix.isIdentity();
-    buffer.writeBool(hasLocalM);
-    if (hasLocalM) {
-        buffer.writeMatrix(fLocalMatrix);
-    }
-}
-
-SkTCopyOnFirstWrite<SkMatrix>
-SkShaderBase::totalLocalMatrix(const SkMatrix* preLocalMatrix) const {
-    SkTCopyOnFirstWrite<SkMatrix> m(fLocalMatrix);
-
-    if (preLocalMatrix) {
-        m.writable()->preConcat(*preLocalMatrix);
-    }
-
-    return m;
-}
+void SkShaderBase::flatten(SkWriteBuffer& buffer) const { this->INHERITED::flatten(buffer); }
 
 bool SkShaderBase::computeTotalInverse(const SkMatrix& ctm,
-                                       const SkMatrix* outerLocalMatrix,
+                                       const SkMatrix* localMatrix,
                                        SkMatrix* totalInverse) const {
-    return SkMatrix::Concat(ctm, *this->totalLocalMatrix(outerLocalMatrix)).invert(totalInverse);
+    return (localMatrix ? SkMatrix::Concat(ctm, *localMatrix) : ctm).invert(totalInverse);
 }
 
 bool SkShaderBase::asLuminanceColor(SkColor* colorPtr) const {
@@ -83,9 +57,7 @@ bool SkShaderBase::asLuminanceColor(SkColor* colorPtr) const {
 SkShaderBase::Context* SkShaderBase::makeContext(const ContextRec& rec, SkArenaAlloc* alloc) const {
 #ifdef SK_ENABLE_LEGACY_SHADERCONTEXT
     // We always fall back to raster pipeline when perspective is present.
-    if (rec.fMatrix->hasPerspective() ||
-        fLocalMatrix.hasPerspective() ||
-        (rec.fLocalMatrix && rec.fLocalMatrix->hasPerspective()) ||
+    if (rec.fMatrix->hasPerspective() || (rec.fLocalMatrix && rec.fLocalMatrix->hasPerspective()) ||
         !this->computeTotalInverse(*rec.fMatrix, rec.fLocalMatrix, nullptr)) {
         return nullptr;
     }
@@ -102,7 +74,6 @@ SkShaderBase::Context::Context(const SkShaderBase& shader, const ContextRec& rec
     // We should never use a context with perspective.
     SkASSERT(!rec.fMatrix->hasPerspective());
     SkASSERT(!rec.fLocalMatrix || !rec.fLocalMatrix->hasPerspective());
-    SkASSERT(!shader.getLocalMatrix().hasPerspective());
 
     // Because the context parameters must be valid at this point, we know that the matrix is
     // invertible.
@@ -127,7 +98,7 @@ SkImage* SkShader::isAImage(SkMatrix* localMatrix, SkTileMode xy[2]) const {
 }
 
 SkShader::GradientType SkShader::asAGradient(GradientInfo* info) const {
-    return kNone_GradientType;
+    return static_cast<GradientType>(as_SB(this)->asGradient(info));
 }
 
 #if SK_SUPPORT_GPU
@@ -157,12 +128,10 @@ SkUpdatableShader* SkShaderBase::onUpdatableShader(SkArenaAlloc* alloc) const {
 void SkShaderBase::addToKey(const SkKeyContext& keyContext,
                             SkPaintParamsKeyBuilder* builder,
                             SkPipelineDataGatherer* gatherer) const {
-    SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, {1, 0, 0, 1});
+    SolidColorShaderBlock::BeginBlock(keyContext, builder, gatherer, {1, 0, 0, 1});
+    builder->endBlock();
 }
 #endif
-
-sk_sp<SkShader> SkShaders::Empty() { return sk_make_sp<SkEmptyShader>(); }
-sk_sp<SkShader> SkShaders::Color(SkColor color) { return sk_make_sp<SkColorShader>(color); }
 
 sk_sp<SkShader> SkBitmap::makeShader(SkTileMode tmx, SkTileMode tmy,
                                      const SkSamplingOptions& sampling,
@@ -188,7 +157,7 @@ bool SkShaderBase::onAppendStages(const SkStageRec& rec) const {
     }
 
     ContextRec cr(*opaquePaint, rec.fMatrixProvider.localToDevice(), rec.fLocalM, rec.fDstColorType,
-                  sk_srgb_singleton());
+                  sk_srgb_singleton(), rec.fSurfaceProps);
 
     struct CallbackCtx : SkRasterPipeline_CallbackCtx {
         sk_sp<const SkShader> shader;
@@ -201,7 +170,7 @@ bool SkShaderBase::onAppendStages(const SkStageRec& rec) const {
         auto c = (CallbackCtx*)self;
         int x = (int)c->rgba[0],
             y = (int)c->rgba[1];
-        SkPMColor tmp[SkRasterPipeline_kMaxStride];
+        SkPMColor tmp[SkRasterPipeline_kMaxStride_highp];
         c->ctx->shadeSpan(x,y, tmp, active_pixels);
 
         for (int i = 0; i < active_pixels; i++) {
@@ -286,16 +255,4 @@ skvm::Coord SkShaderBase::ApplyMatrix(skvm::Builder* p, const SkMatrix& m,
         }
     }
     return {x,y};
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-skvm::Color SkEmptyShader::onProgram(skvm::Builder*, skvm::Coord, skvm::Coord, skvm::Color,
-                                     const SkMatrixProvider&, const SkMatrix*, const SkColorInfo&,
-                                     skvm::Uniforms*, SkArenaAlloc*) const {
-    return {};  // signal failure
-}
-
-sk_sp<SkFlattenable> SkEmptyShader::CreateProc(SkReadBuffer&) {
-    return SkShaders::Empty();
 }

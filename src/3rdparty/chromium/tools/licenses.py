@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -339,6 +339,13 @@ SPECIAL_CASES = {
         "License": "Apache 2.0",
         "License File":
         "/third_party/swiftshader/third_party/SPIRV-Tools/LICENSE",
+    },
+    os.path.join('third_party', 'swiftshader', 'third_party', 'SPIRV-Headers'): {
+        "Name": "SPIRV-Headers",
+        "URL": "https://github.com/KhronosGroup/SPIRV-Headers",
+        "License": "Apache 2.0",
+        "License File":
+        "/third_party/swiftshader/third_party/SPIRV-Headers/LICENSE",
     },
 }
 

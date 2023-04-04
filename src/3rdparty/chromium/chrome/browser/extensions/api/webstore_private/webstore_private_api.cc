@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,7 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/app_list/app_list_util.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/extensions/extensions_dialogs.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -91,7 +91,6 @@ namespace IsPendingCustodianApproval =
     api::webstore_private::IsPendingCustodianApproval;
 namespace IsInIncognitoMode = api::webstore_private::IsInIncognitoMode;
 namespace LaunchEphemeralApp = api::webstore_private::LaunchEphemeralApp;
-namespace RequestExtension = api::webstore_private::RequestExtension;
 namespace SetStoreLogin = api::webstore_private::SetStoreLogin;
 
 namespace {
@@ -208,6 +207,8 @@ const char kIncognitoError[] =
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 const char kSecondaryProfileError[] =
     "Apps may only be installed using the main profile";
+const char kLegacyPackagedAppError[] =
+    "Legacy packaged apps are no longer supported";
 #endif
 const char kEphemeralAppLaunchingNotSupported[] =
     "Ephemeral launching of apps is no longer supported.";
@@ -243,9 +244,9 @@ void ShowBlockedByParentDialog(const Extension* extension,
     return;
   }
 
-  chrome::ShowExtensionInstallBlockedByParentDialog(
-      chrome::ExtensionInstalledBlockedByParentDialogAction::kAdd, extension,
-      contents, std::move(done_callback));
+  extensions::ShowExtensionInstallBlockedByParentDialog(
+      extensions::ExtensionInstalledBlockedByParentDialogAction::kAdd,
+      extension, contents, std::move(done_callback));
 }
 
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -340,9 +341,9 @@ ExtensionInstallStatus AddExtensionToPendingList(
     return status;
   }
 
-  DictionaryPrefUpdate pending_requests_update(
+  ScopedDictPrefUpdate pending_requests_update(
       profile->GetPrefs(), prefs::kCloudExtensionRequestIds);
-  DCHECK(!pending_requests_update->FindKey(id));
+  DCHECK(!pending_requests_update->Find(id));
   base::Value request_data(base::Value::Type::DICTIONARY);
   request_data.SetKey(extension_misc::kExtensionRequestTimestamp,
                       ::base::TimeToValue(base::Time::Now()));
@@ -350,7 +351,7 @@ ExtensionInstallStatus AddExtensionToPendingList(
     request_data.SetKey(extension_misc::kExtensionWorkflowJustification,
                         base::Value(justification));
   }
-  pending_requests_update->SetKey(id, std::move(request_data));
+  pending_requests_update->Set(id, std::move(request_data));
   // Query the new extension install status again. It should be changed from
   // |kCanRequest| to |kRequestPending| if the id has been added into pending
   // list successfully. Otherwise, it shouldn't be changed.
@@ -386,7 +387,7 @@ enum class WebStoreInstallAllowlistParameter {
 
 // Track the value of the allowlist parameter received from Chrome Web Store.
 void ReportWebStoreInstallEsbAllowlistParameter(
-    const bool* allowlist_parameter) {
+    const absl::optional<bool>& allowlist_parameter) {
   WebStoreInstallAllowlistParameter value;
 
   if (!allowlist_parameter)
@@ -588,7 +589,7 @@ void WebstorePrivateBeginInstallWithManifest3Function::OnWebstoreParseSuccess(
                 : ExtensionInstallPrompt::EXTENSION_PENDING_REQUEST_PROMPT),
         ExtensionInstallPrompt::GetDefaultShowDialogCallback());
   } else {
-    ReportWebStoreInstallEsbAllowlistParameter(details().esb_allowlist.get());
+    ReportWebStoreInstallEsbAllowlistParameter(details().esb_allowlist);
 
     if (ShouldShowFrictionDialog(profile_)) {
       ShowInstallFrictionDialog(web_contents);
@@ -871,7 +872,7 @@ bool WebstorePrivateBeginInstallWithManifest3Function::ShouldShowFrictionDialog(
 void WebstorePrivateBeginInstallWithManifest3Function::
     ShowInstallFrictionDialog(content::WebContents* contents) {
   friction_dialog_shown_ = true;
-  chrome::ShowExtensionInstallFrictionDialog(
+  ShowExtensionInstallFrictionDialog(
       contents,
       base::BindOnce(&WebstorePrivateBeginInstallWithManifest3Function::
                          OnFrictionPromptDone,
@@ -933,9 +934,9 @@ void WebstorePrivateBeginInstallWithManifest3Function::
     return;
   }
 
-  chrome::ShowExtensionInstallBlockedDialog(
-      extension->id(), extension->name(), blocked_by_policy_error_message_,
-      image, contents, std::move(done_callback));
+  ShowExtensionInstallBlockedDialog(extension->id(), extension->name(),
+                                    blocked_by_policy_error_message_, image,
+                                    contents, std::move(done_callback));
 }
 
 WebstorePrivateCompleteInstallFunction::
@@ -953,11 +954,6 @@ WebstorePrivateCompleteInstallFunction::Run() {
   if (profile->IsGuestSession() || profile->IsOffTheRecord()) {
     return RespondNow(Error(kIncognitoError));
   }
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (!profile->IsMainProfile()) {
-    return RespondNow(Error(kSecondaryProfileError));
-  }
-#endif
 
   if (!crx_file::id_util::IdIsValid(params->expected_id))
     return RespondNow(Error(kWebstoreInvalidIdError));
@@ -968,6 +964,23 @@ WebstorePrivateCompleteInstallFunction::Run() {
     return RespondNow(Error(kNoPreviousBeginInstallWithManifestError,
                             params->expected_id));
   }
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // TODO(https://crbug.com/1365778): Centralize logic for disallowing
+  // installation with other installation paths.
+  if (!profile->IsMainProfile()) {
+    bool allowed = approval_->dummy_extension &&
+                   (approval_->dummy_extension->is_extension() ||
+                    approval_->dummy_extension->is_theme());
+    if (!allowed) {
+      return RespondNow(Error(kSecondaryProfileError));
+    }
+  }
+  if (approval_->dummy_extension &&
+      approval_->dummy_extension->is_legacy_packaged_app()) {
+    return RespondNow(Error(kLegacyPackagedAppError));
+  }
+#endif
 
   content::WebContents* web_contents = GetSenderWebContents();
   if (!web_contents) {
@@ -1294,7 +1307,7 @@ WebstorePrivateGetExtensionStatusFunction::BuildResponseWithoutManifest(
 void WebstorePrivateGetExtensionStatusFunction::OnManifestParsed(
     const ExtensionId& extension_id,
     data_decoder::DataDecoder::ValueOrError result) {
-  if (!result.value || !result.value->is_dict()) {
+  if (!result.has_value() || !result->is_dict()) {
     Respond(Error(kWebstoreInvalidManifestError));
     return;
   }
@@ -1307,7 +1320,7 @@ void WebstorePrivateGetExtensionStatusFunction::OnManifestParsed(
   std::string error;
   auto dummy_extension =
       Extension::Create(base::FilePath(), mojom::ManifestLocation::kInternal,
-                        base::Value::AsDictionaryValue(*result.value),
+                        base::Value::AsDictionaryValue(*result),
                         Extension::FROM_WEBSTORE, extension_id, &error);
 
   if (!dummy_extension) {
@@ -1321,32 +1334,6 @@ void WebstorePrivateGetExtensionStatusFunction::OnManifestParsed(
   api::webstore_private::ExtensionInstallStatus api_status =
       ConvertExtensionInstallStatusForAPI(status);
   Respond(ArgumentList(GetExtensionStatus::Results::Create(api_status)));
-}
-
-WebstorePrivateRequestExtensionFunction::
-    WebstorePrivateRequestExtensionFunction() = default;
-WebstorePrivateRequestExtensionFunction::
-    ~WebstorePrivateRequestExtensionFunction() = default;
-
-ExtensionFunction::ResponseAction
-WebstorePrivateRequestExtensionFunction::Run() {
-  std::unique_ptr<RequestExtension::Params> params(
-      RequestExtension::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params);
-
-  const ExtensionId& extension_id = params->id;
-
-  if (!crx_file::id_util::IdIsValid(extension_id))
-    return RespondNow(Error(kWebstoreInvalidIdError));
-
-  Profile* profile = Profile::FromBrowserContext(browser_context());
-  ExtensionInstallStatus status =
-      AddExtensionToPendingList(extension_id, profile, std::string());
-
-  api::webstore_private::ExtensionInstallStatus api_status =
-      ConvertExtensionInstallStatusForAPI(status);
-  return RespondNow(
-      ArgumentList(RequestExtension::Results::Create(api_status)));
 }
 
 }  // namespace extensions

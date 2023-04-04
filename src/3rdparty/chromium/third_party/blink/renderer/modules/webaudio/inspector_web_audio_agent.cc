@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@ String StripNodeSuffix(const String& nodeName) {
 }
 
 // Strips out the prefix and returns the actual parameter name. If the name
-// does not match |NodeName.ParamName| pattern, returns "Unknown" instead.
+// does not match `NodeName.ParamName` pattern, returns "Unknown" instead.
 String StripParamPrefix(const String& paramName) {
   Vector<String> name_tokens;
   paramName.Split('.', name_tokens);

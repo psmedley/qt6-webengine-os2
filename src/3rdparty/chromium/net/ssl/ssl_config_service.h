@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,10 @@ struct NET_EXPORT SSLContextConfig {
   // If false, disables post-quantum key agreement in TLS connections.
   bool cecpq2_enabled = true;
 
+  // If false, disables TLS Encrypted ClientHello (ECH). If true, the feature
+  // may be enabled or disabled, depending on feature flags.
+  bool ech_enabled = true;
+
   // ADDING MORE HERE? Don't forget to update |SSLContextConfigsAreEqual|.
 };
 
@@ -58,7 +62,7 @@ class NET_EXPORT SSLConfigService {
     virtual void OnSSLContextConfigChanged() = 0;
 
    protected:
-    virtual ~Observer() {}
+    virtual ~Observer() = default;
   };
 
   SSLConfigService();

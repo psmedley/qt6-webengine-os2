@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "sandbox/policy/sandbox.h"
 
 #include "base/command_line.h"
+#include "base/metrics/histogram_functions.h"
 #include "build/build_config.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "sandbox/policy/switches.h"
@@ -58,12 +59,14 @@ bool Sandbox::Initialize(sandbox::mojom::Sandbox sandbox_type,
       // will be broken. This has to run before threads and windows are created.
 #ifdef TOOLKIT_QT
       // Disable alternate window station due to QTBUG-83300
-      ResultCode result =
-          broker_services->CreatePolicy()->CreateAlternateDesktop(false);
+      ResultCode result = broker_services->CreateAlternateDesktop(
+          Desktop::kAlternateDesktop);
 #else
-      ResultCode result =
-          broker_services->CreatePolicy()->CreateAlternateDesktop(true);
+      ResultCode result = broker_services->CreateAlternateDesktop(
+          Desktop::kAlternateWinstation);
 #endif
+      base::UmaHistogramSparse(
+          "Process.Sandbox.CreateAlternateDesktopResultCode", result);
       CHECK(SBOX_ERROR_FAILED_TO_SWITCH_BACK_WINSTATION != result);
     }
     return true;

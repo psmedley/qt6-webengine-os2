@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <ostream>
 
+#include "base/check_op.h"
 #include "components/query_tiles/internal/tile_group.h"
 #include "components/query_tiles/tile.h"
 

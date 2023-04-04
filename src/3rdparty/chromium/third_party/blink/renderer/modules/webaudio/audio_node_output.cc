@@ -39,12 +39,7 @@ AudioNodeOutput::AudioNodeOutput(AudioHandler* handler,
                                  unsigned number_of_channels)
     : handler_(*handler),
       number_of_channels_(number_of_channels),
-      desired_number_of_channels_(number_of_channels),
-      is_in_place_(false),
-      is_enabled_(true),
-      did_call_dispose_(false),
-      rendering_fan_out_count_(0),
-      rendering_param_fan_out_count_(0) {
+      desired_number_of_channels_(number_of_channels) {
   DCHECK_LE(number_of_channels, BaseAudioContext::MaxNumberOfChannels());
 
   internal_bus_ = AudioBus::Create(
@@ -56,8 +51,8 @@ void AudioNodeOutput::Dispose() {
 
   GetDeferredTaskHandler().RemoveMarkedAudioNodeOutput(this);
   DisconnectAll();
-  DCHECK(inputs_.IsEmpty());
-  DCHECK(params_.IsEmpty());
+  DCHECK(inputs_.empty());
+  DCHECK(params_.empty());
 }
 
 void AudioNodeOutput::SetNumberOfChannels(unsigned number_of_channels) {
@@ -163,24 +158,22 @@ void AudioNodeOutput::DisconnectAllInputs() {
   GetDeferredTaskHandler().AssertGraphOwner();
 
   // Disconnect changes inputs_, so we can't iterate directly over the hash set.
-  Vector<AudioNodeInput*, 4> inputs;
-  CopyToVector(inputs_, inputs);
+  Vector<AudioNodeInput*, 4> inputs(inputs_);
   for (AudioNodeInput* input : inputs) {
     AudioNodeWiring::Disconnect(*this, *input);
   }
-  DCHECK(inputs_.IsEmpty());
+  DCHECK(inputs_.empty());
 }
 
 void AudioNodeOutput::DisconnectAllParams() {
   GetDeferredTaskHandler().AssertGraphOwner();
 
   // Disconnect changes params_, so we can't iterate directly over the hash set.
-  Vector<AudioParamHandler*, 4> params;
-  CopyToVector(params_, params);
+  Vector<AudioParamHandler*, 4> params(params_);
   for (AudioParamHandler* param : params) {
     AudioNodeWiring::Disconnect(*this, *param);
   }
-  DCHECK(params_.IsEmpty());
+  DCHECK(params_.empty());
 }
 
 void AudioNodeOutput::DisconnectAll() {

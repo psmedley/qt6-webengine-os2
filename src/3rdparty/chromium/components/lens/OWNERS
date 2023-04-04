@@ -1,4 +1,7 @@
-schechter@google.com
 benwgold@google.com
 juanmojica@google.com
-timothyallen@google.com
+stanfield@google.com
+yusuyoutube@google.com
+
+per-file *.mojom=set noparent
+per-file *.mojom=file://ipc/SECURITY_OWNERS

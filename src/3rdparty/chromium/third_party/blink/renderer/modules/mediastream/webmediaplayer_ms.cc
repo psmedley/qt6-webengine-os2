@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,8 +75,7 @@ enum class RendererReloadAction {
 
 bool IsPlayableTrack(MediaStreamComponent* component) {
   return component && component->Source() &&
-         component->Source()->GetReadyState() !=
-             MediaStreamSource::kReadyStateEnded;
+         component->GetReadyState() != MediaStreamSource::kReadyStateEnded;
 }
 
 const char* LoadTypeToString(WebMediaPlayer::LoadType type) {
@@ -122,6 +121,17 @@ const char* NetworkStateToString(WebMediaPlayer::NetworkState state) {
     case WebMediaPlayer::kNetworkStateDecodeError:
       return "DecodeError";
   }
+}
+
+media::VideoTransformation GetFrameTransformation(
+    scoped_refptr<media::VideoFrame> frame) {
+  return frame ? frame->metadata().transformation.value_or(
+                     media::kNoTransformation)
+               : media::kNoTransformation;
+}
+
+base::TimeDelta GetFrameTime(scoped_refptr<media::VideoFrame> frame) {
+  return frame ? frame->timestamp() : base::TimeDelta();
 }
 
 constexpr base::TimeDelta kForceBeginFramesTimeout = base::Seconds(1);
@@ -341,7 +351,7 @@ WebMediaPlayerMS::WebMediaPlayerMS(
     const WebString& sink_id,
     CreateSurfaceLayerBridgeCB create_bridge_callback,
     std::unique_ptr<WebVideoFrameSubmitter> submitter,
-    WebMediaPlayer::SurfaceLayerMode surface_layer_mode)
+    bool use_surface_layer)
     : internal_frame_(std::make_unique<MediaStreamInternalFrameWrapper>(frame)),
       network_state_(WebMediaPlayer::kNetworkStateEmpty),
       ready_state_(WebMediaPlayer::kReadyStateHaveNothing),
@@ -350,7 +360,6 @@ WebMediaPlayerMS::WebMediaPlayerMS(
       delegate_(delegate),
       delegate_id_(0),
       paused_(true),
-      video_transformation_(media::kNoTransformation),
       media_log_(std::move(media_log)),
       renderer_factory_(std::make_unique<MediaStreamRendererFactory>()),
       main_render_task_runner_(std::move(main_render_task_runner)),
@@ -370,7 +379,7 @@ WebMediaPlayerMS::WebMediaPlayerMS(
               this,
               &WebMediaPlayerMS::StopForceBeginFrames)),
       submitter_(std::move(submitter)),
-      surface_layer_mode_(surface_layer_mode) {
+      use_surface_layer_(use_surface_layer) {
   DCHECK(client);
   DCHECK(delegate_);
   weak_this_ = weak_factory_.GetWeakPtr();
@@ -397,7 +406,7 @@ WebMediaPlayerMS::~WebMediaPlayerMS() {
   // Destruct compositor resources in the proper order.
   get_client()->SetCcLayer(nullptr);
   if (video_layer_) {
-    DCHECK(surface_layer_mode_ != WebMediaPlayer::SurfaceLayerMode::kAlways);
+    DCHECK(!use_surface_layer_);
     video_layer_->StopUsingProvider();
   }
 
@@ -472,7 +481,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
 
   compositor_ = std::make_unique<WebMediaPlayerMSCompositor>(
       compositor_task_runner_, io_task_runner_, web_stream_,
-      std::move(submitter_), surface_layer_mode_, weak_this_);
+      std::move(submitter_), use_surface_layer_, weak_this_);
 
   // We can receive a call to RequestVideoFrameCallback() before |compositor_|
   // is created. In that case, we suspend the request, and wait until now to
@@ -539,7 +548,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
         client_->AddAudioTrack(
             blink::WebString::FromUTF8(component->Id().Utf8()),
             blink::WebMediaPlayerClient::kAudioTrackKindMain,
-            blink::WebString::FromUTF8(component->Source()->GetName().Utf8()),
+            blink::WebString::FromUTF8(component->GetSourceName().Utf8()),
             /*language=*/"", is_first_audio_track);
         is_first_audio_track = false;
       }
@@ -564,7 +573,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
         client_->AddVideoTrack(
             blink::WebString::FromUTF8(component->Id().Utf8()),
             blink::WebMediaPlayerClient::kVideoTrackKindMain,
-            blink::WebString::FromUTF8(component->Source()->GetName().Utf8()),
+            blink::WebString::FromUTF8(component->GetSourceName().Utf8()),
             /*language=*/"", is_first_video_track);
         is_first_video_track = false;
       }
@@ -582,8 +591,9 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
     MaybeCreateWatchTimeReporter();
   }
 
-  client_->DidMediaMetadataChange(HasAudio(), HasVideo(),
-                                  media::MediaContentType::OneShot);
+  client_->DidMediaMetadataChange(
+      HasAudio(), HasVideo(), media::AudioCodec::kUnknown,
+      media::VideoCodec::kUnknown, media::MediaContentType::OneShot);
   delegate_->DidMediaMetadataChange(delegate_id_, HasAudio(), HasVideo(),
                                     media::MediaContentType::OneShot);
 
@@ -679,7 +689,7 @@ void WebMediaPlayerMS::ReloadVideo() {
   auto video_components = descriptor.VideoComponents();
 
   RendererReloadAction renderer_action = RendererReloadAction::KEEP_RENDERER;
-  if (video_components.IsEmpty()) {
+  if (video_components.empty()) {
     if (video_frame_provider_)
       renderer_action = RendererReloadAction::REMOVE_RENDERER;
     current_video_track_id_ = WebString();
@@ -723,8 +733,9 @@ void WebMediaPlayerMS::ReloadVideo() {
   // TODO(perkj, magjed): We use OneShot focus type here so that it takes
   // audio focus once it starts, and then will not respond to further audio
   // focus changes. See https://crbug.com/596516 for more details.
-  client_->DidMediaMetadataChange(HasAudio(), HasVideo(),
-                                  media::MediaContentType::OneShot);
+  client_->DidMediaMetadataChange(
+      HasAudio(), HasVideo(), media::AudioCodec::kUnknown,
+      media::VideoCodec::kUnknown, media::MediaContentType::OneShot);
   delegate_->DidMediaMetadataChange(delegate_id_, HasAudio(), HasVideo(),
                                     media::MediaContentType::OneShot);
 }
@@ -740,7 +751,7 @@ void WebMediaPlayerMS::ReloadAudio() {
   auto audio_components = descriptor.AudioComponents();
 
   RendererReloadAction renderer_action = RendererReloadAction::KEEP_RENDERER;
-  if (audio_components.IsEmpty()) {
+  if (audio_components.empty()) {
     if (audio_renderer_)
       renderer_action = RendererReloadAction::REMOVE_RENDERER;
     current_audio_track_id_ = WebString();
@@ -783,8 +794,9 @@ void WebMediaPlayerMS::ReloadAudio() {
   // TODO(perkj, magjed): We use OneShot focus type here so that it takes
   // audio focus once it starts, and then will not respond to further audio
   // focus changes. See https://crbug.com/596516 for more details.
-  client_->DidMediaMetadataChange(HasAudio(), HasVideo(),
-                                  media::MediaContentType::OneShot);
+  client_->DidMediaMetadataChange(
+      HasAudio(), HasVideo(), media::AudioCodec::kUnknown,
+      media::VideoCodec::kUnknown, media::MediaContentType::OneShot);
   delegate_->DidMediaMetadataChange(delegate_id_, HasAudio(), HasVideo(),
                                     media::MediaContentType::OneShot);
 }
@@ -904,8 +916,9 @@ void WebMediaPlayerMS::SetWasPlayedWithUserActivation(
     bool was_played_with_user_activation) {}
 
 void WebMediaPlayerMS::OnRequestPictureInPicture() {
-  if (!bridge_)
-    ActivateSurfaceLayerForVideo();
+  if (!bridge_) {
+    ActivateSurfaceLayerForVideo(compositor_->GetMetadata().video_transform);
+  }
 
   DCHECK(bridge_);
   DCHECK(bridge_->GetSurfaceId().is_valid());
@@ -954,9 +967,11 @@ gfx::Size WebMediaPlayerMS::NaturalSize() const {
   if (!video_frame_provider_)
     return gfx::Size();
 
-  const gfx::Size& current_size = compositor_->GetCurrentSize();
-  if (video_transformation_.rotation == media::VIDEO_ROTATION_90 ||
-      video_transformation_.rotation == media::VIDEO_ROTATION_270) {
+  const auto& metadata = compositor_->GetMetadata();
+  const gfx::Size& current_size = metadata.natural_size;
+  const auto& rotation = metadata.video_transform.rotation;
+  if (rotation == media::VIDEO_ROTATION_90 ||
+      rotation == media::VIDEO_ROTATION_270) {
     return gfx::Size(current_size.height(), current_size.width());
   }
   return current_size;
@@ -969,8 +984,9 @@ gfx::Size WebMediaPlayerMS::VisibleSize() const {
     return gfx::Size();
 
   const gfx::Rect& visible_rect = video_frame->visible_rect();
-  if (video_transformation_.rotation == media::VIDEO_ROTATION_90 ||
-      video_transformation_.rotation == media::VIDEO_ROTATION_270) {
+  const auto rotation = GetFrameTransformation(video_frame).rotation;
+  if (rotation == media::VIDEO_ROTATION_90 ||
+      rotation == media::VIDEO_ROTATION_270) {
     return gfx::Size(visible_rect.height(), visible_rect.width());
   }
   return visible_rect.size();
@@ -993,7 +1009,8 @@ double WebMediaPlayerMS::Duration() const {
 
 double WebMediaPlayerMS::CurrentTime() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  const base::TimeDelta current_time = compositor_->GetCurrentTime();
+  const base::TimeDelta current_time =
+      GetFrameTime(compositor_->GetCurrentFrame());
   if (current_time.ToInternalValue() != 0)
     return current_time.InSecondsF();
   else if (audio_renderer_.get())
@@ -1016,11 +1033,6 @@ WebMediaPlayer::ReadyState WebMediaPlayerMS::GetReadyState() const {
   return ready_state_;
 }
 
-WebMediaPlayer::SurfaceLayerMode WebMediaPlayerMS::GetVideoSurfaceLayerMode()
-    const {
-  return surface_layer_mode_;
-}
-
 WebString WebMediaPlayerMS::GetErrorMessage() const {
   return WebString::FromUTF8(media_log_->GetErrorMessage());
 }
@@ -1033,6 +1045,11 @@ WebTimeRanges WebMediaPlayerMS::Buffered() const {
 WebTimeRanges WebMediaPlayerMS::Seekable() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return WebTimeRanges();
+}
+
+void WebMediaPlayerMS::OnFrozen() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(paused_);
 }
 
 bool WebMediaPlayerMS::DidLoadingProgress() {
@@ -1056,14 +1073,20 @@ void WebMediaPlayerMS::Paint(cc::PaintCanvas* canvas,
       return;
   }
   const gfx::RectF dest_rect(rect);
-  video_renderer_.Paint(frame, canvas, dest_rect, flags, video_transformation_,
-                        provider.get());
+  video_renderer_.Paint(frame, canvas, dest_rect, flags,
+                        GetFrameTransformation(frame), provider.get());
 }
 
-scoped_refptr<media::VideoFrame> WebMediaPlayerMS::GetCurrentFrame() {
+scoped_refptr<media::VideoFrame> WebMediaPlayerMS::GetCurrentFrameThenUpdate() {
   DVLOG(3) << __func__;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return compositor_->GetCurrentFrame();
+}
+
+absl::optional<int> WebMediaPlayerMS::CurrentFrameId() const {
+  DVLOG(3) << __func__;
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  return compositor_->GetCurrentFrame()->unique_id();
 }
 
 bool WebMediaPlayerMS::WouldTaintOrigin() const {
@@ -1104,13 +1127,16 @@ bool WebMediaPlayerMS::HasAvailableVideoFrame() const {
 void WebMediaPlayerMS::OnFrameHidden() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (watch_time_reporter_)
+  bool in_picture_in_picture =
+      client_->GetDisplayType() == DisplayType::kPictureInPicture;
+
+  if (watch_time_reporter_ && !in_picture_in_picture)
     watch_time_reporter_->OnHidden();
 
   // This method is called when the RenderFrame is sent to background or
   // suspended. During undoable tab closures OnHidden() may be called back to
   // back, so we can't rely on |render_frame_suspended_| being false here.
-  if (frame_deliverer_) {
+  if (frame_deliverer_ && !in_picture_in_picture) {
     PostCrossThreadTask(
         *io_task_runner_, FROM_HERE,
         CrossThreadBindOnce(&FrameDeliverer::SetRenderFrameSuspended,
@@ -1186,7 +1212,8 @@ void WebMediaPlayerMS::SetVolumeMultiplier(double multiplier) {
   // TODO(perkj, magjed): See TODO in OnPlay().
 }
 
-void WebMediaPlayerMS::ActivateSurfaceLayerForVideo() {
+void WebMediaPlayerMS::ActivateSurfaceLayerForVideo(
+    media::VideoTransformation video_transform) {
   // Note that we might or might not already be in VideoLayer mode.
   DCHECK(!bridge_);
 
@@ -1205,7 +1232,7 @@ void WebMediaPlayerMS::ActivateSurfaceLayerForVideo() {
       *compositor_task_runner_, FROM_HERE,
       CrossThreadBindOnce(&WebMediaPlayerMSCompositor::EnableSubmission,
                           CrossThreadUnretained(compositor_.get()),
-                          bridge_->GetSurfaceId(), video_transformation_,
+                          bridge_->GetSurfaceId(), video_transform,
                           IsInPictureInPicture()));
 
   // If the element is already in Picture-in-Picture mode, it means that it
@@ -1231,8 +1258,8 @@ void WebMediaPlayerMS::OnFirstFrameReceived(
   OnTransformChanged(video_transform);
   OnOpacityChanged(is_opaque);
 
-  if (surface_layer_mode_ == WebMediaPlayer::SurfaceLayerMode::kAlways)
-    ActivateSurfaceLayerForVideo();
+  if (use_surface_layer_)
+    ActivateSurfaceLayerForVideo(video_transform);
 
   SetReadyState(WebMediaPlayer::kReadyStateHaveMetadata);
   SetReadyState(WebMediaPlayer::kReadyStateHaveEnoughData);
@@ -1260,13 +1287,12 @@ void WebMediaPlayerMS::OnTransformChanged(
     media::VideoTransformation video_transform) {
   DVLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  video_transformation_ = video_transform;
 
   if (!bridge_) {
     // Keep the old |video_layer_| alive until SetCcLayer() is called with a new
     // pointer, as it may use the pointer from the last call.
     auto new_video_layer =
-        cc::VideoLayer::Create(compositor_.get(), video_transformation_);
+        cc::VideoLayer::Create(compositor_.get(), video_transform);
     get_client()->SetCcLayer(new_video_layer.get());
     video_layer_ = std::move(new_video_layer);
   }
@@ -1376,7 +1402,6 @@ WebMediaPlayerMS::GetVideoFramePresentationMetadata() {
 }
 
 void WebMediaPlayerMS::RequestVideoFrameCallback() {
-  DCHECK(RuntimeEnabledFeatures::RequestVideoFrameCallbackEnabled());
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (!compositor_) {
@@ -1416,7 +1441,7 @@ void WebMediaPlayerMS::MaybeCreateWatchTimeReporter() {
     return;
 
   if (compositor_) {
-    compositor_initial_time_ = compositor_->GetCurrentTime();
+    compositor_initial_time_ = GetFrameTime(compositor_->GetCurrentFrame());
     compositor_last_time_ = compositor_initial_time_;
   }
   if (audio_renderer_) {
@@ -1506,8 +1531,8 @@ void WebMediaPlayerMS::UpdateWatchTimeReporterSecondaryProperties() {
 base::TimeDelta WebMediaPlayerMS::GetCurrentTimeInterval() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (compositor_) {
-    compositor_last_time_ =
-        std::max(compositor_last_time_, compositor_->GetCurrentTime());
+    compositor_last_time_ = std::max(
+        compositor_last_time_, GetFrameTime(compositor_->GetCurrentFrame()));
   }
   if (audio_renderer_) {
     audio_last_time_ =
@@ -1570,6 +1595,7 @@ WebMediaPlayerMS::GetMediaStreamType() {
     case mojom::blink::MediaStreamType::DISPLAY_AUDIO_CAPTURE:
     case mojom::blink::MediaStreamType::DISPLAY_VIDEO_CAPTURE:
     case mojom::blink::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB:
+    case mojom::blink::MediaStreamType::DISPLAY_VIDEO_CAPTURE_SET:
       return media::mojom::MediaStreamType::kLocalDisplayCapture;
     case mojom::blink::MediaStreamType::NUM_MEDIA_TYPES:
       NOTREACHED();

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,6 @@ namespace extensions {
 namespace {
 constexpr char kInvalidId[] = "Invalid id";
 constexpr char kExtensionId[] = "abcdefghijklmnopabcdefghijklmnop";
-constexpr int kFakeTime = 12345;
 constexpr char kFakeJustification[] = "I need it!";
 constexpr char kExtensionManifest[] = R"({
   \"name\" : \"Extension\",
@@ -53,18 +52,6 @@ constexpr char kBlockAllExtensionSettings[] = R"({
 constexpr char kBlockOneExtensionSettings[] = R"({
   "abcdefghijklmnopabcdefghijklmnop": {
     "installation_mode":"blocked"
-  }
-})";
-
-constexpr char kAllowedExtensionSettings[] = R"({
-  "abcdefghijklmnopabcdefghijklmnop" : {
-    "installation_mode": "allowed"
-  }
-})";
-
-constexpr char kBlockedExtensionSettings[] = R"({
-  "abcdefghijklmnopabcdefghijklmnop" : {
-    "installation_mode": "blocked"
   }
 })";
 
@@ -90,10 +77,6 @@ constexpr char kWebstoreUserCancelledError[] = "User cancelled install";
 constexpr char kWebstoreBlockByPolicy[] =
     "Extension installation is blocked by policy";
 
-base::Time GetFaketime() {
-  return base::Time::FromJavaTime(kFakeTime);
-}
-
 // Helper test struct used for holding data related to extension requests.
 struct ExtensionRequestData {
   explicit ExtensionRequestData(base::Time timestamp)
@@ -112,13 +95,12 @@ struct ExtensionRequestData {
 void VerifyPendingList(const std::map<ExtensionId, ExtensionRequestData>&
                            expected_pending_requests,
                        Profile* profile) {
-  const base::Value* actual_pending_requests =
-      profile->GetPrefs()->GetDictionary(prefs::kCloudExtensionRequestIds);
-  ASSERT_EQ(expected_pending_requests.size(),
-            actual_pending_requests->DictSize());
+  const base::Value::Dict& actual_pending_requests =
+      profile->GetPrefs()->GetDict(prefs::kCloudExtensionRequestIds);
+  ASSERT_EQ(expected_pending_requests.size(), actual_pending_requests.size());
   for (const auto& expected_request : expected_pending_requests) {
     auto* actual_pending_request =
-        actual_pending_requests->FindKey(expected_request.first);
+        actual_pending_requests.Find(expected_request.first);
     ASSERT_NE(nullptr, actual_pending_request);
 
     // All extensions in the pending list are expected to have a timestamp.
@@ -256,106 +238,6 @@ TEST_F(WebstorePrivateGetExtensionStatusTest,
                  response.get());
 }
 
-class WebstorePrivateRequestExtensionTest
-    : public WebstorePrivateExtensionInstallRequestBase {
- public:
-  WebstorePrivateRequestExtensionTest() = default;
-
-  void SetUp() override {
-    WebstorePrivateExtensionInstallRequestBase::SetUp();
-    profile()->GetTestingPrefService()->SetManagedPref(
-        prefs::kCloudExtensionRequestEnabled,
-        std::make_unique<base::Value>(true));
-    VerifyPendingList({}, profile());
-  }
-
-  void SetPendingList(const std::vector<ExtensionId>& ids) {
-    std::unique_ptr<base::Value> id_values =
-        std::make_unique<base::Value>(base::Value::Type::DICTIONARY);
-    for (const auto& id : ids) {
-      base::Value request_data(base::Value::Type::DICTIONARY);
-      request_data.SetKey(extension_misc::kExtensionRequestTimestamp,
-                          ::base::TimeToValue(GetFaketime()));
-      id_values->SetKey(id, std::move(request_data));
-    }
-    profile()->GetTestingPrefService()->SetUserPref(
-        prefs::kCloudExtensionRequestIds, std::move(id_values));
-  }
-
-};
-
-TEST_F(WebstorePrivateRequestExtensionTest, InvalidExtensionId) {
-  auto function =
-      base::MakeRefCounted<WebstorePrivateRequestExtensionFunction>();
-  EXPECT_EQ(kInvalidId,
-            RunFunctionAndReturnError(function.get(),
-                                      GenerateArgs("invalid-extension-id")));
-  VerifyPendingList({}, profile());
-}
-
-TEST_F(WebstorePrivateRequestExtensionTest, UnrequestableExtension) {
-  ExtensionRegistry::Get(profile())->AddEnabled(CreateExtension(kExtensionId));
-  auto function =
-      base::MakeRefCounted<WebstorePrivateRequestExtensionFunction>();
-  std::unique_ptr<base::Value> response =
-      RunFunctionAndReturnValue(function.get(), GenerateArgs(kExtensionId));
-  VerifyResponse(ExtensionInstallStatus::EXTENSION_INSTALL_STATUS_ENABLED,
-                 response.get());
-  VerifyPendingList({}, profile());
-}
-
-TEST_F(WebstorePrivateRequestExtensionTest, AlreadyApprovedExtension) {
-  SetExtensionSettings(kAllowedExtensionSettings, profile());
-  auto function =
-      base::MakeRefCounted<WebstorePrivateRequestExtensionFunction>();
-  std::unique_ptr<base::Value> response =
-      RunFunctionAndReturnValue(function.get(), GenerateArgs(kExtensionId));
-  VerifyResponse(ExtensionInstallStatus::EXTENSION_INSTALL_STATUS_INSTALLABLE,
-                 response.get());
-  VerifyPendingList({{kExtensionId, ExtensionRequestData(base::Time::Now())}},
-                    profile());
-}
-
-TEST_F(WebstorePrivateRequestExtensionTest, AlreadyRejectedExtension) {
-  SetExtensionSettings(kBlockedExtensionSettings, profile());
-  auto function =
-      base::MakeRefCounted<WebstorePrivateRequestExtensionFunction>();
-  std::unique_ptr<base::Value> response =
-      RunFunctionAndReturnValue(function.get(), GenerateArgs(kExtensionId));
-  VerifyResponse(
-      ExtensionInstallStatus::EXTENSION_INSTALL_STATUS_BLOCKED_BY_POLICY,
-      response.get());
-  VerifyPendingList({{kExtensionId, ExtensionRequestData(base::Time::Now())}},
-                    profile());
-}
-
-TEST_F(WebstorePrivateRequestExtensionTest, AlreadyPendingExtension) {
-  SetPendingList({kExtensionId});
-  VerifyPendingList({{kExtensionId, ExtensionRequestData(GetFaketime())}},
-                    profile());
-  auto function =
-      base::MakeRefCounted<WebstorePrivateRequestExtensionFunction>();
-  std::unique_ptr<base::Value> response =
-      RunFunctionAndReturnValue(function.get(), GenerateArgs(kExtensionId));
-  VerifyResponse(
-      ExtensionInstallStatus::EXTENSION_INSTALL_STATUS_REQUEST_PENDING,
-      response.get());
-  VerifyPendingList({{kExtensionId, ExtensionRequestData(GetFaketime())}},
-                    profile());
-}
-
-TEST_F(WebstorePrivateRequestExtensionTest, RequestExtension) {
-  auto function =
-      base::MakeRefCounted<WebstorePrivateRequestExtensionFunction>();
-  std::unique_ptr<base::Value> response =
-      RunFunctionAndReturnValue(function.get(), GenerateArgs(kExtensionId));
-  VerifyResponse(
-      ExtensionInstallStatus::EXTENSION_INSTALL_STATUS_REQUEST_PENDING,
-      response.get());
-  VerifyPendingList({{kExtensionId, ExtensionRequestData(base::Time::Now())}},
-                    profile());
-}
-
 class WebstorePrivateBeginInstallWithManifest3Test
     : public ExtensionApiUnittest {
  public:
@@ -393,8 +275,7 @@ class WebstorePrivateBeginInstallWithManifest3Test
 
   void VerifyUserCancelledFunctionResult(ExtensionFunction* function) {
     ASSERT_TRUE(function->GetResultList());
-    const base::Value& result =
-        function->GetResultList()->GetListDeprecated()[0];
+    const base::Value& result = (*function->GetResultList())[0];
     EXPECT_EQ("user_cancelled", result.GetString());
     EXPECT_EQ(kWebstoreUserCancelledError, function->GetError());
   }
@@ -403,8 +284,7 @@ class WebstorePrivateBeginInstallWithManifest3Test
       WebstorePrivateBeginInstallWithManifest3Function* function,
       const std::u16string& expected_blocked_message) {
     ASSERT_TRUE(function->GetResultList());
-    const base::Value& result =
-        function->GetResultList()->GetListDeprecated()[0];
+    const base::Value& result = (*function->GetResultList())[0];
     EXPECT_EQ("blocked_by_policy", result.GetString());
     EXPECT_EQ(kWebstoreBlockByPolicy, function->GetError());
     EXPECT_EQ(expected_blocked_message,
@@ -432,7 +312,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
   // Confirm request dialog
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   {
     ScopedTestDialogAutoConfirm auto_confirm(
         ScopedTestDialogAutoConfirm::ACCEPT);
@@ -447,7 +327,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
   // Show pending request dialog which can only be canceled.
   function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   {
     ScopedTestDialogAutoConfirm auto_cancel(
         ScopedTestDialogAutoConfirm::CANCEL);
@@ -469,7 +349,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_cancel(ScopedTestDialogAutoConfirm::CANCEL);
 
   api_test_utils::RunFunction(function.get(),
@@ -489,7 +369,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
 
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   {
     ScopedTestDialogAutoConfirm auto_confirm(
         ScopedTestDialogAutoConfirm::ACCEPT);
@@ -515,7 +395,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   {
     ScopedTestDialogAutoConfirm auto_cancel(
         ScopedTestDialogAutoConfirm::CANCEL);
@@ -538,7 +418,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   {
     ScopedTestDialogAutoConfirm auto_confirm(
         ScopedTestDialogAutoConfirm::ACCEPT);
@@ -553,7 +433,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
   EnableExtensionRequest(false);
   function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   {
     // Successfully confirm the install prompt and the API returns an empty
     // string without error.
@@ -578,7 +458,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test, BlockedByPolicy) {
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_confirm(ScopedTestDialogAutoConfirm::ACCEPT);
 
   api_test_utils::RunFunction(function.get(),
@@ -598,7 +478,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_confirm(ScopedTestDialogAutoConfirm::ACCEPT);
 
   api_test_utils::RunFunction(function.get(),
@@ -616,7 +496,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_confirm(ScopedTestDialogAutoConfirm::ACCEPT);
 
   api_test_utils::RunFunction(function.get(),
@@ -633,7 +513,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_confirm(ScopedTestDialogAutoConfirm::ACCEPT);
 
   api_test_utils::RunFunction(function.get(),
@@ -650,7 +530,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_confirm(ScopedTestDialogAutoConfirm::ACCEPT);
 
   std::unique_ptr<base::Value> response = RunFunctionAndReturnValue(
@@ -675,7 +555,7 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
                                                           nullptr);
     auto function = base::MakeRefCounted<
         WebstorePrivateBeginInstallWithManifest3Function>();
-    function->SetRenderFrameHost(web_contents->GetMainFrame());
+    function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
     ScopedTestDialogAutoConfirm auto_confirm(
         ScopedTestDialogAutoConfirm::ACCEPT);
 
@@ -774,7 +654,7 @@ TEST_P(WebstorePrivateBeginInstallWithManifest3FrictionDialogTest,
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
   auto function =
       base::MakeRefCounted<WebstorePrivateBeginInstallWithManifest3Function>();
-  function->SetRenderFrameHost(web_contents->GetMainFrame());
+  function->SetRenderFrameHost(web_contents->GetPrimaryMainFrame());
   ScopedTestDialogAutoConfirm auto_confirm(test_case.dialog_action);
 
   std::string args =

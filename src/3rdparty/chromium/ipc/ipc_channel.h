@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,11 +50,10 @@ class COMPONENT_EXPORT(IPC) Channel : public Sender {
 
  public:
   // Flags to test modes
-  enum ModeFlags {
-    MODE_NO_FLAG = 0x0,
-    MODE_SERVER_FLAG = 0x1,
-    MODE_CLIENT_FLAG = 0x2,
-  };
+  using ModeFlags = int;
+  static constexpr ModeFlags MODE_NO_FLAG = 0x0;
+  static constexpr ModeFlags MODE_SERVER_FLAG = 0x1;
+  static constexpr ModeFlags MODE_CLIENT_FLAG = 0x2;
 
   // Some Standard Modes
   // TODO(morrita): These are under deprecation work. You should use Create*()

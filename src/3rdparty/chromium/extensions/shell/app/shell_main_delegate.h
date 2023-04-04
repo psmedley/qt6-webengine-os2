@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/app/content_main_delegate.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class ContentBrowserClient;
@@ -31,7 +32,7 @@ class ShellMainDelegate : public content::ContentMainDelegate {
   ~ShellMainDelegate() override;
 
   // ContentMainDelegate implementation:
-  bool BasicStartupComplete(int* exit_code) override;
+  absl::optional<int> BasicStartupComplete() override;
   void PreSandboxStartup() override;
   content::ContentClient* CreateContentClient() override;
   content::ContentBrowserClient* CreateContentBrowserClient() override;
@@ -42,12 +43,7 @@ class ShellMainDelegate : public content::ContentMainDelegate {
                           delegates) override;
 #endif
 #if BUILDFLAG(IS_MAC)
-  void PreBrowserMain() override;
-#endif
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  void PostEarlyInitialization(bool is_running_tests) override;
+  absl::optional<int> PreBrowserMain() override;
 #endif
 
  private:

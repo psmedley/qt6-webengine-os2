@@ -26,7 +26,7 @@
 #include "fpdfsdk/cpdfsdk_annot.h"
 #include "fpdfsdk/formfiller/cffl_interactiveformfiller.h"
 #include "fpdfsdk/pwl/cpwl_wnd.h"
-#include "fpdfsdk/pwl/ipwl_systemhandler.h"
+#include "fpdfsdk/pwl/ipwl_fillernotify.h"
 #include "public/fpdf_formfill.h"
 #include "third_party/base/span.h"
 
@@ -56,7 +56,6 @@ FPDF_WIDESTRING AsFPDFWideString(ByteString* bsUTF16LE);
 
 class CPDFSDK_FormFillEnvironment final
     : public CFX_Timer::HandlerIface,
-      public IPWL_SystemHandler,
       public CFFL_InteractiveFormFiller::CallbackIface {
  public:
   CPDFSDK_FormFillEnvironment(CPDF_Document* pDoc, FPDF_FORMFILLINFO* pFFinfo);
@@ -67,15 +66,13 @@ class CPDFSDK_FormFillEnvironment final
   int32_t SetTimer(int32_t uElapse, TimerCallback lpTimerFunc) override;
   void KillTimer(int32_t nTimerID) override;
 
-  // IPWL_SystemHandler:
-  void InvalidateRect(PerWindowData* pWidgetData,
+  // CFFL_InteractiveFormFiller::CallbackIface:
+  void InvalidateRect(CPDFSDK_Widget* widget,
                       const CFX_FloatRect& rect) override;
-  void OutputSelectedRect(PerWindowData* pWidgetData,
+  void OutputSelectedRect(CFFL_FormField* pFormField,
                           const CFX_FloatRect& rect) override;
   bool IsSelectionImplemented() const override;
-  void SetCursor(CursorStyle nCursorType) override;
-
-  // CFFL_InteractiveFormFiller::CallbackIface:
+  void SetCursor(IPWL_FillerNotify::CursorStyle nCursorType) override;
   void OnSetFieldInputFocus(const WideString& text) override;
   void OnCalculate(ObservedPtr<CPDFSDK_Annot>& pAnnot) override;
   void OnFormat(ObservedPtr<CPDFSDK_Annot>& pAnnot) override;
@@ -83,7 +80,6 @@ class CPDFSDK_FormFillEnvironment final
   CPDFSDK_PageView* GetOrCreatePageView(IPDF_Page* pUnderlyingPage) override;
   CPDFSDK_PageView* GetPageView(IPDF_Page* pUnderlyingPage) override;
   CFX_Timer::HandlerIface* GetTimerHandler() override;
-  IPWL_SystemHandler* GetSysHandler() override;
   CPDFSDK_Annot* GetFocusAnnot() const override;
   bool SetFocusAnnot(ObservedPtr<CPDFSDK_Annot>& pAnnot) override;
   bool HasPermissions(uint32_t flags) const override;
@@ -150,7 +146,7 @@ class CPDFSDK_FormFillEnvironment final
 
 #ifdef PDF_ENABLE_V8
   CPDFSDK_PageView* GetCurrentView();
-  FPDF_PAGE GetCurrentPage() const;
+  IPDF_Page* GetCurrentPage() const;
 
   WideString GetLanguage();
   WideString GetPlatform();
@@ -167,7 +163,7 @@ class CPDFSDK_FormFillEnvironment final
                      pdfium::span<uint8_t> response);
   void JS_appBeep(int nType);
   WideString JS_fieldBrowse();
-  void JS_docmailForm(pdfium::span<uint8_t> mailData,
+  void JS_docmailForm(pdfium::span<const uint8_t> mailData,
                       FPDF_BOOL bUI,
                       const WideString& To,
                       const WideString& Subject,
@@ -231,7 +227,7 @@ class CPDFSDK_FormFillEnvironment final
   WideString GetFilePath() const;
   ByteString GetAppName() const { return ByteString(); }
   FPDF_FORMFILLINFO* GetFormFillInfo() const { return m_pInfo; }
-  void SubmitForm(pdfium::span<uint8_t> form_data, const WideString& URL);
+  void SubmitForm(pdfium::span<const uint8_t> form_data, const WideString& URL);
 
   void SetFocusableAnnotSubtypes(
       const std::vector<CPDF_Annot::Subtype>& focusableAnnotTypes) {
@@ -276,11 +272,14 @@ class CPDFSDK_FormFillEnvironment final
                           CPDF_AAction::AActionType type,
                           CFFL_FieldAction* data,
                           const WideString& script);
-  bool IsValidField(CPDF_Dictionary* pFieldDict);
+  bool IsValidField(const CPDF_Dictionary* pFieldDict);
 
   UnownedPtr<FPDF_FORMFILLINFO> const m_pInfo;
   std::unique_ptr<IJS_Runtime> m_pIJSRuntime;
+
+  // Iterator stability guarantees as provided by std::map<> required.
   std::map<IPDF_Page*, std::unique_ptr<CPDFSDK_PageView>> m_PageMap;
+
   std::unique_ptr<CPDFSDK_InteractiveForm> m_pInteractiveForm;
   ObservedPtr<CPDFSDK_Annot> m_pFocusAnnot;
   UnownedPtr<CPDF_Document> const m_pCPDFDoc;

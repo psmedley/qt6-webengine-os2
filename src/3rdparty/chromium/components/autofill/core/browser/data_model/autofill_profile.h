@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,9 @@
 #include <array>
 #include <iosfwd>
 #include <list>
-#include <map>
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/address.h"
@@ -23,7 +20,6 @@
 #include "components/autofill/core/browser/data_model/birthdate.h"
 #include "components/autofill/core/browser/data_model/contact_info.h"
 #include "components/autofill/core/browser/data_model/phone_number.h"
-#include "components/autofill/core/browser/proto/server.pb.h"
 
 namespace autofill {
 
@@ -60,7 +56,7 @@ class AutofillProfile : public AutofillDataModel {
 
   // AutofillDataModel:
   AutofillMetadata GetMetadata() const override;
-  bool SetMetadata(const AutofillMetadata metadata) override;
+  bool SetMetadata(const AutofillMetadata& metadata) override;
   // Returns whether the profile is deletable: if it is not verified and has not
   // been used for longer than |kDisusedAddressDeletionTimeDelta|.
   bool IsDeletable() const override;
@@ -256,10 +252,7 @@ class AutofillProfile : public AutofillDataModel {
 
   // Checks for non-empty setting-inaccessible fields and returns all that were
   // found.
-  // TODO(crbug.com/1297032): Remove |country_code| parameter and rely on the
-  // profile's country once every profile is complemented with a country.
-  ServerFieldTypeSet FindInaccessibleProfileValues(
-      const std::string& country_code) const;
+  ServerFieldTypeSet FindInaccessibleProfileValues() const;
 
   // Clears all specified |fields| from the profile.
   void ClearFields(const ServerFieldTypeSet& fields);

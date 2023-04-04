@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,9 @@
 
 LocalFontsPermissionContext::LocalFontsPermissionContext(
     content::BrowserContext* browser_context)
-    : PermissionContextBase(browser_context,
-                            ContentSettingsType::LOCAL_FONTS,
-                            blink::mojom::PermissionsPolicyFeature::kNotFound) {
-}
+    : PermissionContextBase(
+          browser_context,
+          ContentSettingsType::LOCAL_FONTS,
+          blink::mojom::PermissionsPolicyFeature::kLocalFonts) {}
 
 LocalFontsPermissionContext::~LocalFontsPermissionContext() = default;
-
-bool LocalFontsPermissionContext::IsRestrictedToSecureOrigins() const {
-  return true;
-}

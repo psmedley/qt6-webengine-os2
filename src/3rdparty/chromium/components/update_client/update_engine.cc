@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,7 @@ UpdateEngine::~UpdateEngine() {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
-void UpdateEngine::Update(
+base::RepeatingClosure UpdateEngine::Update(
     bool is_foreground,
     bool is_install,
     const std::vector<std::string>& ids,
@@ -87,13 +87,13 @@ void UpdateEngine::Update(
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(std::move(callback), Error::INVALID_ARGUMENT));
-    return;
+    return base::DoNothing();
   }
 
   if (IsThrottled(is_foreground)) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), Error::RETRY_LATER));
-    return;
+    return base::DoNothing();
   }
 
   // Calls out to get the corresponding CrxComponent data for the components.
@@ -103,7 +103,7 @@ void UpdateEngine::Update(
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(std::move(callback), Error::BAD_CRX_DATA_CALLBACK));
-    return;
+    return base::DoNothing();
   }
 
   const auto update_context = base::MakeRefCounted<UpdateContext>(
@@ -138,16 +138,17 @@ void UpdateEngine::Update(
     }
   }
 
-  if (update_context->components_to_check_for_updates.empty()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&UpdateEngine::HandleComponent, this, update_context));
-    return;
-  }
-
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::BindOnce(&UpdateEngine::DoUpdateCheck, this, update_context));
+      base::BindOnce(update_context->components_to_check_for_updates.empty()
+                         ? &UpdateEngine::HandleComponent
+                         : &UpdateEngine::DoUpdateCheck,
+                     this, update_context));
+  return base::BindRepeating(
+      [](scoped_refptr<UpdateContext> context) {
+        context->is_cancelled = true;
+      },
+      update_context);
 }
 
 void UpdateEngine::DoUpdateCheck(scoped_refptr<UpdateContext> update_context) {
@@ -162,9 +163,7 @@ void UpdateEngine::DoUpdateCheck(scoped_refptr<UpdateContext> update_context) {
       update_checker_factory_(config_, metadata_.get());
 
   update_context->update_checker->CheckForUpdates(
-      update_context->session_id,
-      update_context->components_to_check_for_updates,
-      update_context->components, config_->ExtraRequestParams(),
+      update_context, config_->ExtraRequestParams(),
       base::BindOnce(&UpdateEngine::UpdateCheckResultsAvailable, this,
                      update_context));
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,6 @@ TestNetworkQualityEstimator::TestNetworkQualityEstimator(
     : NetworkQualityEstimator(
           std::make_unique<NetworkQualityEstimatorParams>(variation_params),
           NetLog::Get()),
-      current_network_type_(NetworkChangeNotifier::CONNECTION_UNKNOWN),
       embedded_test_server_(base::FilePath(kTestFilePath)),
       suppress_notifications_for_testing_(suppress_notifications_for_testing) {
   SetUseLocalHostRequestsForTesting(allow_local_host_requests_for_tests);
@@ -61,7 +60,6 @@ TestNetworkQualityEstimator::TestNetworkQualityEstimator(
 TestNetworkQualityEstimator::TestNetworkQualityEstimator(
     std::unique_ptr<NetworkQualityEstimatorParams> params)
     : NetworkQualityEstimator(std::move(params), NetLog::Get()),
-      current_network_type_(NetworkChangeNotifier::CONNECTION_UNKNOWN),
       embedded_test_server_(base::FilePath(kTestFilePath)),
       suppress_notifications_for_testing_(false) {}
 

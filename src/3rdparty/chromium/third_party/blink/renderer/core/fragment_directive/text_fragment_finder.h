@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,10 +30,7 @@ class CORE_EXPORT TextFragmentFinder
  public:
   class Client {
    public:
-    virtual void DidFindMatch(
-        const RangeInFlatTree& range,
-        const TextFragmentAnchorMetrics::Match match_metrics,
-        bool is_unique) = 0;
+    virtual void DidFindMatch(const RangeInFlatTree& range, bool is_unique) = 0;
     virtual void NoMatchFound() = 0;
   };
 

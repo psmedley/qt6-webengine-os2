@@ -1,4 +1,4 @@
-// Copyright 2016 the chromium authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -136,18 +136,6 @@ const CSSValue* StyleValueToCSSValue(
       }
       break;
     }
-    case CSSPropertyID::kOverflowX:
-    case CSSPropertyID::kOverflowY: {
-      if (!RuntimeEnabledFeatures::OverflowClipEnabled()) {
-        auto* identifier_value =
-            DynamicTo<CSSIdentifierValue>(style_value.ToCSSValue());
-        if (identifier_value &&
-            identifier_value->GetValueID() == CSSValueID::kClip) {
-          return nullptr;
-        }
-      }
-      break;
-    }
     case CSSPropertyID::kPaintOrder: {
       // level 1 only accepts single keywords
       const auto* value = style_value.ToCSSValue();
@@ -244,14 +232,14 @@ const CSSValue* CoerceStyleValuesOrStrings(
   DCHECK(property.IsRepeated());
   DCHECK_EQ(property.IDEquals(CSSPropertyID::kVariable),
             !custom_property_name.IsNull());
-  if (values.IsEmpty())
+  if (values.empty())
     return nullptr;
 
   CSSStyleValueVector style_values =
       StyleValueFactory::CoerceStyleValuesOrStrings(
           property, custom_property_name, values, execution_context);
 
-  if (style_values.IsEmpty())
+  if (style_values.empty())
     return nullptr;
 
   CSSValueList* result = CssValueListForPropertyID(property.PropertyID());
@@ -313,7 +301,7 @@ void StylePropertyMap::set(
         break;
     }
 
-    if (css_text.IsEmpty() ||
+    if (css_text.empty() ||
         !SetShorthandProperty(property.PropertyID(), css_text,
                               execution_context->GetSecureContextMode())) {
       exception_state.ThrowTypeError("Invalid type for property");
@@ -351,7 +339,7 @@ void StylePropertyMap::append(
     const String& property_name,
     const HeapVector<Member<V8UnionCSSStyleValueOrString>>& values,
     ExceptionState& exception_state) {
-  if (values.IsEmpty())
+  if (values.empty())
     return;
 
   const CSSPropertyID property_id =

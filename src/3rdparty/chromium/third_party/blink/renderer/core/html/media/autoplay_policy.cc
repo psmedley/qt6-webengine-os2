@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -347,15 +347,16 @@ void AutoplayPolicy::OnIntersectionChangedForAutoplay(
         return;
 
       if (self->element_->can_autoplay_ && self->element_->Autoplay()) {
-        self->element_->PauseInternal();
+        self->element_->PauseInternal(
+            HTMLMediaElement::PlayPromiseError::kPaused_AutoplayAutoPause);
         self->element_->can_autoplay_ = true;
       }
     };
 
     element_->GetDocument()
         .GetTaskRunner(TaskType::kInternalMedia)
-        ->PostTask(FROM_HERE, WTF::Bind(pause_and_preserve_autoplay,
-                                        WrapWeakPersistent(this)));
+        ->PostTask(FROM_HERE, WTF::BindOnce(pause_and_preserve_autoplay,
+                                            WrapWeakPersistent(this)));
     return;
   }
 
@@ -376,7 +377,7 @@ void AutoplayPolicy::OnIntersectionChangedForAutoplay(
   element_->GetDocument()
       .GetTaskRunner(TaskType::kInternalMedia)
       ->PostTask(FROM_HERE,
-                 WTF::Bind(maybe_autoplay, WrapWeakPersistent(this)));
+                 WTF::BindOnce(maybe_autoplay, WrapWeakPersistent(this)));
 }
 
 bool AutoplayPolicy::IsUsingDocumentUserActivationRequiredPolicy() const {

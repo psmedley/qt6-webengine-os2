@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -133,10 +133,10 @@ class TCPSocketWin::Core : public base::RefCounted<Core> {
   // The buffers used in Read() and Write().
   scoped_refptr<IOBuffer> read_iobuffer_;
   scoped_refptr<IOBuffer> write_iobuffer_;
-  int read_buffer_length_;
-  int write_buffer_length_;
+  int read_buffer_length_ = 0;
+  int write_buffer_length_ = 0;
 
-  bool non_blocking_reads_initialized_;
+  bool non_blocking_reads_initialized_ = false;
 
  private:
   friend class base::RefCounted<Core>;
@@ -144,7 +144,7 @@ class TCPSocketWin::Core : public base::RefCounted<Core> {
   class ReadDelegate : public base::win::ObjectWatcher::Delegate {
    public:
     explicit ReadDelegate(Core* core) : core_(core) {}
-    ~ReadDelegate() override {}
+    ~ReadDelegate() override = default;
 
     // base::ObjectWatcher::Delegate methods:
     void OnObjectSignaled(HANDLE object) override;
@@ -156,7 +156,7 @@ class TCPSocketWin::Core : public base::RefCounted<Core> {
   class WriteDelegate : public base::win::ObjectWatcher::Delegate {
    public:
     explicit WriteDelegate(Core* core) : core_(core) {}
-    ~WriteDelegate() override {}
+    ~WriteDelegate() override = default;
 
     // base::ObjectWatcher::Delegate methods:
     void OnObjectSignaled(HANDLE object) override;
@@ -183,9 +183,6 @@ class TCPSocketWin::Core : public base::RefCounted<Core> {
 
 TCPSocketWin::Core::Core(TCPSocketWin* socket)
     : read_event_(WSACreateEvent()),
-      read_buffer_length_(0),
-      write_buffer_length_(0),
-      non_blocking_reads_initialized_(false),
       socket_(socket),
       reader_(this),
       writer_(this) {
@@ -263,13 +260,6 @@ TCPSocketWin::TCPSocketWin(
     : socket_(INVALID_SOCKET),
       socket_performance_watcher_(std::move(socket_performance_watcher)),
       accept_event_(WSA_INVALID_EVENT),
-      accept_socket_(nullptr),
-      accept_address_(nullptr),
-      waiting_connect_(false),
-      waiting_read_(false),
-      waiting_write_(false),
-      connect_os_error_(0),
-      logging_multiple_connect_attempts_(false),
       net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::SOCKET)) {
   net_log_.BeginEventReferencingSource(NetLogEventType::SOCKET_ALIVE, source);
   EnsureWinsockInit();
@@ -317,7 +307,7 @@ int TCPSocketWin::AdoptConnectedSocket(SocketDescriptor socket,
     return result;
   }
 
-  core_ = new Core(this);
+  core_ = base::MakeRefCounted<Core>(this);
   peer_address_ = std::make_unique<IPEndPoint>(peer_address);
 
   return OK;
@@ -791,8 +781,8 @@ int TCPSocketWin::AcceptInternal(std::unique_ptr<TCPSocketWin>* socket,
     net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT, net_error);
     return net_error;
   }
-  std::unique_ptr<TCPSocketWin> tcp_socket(
-      new TCPSocketWin(nullptr, net_log_.net_log(), net_log_.source()));
+  auto tcp_socket = std::make_unique<TCPSocketWin>(nullptr, net_log_.net_log(),
+                                                   net_log_.source());
   int adopt_result = tcp_socket->AdoptConnectedSocket(new_socket, ip_end_point);
   if (adopt_result != OK) {
     net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT,
@@ -840,7 +830,7 @@ int TCPSocketWin::DoConnect() {
     return CreateNetLogIPEndPointParams(peer_address_.get());
   });
 
-  core_ = new Core(this);
+  core_ = base::MakeRefCounted<Core>(this);
 
   // WSAEventSelect sets the socket to non-blocking mode as a side effect.
   // Our connect() and recv() calls require that the socket be non-blocking.
@@ -1051,7 +1041,7 @@ void TCPSocketWin::ApplySocketTag(const SocketTag& tag) {
   CHECK(tag == SocketTag());
 }
 
-int TCPSocketWin::BindToNetwork(NetworkChangeNotifier::NetworkHandle network) {
+int TCPSocketWin::BindToNetwork(handles::NetworkHandle network) {
   NOTIMPLEMENTED();
   return ERR_NOT_IMPLEMENTED;
 }

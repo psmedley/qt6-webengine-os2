@@ -10,6 +10,7 @@
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/RefCntedCallback.h"
 #include "src/gpu/graphite/Buffer.h"
+#include "src/gpu/graphite/ComputePipeline.h"
 #include "src/gpu/graphite/GraphicsPipeline.h"
 #include "src/gpu/graphite/Sampler.h"
 #include "src/gpu/graphite/Texture.h"
@@ -29,6 +30,13 @@ void CommandBuffer::releaseResources() {
     fTrackedResources.reset();
 }
 
+void CommandBuffer::resetCommandBuffer() {
+    TRACE_EVENT0("skia.gpu", TRACE_FUNC);
+
+    this->releaseResources();
+    this->onResetCommandBuffer();
+}
+
 void CommandBuffer::trackResource(sk_sp<Resource> resource) {
     fTrackedResources.push_back(std::move(resource));
 }
@@ -46,12 +54,16 @@ void CommandBuffer::callFinishedProcs(bool success) {
     fFinishedProcs.reset();
 }
 
-bool CommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
-                                    sk_sp<Texture> colorTexture,
-                                    sk_sp<Texture> resolveTexture,
-                                    sk_sp<Texture> depthStencilTexture) {
-    if (!this->onBeginRenderPass(renderPassDesc, colorTexture.get(), resolveTexture.get(),
-                                 depthStencilTexture.get())) {
+bool CommandBuffer::addRenderPass(const RenderPassDesc& renderPassDesc,
+                                  sk_sp<Texture> colorTexture,
+                                  sk_sp<Texture> resolveTexture,
+                                  sk_sp<Texture> depthStencilTexture,
+                                  const std::vector<std::unique_ptr<DrawPass>>& drawPasses) {
+    if (!this->onAddRenderPass(renderPassDesc,
+                               colorTexture.get(),
+                               resolveTexture.get(),
+                               depthStencilTexture.get(),
+                               drawPasses)) {
         return false;
     }
 
@@ -64,62 +76,30 @@ bool CommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
     if (depthStencilTexture) {
         this->trackResource(std::move(depthStencilTexture));
     }
-#ifdef SK_DEBUG
-    if (renderPassDesc.fColorAttachment.fLoadOp == LoadOp::kClear &&
-        (renderPassDesc.fColorAttachment.fStoreOp == StoreOp::kStore ||
-         renderPassDesc.fColorResolveAttachment.fStoreOp == StoreOp::kStore)) {
-        fHasWork = true;
-    }
-#endif
+    // We just assume if you are adding a render pass that the render pass will actually do work. In
+    // theory we could have a discard load that doesn't submit any draws, clears, etc. But hopefully
+    // something so trivial would be caught before getting here.
+    SkDEBUGCODE(fHasWork = true;)
 
     return true;
 }
 
-void CommandBuffer::bindGraphicsPipeline(sk_sp<GraphicsPipeline> graphicsPipeline) {
-    this->onBindGraphicsPipeline(graphicsPipeline.get());
-    this->trackResource(std::move(graphicsPipeline));
-}
-
-void CommandBuffer::bindUniformBuffer(UniformSlot slot,
-                                      sk_sp<Buffer> uniformBuffer,
-                                      size_t offset) {
-    this->onBindUniformBuffer(slot, uniformBuffer.get(), offset);
-    this->trackResource(std::move(uniformBuffer));
-}
-
-void CommandBuffer::bindVertexBuffers(sk_sp<Buffer> vertexBuffer, size_t vertexOffset,
-                                      sk_sp<Buffer> instanceBuffer, size_t instanceOffset) {
-    this->onBindVertexBuffers(vertexBuffer.get(), vertexOffset,
-                              instanceBuffer.get(), instanceOffset);
-    if (vertexBuffer) {
-        this->trackResource(std::move(vertexBuffer));
+bool CommandBuffer::addComputePass(const ComputePassDesc& computePassDesc,
+                                   sk_sp<ComputePipeline> pipeline,
+                                   const std::vector<ResourceBinding>& bindings) {
+    if (!this->onAddComputePass(computePassDesc, pipeline.get(), bindings)) {
+        return false;
     }
-    if (instanceBuffer) {
-        this->trackResource(std::move(instanceBuffer));
+
+    this->trackResource(std::move(pipeline));
+
+    for (const auto& binding : bindings) {
+        this->trackResource(binding.fResource.fBuffer);
     }
-}
 
-void CommandBuffer::bindIndexBuffer(sk_sp<Buffer> indexBuffer, size_t bufferOffset) {
-    this->onBindIndexBuffer(indexBuffer.get(), bufferOffset);
-    if (indexBuffer) {
-        this->trackResource(std::move(indexBuffer));
-    }
-}
+    SkDEBUGCODE(fHasWork = true;)
 
-void CommandBuffer::bindDrawBuffers(BindBufferInfo vertices,
-                                    BindBufferInfo instances,
-                                    BindBufferInfo indices) {
-    this->bindVertexBuffers(sk_ref_sp(vertices.fBuffer), vertices.fOffset,
-                            sk_ref_sp(instances.fBuffer), instances.fOffset);
-    this->bindIndexBuffer(sk_ref_sp(indices.fBuffer), indices.fOffset);
-}
-
-void CommandBuffer::bindTextureAndSampler(sk_sp<Texture> texture,
-                                          sk_sp<Sampler> sampler,
-                                          int bindIndex) {
-    this->onBindTextureAndSampler(texture, sampler, bindIndex);
-    this->trackResource(std::move(texture));
-    this->trackResource(std::move(sampler));
+    return true;
 }
 
 bool CommandBuffer::copyTextureToBuffer(sk_sp<Texture> texture,
@@ -143,7 +123,7 @@ bool CommandBuffer::copyTextureToBuffer(sk_sp<Texture> texture,
     return true;
 }
 
-bool CommandBuffer::copyBufferToTexture(sk_sp<Buffer> buffer,
+bool CommandBuffer::copyBufferToTexture(const Buffer* buffer,
                                         sk_sp<Texture> texture,
                                         const BufferTextureCopyData* copyData,
                                         int count) {
@@ -151,16 +131,57 @@ bool CommandBuffer::copyBufferToTexture(sk_sp<Buffer> buffer,
     SkASSERT(texture);
     SkASSERT(count > 0 && copyData);
 
-    if (!this->onCopyBufferToTexture(buffer.get(), texture.get(), copyData, count)) {
+    if (!this->onCopyBufferToTexture(buffer, texture.get(), copyData, count)) {
         return false;
     }
 
-    this->trackResource(std::move(buffer));
     this->trackResource(std::move(texture));
 
     SkDEBUGCODE(fHasWork = true;)
 
     return true;
 }
+
+bool CommandBuffer::copyTextureToTexture(sk_sp<Texture> src,
+                                         SkIRect srcRect,
+                                         sk_sp<Texture> dst,
+                                         SkIPoint dstPoint) {
+    SkASSERT(src);
+    SkASSERT(dst);
+
+    if (!this->onCopyTextureToTexture(src.get(), srcRect, dst.get(), dstPoint)) {
+        return false;
+    }
+
+    this->trackResource(std::move(src));
+    this->trackResource(std::move(dst));
+
+    SkDEBUGCODE(fHasWork = true;)
+
+    return true;
+}
+
+bool CommandBuffer::synchronizeBufferToCpu(sk_sp<Buffer> buffer) {
+    SkASSERT(buffer);
+
+    bool didResultInWork = false;
+    if (!this->onSynchronizeBufferToCpu(buffer.get(), &didResultInWork)) {
+        return false;
+    }
+
+    if (didResultInWork) {
+        this->trackResource(std::move(buffer));
+        SkDEBUGCODE(fHasWork = true;)
+    }
+
+    return true;
+}
+
+#ifdef SK_ENABLE_PIET_GPU
+void CommandBuffer::renderPietScene(const skgpu::piet::Scene& scene, sk_sp<Texture> target) {
+    this->onRenderPietScene(scene, target.get());
+    this->trackResource(std::move(target));
+}
+#endif
 
 } // namespace skgpu::graphite

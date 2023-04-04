@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/html/canvas/canvas_context_creation_attributes_core.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context_factory.h"
+#include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/html/canvas/image_data.h"
 #include "third_party/blink/renderer/core/style/filter_operations.h"
 #include "third_party/blink/renderer/core/svg/svg_resource_client.h"
@@ -53,7 +54,7 @@ class Layer;
 
 namespace blink {
 
-class CanvasFormattedText;
+class FormattedText;
 class CanvasImageSource;
 class Element;
 class ExceptionState;
@@ -132,14 +133,12 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   void strokeText(const String& text, double x, double y);
   void strokeText(const String& text, double x, double y, double max_width);
   TextMetrics* measureText(const String& text);
-
-  CanvasRenderingContext2DSettings* getContextAttributes() const;
-
-  void fillFormattedText(CanvasFormattedText* formatted_text,
+  void drawFormattedText(FormattedText* formatted_text,
                          double x,
                          double y,
-                         double wrap_width,
-                         double height = kIndefiniteSize);
+                         ExceptionState&);
+
+  CanvasRenderingContext2DSettings* getContextAttributes() const;
 
   void drawFocusIfNeeded(Element*);
   void drawFocusIfNeeded(Path2D*, Element*);

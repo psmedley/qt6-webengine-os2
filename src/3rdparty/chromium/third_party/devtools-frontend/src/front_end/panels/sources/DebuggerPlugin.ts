@@ -45,7 +45,7 @@ import * as SourceFrame from '../../ui/legacy/components/source_frame/source_fra
 import * as UI from '../../ui/legacy/legacy.js';
 import type * as TextEditor from '../../ui/components/text_editor/text_editor.js';
 
-import {AddSourceMapURLDialog} from './AddSourceMapURLDialog.js';
+import {AddDebugInfoURLDialog} from './AddSourceMapURLDialog.js';
 import {BreakpointEditDialog, LogpointPrefix} from './BreakpointEditDialog.js';
 import {Plugin} from './Plugin.js';
 import {ScriptFormatterEditorAction} from './ScriptFormatterEditorAction.js';
@@ -112,6 +112,10 @@ const UIStrings = {
   /**
   *@description Text in Debugger Plugin of the Sources panel
   */
+  addWasmDebugInfo: 'Add DWARF debug info…',
+  /**
+  *@description Text in Debugger Plugin of the Sources panel
+  */
   sourceMapDetected: 'Source map detected.',
   /**
   *@description Text in Debugger Plugin of the Sources panel
@@ -141,6 +145,16 @@ const UIStrings = {
   *@description Text in Debugger Plugin of the Sources panel
   */
   theDebuggerWillSkipStepping: 'The debugger will skip stepping through this script, and will not stop on exceptions.',
+  /**
+  *@description Error message that is displayed in UI when a file needed for debugging information for a call frame is missing
+  *@example {src/myapp.debug.wasm.dwp} PH1
+  */
+  debugFileNotFound: 'Failed to load debug file "{PH1}".',
+  /**
+  *@description Error message that is displayed when no debug info could be loaded
+  *@example {app.wasm} PH1
+  */
+  debugInfoNotFound: 'Failed to load any debug info for {PH1}.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/DebuggerPlugin.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -156,6 +170,8 @@ type BreakpointDescription = {
   breakpoint: Bindings.BreakpointManager.Breakpoint,
 };
 
+const debuggerPluginForUISourceCode = new Map<Workspace.UISourceCode.UISourceCode, DebuggerPlugin>();
+
 export class DebuggerPlugin extends Plugin {
   private editor: TextEditor.TextEditor.TextEditor|undefined = undefined;
   // Set if the debugger is stopped on a breakpoint in this file
@@ -169,7 +185,7 @@ export class DebuggerPlugin extends Plugin {
   private readonly breakpointManager: Bindings.BreakpointManager.BreakpointManager;
   // Manages pop-overs shown when the debugger is active and the user
   // hovers over an expression
-  private readonly popoverHelper: UI.PopoverHelper.PopoverHelper;
+  private popoverHelper: UI.PopoverHelper.PopoverHelper|null = null;
   private scriptFileForDebuggerModel:
       Map<SDK.DebuggerModel.DebuggerModel, Bindings.ResourceScriptMapping.ResourceScriptFile>;
   // The current set of breakpoints for this file. The locations in
@@ -194,20 +210,19 @@ export class DebuggerPlugin extends Plugin {
   private prettyPrintInfobar!: UI.Infobar.Infobar|null;
   private refreshBreakpointsTimeout: undefined|number = undefined;
   private activeBreakpointDialog: BreakpointEditDialog|null = null;
+  private missingDebugInfoBar: UI.Infobar.Infobar|null = null;
+
+  private readonly ignoreListCallback: () => void;
 
   constructor(
       uiSourceCode: Workspace.UISourceCode.UISourceCode,
       private readonly transformer: SourceFrame.SourceFrame.Transformer) {
     super(uiSourceCode);
 
+    debuggerPluginForUISourceCode.set(uiSourceCode, this);
+
     this.scriptsPanel = SourcesPanel.instance();
     this.breakpointManager = Bindings.BreakpointManager.BreakpointManager.instance();
-
-    this.popoverHelper =
-        new UI.PopoverHelper.PopoverHelper(this.scriptsPanel.element, this.getPopoverRequest.bind(this));
-    this.popoverHelper.setDisableOnClick(true);
-    this.popoverHelper.setTimeout(250, 250);
-    this.popoverHelper.setHasPadding(true);
 
     this.breakpointManager.addEventListener(
         Bindings.BreakpointManager.Events.BreakpointAdded, this.breakpointChange, this);
@@ -220,12 +235,8 @@ export class DebuggerPlugin extends Plugin {
 
     this.scriptFileForDebuggerModel = new Map();
 
-    Common.Settings.Settings.instance()
-        .moduleSetting('skipStackFramesPattern')
-        .addChangeListener(this.showIgnoreListInfobarIfNeeded, this);
-    Common.Settings.Settings.instance()
-        .moduleSetting('skipContentScripts')
-        .addChangeListener(this.showIgnoreListInfobarIfNeeded, this);
+    this.ignoreListCallback = this.showIgnoreListInfobarIfNeeded.bind(this);
+    Bindings.IgnoreListManager.IgnoreListManager.instance().addChangeListener(this.ignoreListCallback);
 
     UI.Context.Context.instance().addFlavorChangeListener(SDK.DebuggerModel.CallFrame, this.callFrameChanged, this);
     this.liveLocationPool = new Bindings.LiveLocation.LiveLocationPool();
@@ -237,7 +248,6 @@ export class DebuggerPlugin extends Plugin {
 
     this.ignoreListInfobar = null;
     this.showIgnoreListInfobarIfNeeded();
-
     for (const scriptFile of this.scriptFileForDebuggerModel.values()) {
       scriptFile.checkMapping();
     }
@@ -332,10 +342,19 @@ export class DebuggerPlugin extends Plugin {
         editor.dispatch({effects: SourceFrame.SourceFrame.addNonBreakableLines.of(linePositions)});
       }
     }, console.error);
+    if (this.missingDebugInfoBar) {
+      this.attachInfobar(this.missingDebugInfoBar);
+    }
     if (!this.muted) {
       void this.refreshBreakpoints();
     }
     void this.callFrameChanged();
+
+    this.popoverHelper?.dispose();
+    this.popoverHelper = new UI.PopoverHelper.PopoverHelper(editor, this.getPopoverRequest.bind(this));
+    this.popoverHelper.setDisableOnClick(true);
+    this.popoverHelper.setTimeout(250, 250);
+    this.popoverHelper.setHasPadding(true);
   }
 
   static accepts(uiSourceCode: Workspace.UISourceCode.UISourceCode): boolean {
@@ -348,7 +367,7 @@ export class DebuggerPlugin extends Plugin {
       return;
     }
     const projectType = uiSourceCode.project().type();
-    if (!Bindings.IgnoreListManager.IgnoreListManager.instance().isIgnoreListedUISourceCode(uiSourceCode)) {
+    if (!Bindings.IgnoreListManager.IgnoreListManager.instance().isUserIgnoreListedURL(uiSourceCode.url())) {
       this.hideIgnoreListInfobar();
       return;
     }
@@ -409,7 +428,17 @@ export class DebuggerPlugin extends Plugin {
   }
 
   willHide(): void {
-    this.popoverHelper.hidePopover();
+    this.popoverHelper?.hidePopover();
+  }
+
+  editBreakpointLocation({breakpoint, uiLocation}: Bindings.BreakpointManager.BreakpointLocation): void {
+    const {lineNumber} = this.transformer.uiLocationToEditorLocation(uiLocation.lineNumber, uiLocation.columnNumber);
+    const line = this.editor?.state.doc.line(lineNumber + 1);
+    if (!line) {
+      return;
+    }
+    const isLogpoint = breakpoint.condition().includes(LogpointPrefix);
+    this.editBreakpointCondition(line, breakpoint, null, isLogpoint);
   }
 
   populateLineGutterContextMenu(contextMenu: UI.ContextMenu.ContextMenu, editorLineNumber: number): void {
@@ -441,7 +470,7 @@ export class DebuggerPlugin extends Plugin {
     } else {
       const removeTitle = i18nString(UIStrings.removeBreakpoint, {n: breakpoints.length});
       contextMenu.debugSection().appendItem(
-          removeTitle, () => breakpoints.forEach(breakpoint => breakpoint.remove(false)));
+          removeTitle, () => breakpoints.forEach(breakpoint => void breakpoint.remove(false)));
       if (breakpoints.length === 1 && supportsConditionalBreakpoints) {
         // Editing breakpoints only make sense for conditional breakpoints
         // and logpoints and both are currently only available for JavaScript
@@ -467,25 +496,47 @@ export class DebuggerPlugin extends Plugin {
 
   populateTextAreaContextMenu(contextMenu: UI.ContextMenu.ContextMenu): void {
     function addSourceMapURL(scriptFile: Bindings.ResourceScriptMapping.ResourceScriptFile): void {
-      const dialog = new AddSourceMapURLDialog(addSourceMapURLDialogCallback.bind(null, scriptFile));
+      const dialog =
+          AddDebugInfoURLDialog.createAddSourceMapURLDialog(addSourceMapURLDialogCallback.bind(null, scriptFile));
       dialog.show();
     }
 
     function addSourceMapURLDialogCallback(
-        scriptFile: Bindings.ResourceScriptMapping.ResourceScriptFile, url: string): void {
+        scriptFile: Bindings.ResourceScriptMapping.ResourceScriptFile, url: Platform.DevToolsPath.UrlString): void {
       if (!url) {
         return;
       }
-      scriptFile.addSourceMapURL(url as Platform.DevToolsPath.UrlString);
+      scriptFile.addSourceMapURL(url);
+    }
+
+    function addDebugInfoURL(scriptFile: Bindings.ResourceScriptMapping.ResourceScriptFile): void {
+      const dialog =
+          AddDebugInfoURLDialog.createAddDWARFSymbolsURLDialog(addDebugInfoURLDialogCallback.bind(null, scriptFile));
+      dialog.show();
+    }
+
+    function addDebugInfoURLDialogCallback(
+        scriptFile: Bindings.ResourceScriptMapping.ResourceScriptFile, url: Platform.DevToolsPath.UrlString): void {
+      if (!url) {
+        return;
+      }
+      scriptFile.addDebugInfoURL(url);
     }
 
     if (this.uiSourceCode.project().type() === Workspace.Workspace.projectTypes.Network &&
         Common.Settings.Settings.instance().moduleSetting('jsSourceMapsEnabled').get() &&
-        !Bindings.IgnoreListManager.IgnoreListManager.instance().isIgnoreListedUISourceCode(this.uiSourceCode)) {
+        !Bindings.IgnoreListManager.IgnoreListManager.instance().isUserIgnoreListedURL(this.uiSourceCode.url())) {
       if (this.scriptFileForDebuggerModel.size) {
-        const scriptFile = this.scriptFileForDebuggerModel.values().next().value;
+        const scriptFile: Bindings.ResourceScriptMapping.ResourceScriptFile =
+            this.scriptFileForDebuggerModel.values().next().value;
         const addSourceMapURLLabel = i18nString(UIStrings.addSourceMap);
         contextMenu.debugSection().appendItem(addSourceMapURLLabel, addSourceMapURL.bind(null, scriptFile));
+        if (scriptFile.script?.isWasm() &&
+            !Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance().pluginManager?.hasPluginForScript(
+                scriptFile.script)) {
+          contextMenu.debugSection().appendItem(
+              i18nString(UIStrings.addWasmDebugInfo), addDebugInfoURL.bind(null, scriptFile));
+        }
       }
     }
   }
@@ -520,7 +571,7 @@ export class DebuggerPlugin extends Plugin {
     if (value !== this.muted) {
       this.muted = value;
       if (!value) {
-        this.restoreBreakpointsAfterEditing();
+        void this.restoreBreakpointsAfterEditing();
       } else if (this.editor) {
         this.editor.dispatch({effects: muteBreakpoints.of(null)});
       }
@@ -534,6 +585,10 @@ export class DebuggerPlugin extends Plugin {
       }
     }
     return true;
+  }
+
+  private isVariableIdentifier(tokenType: string): boolean {
+    return tokenType === 'VariableName' || tokenType === 'VariableDefinition';
   }
 
   private isIdentifier(tokenType: string): boolean {
@@ -722,7 +777,7 @@ export class DebuggerPlugin extends Plugin {
       this.setControlDown(false);
     }
     if (event.key === Platform.KeyboardUtilities.ESCAPE_KEY) {
-      if (this.popoverHelper.isPopoverVisible()) {
+      if (this.popoverHelper && this.popoverHelper.isPopoverVisible()) {
         this.popoverHelper.hidePopover();
         event.consume();
         return true;
@@ -962,11 +1017,11 @@ export class DebuggerPlugin extends Plugin {
     tree.iterate({
       from: fromPos,
       to: toPos,
-      enter(type, from, to): void {
-        const varName = type.name === 'VariableName' && editorState.sliceDoc(from, to);
+      enter: node => {
+        const varName = this.isVariableIdentifier(node.name) && editorState.sliceDoc(node.from, node.to);
         if (varName && variableMap.has(varName)) {
-          if (from > curLine.to) {
-            curLine = editorState.doc.lineAt(from);
+          if (node.from > curLine.to) {
+            curLine = editorState.doc.lineAt(node.from);
           }
           let names = namesPerLine.get(curLine.number - 1);
           if (!names) {
@@ -983,7 +1038,7 @@ export class DebuggerPlugin extends Plugin {
   // Highlight the locations the debugger can continue to (when
   // Control is held)
   private async showContinueToLocations(): Promise<void> {
-    this.popoverHelper.hidePopover();
+    this.popoverHelper?.hidePopover();
     const executionContext = UI.Context.Context.instance().flavor(SDK.RuntimeModel.ExecutionContext);
     if (!executionContext || !this.editor) {
       return;
@@ -1217,18 +1272,19 @@ export class DebuggerPlugin extends Plugin {
   // breakpoints the breakpoint manager might have (which point into
   // the old file) with the breakpoints we have, which had their
   // positions tracked through the changes.
-  private restoreBreakpointsAfterEditing(): void {
+  private async restoreBreakpointsAfterEditing(): Promise<void> {
     const {breakpoints} = this;
     const editor = this.editor as TextEditor.TextEditor.TextEditor;
     this.breakpoints = [];
-    for (const {breakpoint, position} of breakpoints) {
+    await Promise.all(breakpoints.map(async description => {
+      const {breakpoint, position} = description;
       const condition = breakpoint.condition(), enabled = breakpoint.enabled();
-      breakpoint.remove(false);
+      await breakpoint.remove(false);
       const editorLocation = editor.toLineColumn(position);
       const uiLocation =
           this.transformer.editorLocationToUILocation(editorLocation.lineNumber, editorLocation.columnNumber);
-      void this.setBreakpoint(uiLocation.lineNumber, uiLocation.columnNumber, condition, enabled);
-    }
+      await this.setBreakpoint(uiLocation.lineNumber, uiLocation.columnNumber, condition, enabled);
+    }));
   }
 
   private async refreshBreakpoints(): Promise<void> {
@@ -1265,7 +1321,7 @@ export class DebuggerPlugin extends Plugin {
       if (event.shiftKey) {
         breakpoint.setEnabled(!breakpoint.enabled());
       } else {
-        breakpoint.remove(false);
+        void breakpoint.remove(false);
       }
     } else if (this.editor) {
       const editorLocation = this.editor.editor.posAtDOM(event.target as unknown as HTMLElement);
@@ -1345,6 +1401,42 @@ export class DebuggerPlugin extends Plugin {
     if (newScriptFile.hasSourceMapURL()) {
       this.showSourceMapInfobar();
     }
+
+    void newScriptFile.missingSymbolFiles().then(resources => {
+      if (resources) {
+        const details = i18nString(UIStrings.debugInfoNotFound, {PH1: newScriptFile.uiSourceCode.url()});
+        this.updateMissingDebugInfoInfobar({resources, details});
+      } else {
+        this.updateMissingDebugInfoInfobar(null);
+      }
+    });
+  }
+
+  private updateMissingDebugInfoInfobar(warning: SDK.DebuggerModel.MissingDebugInfoDetails|null): void {
+    if (this.missingDebugInfoBar) {
+      return;
+    }
+    if (warning === null) {
+      this.removeInfobar(this.missingDebugInfoBar);
+      this.missingDebugInfoBar = null;
+      return;
+    }
+    this.missingDebugInfoBar = UI.Infobar.Infobar.create(UI.Infobar.Type.Error, warning.details, []);
+    if (!this.missingDebugInfoBar) {
+      return;
+    }
+    for (const resource of warning.resources) {
+      const detailsRow =
+          this.missingDebugInfoBar?.createDetailsRowMessage(i18nString(UIStrings.debugFileNotFound, {PH1: resource}));
+      if (detailsRow) {
+        detailsRow.classList.add('infobar-selectable');
+      }
+    }
+    this.missingDebugInfoBar.setCloseCallback(() => {
+      this.removeInfobar(this.missingDebugInfoBar);
+      this.missingDebugInfoBar = null;
+    });
+    this.attachInfobar(this.missingDebugInfoBar);
   }
 
   private showSourceMapInfobar(): void {
@@ -1440,7 +1532,7 @@ export class DebuggerPlugin extends Plugin {
       if (onlyDisable) {
         breakpoint.setEnabled(hasDisabled);
       } else {
-        breakpoint.remove(false);
+        void breakpoint.remove(false);
       }
     }
   }
@@ -1457,7 +1549,9 @@ export class DebuggerPlugin extends Plugin {
   private async setBreakpoint(lineNumber: number, columnNumber: number|undefined, condition: string, enabled: boolean):
       Promise<void> {
     Common.Settings.Settings.instance().moduleSetting('breakpointsActive').set(true);
-    await this.breakpointManager.setBreakpoint(this.uiSourceCode, lineNumber, columnNumber, condition, enabled);
+    await this.breakpointManager.setBreakpoint(
+        this.uiSourceCode, lineNumber, columnNumber, condition, enabled,
+        Bindings.BreakpointManager.BreakpointOrigin.USER_ACTION);
     this.breakpointWasSetForTest(lineNumber, columnNumber, condition, enabled);
   }
 
@@ -1476,6 +1570,7 @@ export class DebuggerPlugin extends Plugin {
             const uiLocation = await liveLocation.uiLocation();
             if (uiLocation && uiLocation.uiSourceCode.url() === this.uiSourceCode.url()) {
               this.setExecutionLocation(uiLocation);
+              this.updateMissingDebugInfoInfobar(callFrame.missingDebugInfoDetails);
             } else {
               this.setExecutionLocation(null);
             }
@@ -1526,8 +1621,8 @@ export class DebuggerPlugin extends Plugin {
     }
     this.scriptFileForDebuggerModel.clear();
 
-    this.popoverHelper.hidePopover();
-    this.popoverHelper.dispose();
+    this.popoverHelper?.hidePopover();
+    this.popoverHelper?.dispose();
 
     this.breakpointManager.removeEventListener(
         Bindings.BreakpointManager.Events.BreakpointAdded, this.breakpointChange, this);
@@ -1538,16 +1633,37 @@ export class DebuggerPlugin extends Plugin {
     this.uiSourceCode.removeEventListener(
         Workspace.UISourceCode.Events.WorkingCopyCommitted, this.workingCopyCommitted, this);
 
-    Common.Settings.Settings.instance()
-        .moduleSetting('skipStackFramesPattern')
-        .removeChangeListener(this.showIgnoreListInfobarIfNeeded, this);
-    Common.Settings.Settings.instance()
-        .moduleSetting('skipContentScripts')
-        .removeChangeListener(this.showIgnoreListInfobarIfNeeded, this);
+    Bindings.IgnoreListManager.IgnoreListManager.instance().removeChangeListener(this.ignoreListCallback);
+
+    debuggerPluginForUISourceCode.delete(this.uiSourceCode);
     super.dispose();
 
     UI.Context.Context.instance().removeFlavorChangeListener(SDK.DebuggerModel.CallFrame, this.callFrameChanged, this);
     this.liveLocationPool.disposeAll();
+  }
+}
+
+let breakpointLocationRevealerInstance: BreakpointLocationRevealer;
+
+export class BreakpointLocationRevealer implements Common.Revealer.Revealer {
+  static instance({forceNew}: {forceNew: boolean} = {forceNew: false}): BreakpointLocationRevealer {
+    if (!breakpointLocationRevealerInstance || forceNew) {
+      breakpointLocationRevealerInstance = new BreakpointLocationRevealer();
+    }
+
+    return breakpointLocationRevealerInstance;
+  }
+
+  async reveal(breakpointLocation: Object, omitFocus?: boolean|undefined): Promise<void> {
+    if (!(breakpointLocation instanceof Bindings.BreakpointManager.BreakpointLocation)) {
+      throw new Error('Internal error: not a breakpoint location');
+    }
+    const {uiLocation} = breakpointLocation;
+    SourcesPanel.instance().showUILocation(uiLocation, omitFocus);
+    const debuggerPlugin = debuggerPluginForUISourceCode.get(uiLocation.uiSourceCode);
+    if (debuggerPlugin) {
+      debuggerPlugin.editBreakpointLocation(breakpointLocation);
+    }
   }
 }
 

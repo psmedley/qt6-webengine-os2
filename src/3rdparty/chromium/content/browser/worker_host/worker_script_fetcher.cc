@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom.h"
 
 namespace content {
 
@@ -626,16 +626,13 @@ void WorkerScriptFetcher::OnReceiveEarlyHints(
 
 void WorkerScriptFetcher::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head,
-    mojo::ScopedDataPipeConsumerHandle body) {
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(!cached_metadata);
   response_head_ = std::move(response_head);
-  if (body)
-    OnStartLoadingResponseBody(std::move(body));
-}
-
-void WorkerScriptFetcher::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle response_body) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (!body)
+    return;
 
   base::WeakPtr<WorkerScriptLoader> script_loader =
       script_loader_factory_->GetScriptLoader();
@@ -647,7 +644,7 @@ void WorkerScriptFetcher::OnStartLoadingResponseBody(
     mojo::PendingReceiver<network::mojom::URLLoaderClient>
         response_client_receiver;
     if (script_loader->MaybeCreateLoaderForResponse(
-            &response_head_, &response_body, &response_url_loader_,
+            &response_head_, &body, &response_url_loader_,
             &response_client_receiver, url_loader_.get())) {
       DCHECK(response_url_loader_);
       response_url_loader_receiver_.Bind(std::move(response_client_receiver));
@@ -662,7 +659,7 @@ void WorkerScriptFetcher::OnStartLoadingResponseBody(
   main_script_load_params_ = blink::mojom::WorkerMainScriptLoadParams::New();
   main_script_load_params_->request_id = request_id_;
   main_script_load_params_->response_head = std::move(response_head_);
-  main_script_load_params_->response_body = std::move(response_body);
+  main_script_load_params_->response_body = std::move(body);
   if (url_loader_) {
     // The main script was served by a request interceptor or the default
     // network loader.
@@ -718,10 +715,6 @@ void WorkerScriptFetcher::OnUploadProgress(int64_t current_position,
   NOTREACHED();
 }
 
-void WorkerScriptFetcher::OnReceiveCachedMetadata(mojo_base::BigBuffer data) {
-  NOTREACHED();
-}
-
 void WorkerScriptFetcher::OnTransferSizeUpdated(int32_t transfer_size_diff) {
   NOTREACHED();
 }
@@ -733,7 +726,7 @@ void WorkerScriptFetcher::OnComplete(
   if (status.error_code == net::OK) {
     // It's possible to reach here when the `response_head_` doesn't have a
     // `parsed_headers` and ask NetworkService to parse headers in
-    // OnStartLoadingResponseBody(). DidParseHeaders() will be called eventually
+    // OnReceiveResponse(). DidParseHeaders() will be called eventually
     // and `this` will be deleted in it.
     return;
   }

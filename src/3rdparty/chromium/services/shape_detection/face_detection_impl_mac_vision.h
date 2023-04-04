@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,7 @@ namespace shape_detection {
 
 // The FaceDetectionImplMacVision class is the implementation of Face Detection
 // based on Mac OS Vision framework.
-class API_AVAILABLE(macos(10.13)) FaceDetectionImplMacVision
-    : public mojom::FaceDetection {
+class FaceDetectionImplMacVision : public mojom::FaceDetection {
  public:
   FaceDetectionImplMacVision();
 

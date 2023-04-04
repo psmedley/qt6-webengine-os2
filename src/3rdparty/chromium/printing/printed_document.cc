@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -209,7 +209,7 @@ bool PrintedDocument::IsComplete() const {
   if (mutable_.converting_pdf_)
     return true;
 
-  PageNumber page(*immutable_.settings_, mutable_.page_count_);
+  PageNumber page(immutable_.settings_->ranges(), mutable_.page_count_);
   if (page == PageNumber::npos())
     return false;
 

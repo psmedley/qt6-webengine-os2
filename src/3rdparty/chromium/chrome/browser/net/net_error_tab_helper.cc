@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -252,7 +252,7 @@ void NetErrorTabHelper::SendInfo() {
   DCHECK(dns_error_page_committed_);
 
   DVLOG(1) << "Sending status " << DnsProbeStatusToString(dns_probe_status_);
-  content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
+  content::RenderFrameHost* rfh = web_contents()->GetPrimaryMainFrame();
 
   mojo::AssociatedRemote<chrome::mojom::NetworkDiagnosticsClient> client;
   rfh->GetRemoteAssociatedInterfaces()->GetInterface(&client);
@@ -280,7 +280,7 @@ void NetErrorTabHelper::RunNetworkDiagnosticsHelper(
     return;
 
   if (network_diagnostics_receivers_.GetCurrentTargetFrame() !=
-      web_contents()->GetMainFrame()) {
+      web_contents()->GetPrimaryMainFrame()) {
     return;
   }
 

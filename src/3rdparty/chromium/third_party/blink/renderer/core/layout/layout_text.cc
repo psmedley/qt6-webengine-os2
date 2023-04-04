@@ -25,6 +25,8 @@
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 
 #include <algorithm>
+
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
@@ -190,7 +192,7 @@ LayoutText::LayoutText(Node* node, scoped_refptr<StringImpl> str)
   // Call GetSecureTextTimers() and GetSelectionDisplayItemClientMap() to ensure
   // map exists. They are called in pre-finalizer where allocation is not
   // allowed.
-  // TODO(yukiy): Remove these if CanvasFormattedTextRun::Dispose() can be
+  // TODO(yukiy): Remove these if FormattedTextRun::Dispose() can be
   // removed.
   GetSecureTextTimers();
   GetSelectionDisplayItemClientMap();
@@ -749,13 +751,13 @@ void LayoutText::AbsoluteQuadsForRange(Vector<gfx::QuadF>& quads,
   const unsigned caret_min_offset = static_cast<unsigned>(CaretMinOffset());
   const unsigned caret_max_offset = static_cast<unsigned>(CaretMaxOffset());
 
-  // Narrows |start| and |end| into |caretMinOffset| and |careMaxOffset|
+  // Narrows |start| and |end| into |CaretMinOffset| and |CaretMaxOffset|
   // to ignore unrendered leading and trailing whitespaces.
   start = std::min(std::max(caret_min_offset, start), caret_max_offset);
   end = std::min(std::max(caret_min_offset, end), caret_max_offset);
 
   // This function is always called in sequence that this check should work.
-  bool has_checked_box_in_range = !quads.IsEmpty();
+  bool has_checked_box_in_range = !quads.empty();
 
   const LayoutBlock* block_for_flipping =
       UNLIKELY(HasFlippedBlocksWritingMode()) ? ContainingBlock() : nullptr;
@@ -1095,8 +1097,8 @@ LayoutRect LayoutText::LocalCaretRect(
       break;
   }
 
-  // for unicode-bidi: plaintext, use inlineBoxBidiLevel() to test the correct
-  // direction for the cursor.
+  // for unicode-bidi: plaintext, use inline_box->BidiLevel() to test the
+  // correct direction for the cursor.
   if (right_aligned && StyleRef().GetUnicodeBidi() == UnicodeBidi::kPlaintext) {
     if (inline_box->BidiLevel() % 2 != 1)
       right_aligned = false;
@@ -1168,7 +1170,7 @@ void LayoutText::TrimmedPrefWidths(LayoutUnit lead_width_layout_unit,
   NOT_DESTROYED();
   float float_min_width = 0.0f, float_max_width = 0.0f;
 
-  // Convert leadWidth to a float here, to avoid multiple implict conversions
+  // Convert lead_width to a float here, to avoid multiple implicit conversions
   // below.
   float lead_width = lead_width_layout_unit.ToFloat();
 
@@ -1347,7 +1349,7 @@ static float MaxWordFragmentWidth(LayoutText* layout_text,
 
   Vector<wtf_size_t, 8> hyphen_locations = hyphenation.HyphenLocations(
       StringView(layout_text->GetText(), word_offset, word_length));
-  if (hyphen_locations.IsEmpty())
+  if (hyphen_locations.empty())
     return 0;
 
   float minimum_fragment_width_to_consider =
@@ -1634,7 +1636,7 @@ void LayoutText::ComputePreferredLogicalWidths(
       if (j < len && style_to_use.AutoWrap())
         has_breakable_char_ = true;
 
-      // Add in wordSpacing to our currMaxWidth, but not if this is the last
+      // Add in wordSpacing to our curr_max_width, but not if this is the last
       // word on a line or the
       // last word in the run.
       if (word_spacing && (is_space || is_collapsible_white_space) &&
@@ -1669,7 +1671,7 @@ void LayoutText::ComputePreferredLogicalWidths(
         min_width_ = curr_min_width;
       curr_min_width = 0;
 
-      // Only set if preserveNewline was true and we saw a newline.
+      // Only set if PreserveNewline was true and we saw a newline.
       if (is_newline) {
         if (first_line) {
           first_line = false;
@@ -1720,9 +1722,9 @@ void LayoutText::ComputePreferredLogicalWidths(
   glyph_overflow.SetFromBounds(glyph_bounds, f, max_width_);
   // We shouldn't change our mind once we "know".
   DCHECK(!known_to_have_no_overflow_and_no_fallback_fonts_ ||
-         (fallback_fonts.IsEmpty() && glyph_overflow.IsApproximatelyZero()));
+         (fallback_fonts.empty() && glyph_overflow.IsApproximatelyZero()));
   known_to_have_no_overflow_and_no_fallback_fonts_ =
-      fallback_fonts.IsEmpty() && glyph_overflow.IsApproximatelyZero();
+      fallback_fonts.empty() && glyph_overflow.IsApproximatelyZero();
 
   ClearIntrinsicLogicalWidthsDirty();
 }
@@ -1852,57 +1854,6 @@ void LayoutText::LogicalStartingPointAndHeight(
     logical_starting_point = {text_box->LogicalLeft(), text_box->LogicalTop()};
     logical_height = LastTextBox()->LogicalBottom() - text_box->LogicalTop();
   }
-}
-
-LayoutUnit LayoutText::PhysicalAreaSize() const {
-  NOT_DESTROYED();
-  // This is not accurate when |this| starts or ends at the middle of a line,
-  // but we prefer performance over accuracy.
-  if (IsInLayoutNGInlineFormattingContext()) {
-    NGInlineCursor cursor;
-    cursor.MoveTo(*this);
-    if (!cursor)
-      return LayoutUnit(0);
-    PhysicalRect rect = cursor.Current().RectInContainerFragment();
-    cursor.MoveToLastForSameLayoutObject();
-    rect.Unite(cursor.Current().RectInContainerFragment());
-    return rect.Width() * rect.Height();
-  }
-
-  if (const auto* first_text_box = FirstTextBox()) {
-    if (const auto* last_text_box = LastTextBox()) {
-      LayoutUnit width =
-          std::max(first_text_box->LogicalRight(),
-                   last_text_box->LogicalRight()) -
-          std::min(first_text_box->LogicalLeft(), last_text_box->LogicalLeft());
-      LayoutUnit height =
-          last_text_box->LogicalBottom() - first_text_box->LogicalTop();
-      return width * height;
-    }
-  }
-  return LayoutUnit(0);
-}
-
-LayoutUnit LayoutText::PhysicalRightOffset() const {
-  NOT_DESTROYED();
-  // This is not accurate when |this| starts or ends at the middle of a line,
-  // but we prefer performance over accuracy.
-  if (IsInLayoutNGInlineFormattingContext()) {
-    NGInlineCursor cursor;
-    cursor.MoveTo(*this);
-    if (!cursor)
-      return LayoutUnit(0);
-    PhysicalRect rect = cursor.Current().RectInContainerFragment();
-    return rect.offset.left + rect.size.width;
-  }
-
-  if (const auto* first_text_box = FirstTextBox()) {
-    if (const auto* last_text_box = LastTextBox()) {
-      return std::max(first_text_box->FrameRect().MaxX(),
-                      last_text_box->FrameRect().MaxX());
-    }
-  }
-  return LayoutUnit(0);
 }
 
 bool LayoutText::CanOptimizeSetText() const {
@@ -2100,7 +2051,7 @@ static inline bool IsInlineFlowOrEmptyText(const LayoutObject* o) {
     return true;
   if (!o->IsText())
     return false;
-  return To<LayoutText>(o)->GetText().IsEmpty();
+  return To<LayoutText>(o)->GetText().empty();
 }
 
 OnlyWhitespaceOrNbsp LayoutText::ContainsOnlyWhitespaceOrNbsp() const {
@@ -2141,7 +2092,7 @@ void LayoutText::ApplyTextTransform() {
     style->ApplyTextTransform(&text_, PreviousCharacter());
 
     // We use the same characters here as for list markers.
-    // See the listMarkerText function in LayoutListMarker.cpp.
+    // See CollectUACounterStyleRules() in ua_counter_style_map.cc.
     switch (style->TextSecurity()) {
       case ETextSecurity::kNone:
         break;
@@ -2178,8 +2129,8 @@ void LayoutText::SecureText(UChar mask) {
   if (last_typed_character_offset_to_reveal >= 0) {
     text_.replace(last_typed_character_offset_to_reveal, 1,
                   String(&revealed_text, 1u));
-    // m_text may be updated later before timer fires. We invalidate the
-    // lastTypedCharacterOffset to avoid inconsistency.
+    // text_ may be updated later before timer fires. We invalidate the
+    // last_typed_character_offset_ to avoid inconsistency.
     secure_text_timer->Invalidate();
   }
 }
@@ -2217,8 +2168,8 @@ void LayoutText::SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
 
 void LayoutText::TextDidChange() {
   NOT_DESTROYED();
-  // If preferredLogicalWidthsDirty() of an orphan child is true,
-  // LayoutObjectChildList::insertChildNode() fails to set true to owner.
+  // If intrinsic_logical_widths_dirty_ of an orphan child is true,
+  // LayoutObjectChildList::InsertChildNode() fails to set true to owner.
   // To avoid that, we call SetNeedsLayoutAndIntrinsicWidthsRecalc() only if
   // this LayoutText has parent.
   if (Parent()) {
@@ -2259,6 +2210,14 @@ void LayoutText::InvalidateSubtreeLayoutForFontUpdates() {
   SetNeedsCollectInlines();
   SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
       layout_invalidation_reason::kFontsChanged);
+  if (RuntimeEnabledFeatures::ParallelTextShapingEnabled()) {
+    if (!GetText().ContainsOnlyWhitespaceOrEmpty()) {
+      // The test[1] needs to do this for `document.fonts.add(face)` to kick off
+      // font load before layout.
+      // [1] fast/css/fontfaceset-ready.html
+      StyleRef().GetFont().WillUseFontData(GetText());
+    }
+  }
 }
 
 void LayoutText::DirtyOrDeleteLineBoxesIfNeeded(bool full_layout) {
@@ -2896,8 +2855,10 @@ void LayoutText::SetInlineItems(NGInlineItemsData* data,
                                 size_t size) {
   NOT_DESTROYED();
 #if DCHECK_IS_ON()
-  for (size_t i = begin; i < begin + size; i++)
-    DCHECK_EQ(data->items[SafeCast<wtf_size_t>(i)].GetLayoutObject(), this);
+  for (size_t i = begin; i < begin + size; i++) {
+    DCHECK_EQ(data->items[base::checked_cast<wtf_size_t>(i)].GetLayoutObject(),
+              this);
+  }
 #endif
   auto* items = GetNGInlineItems();
   if (!items)

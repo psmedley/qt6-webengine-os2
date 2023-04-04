@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -112,12 +112,9 @@ bool HostMatches(const base::StringPiece& url_host,
   return base::CompareCaseInsensitiveASCII(url_host, rule_host) == 0;
 }
 
-// Returns true if the host and scheme filters defined in |rule| match
-// |request|.
-bool RuleFiltersMatchRequest(network::ResourceRequest* request,
-                             const mojom::UrlRequestRulePtr& rule) {
-  const GURL& url = request->url;
-
+// Returns true if the host and scheme filters defined in |rule| match |url|.
+bool RuleFiltersMatchUrl(const GURL& url,
+                         const mojom::UrlRequestRulePtr& rule) {
   if (rule->hosts_filter) {
     bool found = false;
     for (const base::StringPiece host : rule->hosts_filter.value()) {
@@ -150,10 +147,10 @@ bool IsRequestAllowed(network::ResourceRequest* request,
     if (rule->actions.size() != 1)
       continue;
 
-    if (rule->actions[0]->which() != mojom::UrlRequestAction::Tag::POLICY)
+    if (rule->actions[0]->which() != mojom::UrlRequestAction::Tag::kPolicy)
       continue;
 
-    if (!RuleFiltersMatchRequest(request, rule))
+    if (!RuleFiltersMatchUrl(request->url, rule))
       continue;
 
     switch (rule->actions[0]->get_policy()) {
@@ -203,8 +200,19 @@ bool URLLoaderThrottle::makes_unsafe_redirect() {
 
 void URLLoaderThrottle::ApplyRule(network::ResourceRequest* request,
                                   const mojom::UrlRequestRulePtr& rule) {
-  if (!RuleFiltersMatchRequest(request, rule))
+  if (!RuleFiltersMatchUrl(request->url, rule))
     return;
+
+  // Prevent applying rules more than once when redirected.
+  for (const auto& url : request->navigation_redirect_chain) {
+    // Last element in redirect chain is the current navigation.
+    if (&url == &request->navigation_redirect_chain.back()) {
+      continue;
+    }
+    if (RuleFiltersMatchUrl(url, rule)) {
+      return;
+    }
+  }
 
   for (const auto& rewrite : rule->actions)
     ApplyRewrite(request, rewrite);
@@ -214,23 +222,23 @@ void URLLoaderThrottle::ApplyRewrite(
     network::ResourceRequest* request,
     const mojom::UrlRequestActionPtr& rewrite) {
   switch (rewrite->which()) {
-    case mojom::UrlRequestAction::Tag::ADD_HEADERS:
+    case mojom::UrlRequestAction::Tag::kAddHeaders:
       ApplyAddHeaders(request, rewrite->get_add_headers());
       return;
-    case mojom::UrlRequestAction::Tag::REMOVE_HEADER:
+    case mojom::UrlRequestAction::Tag::kRemoveHeader:
       ApplyRemoveHeader(request, rewrite->get_remove_header());
       return;
-    case mojom::UrlRequestAction::Tag::SUBSTITUTE_QUERY_PATTERN:
+    case mojom::UrlRequestAction::Tag::kSubstituteQueryPattern:
       ApplySubstituteQueryPattern(request,
                                   rewrite->get_substitute_query_pattern());
       return;
-    case mojom::UrlRequestAction::Tag::REPLACE_URL:
+    case mojom::UrlRequestAction::Tag::kReplaceUrl:
       ApplyReplaceUrl(request, rewrite->get_replace_url());
       return;
-    case mojom::UrlRequestAction::Tag::APPEND_TO_QUERY:
+    case mojom::UrlRequestAction::Tag::kAppendToQuery:
       ApplyAppendToQuery(request, rewrite->get_append_to_query());
       return;
-    case mojom::UrlRequestAction::Tag::POLICY:
+    case mojom::UrlRequestAction::Tag::kPolicy:
       // "Policy" is interpreted elsewhere; it is a no-op for rewriting.
       return;
   }

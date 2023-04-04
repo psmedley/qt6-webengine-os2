@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,11 +48,14 @@ FakeBluetoothDelegate::ShowBluetoothScanningPrompt(
   return std::make_unique<AlwaysAllowBluetoothScanning>(event_handler);
 }
 
-void FakeBluetoothDelegate::ShowDeviceCredentialsPrompt(
+void FakeBluetoothDelegate::ShowDevicePairPrompt(
     RenderFrameHost* frame,
     const std::u16string& device_identifier,
-    CredentialsCallback callback) {
-  std::move(callback).Run(DeviceCredentialsPromptResult::kCancelled, u"");
+    PairPromptCallback callback,
+    PairingKind pairing_kind,
+    const absl::optional<std::u16string>& pin) {
+  std::move(callback).Run(content::BluetoothDelegate::PairPromptResult(
+      content::BluetoothDelegate::PairPromptStatus::kCancelled));
 }
 
 WebBluetoothDeviceId FakeBluetoothDelegate::GetWebBluetoothDeviceId(
@@ -213,9 +216,9 @@ void FakeBluetoothDelegate::GrantUnionOfServicesAndManufacturerDataForDevice(
 FakeBluetoothDelegate::AddressToIdMap&
 FakeBluetoothDelegate::GetAddressToIdMapForOrigin(RenderFrameHost* frame) {
   auto* web_contents = WebContents::FromRenderFrameHost(frame);
-  auto origin_pair =
-      std::make_pair(frame->GetLastCommittedOrigin(),
-                     web_contents->GetMainFrame()->GetLastCommittedOrigin());
+  auto origin_pair = std::make_pair(
+      frame->GetLastCommittedOrigin(),
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
   return device_address_to_id_map_for_origin_[origin_pair];
 }
 

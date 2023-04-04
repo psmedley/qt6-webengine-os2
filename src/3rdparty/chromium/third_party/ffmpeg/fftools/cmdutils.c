@@ -39,6 +39,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/display.h"
+#include "libavutil/getenv_utf8.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/libm.h"
@@ -47,9 +48,11 @@
 #include "libavutil/dict.h"
 #include "libavutil/opt.h"
 #include "cmdutils.h"
+#include "fopen_utf8.h"
 #include "opt_common.h"
 #ifdef _WIN32
 #include <windows.h>
+#include "compat/w32dlfcn.h"
 #endif
 
 AVDictionary *sws_dict;
@@ -85,6 +88,12 @@ static void (*program_exit)(int ret);
 void register_exit(void (*cb)(int ret))
 {
     program_exit = cb;
+}
+
+void report_and_exit(int ret)
+{
+    av_log(NULL, AV_LOG_FATAL, "%s\n", av_err2str(ret));
+    exit_program(AVUNERROR(ret));
 }
 
 void exit_program(int ret)
@@ -465,7 +474,7 @@ static void check_options(const OptionDef *po)
 void parse_loglevel(int argc, char **argv, const OptionDef *options)
 {
     int idx = locate_option(argc, argv, options, "loglevel");
-    const char *env;
+    char *env;
 
     check_options(options);
 
@@ -474,7 +483,8 @@ void parse_loglevel(int argc, char **argv, const OptionDef *options)
     if (idx && argv[idx + 1])
         opt_loglevel(NULL, "loglevel", argv[idx + 1]);
     idx = locate_option(argc, argv, options, "report");
-    if ((env = getenv("FFREPORT")) || idx) {
+    env = getenv_utf8("FFREPORT");
+    if (env || idx) {
         FILE *report_file = NULL;
         init_report(env, &report_file);
         if (report_file) {
@@ -487,6 +497,7 @@ void parse_loglevel(int argc, char **argv, const OptionDef *options)
             fflush(report_file);
         }
     }
+    freeenv_utf8(env);
     idx = locate_option(argc, argv, options, "hide_banner");
     if (idx)
         hide_banner = 1;
@@ -645,7 +656,7 @@ static void init_parse_context(OptionParseContext *octx,
     octx->nb_groups = nb_groups;
     octx->groups    = av_calloc(octx->nb_groups, sizeof(*octx->groups));
     if (!octx->groups)
-        exit_program(1);
+        report_and_exit(AVERROR(ENOMEM));
 
     for (i = 0; i < octx->nb_groups; i++)
         octx->groups[i].group_def = &groups[i];
@@ -812,28 +823,45 @@ FILE *get_preset_file(char *filename, size_t filename_size,
 {
     FILE *f = NULL;
     int i;
-    const char *base[3] = { getenv("FFMPEG_DATADIR"),
-                            getenv("HOME"),
+#if HAVE_GETMODULEHANDLE && defined(_WIN32)
+    char *datadir = NULL;
+#endif
+    char *env_home = getenv_utf8("HOME");
+    char *env_ffmpeg_datadir = getenv_utf8("FFMPEG_DATADIR");
+    const char *base[3] = { env_ffmpeg_datadir,
+                            env_home,   /* index=1(HOME) is special: search in a .ffmpeg subfolder */
                             FFMPEG_DATADIR, };
 
     if (is_path) {
         av_strlcpy(filename, preset_name, filename_size);
-        f = fopen(filename, "r");
+        f = fopen_utf8(filename, "r");
     } else {
 #if HAVE_GETMODULEHANDLE && defined(_WIN32)
-        char datadir[MAX_PATH], *ls;
+        wchar_t *datadir_w = get_module_filename(NULL);
         base[2] = NULL;
 
-        if (GetModuleFileNameA(GetModuleHandleA(NULL), datadir, sizeof(datadir) - 1))
+        if (wchartoutf8(datadir_w, &datadir))
+            datadir = NULL;
+        av_free(datadir_w);
+
+        if (datadir)
         {
-            for (ls = datadir; ls < datadir + strlen(datadir); ls++)
+            char *ls;
+            for (ls = datadir; *ls; ls++)
                 if (*ls == '\\') *ls = '/';
 
             if (ls = strrchr(datadir, '/'))
             {
-                *ls = 0;
-                strncat(datadir, "/ffpresets",  sizeof(datadir) - 1 - strlen(datadir));
-                base[2] = datadir;
+                ptrdiff_t datadir_len = ls - datadir;
+                size_t desired_size = datadir_len + strlen("/ffpresets") + 1;
+                char *new_datadir = av_realloc_array(
+                    datadir, desired_size, sizeof *datadir);
+                if (new_datadir) {
+                    datadir = new_datadir;
+                    datadir[datadir_len] = 0;
+                    strncat(datadir, "/ffpresets",  desired_size - 1 - datadir_len);
+                    base[2] = datadir;
+                }
             }
         }
 #endif
@@ -842,17 +870,22 @@ FILE *get_preset_file(char *filename, size_t filename_size,
                 continue;
             snprintf(filename, filename_size, "%s%s/%s.ffpreset", base[i],
                      i != 1 ? "" : "/.ffmpeg", preset_name);
-            f = fopen(filename, "r");
+            f = fopen_utf8(filename, "r");
             if (!f && codec_name) {
                 snprintf(filename, filename_size,
                          "%s%s/%s-%s.ffpreset",
                          base[i], i != 1 ? "" : "/.ffmpeg", codec_name,
                          preset_name);
-                f = fopen(filename, "r");
+                f = fopen_utf8(filename, "r");
             }
         }
     }
 
+#if HAVE_GETMODULEHANDLE && defined(_WIN32)
+    av_free(datadir);
+#endif
+    freeenv_utf8(env_ffmpeg_datadir);
+    freeenv_utf8(env_home);
     return f;
 }
 
@@ -931,11 +964,8 @@ AVDictionary **setup_find_stream_info_opts(AVFormatContext *s,
     if (!s->nb_streams)
         return NULL;
     opts = av_calloc(s->nb_streams, sizeof(*opts));
-    if (!opts) {
-        av_log(NULL, AV_LOG_ERROR,
-               "Could not alloc memory for stream options.\n");
-        exit_program(1);
-    }
+    if (!opts)
+        report_and_exit(AVERROR(ENOMEM));
     for (i = 0; i < s->nb_streams; i++)
         opts[i] = filter_codec_opts(codec_opts, s->streams[i]->codecpar->codec_id,
                                     s, s->streams[i], NULL);
@@ -950,10 +980,8 @@ void *grow_array(void *array, int elem_size, int *size, int new_size)
     }
     if (*size < new_size) {
         uint8_t *tmp = av_realloc_array(array, new_size, elem_size);
-        if (!tmp) {
-            av_log(NULL, AV_LOG_ERROR, "Could not alloc buffer.\n");
-            exit_program(1);
-        }
+        if (!tmp)
+            report_and_exit(AVERROR(ENOMEM));
         memset(tmp + *size*elem_size, 0, (new_size-*size) * elem_size);
         *size = new_size;
         return tmp;
@@ -966,10 +994,8 @@ void *allocate_array_elem(void *ptr, size_t elem_size, int *nb_elems)
     void *new_elem;
 
     if (!(new_elem = av_mallocz(elem_size)) ||
-        av_dynarray_add_nofree(ptr, nb_elems, new_elem) < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Could not alloc buffer.\n");
-        exit_program(1);
-    }
+        av_dynarray_add_nofree(ptr, nb_elems, new_elem) < 0)
+        report_and_exit(AVERROR(ENOMEM));
     return new_elem;
 }
 

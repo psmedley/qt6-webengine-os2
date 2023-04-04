@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,9 @@ class AppBannerManagerAndroid : public AppBannerManager,
   base::android::ScopedJavaLocalRef<jstring> GetInstallableWebAppName(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& java_web_contents);
+  base::android::ScopedJavaLocalRef<jstring> GetInstallableWebAppManifestId(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& java_web_contents);
 
   // Returns true if the banner pipeline is currently running.
   bool IsRunningForTesting(JNIEnv* env,
@@ -110,6 +113,9 @@ class AppBannerManagerAndroid : public AppBannerManager,
   void PerformInstallableChecks() override;
   InstallableParams ParamsToPerformInstallableWebAppCheck() override;
   void PerformInstallableWebAppCheck() override;
+  void PerformWorkerCheckForAmbientBadge() override;
+  void OnDidPerformWorkerCheckForAmbientBadge(
+      const InstallableData& data) override;
   void ResetCurrentPageData() override;
   void ShowBannerUi(WebappInstallSource install_source) override;
   void MaybeShowAmbientBadge() override;
@@ -140,9 +146,6 @@ class AppBannerManagerAndroid : public AppBannerManager,
   // being cancelled or an app being installed has occurred.
   void OnInstallEvent(AddToHomescreenInstaller::Event event,
                       const AddToHomescreenParams& a2hs_params);
-
-  void OnDidPerformInstallableWebAppCheck(
-      const InstallableData& result) override;
 
   base::WeakPtr<AppBannerManagerAndroid> GetAndroidWeakPtr();
 
@@ -194,9 +197,6 @@ class AppBannerManagerAndroid : public AppBannerManager,
 
   // Title to display in the banner for native app.
   std::u16string native_app_title_;
-
-  // The screenshots to show in the install UI.
-  std::vector<SkBitmap> screenshots_;
 
   base::WeakPtrFactory<AppBannerManagerAndroid> weak_factory_{this};
 };

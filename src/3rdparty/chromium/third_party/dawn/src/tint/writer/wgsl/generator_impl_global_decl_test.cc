@@ -14,8 +14,10 @@
 
 #include "src/tint/ast/stage_attribute.h"
 #include "src/tint/ast/variable_decl_statement.h"
-#include "src/tint/sem/sampled_texture_type.h"
+#include "src/tint/sem/sampled_texture.h"
 #include "src/tint/writer/wgsl/test_helper.h"
+
+using namespace tint::number_suffixes;  // NOLINT
 
 namespace tint::writer::wgsl {
 namespace {
@@ -23,17 +25,17 @@ namespace {
 using WgslGeneratorImplTest = TestHelper;
 
 TEST_F(WgslGeneratorImplTest, Emit_GlobalDeclAfterFunction) {
-  auto* func_var = Var("a", ty.f32());
-  WrapInFunction(func_var);
+    auto* func_var = Var("a", ty.f32());
+    WrapInFunction(func_var);
 
-  Global("a", ty.f32(), ast::StorageClass::kPrivate);
+    GlobalVar("a", ty.f32(), ast::AddressSpace::kPrivate);
 
-  GeneratorImpl& gen = Build();
+    GeneratorImpl& gen = Build();
 
-  gen.increment_indent();
+    gen.increment_indent();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-  EXPECT_EQ(gen.result(), R"(  @stage(compute) @workgroup_size(1, 1, 1)
+    ASSERT_TRUE(gen.Generate()) << gen.error();
+    EXPECT_EQ(gen.result(), R"(  @compute @workgroup_size(1i, 1i, 1i)
   fn test_function() {
     var a : f32;
   }
@@ -43,37 +45,41 @@ TEST_F(WgslGeneratorImplTest, Emit_GlobalDeclAfterFunction) {
 }
 
 TEST_F(WgslGeneratorImplTest, Emit_GlobalsInterleaved) {
-  Global("a0", ty.f32(), ast::StorageClass::kPrivate);
+    GlobalVar("a0", ty.f32(), ast::AddressSpace::kPrivate);
 
-  auto* s0 = Structure("S0", {Member("a", ty.i32())});
+    auto* s0 = Structure("S0", utils::Vector{
+                                   Member("a", ty.i32()),
+                               });
 
-  Func("func", ast::VariableList{}, ty.f32(),
-       ast::StatementList{
-           Return("a0"),
-       },
-       ast::AttributeList{});
+    Func("func", {}, ty.f32(),
+         utils::Vector{
+             Return("a0"),
+         },
+         utils::Empty);
 
-  Global("a1", ty.f32(), ast::StorageClass::kPrivate);
+    GlobalVar("a1", ty.f32(), ast::AddressSpace::kPrivate);
 
-  auto* s1 = Structure("S1", {Member("a", ty.i32())});
+    auto* s1 = Structure("S1", utils::Vector{
+                                   Member("a", ty.i32()),
+                               });
 
-  Func("main", ast::VariableList{}, ty.void_(),
-       ast::StatementList{
-           Decl(Var("s0", ty.Of(s0))),
-           Decl(Var("s1", ty.Of(s1))),
-           Assign("a1", Call("func")),
-       },
-       ast::AttributeList{
-           Stage(ast::PipelineStage::kCompute),
-           WorkgroupSize(1),
-       });
+    Func("main", {}, ty.void_(),
+         utils::Vector{
+             Decl(Var("s0", ty.Of(s0))),
+             Decl(Var("s1", ty.Of(s1))),
+             Assign("a1", Call("func")),
+         },
+         utils::Vector{
+             Stage(ast::PipelineStage::kCompute),
+             WorkgroupSize(1_i),
+         });
 
-  GeneratorImpl& gen = Build();
+    GeneratorImpl& gen = Build();
 
-  gen.increment_indent();
+    gen.increment_indent();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-  EXPECT_EQ(gen.result(), R"(  var<private> a0 : f32;
+    ASSERT_TRUE(gen.Generate()) << gen.error();
+    EXPECT_EQ(gen.result(), R"(  var<private> a0 : f32;
 
   struct S0 {
     a : i32,
@@ -89,7 +95,7 @@ TEST_F(WgslGeneratorImplTest, Emit_GlobalsInterleaved) {
     a : i32,
   }
 
-  @stage(compute) @workgroup_size(1)
+  @compute @workgroup_size(1i)
   fn main() {
     var s0 : S0;
     var s1 : S1;
@@ -99,46 +105,53 @@ TEST_F(WgslGeneratorImplTest, Emit_GlobalsInterleaved) {
 }
 
 TEST_F(WgslGeneratorImplTest, Emit_Global_Sampler) {
-  Global("s", ty.sampler(ast::SamplerKind::kSampler),
-         ast::AttributeList{
-             create<ast::GroupAttribute>(0),
-             create<ast::BindingAttribute>(0),
-         });
+    GlobalVar("s", ty.sampler(ast::SamplerKind::kSampler), Group(0_a), Binding(0_a));
 
-  GeneratorImpl& gen = Build();
+    GeneratorImpl& gen = Build();
 
-  gen.increment_indent();
+    gen.increment_indent();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-  EXPECT_EQ(gen.result(), "  @group(0) @binding(0) var s : sampler;\n");
+    ASSERT_TRUE(gen.Generate()) << gen.error();
+    EXPECT_EQ(gen.result(), "  @group(0) @binding(0) var s : sampler;\n");
 }
 
 TEST_F(WgslGeneratorImplTest, Emit_Global_Texture) {
-  auto* st = ty.sampled_texture(ast::TextureDimension::k1d, ty.f32());
-  Global("t", st,
-         ast::AttributeList{
-             create<ast::GroupAttribute>(0),
-             create<ast::BindingAttribute>(0),
-         });
+    auto* st = ty.sampled_texture(ast::TextureDimension::k1d, ty.f32());
+    GlobalVar("t", st, Group(0_a), Binding(0_a));
 
-  GeneratorImpl& gen = Build();
+    GeneratorImpl& gen = Build();
 
-  gen.increment_indent();
+    gen.increment_indent();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-  EXPECT_EQ(gen.result(), "  @group(0) @binding(0) var t : texture_1d<f32>;\n");
+    ASSERT_TRUE(gen.Generate()) << gen.error();
+    EXPECT_EQ(gen.result(), "  @group(0) @binding(0) var t : texture_1d<f32>;\n");
+}
+
+TEST_F(WgslGeneratorImplTest, Emit_GlobalConst) {
+    GlobalConst("explicit", ty.f32(), Expr(1_f));
+    GlobalConst("inferred", Expr(1_f));
+
+    GeneratorImpl& gen = Build();
+
+    gen.increment_indent();
+
+    ASSERT_TRUE(gen.Generate()) << gen.error();
+    EXPECT_EQ(gen.result(), R"(  const explicit : f32 = 1.0f;
+
+  const inferred = 1.0f;
+)");
 }
 
 TEST_F(WgslGeneratorImplTest, Emit_OverridableConstants) {
-  Override("a", ty.f32(), nullptr);
-  Override("b", ty.f32(), nullptr, {Id(7u)});
+    Override("a", ty.f32());
+    Override("b", ty.f32(), Id(7_a));
 
-  GeneratorImpl& gen = Build();
+    GeneratorImpl& gen = Build();
 
-  gen.increment_indent();
+    gen.increment_indent();
 
-  ASSERT_TRUE(gen.Generate()) << gen.error();
-  EXPECT_EQ(gen.result(), R"(  override a : f32;
+    ASSERT_TRUE(gen.Generate()) << gen.error();
+    EXPECT_EQ(gen.result(), R"(  override a : f32;
 
   @id(7) override b : f32;
 )");

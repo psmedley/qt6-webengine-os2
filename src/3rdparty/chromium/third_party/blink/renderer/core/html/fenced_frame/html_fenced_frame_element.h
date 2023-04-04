@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FENCED_FRAME_HTML_FENCED_FRAME_ELEMENT_H_
 
 #include "base/notreached.h"
+#include "third_party/blink/public/common/fenced_frame/fenced_frame_utils.h"
 #include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -53,6 +54,10 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
     // collection.
     virtual void Dispose() {}
 
+    virtual void AttachLayoutTree() {}
+    virtual bool SupportsFocus() { return false; }
+    virtual void FreezeFrameSize() {}
+
    protected:
     HTMLFencedFrameElement& GetElement() const { return *outer_element_; }
 
@@ -98,6 +103,16 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   // respond to the size change requests from the containing layout algorithm,
   // while keeping the inner frame size unchanged.
   HTMLIFrameElement* InnerIFrameElement() const;
+
+  // Web-exposed API that returns whether an opaque-ads fenced frame would be
+  // allowed to be created in the current active document of this node.
+  // Checks the following criteria:
+  // - Not trying to load in a default mode fenced frame tree
+  // - All of the sandbox/allow flags required to load a fenced frame are set
+  //   in the embedder. See: blink::kFencedFrameMandatoryUnsandboxedFlags
+  // - No CSP headers are in place that will stop the fenced frame from loading
+  // - No CSPEE is applied to this or an ancestor frame
+  static bool canLoadOpaqueURL(ScriptState*);
 
  private:
   // This method will only navigate the underlying frame if the element
@@ -164,11 +179,20 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   // variable below so we can know when to reject updates to `mode_`.
   mojom::blink::FencedFrameMode mode_ = mojom::blink::FencedFrameMode::kDefault;
   bool freeze_mode_attribute_ = false;
+  // Used to track if the Blink.FencedFrame.IsFrameResizedAfterSizeFrozen
+  // histogram has already been logged for this fenced frame if its size was
+  // set after being frozen. This ensures that multiple logs don't happen
+  // for one fenced frame if it's constantly being resized.
+  bool size_set_after_freeze_ = false;
 
+  friend class FencedFrameMPArchDelegate;
+  friend class FencedFrameShadowDOMDelegate;
   friend class ResizeObserverDelegate;
   FRIEND_TEST_ALL_PREFIXES(HTMLFencedFrameElementTest,
                            FreezeSizePageZoomFactor);
   FRIEND_TEST_ALL_PREFIXES(HTMLFencedFrameElementTest, CoerceFrameSizeTest);
+  FRIEND_TEST_ALL_PREFIXES(HTMLFencedFrameElementTest,
+                           HistogramTestResizeAfterFreeze);
 };
 
 // Type casting. Custom since adoption could lead to an HTMLFencedFrameElement

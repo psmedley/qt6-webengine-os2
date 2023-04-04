@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -124,7 +124,7 @@ TEST_F(CSSStyleSheetTest, AdoptedStyleSheetMediaQueryEvalChange) {
   ASSERT_TRUE(sheet->Contents()->HasRuleSet());
   EXPECT_NE(rule_set, &sheet->Contents()->GetRuleSet());
   EXPECT_EQ(
-      MakeRGB(0, 128, 0),
+      Color::FromRGB(0, 128, 0),
       green->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
   EXPECT_EQ(Color::kBlack, blue->GetComputedStyle()->VisitedDependentColor(
                                GetCSSPropertyColor()));
@@ -142,10 +142,11 @@ TEST_F(CSSStyleSheetTest, AdoptedStyleSheetMediaQueryEvalChange) {
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_EQ(
-      MakeRGB(0, 128, 0),
+      Color::FromRGB(0, 128, 0),
       green->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
-  EXPECT_EQ(MakeRGB(0, 0, 255), blue->GetComputedStyle()->VisitedDependentColor(
-                                    GetCSSPropertyColor()));
+  EXPECT_EQ(
+      Color::FromRGB(0, 0, 255),
+      blue->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
 }
 
 }  // namespace blink

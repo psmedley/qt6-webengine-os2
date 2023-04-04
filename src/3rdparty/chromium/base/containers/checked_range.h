@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/containers/checked_iterators.h"
 #include "base/template_util.h"
 
@@ -127,7 +128,8 @@ class CheckedContiguousRange {
   constexpr reference back() const noexcept { return *(end() - 1); }
 
   constexpr reference operator[](size_type idx) const noexcept {
-    return *(begin() + idx);
+    CHECK(idx < size());
+    return *(begin() + static_cast<difference_type>(idx));
   }
 
   constexpr pointer data() const noexcept {

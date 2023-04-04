@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,6 @@ namespace blink {
 // This structure contains extracted mobile friendliness metrics from the page.
 // Used for UKM logging.
 struct BLINK_COMMON_EXPORT MobileFriendliness {
-  MobileFriendliness() = default;
-  MobileFriendliness(const MobileFriendliness&) = default;
-  MobileFriendliness& operator=(const MobileFriendliness&) = default;
-
   bool operator==(const MobileFriendliness& other) const;
   bool operator!=(const MobileFriendliness& other) const {
     return !(*this == other);

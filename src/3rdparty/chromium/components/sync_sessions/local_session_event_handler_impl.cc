@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "components/sync/model/sync_change.h"
 #include "components/sync/protocol/session_specifics.pb.h"
+#include "components/sync/protocol/sync_enums.pb.h"
 #include "components/sync_sessions/sync_sessions_client.h"
 #include "components/sync_sessions/synced_session_tracker.h"
 #include "components/sync_sessions/synced_tab_delegate.h"
@@ -58,19 +58,19 @@ bool ScanForTabbedWindow(SyncedWindowDelegatesGetter* delegates_getter) {
   return false;
 }
 
-sync_pb::SessionWindow_BrowserType BrowserTypeFromWindowDelegate(
+sync_pb::SyncEnums_BrowserType BrowserTypeFromWindowDelegate(
     const SyncedWindowDelegate& delegate) {
   if (delegate.IsTypeNormal()) {
-    return sync_pb::SessionWindow_BrowserType_TYPE_TABBED;
+    return sync_pb::SyncEnums_BrowserType_TYPE_TABBED;
   }
 
   if (delegate.IsTypePopup()) {
-    return sync_pb::SessionWindow_BrowserType_TYPE_POPUP;
+    return sync_pb::SyncEnums_BrowserType_TYPE_POPUP;
   }
 
   // This is a custom tab within an app. These will not be restored on
   // startup if not present.
-  return sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB;
+  return sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB;
 }
 
 }  // namespace
@@ -278,8 +278,9 @@ void LocalSessionEventHandlerImpl::AssociateTab(
       session_tracker_->GetTab(current_session_tag_, tab_id);
   int old_index = session_tab->normalized_navigation_index();
   GURL old_url;
-  if (session_tab->navigations.size() > static_cast<size_t>(old_index))
+  if (session_tab->navigations.size() > static_cast<size_t>(old_index)) {
     old_url = session_tab->navigations[old_index].virtual_url();
+  }
 
   // Produce the specifics.
   auto specifics = std::make_unique<sync_pb::SessionSpecifics>();
@@ -376,15 +377,17 @@ sync_pb::SessionTab LocalSessionEventHandlerImpl::GetTabSpecificsFromDelegate(
     tab_delegate.GetSerializedNavigationAtIndex(i, &serialized_entry);
 
     // Set current_navigation_index to the index in navigations.
-    if (i == current_index)
+    if (i == current_index) {
       specifics.set_current_navigation_index(specifics.navigation_size());
+    }
 
     sync_pb::TabNavigation* navigation = specifics.add_navigation();
     SessionNavigationToSyncData(serialized_entry).Swap(navigation);
 
     const std::string page_language = tab_delegate.GetPageLanguageAtIndex(i);
-    if (!page_language.empty())
+    if (!page_language.empty()) {
       navigation->set_page_language(page_language);
+    }
 
     if (has_child_account) {
       navigation->set_blocked_state(

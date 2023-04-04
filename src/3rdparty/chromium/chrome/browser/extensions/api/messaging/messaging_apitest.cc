@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/json/json_reader.h"
@@ -93,7 +94,7 @@ class MessageSender : public ExtensionHostRegistry::Observer {
       GURL event_url) {
     auto event = std::make_unique<Event>(
         events::TEST_ON_MESSAGE, "test.onMessage",
-        std::move(*event_args).TakeListDeprecated(), browser_context);
+        std::move(*event_args).TakeList(), browser_context);
     event->event_url = std::move(event_url);
     return event;
   }
@@ -131,10 +132,7 @@ class MessagingApiTest : public ExtensionApiTest {
   explicit MessagingApiTest(bool enable_back_forward_cache) {
     if (enable_back_forward_cache) {
       feature_list_.InitWithFeaturesAndParameters(
-          {{features::kBackForwardCache,
-            // The tests does same-site navigation. So same site BFCache needs
-            // to be enabled.
-            {{"enable_same_site", "true"}}},
+          {{features::kBackForwardCache, {}},
            // Allow BackForwardCache for all devices regardless of their memory.
            {features::kBackForwardCacheMemoryControls, {}}},
           {});
@@ -175,7 +173,7 @@ IN_PROC_BROWSER_TEST_F(MessagingApiWithoutBackForwardCacheTest, Messaging) {
 }
 
 IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingCrash) {
-  ExtensionTestMessageListener ready_to_crash("ready_to_crash", false);
+  ExtensionTestMessageListener ready_to_crash("ready_to_crash");
   ASSERT_TRUE(LoadExtension(
           test_data_dir_.AppendASCII("messaging/connect_crash")));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
@@ -272,7 +270,7 @@ IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingExternal) {
 // no background page.
 IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingNoBackground) {
   ASSERT_TRUE(RunExtensionTest("messaging/connect_nobackground",
-                               {.page_url = "page_in_main_frame.html"}))
+                               {.extension_url = "page_in_main_frame.html"}))
       << message_;
 }
 
@@ -317,15 +315,16 @@ class ExternallyConnectableMessagingTest : public MessagingApiTest {
   }
 
   Result CanConnectAndSendMessagesToMainFrame(const Extension* extension,
-                                              const char* message = NULL) {
-    return CanConnectAndSendMessagesToFrame(
-        browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame(),
-        extension,
-        message);
+                                              const char* message = nullptr) {
+    return CanConnectAndSendMessagesToFrame(browser()
+                                                ->tab_strip_model()
+                                                ->GetActiveWebContents()
+                                                ->GetPrimaryMainFrame(),
+                                            extension, message);
   }
 
   Result CanConnectAndSendMessagesToIFrame(const Extension* extension,
-                                           const char* message = NULL) {
+                                           const char* message = nullptr) {
     content::RenderFrameHost* frame = content::FrameMatchingPredicate(
         browser()->tab_strip_model()->GetActiveWebContents()->GetPrimaryPage(),
         base::BindRepeating(&content::FrameIsChildOfMainFrame));
@@ -346,8 +345,10 @@ class ExternallyConnectableMessagingTest : public MessagingApiTest {
   }
 
   testing::AssertionResult AreAnyNonWebApisDefinedForMainFrame() {
-    return AreAnyNonWebApisDefinedForFrame(
-        browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame());
+    return AreAnyNonWebApisDefinedForFrame(browser()
+                                               ->tab_strip_model()
+                                               ->GetActiveWebContents()
+                                               ->GetPrimaryMainFrame());
   }
 
   testing::AssertionResult AreAnyNonWebApisDefinedForIFrame() {
@@ -403,7 +404,7 @@ class ExternallyConnectableMessagingTest : public MessagingApiTest {
 
   std::string GetTlsChannelIdFromPortConnect(const Extension* extension,
                                              bool include_tls_channel_id,
-                                             const char* message = NULL) {
+                                             const char* message = nullptr) {
     return GetTlsChannelIdFromAssertion("getTlsChannelIdFromPortConnect",
                                         extension,
                                         include_tls_channel_id,
@@ -412,7 +413,7 @@ class ExternallyConnectableMessagingTest : public MessagingApiTest {
 
   std::string GetTlsChannelIdFromSendMessage(const Extension* extension,
                                              bool include_tls_channel_id,
-                                             const char* message = NULL) {
+                                             const char* message = nullptr) {
     return GetTlsChannelIdFromAssertion("getTlsChannelIdFromSendMessage",
                                         extension,
                                         include_tls_channel_id,
@@ -822,8 +823,10 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   Browser* incognito_browser = OpenURLOffTheRecord(
       profile()->GetPrimaryOTRProfile(/*create_if_needed=*/true),
       chromium_org_url());
-  content::RenderFrameHost* incognito_frame = incognito_browser->
-      tab_strip_model()->GetActiveWebContents()->GetMainFrame();
+  content::RenderFrameHost* incognito_frame =
+      incognito_browser->tab_strip_model()
+          ->GetActiveWebContents()
+          ->GetPrimaryMainFrame();
 
   {
     IncognitoConnectability::ScopedAlertTracker alert_tracker(
@@ -833,20 +836,21 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
     // the user denied our interactive request.
     EXPECT_EQ(
         COULD_NOT_ESTABLISH_CONNECTION_ERROR,
-        CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+        CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), nullptr));
     EXPECT_EQ(1, alert_tracker.GetAndResetAlertCount());
 
     // Try again. User has already denied so alert not shown.
     EXPECT_EQ(
         COULD_NOT_ESTABLISH_CONNECTION_ERROR,
-        CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+        CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), nullptr));
     EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
   }
 
   // It's not possible to allow an app in incognito.
   ExtensionPrefs::Get(profile())->SetIsIncognitoEnabled(app->id(), true);
-  EXPECT_EQ(COULD_NOT_ESTABLISH_CONNECTION_ERROR,
-            CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+  EXPECT_EQ(
+      COULD_NOT_ESTABLISH_CONNECTION_ERROR,
+      CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), nullptr));
 }
 
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
@@ -860,7 +864,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   content::RenderFrameHost* incognito_frame =
       incognito_browser->tab_strip_model()
           ->GetActiveWebContents()
-          ->GetMainFrame();
+          ->GetPrimaryMainFrame();
 
   IncognitoConnectability::ScopedAlertTracker alert_tracker(
       IncognitoConnectability::ScopedAlertTracker::ALWAYS_DENY);
@@ -913,7 +917,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   content::RenderFrameHost* incognito_frame =
       incognito_browser->tab_strip_model()
           ->GetActiveWebContents()
-          ->GetMainFrame();
+          ->GetPrimaryMainFrame();
 
   {
     IncognitoConnectability::ScopedAlertTracker alert_tracker(
@@ -923,7 +927,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
     // the app hasn't installed event handlers.
     EXPECT_EQ(
         COULD_NOT_ESTABLISH_CONNECTION_ERROR,
-        CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+        CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), nullptr));
     // No dialog should have been shown.
     EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
   }
@@ -941,8 +945,10 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   Browser* incognito_browser = OpenURLOffTheRecord(
       profile()->GetPrimaryOTRProfile(/*create_if_needed=*/true),
       chromium_org_url());
-  content::RenderFrameHost* incognito_frame = incognito_browser->
-      tab_strip_model()->GetActiveWebContents()->GetMainFrame();
+  content::RenderFrameHost* incognito_frame =
+      incognito_browser->tab_strip_model()
+          ->GetActiveWebContents()
+          ->GetPrimaryMainFrame();
 
   {
     IncognitoConnectability::ScopedAlertTracker alert_tracker(
@@ -950,21 +956,21 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 
     // Connection allowed even with incognito disabled, because the user
     // accepted the interactive request.
-    EXPECT_EQ(
-        OK, CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+    EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(incognito_frame, app.get(),
+                                                   nullptr));
     EXPECT_EQ(1, alert_tracker.GetAndResetAlertCount());
 
     // Try again. User has already allowed.
-    EXPECT_EQ(
-        OK, CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+    EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(incognito_frame, app.get(),
+                                                   nullptr));
     EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
   }
 
   // Apps can't be allowed in incognito mode, but it's moot because it's
   // already allowed.
   ExtensionPrefs::Get(profile())->SetIsIncognitoEnabled(app->id(), true);
-  EXPECT_EQ(OK,
-            CanConnectAndSendMessagesToFrame(incognito_frame, app.get(), NULL));
+  EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(incognito_frame, app.get(),
+                                                 nullptr));
 }
 
 // Tests connection from incognito tabs when there are multiple tabs open to the
@@ -982,7 +988,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   content::RenderFrameHost* incognito_frame1 =
       incognito_browser->tab_strip_model()
           ->GetActiveWebContents()
-          ->GetMainFrame();
+          ->GetPrimaryMainFrame();
   infobars::ContentInfoBarManager* infobar_manager1 =
       infobars::ContentInfoBarManager::FromWebContents(
           incognito_browser->tab_strip_model()->GetActiveWebContents());
@@ -993,7 +999,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   content::RenderFrameHost* incognito_frame2 =
       incognito_browser->tab_strip_model()
           ->GetActiveWebContents()
-          ->GetMainFrame();
+          ->GetPrimaryMainFrame();
   infobars::ContentInfoBarManager* infobar_manager2 =
       infobars::ContentInfoBarManager::FromWebContents(
           incognito_browser->tab_strip_model()->GetActiveWebContents());
@@ -1023,12 +1029,12 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
         ui_test_utils::NavigateToURL(incognito_browser, chromium_org_url()));
     incognito_frame2 = incognito_browser->tab_strip_model()
                            ->GetActiveWebContents()
-                           ->GetMainFrame();
+                           ->GetPrimaryMainFrame();
     EXPECT_NE(incognito_frame1, incognito_frame2);
 
     EXPECT_EQ(1U, infobar_manager1->infobar_count());
     EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(incognito_frame2, app.get(),
-                                                   NULL));
+                                                   nullptr));
     EXPECT_EQ(1, alert_tracker.GetAndResetAlertCount());
     EXPECT_EQ(0U, infobar_manager1->infobar_count());
   }
@@ -1057,7 +1063,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   content::RenderFrameHost* incognito_frame =
       incognito_browser->tab_strip_model()
           ->GetActiveWebContents()
-          ->GetMainFrame();
+          ->GetPrimaryMainFrame();
 
   IncognitoConnectability::ScopedAlertTracker alert_tracker(
       IncognitoConnectability::ScopedAlertTracker::ALWAYS_ALLOW);
@@ -1153,7 +1159,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, FromPopup) {
   ASSERT_NE(nullptr, popup_contents) << "Could not find WebContents for popup";
 
   // Make sure the popup can connect and send messages to the extension.
-  content::RenderFrameHost* popup_frame = popup_contents->GetMainFrame();
+  content::RenderFrameHost* popup_frame = popup_contents->GetPrimaryMainFrame();
 
   EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(popup_frame, extension.get(),
                                                  nullptr));
@@ -1491,7 +1497,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingOnUnload) {
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("messaging/on_unload"));
-  ExtensionTestMessageListener listener("listening", false);
+  ExtensionTestMessageListener listener("listening");
   ASSERT_TRUE(extension);
   // Open a new tab to example.com. Since we'll be closing it later, we need
   // to make sure there's still a tab around to extend the life of the
@@ -1544,7 +1550,6 @@ class MessagingApiFencedFrameTest
           {{"implementation_type", GetParam() ? "shadow_dom" : "mparch"}}},
          {features::kPrivacySandboxAdsAPIsOverride, {}}},
         {/* disabled_features */});
-    UseHttpsTestServer();
   }
   ~MessagingApiFencedFrameTest() override = default;
 

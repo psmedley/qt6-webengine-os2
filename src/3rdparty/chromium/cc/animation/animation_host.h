@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,13 +69,11 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   void RegisterAnimationForElement(ElementId element_id, Animation* animation);
   void UnregisterAnimationForElement(ElementId element_id,
                                      Animation* animation);
-
-  scoped_refptr<const ElementAnimations> GetElementAnimationsForElementId(
-      ElementId element_id) const;
-  scoped_refptr<ElementAnimations> GetElementAnimationsForElementId(
-      ElementId element_id);
-
+  void UpdateClientAnimationStateForElementAnimations(ElementId element_id);
   gfx::PointF GetScrollOffsetForAnimation(ElementId element_id) const;
+
+  scoped_refptr<const ElementAnimations>
+  GetElementAnimationsForElementIdForTesting(ElementId element_id) const;
 
   // Parent LayerTreeHost or LayerTreeHostImpl.
   MutatorHostClient* mutator_host_client() {
@@ -136,28 +134,14 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
 
   bool ScrollOffsetAnimationWasInterrupted(ElementId element_id) const override;
 
-  bool IsAnimatingFilterProperty(ElementId element_id,
-                                 ElementListType list_type) const override;
-  bool IsAnimatingBackdropFilterProperty(
-      ElementId element_id,
-      ElementListType list_type) const override;
-  bool IsAnimatingOpacityProperty(ElementId element_id,
-                                  ElementListType list_type) const override;
-  bool IsAnimatingTransformProperty(ElementId element_id,
-                                    ElementListType list_type) const override;
+  bool IsAnimatingProperty(ElementId element_id,
+                           ElementListType list_type,
+                           TargetProperty::Type property) const override;
 
-  bool HasPotentiallyRunningFilterAnimation(
+  bool HasPotentiallyRunningAnimationForProperty(
       ElementId element_id,
-      ElementListType list_type) const override;
-  bool HasPotentiallyRunningBackdropFilterAnimation(
-      ElementId element_id,
-      ElementListType list_type) const override;
-  bool HasPotentiallyRunningOpacityAnimation(
-      ElementId element_id,
-      ElementListType list_type) const override;
-  bool HasPotentiallyRunningTransformAnimation(
-      ElementId element_id,
-      ElementListType list_type) const override;
+      ElementListType list_type,
+      TargetProperty::Type property) const override;
 
   bool HasAnyAnimationTargetingProperty(
       ElementId element_id,
@@ -225,6 +209,7 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   bool HasCanvasInvalidation() const override;
   bool HasJSAnimation() const override;
   bool HasSmilAnimation() const override;
+  bool HasSharedElementTransition() const override;
 
   // Starts/stops throughput tracking represented by |sequence_id|.
   void StartThroughputTracking(TrackedAnimationSequenceId sequence_id);
@@ -234,11 +219,17 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   void SetHasCanvasInvalidation(bool has_canvas_invalidation);
   void SetHasInlineStyleMutation(bool has_inline_style_mutation);
   void SetHasSmilAnimation(bool has_svg_smil_animation);
+  void SetHasSharedElementTransition(bool hash_shared_element_transition);
   void SetCurrentFrameHadRaf(bool current_frame_had_raf);
   void SetNextFrameHasPendingRaf(bool next_frame_has_pending_raf);
 
  private:
   explicit AnimationHost(ThreadInstance thread_instance);
+
+  const ElementAnimations* GetElementAnimationsForElementId(
+      ElementId element_id) const;
+  scoped_refptr<ElementAnimations> GetElementAnimationsForElementId(
+      ElementId element_id);
 
   void PushTimelinesToImplThread(AnimationHost* host_impl) const;
   void RemoveTimelinesFromImplThread(AnimationHost* host_impl) const;
@@ -298,6 +289,7 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   ProtectedSequenceReadable<bool> has_canvas_invalidation_{false};
   ProtectedSequenceReadable<bool> has_inline_style_mutation_{false};
   ProtectedSequenceReadable<bool> has_smil_animation_{false};
+  ProtectedSequenceReadable<bool> has_shared_element_transition_{false};
 
   ProtectedSequenceWritable<PendingThroughputTrackerInfos>
       pending_throughput_tracker_infos_;

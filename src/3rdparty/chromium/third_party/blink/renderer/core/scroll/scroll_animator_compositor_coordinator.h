@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,14 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "ui/gfx/animation/keyframe/animation_curve.h"
 
+namespace cc {
+class AnimationTimeline;
+}
+
 namespace blink {
 
 class ScrollableArea;
 class CompositorAnimation;
-class CompositorAnimationTimeline;
 
 // ScrollAnimatorCompositorCoordinator is the common base class of user scroll
 // animators and programmatic scroll animators, and holds logic related to
@@ -145,7 +148,7 @@ class CORE_EXPORT ScrollAnimatorCompositorCoordinator
 
   void CompositorAnimationFinished(int group_id);
   // Returns true if the compositor animation was attached to a new layer.
-  bool ReattachCompositorAnimationIfNeeded(CompositorAnimationTimeline*);
+  bool ReattachCompositorAnimationIfNeeded(cc::AnimationTimeline*);
 
   // CompositorAnimationDelegate implementation.
   void NotifyAnimationStarted(base::TimeDelta monotonic_time,
@@ -175,6 +178,9 @@ class CORE_EXPORT ScrollAnimatorCompositorCoordinator
   FRIEND_TEST_ALL_PREFIXES(ScrollAnimatorTest,
                            UserScrollCallBackAtAnimationFinishOnCompositor);
   FRIEND_TEST_ALL_PREFIXES(ScrollAnchorTest, ClampAdjustsAnchorAnimation);
+  // TODO(crbug.com/1313270): Remove this when ScrollAnchorTest runs on Fuchsia.
+  FRIEND_TEST_ALL_PREFIXES(DISABLED_ScrollAnchorTest,
+                           ClampAdjustsAnchorAnimation);
 
   std::unique_ptr<CompositorAnimation> compositor_animation_;
   // The element id to which the compositor animation is attached when

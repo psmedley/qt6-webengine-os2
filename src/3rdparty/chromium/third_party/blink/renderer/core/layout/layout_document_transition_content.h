@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,11 @@ class CORE_EXPORT LayoutDocumentTransitionContent : public LayoutReplaced {
   }
   void OnIntrinsicSizeUpdated(const LayoutSize& intrinsic_size);
 
+  bool IsDocumentTransitionContent() const override {
+    NOT_DESTROYED();
+    return true;
+  }
+
  protected:
   PaintLayerType LayerTypeRequired() const override;
   void IntrinsicSizeChanged() override { NOT_DESTROYED(); }
@@ -33,6 +38,13 @@ class CORE_EXPORT LayoutDocumentTransitionContent : public LayoutReplaced {
 
  private:
   scoped_refptr<cc::DocumentTransitionContentLayer> layer_;
+};
+
+template <>
+struct DowncastTraits<LayoutDocumentTransitionContent> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsDocumentTransitionContent();
+  }
 };
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,7 +72,6 @@ class MainThreadWorkletTest : public PageTestBase {
         window->GetReferrerPolicy(), window->GetSecurityOrigin(),
         window->IsSecureContext(), window->GetHttpsState(),
         nullptr /* worker_clients */, nullptr /* content_settings_client */,
-        window->AddressSpace(),
         OriginTrialContext::GetInheritedTrialFeatures(window).get(),
         base::UnguessableToken::Create(), nullptr /* worker_settings */,
         mojom::blink::V8CacheOptions::kDefault,

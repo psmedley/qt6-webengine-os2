@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,9 +39,7 @@ typedef base::RepeatingCallback<bool(base::TimeTicks)> ShouldNotifyRTTCallback;
 
 }  // namespace
 
-namespace nqe {
-
-namespace internal {
+namespace nqe::internal {
 
 // SocketWatcher implements SocketPerformanceWatcher, and is not thread-safe.
 class NET_EXPORT_PRIVATE SocketWatcher : public SocketPerformanceWatcher {
@@ -106,15 +104,13 @@ class NET_EXPORT_PRIVATE SocketWatcher : public SocketPerformanceWatcher {
 
   // True if the first RTT notification from the QUIC connection has been
   // received.
-  bool first_quic_rtt_notification_received_;
+  bool first_quic_rtt_notification_received_ = false;
 
   // A unique identifier for the remote host that this socket connects to.
   const absl::optional<IPHash> host_;
 };
 
-}  // namespace internal
-
-}  // namespace nqe
+}  // namespace nqe::internal
 
 }  // namespace net
 

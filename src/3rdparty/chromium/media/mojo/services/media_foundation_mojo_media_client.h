@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,10 @@ class MediaFoundationMojoMediaClient final : public MojoMediaClient {
       const MediaFoundationMojoMediaClient&) = delete;
 
   ~MediaFoundationMojoMediaClient() override;
+
+  // MojoMediaClient implementation.
+  std::unique_ptr<AudioDecoder> CreateAudioDecoder(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) override;
 
   // MojoMediaClient implementation.
   std::unique_ptr<Renderer> CreateMediaFoundationRenderer(

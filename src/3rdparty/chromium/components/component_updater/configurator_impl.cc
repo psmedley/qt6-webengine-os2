@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -149,7 +149,10 @@ update_client::UpdaterStateProvider ConfiguratorImpl::GetUpdaterStateProvider()
 
 absl::optional<bool> ConfiguratorImpl::IsMachineExternallyManaged() const {
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
-  return base::IsMachineExternallyManaged();
+  // TODO (crbug.com/1320776): For legacy compatibility, this uses
+  // IsEnterpriseDevice() which effectively equates to a domain join check.
+  // Consider whether this should use IsManagedDevice() instead.
+  return base::IsEnterpriseDevice();
 #else
   return absl::nullopt;
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "v8/include/v8-array-buffer.h"
 #include "v8/include/v8-callbacks.h"
 #include "v8/include/v8-forward.h"
+#include "v8/include/v8-isolate.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -83,6 +84,12 @@ class GIN_EXPORT IsolateHolder {
       IsolateCreationMode isolate_creation_mode = IsolateCreationMode::kNormal,
       v8::CreateHistogramCallback create_histogram_callback = nullptr,
       v8::AddHistogramSampleCallback add_histogram_sample_callback = nullptr);
+  IsolateHolder(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      AccessMode access_mode,
+      IsolateType isolate_type,
+      std::unique_ptr<v8::Isolate::CreateParams> params,
+      IsolateCreationMode isolate_creation_mode = IsolateCreationMode::kNormal);
   IsolateHolder(const IsolateHolder&) = delete;
   IsolateHolder& operator=(const IsolateHolder&) = delete;
   ~IsolateHolder();
@@ -109,6 +116,9 @@ class GIN_EXPORT IsolateHolder {
   // false after returning true).
   static bool Initialized();
 
+  // Should only be called after v8::IsolateHolder::Initialize() is invoked.
+  static std::unique_ptr<v8::Isolate::CreateParams> getDefaultIsolateParams();
+
   v8::Isolate* isolate() { return isolate_; }
 
   // This method returns if v8::Locker is needed to access isolate.
@@ -133,7 +143,7 @@ class GIN_EXPORT IsolateHolder {
   void SetUp(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   std::unique_ptr<v8::SnapshotCreator> snapshot_creator_;
-  raw_ptr<v8::Isolate> isolate_;
+  raw_ptr<v8::Isolate, DanglingUntriaged> isolate_;
   std::unique_ptr<PerIsolateData> isolate_data_;
   std::unique_ptr<V8IsolateMemoryDumpProvider> isolate_memory_dump_provider_;
   AccessMode access_mode_;

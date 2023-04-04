@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,7 +110,7 @@ void BindingStateBase::BindInternal(
     base::span<const uint32_t> sync_method_ordinals,
     MessageReceiverWithResponderStatus* stub,
     uint32_t interface_version,
-    MessageToStableIPCHashCallback ipc_hash_callback,
+    MessageToMethodInfoCallback method_info_callback,
     MessageToMethodNameCallback method_name_callback) {
   DCHECK(!is_bound()) << "Attempting to bind interface that is already bound: "
                       << interface_name;
@@ -133,7 +133,7 @@ void BindingStateBase::BindInternal(
       router_->CreateLocalEndpointHandle(kPrimaryInterfaceId), stub,
       std::move(request_validator), sync_method_ordinals,
       std::move(sequenced_runner), interface_version, interface_name,
-      ipc_hash_callback, method_name_callback);
+      method_info_callback, method_name_callback);
   endpoint_client_->SetIdleTrackingEnabledCallback(
       base::BindOnce(&MultiplexRouter::SetConnectionGroup, router_));
 

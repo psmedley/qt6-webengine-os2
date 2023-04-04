@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill_assistant/browser/client_settings.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/script_executor_delegate.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/service/service.h"
@@ -16,7 +17,6 @@
 #include "components/autofill_assistant/browser/user_model.h"
 #include "components/autofill_assistant/browser/viewport_mode.h"
 #include "components/autofill_assistant/browser/web/web_controller.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "url/gurl.h"
@@ -49,6 +49,13 @@ class MockScriptExecutorDelegate : public ScriptExecutorDelegate {
               (),
               (override));
   MOCK_METHOD(content::WebContents*, GetWebContents, (), (override));
+  MOCK_METHOD(const std::string, GetLocale, (), (override));
+  MOCK_METHOD(void,
+              SetJsFlowLibrary,
+              (const std::string& js_flow_library),
+              (override));
+  MOCK_METHOD(JsFlowDevtoolsWrapper*, GetJsFlowDevtoolsWrapper, (), (override));
+
   MOCK_METHOD(std::string,
               GetEmailAddressForAccessTokenAccount,
               (),
@@ -76,6 +83,7 @@ class MockScriptExecutorDelegate : public ScriptExecutorDelegate {
               (const ClientSettingsProto& client_settings),
               (override));
   MOCK_METHOD(UserModel*, GetUserModel, (), (override));
+  MOCK_METHOD(UserData*, GetUserData, (), (override));
   MOCK_METHOD(void, ExpectNavigation, (), (override));
   MOCK_METHOD(bool, IsNavigatingToNewDocument, (), (override));
   MOCK_METHOD(bool, HasNavigationError, (), (override));
@@ -95,10 +103,21 @@ class MockScriptExecutorDelegate : public ScriptExecutorDelegate {
   MOCK_METHOD(void, SetBrowseModeInvisible, (bool invisible), (override));
   MOCK_METHOD(ProcessedActionStatusDetailsProto&, GetLogInfo, (), (override));
   MOCK_METHOD(bool, ShouldShowWarning, (), (override));
+  MOCK_METHOD(bool, MustUseBackendData, (), (const override));
+  MOCK_METHOD(void,
+              OnActionsResponseReceived,
+              (const RoundtripNetworkStats& network_stats),
+              (override));
+  MOCK_CONST_METHOD1(IsXmlSigned, bool(const std::string& xml_string));
+  MOCK_CONST_METHOD2(
+      ExtractValuesFromSingleTagXml,
+      const std::vector<std::string>(const std::string& xml_string,
+                                     const std::vector<std::string>& keys));
 
  private:
   ClientSettings client_settings_;
   ProcessedActionStatusDetailsProto log_info_;
+  const GURL default_url_ = GURL("https://example.com/");
 };
 
 }  // namespace autofill_assistant

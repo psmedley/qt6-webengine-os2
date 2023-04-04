@@ -6,6 +6,8 @@
 
 #include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 
+#include <stdint.h>
+
 #include <memory>
 #include <utility>
 #include <vector>
@@ -14,7 +16,7 @@
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfdoc/cpdf_nametree.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/stl_util.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "fpdfsdk/cpdfsdk_interactiveform.h"
@@ -22,7 +24,6 @@
 #include "fpdfsdk/cpdfsdk_widget.h"
 #include "fpdfsdk/formfiller/cffl_formfield.h"
 #include "fpdfsdk/formfiller/cffl_interactiveformfiller.h"
-#include "fpdfsdk/formfiller/cffl_perwindowdata.h"
 #include "fxjs/ijs_event_context.h"
 #include "fxjs/ijs_runtime.h"
 #include "third_party/base/check.h"
@@ -35,22 +36,22 @@
 #endif
 
 static_assert(FXCT_ARROW ==
-                  static_cast<int>(IPWL_SystemHandler::CursorStyle::kArrow),
+                  static_cast<int>(IPWL_FillerNotify::CursorStyle::kArrow),
               "kArrow value mismatch");
 static_assert(FXCT_NESW ==
-                  static_cast<int>(IPWL_SystemHandler::CursorStyle::kNESW),
+                  static_cast<int>(IPWL_FillerNotify::CursorStyle::kNESW),
               "kNEWS value mismatch");
 static_assert(FXCT_NWSE ==
-                  static_cast<int>(IPWL_SystemHandler::CursorStyle::kNWSE),
+                  static_cast<int>(IPWL_FillerNotify::CursorStyle::kNWSE),
               "kNWSE value mismatch");
 static_assert(FXCT_VBEAM ==
-                  static_cast<int>(IPWL_SystemHandler::CursorStyle::kVBeam),
+                  static_cast<int>(IPWL_FillerNotify::CursorStyle::kVBeam),
               "kVBeam value mismatch");
 static_assert(FXCT_HBEAM ==
-                  static_cast<int>(IPWL_SystemHandler::CursorStyle::kHBeam),
+                  static_cast<int>(IPWL_FillerNotify::CursorStyle::kHBeam),
               "HBeam value mismatch");
 static_assert(FXCT_HAND ==
-                  static_cast<int>(IPWL_SystemHandler::CursorStyle::kHand),
+                  static_cast<int>(IPWL_FillerNotify::CursorStyle::kHand),
               "kHand value mismatch");
 
 FPDF_WIDESTRING AsFPDFWideString(ByteString* bsUTF16LE) {
@@ -88,13 +89,8 @@ CPDFSDK_FormFillEnvironment::~CPDFSDK_FormFillEnvironment() {
     m_pInfo->Release(m_pInfo);
 }
 
-void CPDFSDK_FormFillEnvironment::InvalidateRect(PerWindowData* pWidgetData,
+void CPDFSDK_FormFillEnvironment::InvalidateRect(CPDFSDK_Widget* widget,
                                                  const CFX_FloatRect& rect) {
-  auto* pPrivateData = static_cast<CFFL_PerWindowData*>(pWidgetData);
-  CPDFSDK_Widget* widget = pPrivateData->GetWidget();
-  if (!widget)
-    return;
-
   IPDF_Page* pPage = widget->GetPage();
   if (!pPage)
     return;
@@ -111,17 +107,9 @@ void CPDFSDK_FormFillEnvironment::InvalidateRect(PerWindowData* pWidgetData,
 }
 
 void CPDFSDK_FormFillEnvironment::OutputSelectedRect(
-    PerWindowData* pWidgetData,
+    CFFL_FormField* pFormField,
     const CFX_FloatRect& rect) {
   if (!m_pInfo || !m_pInfo->FFI_OutputSelectedRect)
-    return;
-
-  auto* pPrivateData = static_cast<CFFL_PerWindowData*>(pWidgetData);
-  if (!pPrivateData)
-    return;
-
-  CFFL_FormField* pFormField = pPrivateData->GetFormField();
-  if (!pFormField)
     return;
 
   auto* pPage = FPDFPageFromIPDFPage(pFormField->GetSDKWidget()->GetPage());
@@ -139,14 +127,14 @@ bool CPDFSDK_FormFillEnvironment::IsSelectionImplemented() const {
 
 #ifdef PDF_ENABLE_V8
 CPDFSDK_PageView* CPDFSDK_FormFillEnvironment::GetCurrentView() {
-  IPDF_Page* pPage = IPDFPageFromFPDFPage(GetCurrentPage());
+  IPDF_Page* pPage = GetCurrentPage();
   return pPage ? GetOrCreatePageView(pPage) : nullptr;
 }
 
-FPDF_PAGE CPDFSDK_FormFillEnvironment::GetCurrentPage() const {
+IPDF_Page* CPDFSDK_FormFillEnvironment::GetCurrentPage() const {
   if (m_pInfo && m_pInfo->FFI_GetCurrentPage) {
-    return m_pInfo->FFI_GetCurrentPage(
-        m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get()));
+    return IPDFPageFromFPDFPage(m_pInfo->FFI_GetCurrentPage(
+        m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get())));
   }
   return nullptr;
 }
@@ -160,7 +148,7 @@ WideString CPDFSDK_FormFillEnvironment::GetLanguage() {
   if (nRequiredLen <= 0)
     return WideString();
 
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> pBuff(nRequiredLen);
+  DataVector<uint8_t> pBuff(nRequiredLen);
   int nActualLen =
       m_pInfo->FFI_GetLanguage(m_pInfo, pBuff.data(), nRequiredLen);
   if (nActualLen <= 0 || nActualLen > nRequiredLen)
@@ -182,7 +170,7 @@ WideString CPDFSDK_FormFillEnvironment::GetPlatform() {
   if (nRequiredLen <= 0)
     return WideString();
 
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> pBuff(nRequiredLen);
+  DataVector<uint8_t> pBuff(nRequiredLen);
   int nActualLen =
       m_pInfo->FFI_GetPlatform(m_pInfo, pBuff.data(), nRequiredLen);
   if (nActualLen <= 0 || nActualLen > nRequiredLen)
@@ -247,7 +235,7 @@ WideString CPDFSDK_FormFillEnvironment::JS_fieldBrowse() {
   if (nRequiredLen <= 0)
     return WideString();
 
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> pBuff(nRequiredLen);
+  DataVector<uint8_t> pBuff(nRequiredLen);
   const int nActualLen =
       js_platform->Field_browse(js_platform, pBuff.data(), nRequiredLen);
   if (nActualLen <= 0 || nActualLen > nRequiredLen)
@@ -255,16 +243,19 @@ WideString CPDFSDK_FormFillEnvironment::JS_fieldBrowse() {
 
   // Don't include trailing NUL.
   pBuff.resize(nActualLen - 1);
+
+  // Use FromDefANSI() per "local encoding" comment in fpdf_formfill.h.
   return WideString::FromDefANSI(ByteStringView(pBuff));
 }
 
-void CPDFSDK_FormFillEnvironment::JS_docmailForm(pdfium::span<uint8_t> mailData,
-                                                 FPDF_BOOL bUI,
-                                                 const WideString& To,
-                                                 const WideString& Subject,
-                                                 const WideString& CC,
-                                                 const WideString& BCC,
-                                                 const WideString& Msg) {
+void CPDFSDK_FormFillEnvironment::JS_docmailForm(
+    pdfium::span<const uint8_t> mailData,
+    FPDF_BOOL bUI,
+    const WideString& To,
+    const WideString& Subject,
+    const WideString& CC,
+    const WideString& BCC,
+    const WideString& Msg) {
   IPDF_JSPLATFORM* js_platform = GetJSPlatform();
   if (!js_platform || !js_platform->Doc_mail)
     return;
@@ -274,7 +265,7 @@ void CPDFSDK_FormFillEnvironment::JS_docmailForm(pdfium::span<uint8_t> mailData,
   ByteString bsCC = CC.ToUTF16LE();
   ByteString bsBcc = BCC.ToUTF16LE();
   ByteString bsMsg = Msg.ToUTF16LE();
-  js_platform->Doc_mail(js_platform, mailData.data(),
+  js_platform->Doc_mail(js_platform, const_cast<uint8_t*>(mailData.data()),
                         pdfium::base::checked_cast<int>(mailData.size()), bUI,
                         AsFPDFWideString(&bsTo), AsFPDFWideString(&bsSubject),
                         AsFPDFWideString(&bsCC), AsFPDFWideString(&bsBcc),
@@ -320,7 +311,7 @@ WideString CPDFSDK_FormFillEnvironment::GetFilePath() const {
   if (nRequiredLen <= 0)
     return WideString();
 
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> pBuff(nRequiredLen);
+  DataVector<uint8_t> pBuff(nRequiredLen);
   const int nActualLen =
       js_platform->Doc_getFilePath(js_platform, pBuff.data(), nRequiredLen);
   if (nActualLen <= 0 || nActualLen > nRequiredLen)
@@ -328,19 +319,22 @@ WideString CPDFSDK_FormFillEnvironment::GetFilePath() const {
 
   // Don't include trailing NUL.
   pBuff.resize(nActualLen - 1);
+
+  // Use FromDefANSI() per "local encoding" comment in fpdf_formfill.h.
   return WideString::FromDefANSI(ByteStringView(pBuff));
 }
 
-void CPDFSDK_FormFillEnvironment::SubmitForm(pdfium::span<uint8_t> form_data,
-                                             const WideString& URL) {
+void CPDFSDK_FormFillEnvironment::SubmitForm(
+    pdfium::span<const uint8_t> form_data,
+    const WideString& URL) {
   IPDF_JSPLATFORM* js_platform = GetJSPlatform();
   if (!js_platform || !js_platform->Doc_submitForm)
     return;
 
   ByteString bsUrl = URL.ToUTF16LE();
-  js_platform->Doc_submitForm(js_platform, form_data.data(),
-                              fxcrt::CollectionSize<int>(form_data),
-                              AsFPDFWideString(&bsUrl));
+  js_platform->Doc_submitForm(
+      js_platform, const_cast<uint8_t*>(form_data.data()),
+      fxcrt::CollectionSize<int>(form_data), AsFPDFWideString(&bsUrl));
 }
 
 IJS_Runtime* CPDFSDK_FormFillEnvironment::GetIJSRuntime() {
@@ -357,7 +351,8 @@ void CPDFSDK_FormFillEnvironment::Invalidate(IPDF_Page* page,
   }
 }
 
-void CPDFSDK_FormFillEnvironment::SetCursor(CursorStyle nCursorType) {
+void CPDFSDK_FormFillEnvironment::SetCursor(
+    IPWL_FillerNotify::CursorStyle nCursorType) {
   if (m_pInfo && m_pInfo->FFI_SetCursor)
     m_pInfo->FFI_SetCursor(m_pInfo, static_cast<int>(nCursorType));
 }
@@ -576,7 +571,7 @@ WideString CPDFSDK_FormFillEnvironment::PostRequestURL(
 
   WideString wsRet =
       WideString::FromUTF16LE(reinterpret_cast<FPDF_WIDESTRING>(response.str),
-                              response.len / sizeof(FPDF_WIDESTRING));
+                              response.len / sizeof(FPDF_WCHAR));
 
   FPDF_BStr_Clear(&response);
   return wsRet;
@@ -641,10 +636,6 @@ CFX_Timer::HandlerIface* CPDFSDK_FormFillEnvironment::GetTimerHandler() {
   return this;
 }
 
-IPWL_SystemHandler* CPDFSDK_FormFillEnvironment::GetSysHandler() {
-  return this;
-}
-
 CPDFSDK_PageView* CPDFSDK_FormFillEnvironment::GetPageViewAtIndex(int nIndex) {
   IPDF_Page* pTempPage = GetPage(nIndex);
   return pTempPage ? GetPageView(pTempPage) : nullptr;
@@ -664,11 +655,11 @@ void CPDFSDK_FormFillEnvironment::ProcJavascriptAction() {
 }
 
 bool CPDFSDK_FormFillEnvironment::ProcOpenAction() {
-  CPDF_Dictionary* pRoot = m_pCPDFDoc->GetRoot();
+  const CPDF_Dictionary* pRoot = m_pCPDFDoc->GetRoot();
   if (!pRoot)
     return false;
 
-  CPDF_Object* pOpenAction = pRoot->GetDictFor("OpenAction");
+  RetainPtr<const CPDF_Object> pOpenAction(pRoot->GetDictFor("OpenAction"));
   if (!pOpenAction)
     pOpenAction = pRoot->GetArrayFor("OpenAction");
   if (!pOpenAction)
@@ -677,11 +668,11 @@ bool CPDFSDK_FormFillEnvironment::ProcOpenAction() {
   if (pOpenAction->IsArray())
     return true;
 
-  CPDF_Dictionary* pDict = pOpenAction->AsDictionary();
+  RetainPtr<const CPDF_Dictionary> pDict = ToDictionary(pOpenAction);
   if (!pDict)
     return false;
 
-  DoActionDocOpen(CPDF_Action(pDict));
+  DoActionDocOpen(CPDF_Action(std::move(pDict)));
   return true;
 }
 
@@ -831,7 +822,8 @@ void CPDFSDK_FormFillEnvironment::SendOnFocusChange(
   if (!page)
     return;
 
-  CPDF_Dictionary* annot_dict = pAnnot->GetPDFAnnot()->GetAnnotDict();
+  RetainPtr<CPDF_Dictionary> annot_dict =
+      pAnnot->GetPDFAnnot()->GetMutableAnnotDict();
   auto focused_annot = std::make_unique<CPDF_AnnotContext>(annot_dict, page);
   FPDF_ANNOTATION fpdf_annot =
       FPDFAnnotationFromCPDFAnnotContext(focused_annot.get());
@@ -896,17 +888,8 @@ bool CPDFSDK_FormFillEnvironment::DoActionDestination(const CPDF_Dest& dest) {
   CPDF_Document* document = GetPDFDocument();
   DCHECK(document);
 
-  const CPDF_Array* dest_array = dest.GetArray();
-  std::vector<float> dest_positions;
-  // |dest_array| index 0 contains destination page details and index 1 contains
-  // parameter that explains about the rest of |dest_array|.
-  if (dest_array) {
-    for (size_t i = 2; i < dest_array->size(); i++)
-      dest_positions.push_back(dest_array->GetNumberAt(i));
-  }
-
-  DoGoToAction(dest.GetDestPageIndex(document), dest.GetZoomMode(),
-               dest_positions);
+  std::vector<float> positions = dest.GetScrollPositionArray();
+  DoGoToAction(dest.GetDestPageIndex(document), dest.GetZoomMode(), positions);
   return true;
 }
 
@@ -989,7 +972,8 @@ bool CPDFSDK_FormFillEnvironment::ExecuteDocumentPageAction(
   return true;
 }
 
-bool CPDFSDK_FormFillEnvironment::IsValidField(CPDF_Dictionary* pFieldDict) {
+bool CPDFSDK_FormFillEnvironment::IsValidField(
+    const CPDF_Dictionary* pFieldDict) {
   DCHECK(pFieldDict);
 
   CPDFSDK_InteractiveForm* pForm = GetInteractiveForm();

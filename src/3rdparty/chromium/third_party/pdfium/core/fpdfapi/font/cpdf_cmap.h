@@ -7,10 +7,12 @@
 #ifndef CORE_FPDFAPI_FONT_CPDF_CMAP_H_
 #define CORE_FPDFAPI_FONT_CPDF_CMAP_H_
 
+#include <stdint.h>
+
 #include <vector>
 
 #include "core/fpdfapi/font/cpdf_cidfont.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/fixed_zeroed_data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/span.h"
@@ -30,6 +32,8 @@ enum class CIDCoding : uint8_t {
 
 class CPDF_CMap final : public Retainable {
  public:
+  static constexpr size_t kDirectMapTableSize = 65536;
+
   enum CodingScheme : uint8_t {
     OneByte,
     TwoBytes,
@@ -72,7 +76,7 @@ class CPDF_CMap final : public Retainable {
   void SetCharset(CIDSet set) { m_Charset = set; }
 
   void SetDirectCharcodeToCIDTable(size_t idx, uint16_t val) {
-    m_DirectCharcodeToCIDTable[idx] = val;
+    m_DirectCharcodeToCIDTable.writable_span()[idx] = val;
   }
   bool IsDirectCharcodeToCIDTableIsEmpty() const {
     return m_DirectCharcodeToCIDTable.empty();
@@ -90,7 +94,7 @@ class CPDF_CMap final : public Retainable {
   CIDCoding m_Coding = CIDCoding::kUNKNOWN;
   std::vector<bool> m_MixedTwoByteLeadingBytes;
   std::vector<CodeRange> m_MixedFourByteLeadingRanges;
-  std::vector<uint16_t, FxAllocAllocator<uint16_t>> m_DirectCharcodeToCIDTable;
+  FixedZeroedDataVector<uint16_t> m_DirectCharcodeToCIDTable;
   std::vector<CIDRange> m_AdditionalCharcodeToCIDMappings;
   UnownedPtr<const FXCMAP_CMap> m_pEmbedMap;
 };

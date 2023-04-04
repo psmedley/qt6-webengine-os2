@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,8 @@
 #include "components/autofill_assistant/browser/actions/action_test_utils.h"
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
-#include "components/autofill_assistant/browser/mock_website_login_manager.h"
+#include "components/autofill_assistant/browser/mock_personal_data_manager.h"
+#include "components/autofill_assistant/browser/public/password_change/mock_website_login_manager.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/test_util.h"
 #include "components/autofill_assistant/browser/user_data.h"
@@ -41,6 +42,7 @@ using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::IsEmpty;
+using ::testing::NiceMock;
 using ::testing::Return;
 
 RequiredDataPiece MakeRequiredDataPiece(autofill::ServerFieldType field) {
@@ -997,6 +999,8 @@ class UserDataUtilTextValueTest : public testing::Test {
         .WillByDefault(Return(&user_model_));
     ON_CALL(mock_action_delegate_, GetWebsiteLoginManager)
         .WillByDefault(Return(&mock_website_login_manager_));
+    ON_CALL(mock_action_delegate_, GetPersonalDataManager)
+        .WillByDefault(Return(&mock_personal_data_manager_));
   }
 
   MOCK_METHOD2(OnResult, void(const ClientStatus&, const std::string&));
@@ -1006,6 +1010,7 @@ class UserDataUtilTextValueTest : public testing::Test {
   content::RenderViewHostTestEnabler rvh_test_enabler_;
   content::TestBrowserContext browser_context_;
   std::unique_ptr<content::WebContents> web_contents_;
+  NiceMock<MockPersonalDataManager> mock_personal_data_manager_;
   MockActionDelegate mock_action_delegate_;
   UserData user_data_;
   UserModel user_model_;
@@ -1263,7 +1268,7 @@ TEST_F(UserDataUtilTextValueTest, GetUsername) {
       GURL("https://www.example.com"), "username");
 
   ElementFinderResult element;
-  element.SetRenderFrameHost(web_contents_->GetMainFrame());
+  element.SetRenderFrameHostForTest(web_contents_->GetPrimaryMainFrame());
 
   PasswordManagerValue password_manager_value;
   password_manager_value.set_credential_type(PasswordManagerValue::USERNAME);
@@ -1281,7 +1286,7 @@ TEST_F(UserDataUtilTextValueTest, GetStoredPassword) {
       GURL("https://www.example.com"), "username");
 
   ElementFinderResult element;
-  element.SetRenderFrameHost(web_contents_->GetMainFrame());
+  element.SetRenderFrameHostForTest(web_contents_->GetPrimaryMainFrame());
 
   PasswordManagerValue password_manager_value;
   password_manager_value.set_credential_type(PasswordManagerValue::PASSWORD);
@@ -1303,7 +1308,7 @@ TEST_F(UserDataUtilTextValueTest, GetStoredPasswordFails) {
   ElementFinderResult element;
   content::WebContentsTester::For(web_contents_.get())
       ->NavigateAndCommit(GURL("https://www.example.com"));
-  element.SetRenderFrameHost(web_contents_->GetMainFrame());
+  element.SetRenderFrameHostForTest(web_contents_->GetPrimaryMainFrame());
 
   PasswordManagerValue password_manager_value;
   password_manager_value.set_credential_type(PasswordManagerValue::PASSWORD);
@@ -1419,7 +1424,7 @@ TEST_F(UserDataUtilTextValueTest, TextValuePasswordManagerValue) {
   ElementFinderResult element;
   content::WebContentsTester::For(web_contents_.get())
       ->NavigateAndCommit(GURL("https://www.example.com"));
-  element.SetRenderFrameHost(web_contents_->GetMainFrame());
+  element.SetRenderFrameHostForTest(web_contents_->GetPrimaryMainFrame());
 
   TextValue text_value;
   text_value.mutable_password_manager_value()->set_credential_type(
@@ -1609,6 +1614,447 @@ TEST_F(UserDataUtilTextValueTest, ResolveSelectorUserDataError) {
   ClientStatus status = ResolveSelectorUserData(&selector, &user_data_);
 
   ASSERT_FALSE(status.ok());
+}
+
+TEST(UserDataUtilTest, InsertNewContactToList) {
+  autofill::AutofillProfile new_profile;
+  autofill::test::SetProfileInfo(&new_profile, "Adam", "", "West",
+                                 "adam.west@gmail.com", "", "", "", "", "", "",
+                                 "", "");
+
+  std::unique_ptr<autofill::AutofillProfile> old_profile =
+      std::make_unique<autofill::AutofillProfile>();
+  autofill::test::SetProfileInfo(old_profile.get(), "Berta", "", "West",
+                                 "berta.west@gmail.com", "", "", "", "", "", "",
+                                 "", "");
+
+  std::vector<std::unique_ptr<Contact>> list;
+  list.emplace_back(std::make_unique<Contact>(std::move(old_profile)));
+
+  UpsertContact(new_profile, list);
+
+  ASSERT_EQ(list.size(), 2u);
+  EXPECT_EQ(list[1]->profile->guid(), new_profile.guid());
+  EXPECT_EQ(list[1]->identifier, new_profile.guid());
+  EXPECT_EQ(list[0]->profile->GetInfo(autofill::NAME_FIRST, "en-US"), u"Berta");
+  EXPECT_EQ(list[1]->profile->GetInfo(autofill::NAME_FIRST, "en-US"), u"Adam");
+}
+
+TEST(UserDataUtilTest, UpdateExistingContactInList) {
+  autofill::AutofillProfile updated_profile;
+  autofill::test::SetProfileInfo(&updated_profile, "Adam", "B.", "West",
+                                 "adam.west@gmail.com", "", "", "", "", "", "",
+                                 "", "");
+
+  std::unique_ptr<autofill::AutofillProfile> old_profile =
+      std::make_unique<autofill::AutofillProfile>();
+  old_profile->set_guid(updated_profile.guid());
+  autofill::test::SetProfileInfo(old_profile.get(), "Adam", "", "West",
+                                 "adam.west@gmail.com", "", "", "", "", "", "",
+                                 "", "");
+
+  std::vector<std::unique_ptr<Contact>> list;
+  list.emplace_back(std::make_unique<Contact>(std::move(old_profile)));
+
+  EXPECT_EQ(list[0]->profile->GetInfo(autofill::NAME_MIDDLE, "en-US"), u"");
+  UpsertContact(updated_profile, list);
+
+  ASSERT_EQ(list.size(), 1u);
+  EXPECT_EQ(list[0]->profile->guid(), updated_profile.guid());
+  EXPECT_EQ(list[0]->profile->GetInfo(autofill::NAME_MIDDLE, "en-US"), u"B.");
+}
+
+TEST(UserDataUtilTest, InsertNewPhoneNumberToList) {
+  autofill::AutofillProfile new_profile;
+  autofill::test::SetProfileInfo(&new_profile, "", "", "", "", "", "", "", "",
+                                 "", "", "", "+41441234567");
+
+  std::unique_ptr<autofill::AutofillProfile> old_profile =
+      std::make_unique<autofill::AutofillProfile>();
+  autofill::test::SetProfileInfo(old_profile.get(), "", "", "", "", "", "", "",
+                                 "", "", "", "", "+4144765432");
+
+  std::vector<std::unique_ptr<Contact>> list;
+  list.emplace_back(std::make_unique<Contact>(std::move(old_profile)));
+
+  UpsertContact(new_profile, list);
+
+  ASSERT_EQ(list.size(), 2u);
+  EXPECT_EQ(list[1]->profile->guid(), new_profile.guid());
+  EXPECT_EQ(list[1]->identifier, new_profile.guid());
+  EXPECT_EQ(
+      list[0]->profile->GetInfo(autofill::PHONE_HOME_WHOLE_NUMBER, "en-US"),
+      u"+4144765432");
+  EXPECT_EQ(
+      list[1]->profile->GetInfo(autofill::PHONE_HOME_WHOLE_NUMBER, "en-US"),
+      u"+41441234567");
+}
+
+TEST(UserDataUtilTest, UpdateExistingPhoneNumberInList) {
+  autofill::AutofillProfile updated_profile;
+  autofill::test::SetProfileInfo(&updated_profile, "", "", "", "", "", "", "",
+                                 "", "", "", "", "+41441234567");
+
+  std::unique_ptr<autofill::AutofillProfile> old_profile =
+      std::make_unique<autofill::AutofillProfile>();
+  old_profile->set_guid(updated_profile.guid());
+  autofill::test::SetProfileInfo(old_profile.get(), "", "", "", "", "", "", "",
+                                 "", "", "", "", "+4144765432");
+
+  std::vector<std::unique_ptr<Contact>> list;
+  list.emplace_back(std::make_unique<Contact>(std::move(old_profile)));
+
+  EXPECT_EQ(
+      list[0]->profile->GetInfo(autofill::PHONE_HOME_WHOLE_NUMBER, "en-US"),
+      u"+4144765432");
+  UpsertContact(updated_profile, list);
+
+  ASSERT_EQ(list.size(), 1u);
+  EXPECT_EQ(list[0]->profile->guid(), updated_profile.guid());
+  EXPECT_EQ(
+      list[0]->profile->GetInfo(autofill::PHONE_HOME_WHOLE_NUMBER, "en-US"),
+      u"+41441234567");
+}
+
+TEST(UserDataUtilTest, ContactHasAtLeastOneRequiredField) {
+  autofill::AutofillProfile only_email;
+  autofill::test::SetProfileInfo(&only_email, "", "", "", "adam.west@gmail.com",
+                                 "", "", "", "", "", "", "", "");
+
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = true;
+    EXPECT_FALSE(ContactHasAtLeastOneRequiredField(only_email, options));
+  }
+
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = true;
+    options.request_payer_phone = true;
+    EXPECT_FALSE(ContactHasAtLeastOneRequiredField(only_email, options));
+  }
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = true;
+    options.request_payer_phone = true;
+    options.request_payer_email = true;
+    EXPECT_TRUE(ContactHasAtLeastOneRequiredField(only_email, options));
+  }
+
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = false;
+    options.request_payer_phone = false;
+    options.request_payer_email = true;
+    EXPECT_TRUE(ContactHasAtLeastOneRequiredField(only_email, options));
+  }
+
+  autofill::AutofillProfile only_name;
+  autofill::test::SetProfileInfo(&only_name, "Adam", "", "", "", "",
+                                 "Baker Street 221b", "", "London", "",
+                                 "WC2N 5DU", "UK", "");
+
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = false;
+    options.request_payer_phone = false;
+    options.request_payer_email = true;
+    EXPECT_FALSE(ContactHasAtLeastOneRequiredField(only_name, options));
+  }
+
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = true;
+    options.request_payer_phone = false;
+    options.request_payer_email = true;
+    EXPECT_TRUE(ContactHasAtLeastOneRequiredField(only_name, options));
+  }
+
+  autofill::AutofillProfile only_phone;
+  autofill::test::SetProfileInfo(&only_phone, "", "", "", "", "",
+                                 "Baker Street 221b", "", "London", "",
+                                 "WC2N 5DU", "UK", "+44");
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = true;
+    options.request_payer_phone = false;
+    options.request_payer_email = true;
+    EXPECT_FALSE(ContactHasAtLeastOneRequiredField(only_phone, options));
+  }
+  {
+    CollectUserDataOptions options;
+    options.request_payer_name = true;
+    options.request_payer_phone = true;
+    options.request_payer_email = true;
+    EXPECT_TRUE(ContactHasAtLeastOneRequiredField(only_phone, options));
+  }
+
+  autofill::AutofillProfile full_profile;
+  autofill::test::SetProfileInfo(&full_profile, "Adam", "", "West",
+                                 "adam.west@gmail.com", "", "Baker Street 221b",
+                                 "", "London", "", "WC2N 5DU", "UK", "+44");
+  {
+    CollectUserDataOptions options;
+    EXPECT_FALSE(ContactHasAtLeastOneRequiredField(only_phone, options));
+  }
+}
+
+// Utility for creating test profiles with slight variations
+struct ProfileFieldFactory {
+  // If name is different, both address and contact would be unique
+  base::flat_map<autofill::ServerFieldType, std::string> name_template = {
+      {autofill::ServerFieldType::NAME_FIRST, "John"},
+      {autofill::ServerFieldType::NAME_MIDDLE, "David"},
+      {autofill::ServerFieldType::NAME_LAST, "Doe"},
+  };
+
+  // Fields concerning contact only
+  base::flat_map<autofill::ServerFieldType, std::string> contact_template = {
+      {autofill::ServerFieldType::EMAIL_ADDRESS, "jdoe@google.com"},
+      {autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER, "+1771111111"},
+  };
+
+  // Fields concerning address only
+  base::flat_map<autofill::ServerFieldType, std::string> address_template = {
+      {autofill::ServerFieldType::ADDRESS_HOME_LINE1, "Main St. 18"},
+      {autofill::ServerFieldType::ADDRESS_HOME_LINE2, ""},
+      {autofill::ServerFieldType::COMPANY_NAME, ""},
+      {autofill::ServerFieldType::ADDRESS_HOME_DEPENDENT_LOCALITY, "abc"},
+      {autofill::ServerFieldType::ADDRESS_HOME_CITY, "New York"},
+      {autofill::ServerFieldType::ADDRESS_HOME_STATE, "NY"},
+      {autofill::ServerFieldType::ADDRESS_HOME_ZIP, "10001"},
+      {autofill::ServerFieldType::ADDRESS_HOME_COUNTRY, "US"},
+  };
+
+  // Returns a default profile of desired fields (all fields if empty filter
+  // is passed)
+  base::flat_map<autofill::ServerFieldType, std::string> GetProfileFields(
+      base::flat_set<autofill::ServerFieldType> filter) {
+    base::flat_map<autofill::ServerFieldType, std::string> profile_template;
+    profile_template.insert(name_template.begin(), name_template.end());
+    profile_template.insert(contact_template.begin(), contact_template.end());
+    profile_template.insert(address_template.begin(), address_template.end());
+
+    if (filter.size() <= 0) {
+      return profile_template;
+    }
+
+    base::flat_map<autofill::ServerFieldType, std::string> filtered_profile;
+    for (autofill::ServerFieldType& key : filter) {
+      filtered_profile[key] = profile_template[key];
+    }
+    return filtered_profile;
+  }
+
+  // Returns a profile with the default values for the fields in |filter| and
+  // the specified value for the fields in |overrides|
+  base::flat_map<autofill::ServerFieldType, std::string> GetProfileFields(
+      base::flat_set<autofill::ServerFieldType> filter,
+      base::flat_map<autofill::ServerFieldType, std::string> overrides) {
+    base::flat_map<autofill::ServerFieldType, std::string> profile_template =
+        GetProfileFields(filter);
+    for (auto& entry : overrides) {
+      if (filter.size() > 0 && !filter.contains(entry.first)) {
+        continue;
+      }
+      profile_template[entry.first] = entry.second;
+    }
+    return profile_template;
+  }
+};
+
+std::string GetOrDefault(
+    base::flat_map<autofill::ServerFieldType, std::string>& profile,
+    autofill::ServerFieldType field) {
+  return profile.contains(field) ? profile[field] : "";
+}
+
+TEST_F(UserDataUtilTextValueTest, CheckProfileSubsetDeduplication) {
+  // Create list of profiles with various duplicate and subset scenarios
+  ProfileFieldFactory factory = ProfileFieldFactory();
+  std::vector<base::flat_map<autofill::ServerFieldType, std::string>>
+      test_cases{
+          // Default profile with all normal values
+          factory.GetProfileFields({}),
+          // Exact duplicate default profile with no variations
+          factory.GetProfileFields({}),
+          // Exact duplicate default profile with variations on some fields
+          // All these cases are ignored by autofill comparators by default
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::NAME_MIDDLE, "D"},
+                  {autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER,
+                   "771111111"},
+                  {autofill::ServerFieldType::ADDRESS_HOME_LINE1,
+                   "Main Street 18"}}),
+          // Completely empty profile
+          {},
+
+          // Unique profile both for contact and for address (different name)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::NAME_FIRST, "Richard"}}),
+
+          // Missing first name is de-duplicated by Autofill
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::NAME_FIRST, ""}}),
+
+          // Missing middle name is de-duplicated by Autofill
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::NAME_MIDDLE, ""}}),
+
+          // Unique profile for contact and for address (missing last name)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::NAME_LAST, ""}}),
+
+          // Unique profile for contact but not for address (different email)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::EMAIL_ADDRESS,
+                   "jdoe@gmail.com"}}),
+
+          // Unique profile for address but not for contact (different zip)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::ADDRESS_HOME_ZIP, "10002"}}),
+
+          // Unique profile for contact but not for address (different phone)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER,
+                   "+1771111112"}}),
+
+          // Duplicate profile (various missing fields)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::EMAIL_ADDRESS, ""},
+                  {autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER, ""},
+                  {autofill::ServerFieldType::COMPANY_NAME, ""}}),
+
+          // Duplicate profile (various missing fields)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::EMAIL_ADDRESS, ""},
+                  {autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER, ""},
+                  {autofill::ServerFieldType::COMPANY_NAME, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_CITY, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_STATE, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_ZIP, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_COUNTRY, ""}}),
+
+          // Duplicate profile (various missing fields, and duplicate zip)
+          factory.GetProfileFields(
+              {},
+              base::flat_map<autofill::ServerFieldType, std::string>{
+                  {autofill::ServerFieldType::EMAIL_ADDRESS, ""},
+                  {autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER, ""},
+                  {autofill::ServerFieldType::COMPANY_NAME, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_CITY, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_STATE, ""},
+                  {autofill::ServerFieldType::ADDRESS_HOME_ZIP, "10002"},
+                  {autofill::ServerFieldType::ADDRESS_HOME_COUNTRY, ""}}),
+      };
+
+  // guid numbers correspond to profile indexes of the list above
+  base::flat_set<std::string> expected_contact_guids = {
+      "fake_guid_0", "fake_guid_4",  "fake_guid_7",
+      "fake_guid_8", "fake_guid_10",
+  };
+
+  // guid numbers correspond to profile indexes of the list above
+  base::flat_set<std::string> expected_address_guids = {
+      "fake_guid_0", "fake_guid_4", "fake_guid_7", "fake_guid_9"};
+
+  // Create the actual profiles from defined test cases
+  std::vector<std::unique_ptr<autofill::AutofillProfile>> profiles;
+  std::vector<autofill::AutofillProfile*> profile_pointers;
+  for (size_t i = 0; i < test_cases.size(); i++) {
+    std::unique_ptr<autofill::AutofillProfile> profile =
+        std::make_unique<autofill::AutofillProfile>();
+    base::flat_map<autofill::ServerFieldType, std::string>& test =
+        test_cases[i];
+    autofill::test::SetProfileInfo(
+        profile.get(),
+        GetOrDefault(test, autofill::ServerFieldType::NAME_FIRST).data(),
+        GetOrDefault(test, autofill::ServerFieldType::NAME_MIDDLE).data(),
+        GetOrDefault(test, autofill::ServerFieldType::NAME_LAST).data(),
+        GetOrDefault(test, autofill::ServerFieldType::EMAIL_ADDRESS).data(),
+        GetOrDefault(test, autofill::ServerFieldType::COMPANY_NAME).data(),
+        GetOrDefault(test, autofill::ServerFieldType::ADDRESS_HOME_LINE1)
+            .data(),
+        GetOrDefault(test, autofill::ServerFieldType::ADDRESS_HOME_LINE2)
+            .data(),
+        GetOrDefault(test,
+                     autofill::ServerFieldType::ADDRESS_HOME_DEPENDENT_LOCALITY)
+            .data(),
+        GetOrDefault(test, autofill::ServerFieldType::ADDRESS_HOME_CITY).data(),
+        GetOrDefault(test, autofill::ServerFieldType::ADDRESS_HOME_STATE)
+            .data(),
+        GetOrDefault(test, autofill::ServerFieldType::ADDRESS_HOME_ZIP).data(),
+        GetOrDefault(test, autofill::ServerFieldType::ADDRESS_HOME_COUNTRY)
+            .data(),
+        GetOrDefault(test, autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER)
+            .data());
+
+    // Each profile is given a unique guid wrt. their index to make
+    // referencing & debugging easier
+    profile.get()->set_guid("fake_guid_" + base::NumberToString(i));
+
+    profile_pointers.push_back(profile.get());
+    profiles.push_back(std::move(profile));
+  }
+
+  base::flat_set<autofill::ServerFieldType> contact_field_types =
+      base::flat_set<autofill::ServerFieldType>{
+          autofill::ServerFieldType::NAME_FULL,
+          autofill::ServerFieldType::EMAIL_ADDRESS,
+          autofill::ServerFieldType::PHONE_HOME_WHOLE_NUMBER};
+  std::vector<autofill::AutofillProfile*> contact_profiles = GetUniqueProfiles(
+      profile_pointers, mock_personal_data_manager_.app_locale(),
+      contact_field_types);
+
+  // Ensure expected_contact_guids matches 1-1 with given contact profiles
+  EXPECT_EQ(expected_contact_guids.size(), contact_profiles.size());
+  for (autofill::AutofillProfile*& contact_profile : contact_profiles) {
+    EXPECT_TRUE(expected_contact_guids.contains(contact_profile->guid()));
+    expected_contact_guids.erase(contact_profile->guid());
+  }
+  EXPECT_EQ(expected_contact_guids.size(), 0ul);
+
+  base::flat_set<autofill::ServerFieldType> address_field_types =
+      base::flat_set<autofill::ServerFieldType>{
+          autofill::ServerFieldType::ADDRESS_HOME_COUNTRY,
+          autofill::ServerFieldType::ADDRESS_HOME_STATE,
+          autofill::ServerFieldType::ADDRESS_HOME_CITY,
+          autofill::ServerFieldType::ADDRESS_HOME_DEPENDENT_LOCALITY,
+          autofill::ServerFieldType::ADDRESS_HOME_SORTING_CODE,
+          autofill::ServerFieldType::ADDRESS_HOME_ZIP,
+          autofill::ServerFieldType::ADDRESS_HOME_STREET_ADDRESS,
+          autofill::ServerFieldType::NAME_FULL};
+  std::vector<autofill::AutofillProfile*> address_profiles = GetUniqueProfiles(
+      profile_pointers, mock_personal_data_manager_.app_locale(),
+      address_field_types);
+
+  // Ensure expected_address_guids matches 1-1 with given contact profiles
+  EXPECT_EQ(expected_address_guids.size(), address_profiles.size());
+  for (autofill::AutofillProfile*& address_profile : address_profiles) {
+    EXPECT_TRUE(expected_address_guids.contains(address_profile->guid()));
+    expected_address_guids.erase(address_profile->guid());
+  }
+  EXPECT_EQ(expected_address_guids.size(), 0ul);
 }
 
 }  // namespace

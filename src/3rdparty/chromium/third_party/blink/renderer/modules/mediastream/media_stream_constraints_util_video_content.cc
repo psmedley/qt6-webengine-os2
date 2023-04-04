@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "media/base/limits.h"
+#include "media/base/video_types.h"
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
@@ -201,10 +202,12 @@ media::VideoCaptureParams SelectVideoCaptureParamsFromCandidates(
       candidates.resolution_set().SelectClosestPointToIdeal(
           basic_constraint_set, default_height, default_width);
   media::VideoCaptureParams params;
+  // If zero-copy tab capture is enabled, we want the capturer to auto-select
+  // the pixel format:
   params.requested_format = media::VideoCaptureFormat(
       ToGfxSize(requested_resolution), static_cast<float>(requested_frame_rate),
       RuntimeEnabledFeatures::ZeroCopyTabCaptureEnabled()
-          ? media::PIXEL_FORMAT_NV12
+          ? media::PIXEL_FORMAT_UNKNOWN
           : media::PIXEL_FORMAT_I420);
   params.resolution_change_policy = SelectResolutionPolicyFromCandidates(
       candidates.resolution_set(), default_resolution_policy);

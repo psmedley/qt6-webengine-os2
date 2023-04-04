@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,9 +24,6 @@ template("cc_component") {
     }
     configs -= cc_remove_configs
     configs += cc_add_configs
-
-    # TODO(crbug.com/1292951): Remove this line.
-    configs -= [ "//build/config/compiler:prevent_unsafe_narrowing" ]
   }
 }
 
@@ -41,9 +38,6 @@ template("cc_test_static_library") {
 
     # Not needed in test code.
     configs -= [ "//build/config/compiler:wexit_time_destructors" ]
-
-    # TODO(crbug.com/1292951): Remove this line.
-    configs -= [ "//build/config/compiler:prevent_unsafe_narrowing" ]
   }
 }
 
@@ -58,8 +52,5 @@ template("cc_test") {
 
     # Not needed in test code.
     configs -= [ "//build/config/compiler:wexit_time_destructors" ]
-
-    # TODO(crbug.com/1292951): Remove this line.
-    configs -= [ "//build/config/compiler:prevent_unsafe_narrowing" ]
   }
 }

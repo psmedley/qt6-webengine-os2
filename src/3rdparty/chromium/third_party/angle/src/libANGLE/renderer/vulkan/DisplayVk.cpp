@@ -20,17 +20,91 @@
 #include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/SurfaceVk.h"
 #include "libANGLE/renderer/vulkan/SyncVk.h"
+#include "libANGLE/renderer/vulkan/TextureVk.h"
 #include "libANGLE/renderer/vulkan/VkImageImageSiblingVk.h"
 #include "libANGLE/trace.h"
 
 namespace rx
 {
 
+namespace
+{
+// Query surface format and colorspace support.
+void GetSupportedFormatColorspaces(VkPhysicalDevice physicalDevice,
+                                   const angle::FeaturesVk &featuresVk,
+                                   VkSurfaceKHR surface,
+                                   std::vector<VkSurfaceFormat2KHR> *surfaceFormatsOut)
+{
+    ASSERT(surfaceFormatsOut);
+    surfaceFormatsOut->clear();
+
+    constexpr VkSurfaceFormat2KHR kSurfaceFormat2Initializer = {
+        VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR,
+        nullptr,
+        {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}};
+
+    if (featuresVk.supportsSurfaceCapabilities2Extension.enabled)
+    {
+        VkPhysicalDeviceSurfaceInfo2KHR surfaceInfo2 = {};
+        surfaceInfo2.sType          = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR;
+        surfaceInfo2.surface        = surface;
+        uint32_t surfaceFormatCount = 0;
+
+        // Query the count first
+        VkResult result = vkGetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, &surfaceInfo2,
+                                                                &surfaceFormatCount, nullptr);
+        ASSERT(result == VK_SUCCESS);
+        ASSERT(surfaceFormatCount > 0);
+
+        // Query the VkSurfaceFormat2KHR list
+        std::vector<VkSurfaceFormat2KHR> surfaceFormats2(surfaceFormatCount,
+                                                         kSurfaceFormat2Initializer);
+        result = vkGetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, &surfaceInfo2,
+                                                       &surfaceFormatCount, surfaceFormats2.data());
+        ASSERT(result == VK_SUCCESS);
+
+        *surfaceFormatsOut = std::move(surfaceFormats2);
+    }
+    else
+    {
+        uint32_t surfaceFormatCount = 0;
+        // Query the count first
+        VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface,
+                                                               &surfaceFormatCount, nullptr);
+        ASSERT(result == VK_SUCCESS);
+
+        // Query the VkSurfaceFormatKHR list
+        std::vector<VkSurfaceFormatKHR> surfaceFormats(surfaceFormatCount);
+        result = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount,
+                                                      surfaceFormats.data());
+        ASSERT(result == VK_SUCCESS);
+
+        // Copy over data from std::vector<VkSurfaceFormatKHR> to std::vector<VkSurfaceFormat2KHR>
+        std::vector<VkSurfaceFormat2KHR> surfaceFormats2(surfaceFormatCount,
+                                                         kSurfaceFormat2Initializer);
+        for (size_t index = 0; index < surfaceFormatCount; index++)
+        {
+            surfaceFormats2[index].surfaceFormat.format = surfaceFormats[index].format;
+        }
+
+        *surfaceFormatsOut = std::move(surfaceFormats2);
+    }
+}
+
+}  // namespace
+
+// Time interval in seconds that we should try to prune default buffer pools.
+constexpr double kTimeElapsedForPruneDefaultBufferPool = 0.25;
+
+// Set to true will log bufferpool stats into INFO stream
+#define ANGLE_ENABLE_BUFFER_POOL_STATS_LOGGING 0
+
 DisplayVk::DisplayVk(const egl::DisplayState &state)
     : DisplayImpl(state),
       vk::Context(new RendererVk()),
       mScratchBuffer(1000u),
-      mSavedError({VK_SUCCESS, "", "", 0})
+      mSavedError({VK_SUCCESS, "", "", 0}),
+      mSupportedColorspaceFormatsMap{}
 {}
 
 DisplayVk::~DisplayVk()
@@ -43,6 +117,8 @@ egl::Error DisplayVk::initialize(egl::Display *display)
     ASSERT(mRenderer != nullptr && display != nullptr);
     angle::Result result = mRenderer->initialize(this, display, getWSIExtension(), getWSILayer());
     ANGLE_TRY(angle::ToEGL(result, this, EGL_NOT_INITIALIZED));
+    // Query and cache supported surface format and colorspace for later use.
+    initSupportedSurfaceFormatColorspaces();
     return egl::NoError();
 }
 
@@ -173,6 +249,98 @@ ShareGroupImpl *DisplayVk::createShareGroup()
     return new ShareGroupVk();
 }
 
+bool DisplayVk::isConfigFormatSupported(VkFormat format) const
+{
+    // Requires VK_GOOGLE_surfaceless_query extension to be supported.
+    ASSERT(mRenderer->getFeatures().supportsSurfacelessQueryExtension.enabled);
+
+    // A format is considered supported if it is supported in atleast 1 colorspace.
+    using ColorspaceFormatSetItem =
+        const std::pair<const VkColorSpaceKHR, std::unordered_set<VkFormat>>;
+    for (ColorspaceFormatSetItem &colorspaceFormatSetItem : mSupportedColorspaceFormatsMap)
+    {
+        if (colorspaceFormatSetItem.second.count(format) > 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool DisplayVk::isSurfaceFormatColorspacePairSupported(VkSurfaceKHR surface,
+                                                       VkFormat format,
+                                                       VkColorSpaceKHR colorspace) const
+{
+    if (mSupportedColorspaceFormatsMap.size() > 0)
+    {
+        return mSupportedColorspaceFormatsMap.count(colorspace) > 0 &&
+               mSupportedColorspaceFormatsMap.at(colorspace).count(format) > 0;
+    }
+    else
+    {
+        const angle::FeaturesVk &featuresVk = mRenderer->getFeatures();
+        std::vector<VkSurfaceFormat2KHR> surfaceFormats;
+        GetSupportedFormatColorspaces(mRenderer->getPhysicalDevice(), featuresVk, surface,
+                                      &surfaceFormats);
+
+        if (!featuresVk.supportsSurfaceCapabilities2Extension.enabled)
+        {
+            if (surfaceFormats.size() == 1u &&
+                surfaceFormats[0].surfaceFormat.format == VK_FORMAT_UNDEFINED)
+            {
+                return true;
+            }
+        }
+
+        for (const VkSurfaceFormat2KHR &surfaceFormat : surfaceFormats)
+        {
+            if (surfaceFormat.surfaceFormat.format == format &&
+                surfaceFormat.surfaceFormat.colorSpace == colorspace)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool DisplayVk::isColorspaceSupported(VkColorSpaceKHR colorspace) const
+{
+    return mSupportedColorspaceFormatsMap.count(colorspace) > 0;
+}
+
+void DisplayVk::initSupportedSurfaceFormatColorspaces()
+{
+    const angle::FeaturesVk &featuresVk = mRenderer->getFeatures();
+    if (featuresVk.supportsSurfacelessQueryExtension.enabled &&
+        featuresVk.supportsSurfaceCapabilities2Extension.enabled)
+    {
+        // Use the VK_GOOGLE_surfaceless_query extension to query supported surface formats and
+        // colorspaces by using a VK_NULL_HANDLE for the VkSurfaceKHR handle.
+        std::vector<VkSurfaceFormat2KHR> surfaceFormats;
+        GetSupportedFormatColorspaces(mRenderer->getPhysicalDevice(), featuresVk, VK_NULL_HANDLE,
+                                      &surfaceFormats);
+        for (const VkSurfaceFormat2KHR &surfaceFormat : surfaceFormats)
+        {
+            // Cache supported VkFormat and VkColorSpaceKHR for later use
+            VkFormat format            = surfaceFormat.surfaceFormat.format;
+            VkColorSpaceKHR colorspace = surfaceFormat.surfaceFormat.colorSpace;
+
+            ASSERT(format != VK_FORMAT_UNDEFINED);
+
+            mSupportedColorspaceFormatsMap[colorspace].insert(format);
+        }
+
+        ASSERT(mSupportedColorspaceFormatsMap.size() > 0);
+    }
+    else
+    {
+        mSupportedColorspaceFormatsMap.clear();
+    }
+}
+
 ContextImpl *DisplayVk::createContext(const gl::State &state,
                                       gl::ErrorSet *errorSet,
                                       const egl::Config *configuration,
@@ -203,6 +371,11 @@ gl::Version DisplayVk::getMaxSupportedESVersion() const
 gl::Version DisplayVk::getMaxConformantESVersion() const
 {
     return mRenderer->getMaxConformantESVersion();
+}
+
+Optional<gl::Version> DisplayVk::getMaxSupportedDesktopVersion() const
+{
+    return gl::Version{4, 6};
 }
 
 egl::Error DisplayVk::validateImageClientBuffer(const gl::Context *context,
@@ -293,8 +466,8 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->imagePixmap           = false;  // ANGLE does not support pixmaps
     outExtensions->glTexture2DImage      = true;
     outExtensions->glTextureCubemapImage = true;
-    outExtensions->glTexture3DImage      = false;
-    outExtensions->glRenderbufferImage   = true;
+    outExtensions->glTexture3DImage = getRenderer()->getFeatures().supportsImage2dViewOf3d.enabled;
+    outExtensions->glRenderbufferImage = true;
     outExtensions->imageNativeBuffer =
         getRenderer()->getFeatures().supportsAndroidHardwareBuffer.enabled;
     outExtensions->surfacelessContext = true;
@@ -346,6 +519,31 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
         getRenderer()->getFeatures().supportsLockSurfaceExtension.enabled;
 
     outExtensions->partialUpdateKHR = true;
+
+    outExtensions->timestampSurfaceAttributeANGLE =
+        getRenderer()->getFeatures().supportsTimestampSurfaceAttribute.enabled;
+
+    outExtensions->eglColorspaceAttributePassthroughANGLE =
+        outExtensions->glColorspace &&
+        getRenderer()->getFeatures().eglColorspaceAttributePassthrough.enabled;
+
+    // If EGL_KHR_gl_colorspace extension is supported check if other colorspace extensions
+    // can be supported as well.
+    if (outExtensions->glColorspace)
+    {
+        if (isColorspaceSupported(VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT))
+        {
+            outExtensions->glColorspaceDisplayP3            = true;
+            outExtensions->glColorspaceDisplayP3Passthrough = true;
+        }
+
+        outExtensions->glColorspaceDisplayP3Linear =
+            isColorspaceSupported(VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT);
+        outExtensions->glColorspaceScrgb =
+            isColorspaceSupported(VK_COLOR_SPACE_EXTENDED_SRGB_NONLINEAR_EXT);
+        outExtensions->glColorspaceScrgbLinear =
+            isColorspaceSupported(VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT);
+    }
 }
 
 void DisplayVk::generateCaps(egl::Caps *outCaps) const
@@ -402,14 +600,34 @@ egl::Error DisplayVk::getEGLError(EGLint errorCode)
     return egl::Error(errorCode, 0, std::move(errorString));
 }
 
+void DisplayVk::initializeFrontendFeatures(angle::FrontendFeatures *features) const
+{
+    mRenderer->initializeFrontendFeatures(features);
+}
+
 void DisplayVk::populateFeatureList(angle::FeatureList *features)
 {
     mRenderer->getFeatures().populateFeatureList(features);
 }
 
-ShareGroupVk::ShareGroupVk()
+ShareGroupVk::ShareGroupVk() : mOrphanNonEmptyBufferBlock(false)
 {
     mLastPruneTime = angle::GetCurrentSystemTime();
+}
+
+void ShareGroupVk::addContext(ContextVk *contextVk)
+{
+    mContexts.insert(contextVk);
+
+    if (contextVk->getState().hasDisplayTextureShareGroup())
+    {
+        mOrphanNonEmptyBufferBlock = true;
+    }
+}
+
+void ShareGroupVk::removeContext(ContextVk *contextVk)
+{
+    mContexts.erase(contextVk);
 }
 
 void ShareGroupVk::onDestroy(const egl::Display *display)
@@ -420,17 +638,24 @@ void ShareGroupVk::onDestroy(const egl::Display *display)
     {
         if (pool)
         {
-            pool->destroy(renderer);
+            pool->destroy(renderer, mOrphanNonEmptyBufferBlock);
         }
     }
 
     if (mSmallBufferPool)
     {
-        mSmallBufferPool->destroy(renderer);
+        mSmallBufferPool->destroy(renderer, mOrphanNonEmptyBufferBlock);
     }
 
     mPipelineLayoutCache.destroy(renderer);
     mDescriptorSetLayoutCache.destroy(renderer);
+
+    mMetaDescriptorPools[DescriptorSetIndex::UniformsAndXfb].destroy(renderer);
+    mMetaDescriptorPools[DescriptorSetIndex::Texture].destroy(renderer);
+    mMetaDescriptorPools[DescriptorSetIndex::ShaderResource].destroy(renderer);
+
+    mFramebufferCache.destroy(renderer);
+    resetPrevTexture();
 
     ASSERT(mResourceUseLists.empty());
 }
@@ -447,23 +672,187 @@ void ShareGroupVk::releaseResourceUseLists(const Serial &submitSerial)
     }
 }
 
+angle::Result ShareGroupVk::onMutableTextureUpload(ContextVk *contextVk, TextureVk *newTexture)
+{
+    return mTextureUpload.onMutableTextureUpload(contextVk, newTexture);
+}
+
+void ShareGroupVk::onTextureRelease(TextureVk *textureVk)
+{
+    mTextureUpload.onTextureRelease(textureVk);
+}
+
+angle::Result TextureUpload::onMutableTextureUpload(ContextVk *contextVk, TextureVk *newTexture)
+{
+    // This feature is currently disabled in the case of display-level texture sharing.
+    ASSERT(!contextVk->hasDisplayTextureShareGroup());
+
+    // If the previous texture is null, it should be set to the current texture. We also have to
+    // make sure that the previous texture pointer is still a mutable texture. Otherwise, we skip
+    // the optimization.
+    if (mPrevUploadedMutableTexture == nullptr || mPrevUploadedMutableTexture->isImmutable())
+    {
+        mPrevUploadedMutableTexture = newTexture;
+        return angle::Result::Continue;
+    }
+
+    // Skip the optimization if we have not switched to a new texture yet.
+    if (mPrevUploadedMutableTexture == newTexture)
+    {
+        return angle::Result::Continue;
+    }
+
+    // If the mutable texture is consistently specified, we initialize a full mip chain for it.
+    if (mPrevUploadedMutableTexture->isMutableTextureConsistentlySpecifiedForFlush())
+    {
+        ANGLE_TRY(mPrevUploadedMutableTexture->ensureImageInitialized(
+            contextVk, ImageMipLevels::FullMipChain));
+        contextVk->getPerfCounters().mutableTexturesUploaded++;
+    }
+
+    // Update the mutable texture pointer with the new pointer for the next potential flush.
+    mPrevUploadedMutableTexture = newTexture;
+
+    return angle::Result::Continue;
+}
+
+void TextureUpload::onTextureRelease(TextureVk *textureVk)
+{
+    if (mPrevUploadedMutableTexture == textureVk)
+    {
+        resetPrevTexture();
+    }
+}
+
 vk::BufferPool *ShareGroupVk::getDefaultBufferPool(RendererVk *renderer,
                                                    VkDeviceSize size,
                                                    uint32_t memoryTypeIndex)
 {
-    return vk::GetDefaultBufferPool(mSmallBufferPool, mDefaultBufferPools, renderer, size,
-                                    memoryTypeIndex);
+    if (size <= kMaxSizeToUseSmallBufferPool &&
+        memoryTypeIndex ==
+            renderer->getVertexConversionBufferMemoryTypeIndex(vk::MemoryHostVisibility::Visible))
+    {
+        if (!mSmallBufferPool)
+        {
+            const vk::Allocator &allocator = renderer->getAllocator();
+            VkBufferUsageFlags usageFlags  = GetDefaultBufferUsageFlags(renderer);
+
+            VkMemoryPropertyFlags memoryPropertyFlags;
+            allocator.getMemoryTypeProperties(memoryTypeIndex, &memoryPropertyFlags);
+
+            std::unique_ptr<vk::BufferPool> pool = std::make_unique<vk::BufferPool>();
+            pool->initWithFlags(renderer, vma::VirtualBlockCreateFlagBits::BUDDY, usageFlags, 0,
+                                memoryTypeIndex, memoryPropertyFlags);
+            mSmallBufferPool = std::move(pool);
+        }
+        return mSmallBufferPool.get();
+    }
+    else if (!mDefaultBufferPools[memoryTypeIndex])
+    {
+        const vk::Allocator &allocator = renderer->getAllocator();
+        VkBufferUsageFlags usageFlags  = GetDefaultBufferUsageFlags(renderer);
+
+        VkMemoryPropertyFlags memoryPropertyFlags;
+        allocator.getMemoryTypeProperties(memoryTypeIndex, &memoryPropertyFlags);
+
+        std::unique_ptr<vk::BufferPool> pool = std::make_unique<vk::BufferPool>();
+        pool->initWithFlags(renderer, vma::VirtualBlockCreateFlagBits::GENERAL, usageFlags, 0,
+                            memoryTypeIndex, memoryPropertyFlags);
+        mDefaultBufferPools[memoryTypeIndex] = std::move(pool);
+    }
+
+    return mDefaultBufferPools[memoryTypeIndex].get();
 }
 
 void ShareGroupVk::pruneDefaultBufferPools(RendererVk *renderer)
 {
     mLastPruneTime = angle::GetCurrentSystemTime();
 
-    vk::PruneDefaultBufferPools(renderer, mDefaultBufferPools, mSmallBufferPool);
+    // Bail out if no suballocation have been destroyed since last prune.
+    if (renderer->getSuballocationDestroyedSize() == 0)
+    {
+        return;
+    }
+
+    for (std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
+    {
+        if (pool)
+        {
+            pool->pruneEmptyBuffers(renderer);
+        }
+    }
+    if (mSmallBufferPool)
+    {
+        mSmallBufferPool->pruneEmptyBuffers(renderer);
+    }
+
+    renderer->onBufferPoolPrune();
+
+#if ANGLE_ENABLE_BUFFER_POOL_STATS_LOGGING
+    logBufferPools();
+#endif
 }
 
-bool ShareGroupVk::isDueForBufferPoolPrune()
+bool ShareGroupVk::isDueForBufferPoolPrune(RendererVk *renderer)
 {
-    return vk::IsDueForBufferPoolPrune(mLastPruneTime);
+    // Ensure we periodically prune to maintain the heuristic information
+    double timeElapsed = angle::GetCurrentSystemTime() - mLastPruneTime;
+    if (timeElapsed > kTimeElapsedForPruneDefaultBufferPool)
+    {
+        return true;
+    }
+
+    // If we have destroyed a lot of memory, also prune to ensure memory gets freed as soon as
+    // possible
+    if (renderer->getSuballocationDestroyedSize() >= kMaxTotalEmptyBufferBytes)
+    {
+        return true;
+    }
+
+    return false;
+}
+
+void ShareGroupVk::calculateTotalBufferCount(size_t *bufferCount, VkDeviceSize *totalSize) const
+{
+    *bufferCount = 0;
+    *totalSize   = 0;
+    for (const std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
+    {
+        if (pool)
+        {
+            *bufferCount += pool->getBufferCount();
+            *totalSize += pool->getMemorySize();
+        }
+    }
+    if (mSmallBufferPool)
+    {
+        *bufferCount += mSmallBufferPool->getBufferCount();
+        *totalSize += mSmallBufferPool->getMemorySize();
+    }
+}
+
+void ShareGroupVk::logBufferPools() const
+{
+    size_t totalBufferCount;
+    VkDeviceSize totalMemorySize;
+    calculateTotalBufferCount(&totalBufferCount, &totalMemorySize);
+
+    INFO() << "BufferBlocks count:" << totalBufferCount << " memorySize:" << totalMemorySize / 1024
+           << " UnusedBytes/memorySize (KBs):";
+    for (const std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
+    {
+        if (pool && pool->getBufferCount() > 0)
+        {
+            std::ostringstream log;
+            pool->addStats(&log);
+            INFO() << "\t" << log.str();
+        }
+    }
+    if (mSmallBufferPool && mSmallBufferPool->getBufferCount() > 0)
+    {
+        std::ostringstream log;
+        mSmallBufferPool->addStats(&log);
+        INFO() << "\t" << log.str();
+    }
 }
 }  // namespace rx

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,13 @@
 namespace gl {
 namespace {
 EGLDeviceEXT GetEGLDeviceFromANGLE() {
-  EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
+  EGLDisplay egl_display = gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay();
   if (egl_display == EGL_NO_DISPLAY) {
     LOG(ERROR) << "Failed to retrieve EGLDisplay";
     return nullptr;
   }
 
-  if (!gl::GLSurfaceEGL::IsEGLQueryDeviceSupported()) {
+  if (!gl::g_driver_egl.client_ext.b_EGL_EXT_device_query) {
     LOG(ERROR) << "EGL_EXT_device_query not supported";
     return nullptr;
   }

@@ -84,7 +84,7 @@ callsite. At a given callsite (preferably you have only one), the string
 should be the same every time the macro is called. If you need to use dynamic
 names, use the functions in histogram_functions.h instead of the macros.
 
-### Don't Use Same String in Multiple Places
+### Don't Use Same Inline String in Multiple Places
 
 If you must use the histogram name in multiple places, use a compile-time
 constant of appropriate scope that can be referenced everywhere. Using inline
@@ -210,6 +210,9 @@ private static void logNewTabPageAction(@NewTabPageAction int action) {
 }
 ```
 
+Finally, regardless of the programming language you are using, add the
+definition of the enumerator to [enums.xml](./enums.xml).
+
 #### Legacy Enums
 
 **Note: this method of defining histogram enums is deprecated. Do not use this
@@ -248,6 +251,13 @@ corresponding entry to [enums.xml](./enums.xml). This is automatically verified
 by the `AboutFlagsHistogramTest` unit test.
 
 To add a new entry:
+
+1. After adding flags
+   to [about_flags.cc](../../../chrome/browser/about_flags.cc),
+   run `generate_flag_enums.py --feature <your awesome feature>` or
+   simply `generate_flag_enums.py` (slower).
+
+You can alternatively follow these steps:
 
 1. Edit [enums.xml](./enums.xml), adding the feature to the `LoginCustomFlags`
    enum section, with any unique value (just make one up, although whatever it
@@ -294,14 +304,15 @@ situation.
 #### Count Histograms: Choosing Number of Buckets
 
 Choose the smallest number of buckets that give you the granularity you need. By
-default, count histogram bucket sizes scale exponentially, so you can get fine
-granularity when the numbers are small yet still reasonable resolution for
-larger numbers. The macros default to 50 buckets (or 100 buckets for histograms
-with wide ranges), which is appropriate for most purposes. Because histograms
-pre-allocate all the buckets, the number of buckets selected directly dictates
-how much memory is used. Do not exceed 100 buckets without good reason (and
-consider whether [sparse histograms](#When-To-Use-Sparse-Histograms) might work
-better for you in that case—they do not pre-allocate their buckets).
+default, count histogram bucket sizes increase exponentially with respect to the
+value (i.e., exponential binning), so you can get fine granularity when the
+values are small yet still reasonable resolution when the values are larger. The
+macros default to 50 buckets (or 100 buckets for histograms with wide ranges),
+which is appropriate for most purposes. Because histograms pre-allocate all the
+buckets, the number of buckets selected directly dictates how much memory is
+used. Do not exceed 100 buckets without good reason (and consider whether
+[sparse histograms](#When-To-Use-Sparse-Histograms) might work better for you in
+that case—they do not pre-allocate their buckets).
 
 ### Timing Histograms
 
@@ -652,7 +663,7 @@ entry in the histograms.xml file.
   * Suffix entries in histogram_suffixes_list.xml.
 * Please remove these artifacts if you find them.
   * **Exception**: please mark `<int value=...>` blocks as obsolete rather than
-    deleting them.
+    deleting them, if the surrounding `<enum>` block is not being deleted.
 * A histogram entry can be removed after an obsoletion message was added, but
   please check that at least a day has passed since the change landed. This
   ensures that the message will be recorded by internal tools.
@@ -717,6 +728,11 @@ This is useful for token substitutions that are shared among multiple families
 of histograms. See
 [histograms.xml](https://source.chromium.org/search?q=file:histograms.xml%20%3Cvariants)
 for examples.
+
+*** promo
+Warning: The `name` attribute of the `<variants>` tag is globally scoped, so
+use detailed names to avoid collisions.
+***
 
 By default, a `<variant>` inherits the owners declared for the patterned
 histogram. Each variant can optionally override the inherited list with custom

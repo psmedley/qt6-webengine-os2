@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,6 +52,11 @@ class CORE_EXPORT DisplayLockDocumentState final
   void RegisterDisplayLockActivationObservation(Element*);
   void UnregisterDisplayLockActivationObservation(Element*);
 
+  // Returns true if we have activatable locks.
+  // This compares LockedDisplayLockCount() and
+  // DisplayLockBlockingAllActivationCount().
+  bool HasActivatableLocks() const;
+
   // Returns true if all activatable locks have been forced.
   bool ActivatableDisplayLocksForced() const;
 
@@ -81,6 +86,13 @@ class CORE_EXPORT DisplayLockDocumentState final
   // Notify the display locks that selection was removed.
   void NotifySelectionRemoved();
 
+  // Notify the display locks that shared elements have changed.
+  void NotifySharedElementPseudoTreeChanged();
+
+  // Updates only the ancestor locks of the shared element transition elements.
+  // This is an optimization to be used by the display lock context.
+  void UpdateSharedElementAncestorLocks();
+
   // This is called when the forced scope is created or destroyed in
   // |ScopedForcedUpdate::Impl|. This is used to ensure that we can create new
   // locks that are immediately forced by the existing forced scope.
@@ -108,6 +120,9 @@ class CORE_EXPORT DisplayLockDocumentState final
       const Range* range,
       DisplayLockUtilities::ScopedForcedUpdate::Impl* chain);
   void EndForcedScope(DisplayLockUtilities::ScopedForcedUpdate::Impl* chain);
+  bool HasForcedScopes() const {
+    return forced_node_infos_.size() > 0 || forced_range_infos_.size() > 0;
+  }
 
   // This is called to make sure that any of the currently forced locks allow at
   // least the specified phase for updates. This is used when a scope is
@@ -173,6 +188,8 @@ class CORE_EXPORT DisplayLockDocumentState final
 
   static constexpr float kViewportMarginPercentage = 150.f;
 
+  void IssueForcedRenderWarning(Element*);
+
  private:
   IntersectionObserver& EnsureIntersectionObserver();
 
@@ -191,20 +208,22 @@ class CORE_EXPORT DisplayLockDocumentState final
   Member<IntersectionObserver> intersection_observer_ = nullptr;
   HeapHashSet<WeakMember<DisplayLockContext>> display_lock_contexts_;
 
+  // Contains all of the currently forced node infos, each of which represents
+  // the node that caused the scope to be created.
+  HeapVector<ForcedNodeInfo> forced_node_infos_;
+  HeapVector<ForcedRangeInfo> forced_range_infos_;
+
   int locked_display_lock_count_ = 0;
   int display_lock_blocking_all_activation_count_ = 0;
 
   // If greater than 0, then the activatable locks are forced.
   int activatable_display_locks_forced_ = 0;
 
-  // Contains all of the currently forced node infos, each of which represents
-  // the node that caused the scope to be created.
-  HeapVector<ForcedNodeInfo> forced_node_infos_;
-  HeapVector<ForcedRangeInfo> forced_range_infos_;
-
   bool printing_ = false;
 
   base::TimeTicks last_lock_update_timestamp_ = base::TimeTicks();
+
+  unsigned forced_render_warnings_ = 0;
 };
 
 }  // namespace blink

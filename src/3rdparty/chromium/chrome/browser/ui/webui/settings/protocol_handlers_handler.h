@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
+#include "base/values.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "chrome/browser/web_applications/app_registrar_observer.h"
 #include "chrome/browser/web_applications/web_app_id.h"
@@ -25,10 +26,6 @@
 // This get triggered whenever a user allows or disallows a specific website or
 // application to handle clicks on a link with a specified protocol (i.e.
 // mailto: -> Gmail).
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace settings {
 
@@ -85,13 +82,12 @@ class ProtocolHandlersHandler
   custom_handlers::ProtocolHandler ParseHandlerFromArgs(
       const base::Value::List& args) const;
 
-  // Returns a JSON object describing the set of protocol handlers for the
+  // Populates a JSON object describing the set of protocol handlers for the
   // given protocol.
-  void GetHandlersForProtocol(const std::string& protocol,
-                              base::DictionaryValue* value);
+  base::Value::Dict GetHandlersForProtocol(const std::string& protocol);
 
   // Returns a JSON list of the ignored protocol handlers.
-  void GetIgnoredHandlers(base::ListValue* handlers);
+  base::Value::List GetIgnoredHandlers();
 
   // Called when the JS PasswordManager object is initialized.
   void UpdateHandlerList();
@@ -116,9 +112,9 @@ class ProtocolHandlersHandler
   custom_handlers::ProtocolHandler ParseAppHandlerFromArgs(
       const base::Value::List& args) const;
 
-  // Returns a DictionaryValue describing the set of app protocol handlers for
+  // Returns a Value::Dict describing the set of app protocol handlers for
   // the given |protocol| in the given |handlers| list.
-  std::unique_ptr<base::DictionaryValue> GetAppHandlersForProtocol(
+  base::Value::Dict GetAppHandlersForProtocol(
       const std::string& protocol,
       custom_handlers::ProtocolHandlerRegistry::ProtocolHandlerList handlers);
 

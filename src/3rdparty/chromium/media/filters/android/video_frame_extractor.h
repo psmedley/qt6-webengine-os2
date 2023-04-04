@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_export.h"
-#include "media/filters/ffmpeg_demuxer.h"
+#include "media/base/video_decoder_config.h"
+#include "media/ffmpeg/scoped_av_packet.h"
 
 struct AVPacket;
 struct AVStream;
@@ -23,7 +24,6 @@ class BlockingUrlProtocol;
 class DataSource;
 class FFmpegBitstreamConverter;
 class FFmpegGlue;
-class VideoDecoderConfig;
 
 // This class synchronously extracts a video key frame. Should be used in
 // sandboxed process since the media data is user input.

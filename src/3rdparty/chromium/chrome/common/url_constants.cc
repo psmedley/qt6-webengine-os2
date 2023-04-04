@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,9 @@ const char kAdvancedProtectionDownloadLearnMoreURL[] =
 
 const char kAppNotificationsBrowserSettingsURL[] =
     "chrome://settings/content/notifications";
+
+const char kBatterySaverModeLearnMoreUrl[] =
+    "https://support.google.com/chrome/?p=chrome_battery_saver";
 
 const char kBluetoothAdapterOffHelpURL[] =
     "https://support.google.com/chrome?p=bluetooth";
@@ -82,6 +85,8 @@ const char kChromeOsHelpViaWebUIURL[] =
     "https://support.google.com/chromebook/?p=help&ctx=settings";
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+const char kIsolatedAppScheme[] = "isolated-app";
 
 const char kChromeNativeScheme[] = "chrome-native";
 
@@ -165,6 +170,9 @@ const char kGoogleAccountDeviceActivityURL[] =
 const char kGooglePasswordManagerURL[] = "https://passwords.google.com";
 
 const char kGooglePhotosURL[] = "https://photos.google.com";
+
+const char kHighEfficiencyModeLearnMoreUrl[] =
+    "https://support.google.com/chrome/?p=chrome_memory_saver";
 
 const char kLearnMoreReportingURL[] =
     "https://support.google.com/chrome/?p=ui_usagestat";
@@ -276,6 +284,9 @@ const char kSyncGoogleDashboardURL[] =
 const char kSyncLearnMoreURL[] =
     "https://support.google.com/chrome/?p=settings_sign_in";
 
+const char kSigninInterceptManagedDisclaimerLearnMoreURL[] =
+    "https://support.google.com/chrome/a/?p=profile_separation";
+
 #if !BUILDFLAG(IS_ANDROID)
 const char kSyncTrustedVaultOptInURL[] =
     "https://passwords.google.com/encryption/enroll?"
@@ -303,6 +314,13 @@ const char kEnhancedPlaybackNotificationLearnMoreURL[] =
 #elif BUILDFLAG(IS_ANDROID)
 // Keep in sync with chrome/browser/ui/android/strings/android_chrome_strings.grd
     "https://support.google.com/chrome/?p=mobile_protected_content";
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+const char kChromeOSDefaultMailtoHandler[] =
+    "https://mail.google.com/mail/?extsrc=mailto&amp;url=%s";
+const char kChromeOSDefaultWebcalHandler[] =
+    "https://www.google.com/calendar/render?cid=%s";
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -419,6 +437,9 @@ const char kTPMFirmwareUpdateLearnMoreURL[] =
 const char kTimeZoneSettingsLearnMoreURL[] =
     "https://support.google.com/chromebook?p=chromebook_timezone&hl=%s";
 
+const char kSmartPrivacySettingsLearnMoreURL[] =
+    "https://support.google.com/chromebook?p=screen_privacy_m100";
+
 const char kSmbSharesLearnMoreURL[] =
     "https://support.google.com/chromebook?p=network_file_shares";
 
@@ -459,12 +480,13 @@ const char kChromeCleanerLearnMoreURL[] =
 
 const char kWindowsXPVistaDeprecationURL[] =
     "https://chrome.blogspot.com/2015/11/updates-to-chrome-platform-support.html";
-#endif
 
-#if BUILDFLAG(ENABLE_ONE_CLICK_SIGNIN)
+const char kWindows78DeprecationURL[] =
+    "https://support.google.com/chrome/?p=unsupported_windows";
+#endif  // BUILDFLAG(IS_WIN)
+
 const char kChromeSyncLearnMoreURL[] =
     "https://support.google.com/chrome/answer/165139";
-#endif  // BUILDFLAG(ENABLE_ONE_CLICK_SIGNIN)
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 const char kOutdatedPluginLearnMoreURL[] =
@@ -479,6 +501,13 @@ const char kPhoneHubPermissionLearnMoreURL[] =
     BUILDFLAG(IS_FUCHSIA)
 const char kChromeAppsDeprecationLearnMoreURL[] =
     "https://support.google.com/chrome/?p=chrome_app_deprecation";
+#endif
+
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+// TODO(b/1339340): add help center link when help center link is created.
+const char kChromeRootStoreSettingsHelpCenterURL[] =
+    "https://chromium.googlesource.com/chromium/src/+/main/net/data/ssl/"
+    "chrome_root_store/root_store.md";
 #endif
 
 }  // namespace chrome

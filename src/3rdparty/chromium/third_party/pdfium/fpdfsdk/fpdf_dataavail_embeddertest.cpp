@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/fxcrt/bytestring.h"
+#include "public/fpdf_doc.h"
 #include "public/fpdfview.h"
 #include "testing/embedder_test.h"
 #include "testing/fx_string_testhelpers.h"
@@ -388,4 +389,18 @@ TEST_F(FPDFDataAvailEmbedderTest, NegativePageIndex) {
   ASSERT_EQ(PDF_DATA_AVAIL, FPDFAvail_IsDocAvail(avail(), loader.hints()));
   EXPECT_EQ(PDF_DATA_NOTAVAIL,
             FPDFAvail_IsPageAvail(avail(), -1, loader.hints()));
+}
+
+TEST_F(FPDFDataAvailEmbedderTest, Bug_1324189) {
+  // Test passes if it doesn't crash.
+  TestAsyncLoader loader("bug_1324189.pdf");
+  CreateAvail(loader.file_avail(), loader.file_access());
+  ASSERT_EQ(PDF_DATA_NOTAVAIL, FPDFAvail_IsDocAvail(avail(), loader.hints()));
+}
+
+TEST_F(FPDFDataAvailEmbedderTest, Bug_1324503) {
+  // Test passes if it doesn't crash.
+  TestAsyncLoader loader("bug_1324503.pdf");
+  CreateAvail(loader.file_avail(), loader.file_access());
+  ASSERT_EQ(PDF_DATA_NOTAVAIL, FPDFAvail_IsDocAvail(avail(), loader.hints()));
 }

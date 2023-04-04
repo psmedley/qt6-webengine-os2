@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,14 +81,15 @@ class FrameConnectedBluetoothDevicesTest
     RenderViewHostImplTestHarness::SetUp();
 
     // Create subframe to simulate two maps on the same WebContents.
-    contents()->GetMainFrame()->InitializeRenderFrameIfNeeded();
+    contents()->GetPrimaryMainFrame()->InitializeRenderFrameIfNeeded();
     TestRenderFrameHost* subframe =
-        contents()->GetMainFrame()->AppendChild("bluetooth_frame");
+        contents()->GetPrimaryMainFrame()->AppendChild("bluetooth_frame");
     subframe->InitializeRenderFrameIfNeeded();
 
     // Simulate two frames each connected to a bluetooth service.
-    service0_ =
-        contents()->GetMainFrame()->CreateWebBluetoothServiceForTesting();
+    service0_ = contents()
+                    ->GetPrimaryMainFrame()
+                    ->CreateWebBluetoothServiceForTesting();
     map0_ = service0_->connected_devices_.get();
 
     service1_ = subframe->CreateWebBluetoothServiceForTesting();
@@ -110,14 +111,12 @@ class FrameConnectedBluetoothDevicesTest
   }
 
   void ResetService0() {
-    delete service0_;
-    service0_ = nullptr;
+    std::exchange(service0_, nullptr)->ResetAndDeleteThis();
     map0_ = nullptr;
   }
 
   void ResetService1() {
-    delete service1_;
-    service1_ = nullptr;
+    std::exchange(service1_, nullptr)->ResetAndDeleteThis();
     map1_ = nullptr;
   }
 

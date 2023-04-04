@@ -72,6 +72,8 @@ protected:
     // This returns zero since the memory should all be handled by the attachments
     size_t onGpuMemorySize() const override { return 0; }
 
+    void onSetLabel() override;
+
     sk_sp<GrMtlAttachment> fColorAttachment;
     sk_sp<GrMtlAttachment> fResolveAttachment;
 

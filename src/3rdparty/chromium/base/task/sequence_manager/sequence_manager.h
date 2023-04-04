@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/base_export.h"
+#include "base/dcheck_is_on.h"
 #include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/message_loop/timer_slack.h"
@@ -132,8 +133,7 @@ class BASE_EXPORT SequenceManager {
     // If not zero this seeds a PRNG used by the task selection logic to choose
     // a random TaskQueue for a given priority rather than the TaskQueue with
     // the oldest EnqueueOrder.
-    int random_task_selection_seed = 0;
-
+    uint64_t random_task_selection_seed = 0;
 #endif  // DCHECK_IS_ON()
   };
 
@@ -260,6 +260,12 @@ class BASE_EXPORT SequenceManager {
   // message pump).
   virtual void PrioritizeYieldingToNative(base::TimeTicks prioritize_until) = 0;
 
+  // Enable periodically yielding to the system message loop every |interval|.
+  // If |interval.is_inf()|, then SequenceManager won't yield to the system
+  // message pump unless it is out of immediate work.
+  // Currently only takes effect on Android.
+  virtual void EnablePeriodicYieldingToNative(base::TimeDelta interval) = 0;
+
   // Adds an observer which reports task execution. Can only be called on the
   // same thread that `this` is running on.
   virtual void AddTaskObserver(TaskObserver* task_observer) = 0;
@@ -315,8 +321,7 @@ class BASE_EXPORT SequenceManager::Settings::Builder {
   // If not zero this seeds a PRNG used by the task selection logic to choose a
   // random TaskQueue for a given priority rather than the TaskQueue with the
   // oldest EnqueueOrder.
-  Builder& SetRandomTaskSelectionSeed(int random_task_selection_seed);
-
+  Builder& SetRandomTaskSelectionSeed(uint64_t random_task_selection_seed);
 #endif  // DCHECK_IS_ON()
 
   Settings Build();

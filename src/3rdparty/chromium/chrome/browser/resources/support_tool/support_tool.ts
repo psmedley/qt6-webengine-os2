@@ -1,23 +1,22 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'chrome://resources/polymer/v3_0/iron-pages/iron-pages.js';
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import 'chrome://resources/cr_elements/icons.m.js';
 import './data_collectors.js';
 import './issue_details.js';
 import './spinner_page.js';
 import './pii_selection.js';
 import './data_export_done.js';
-import './support_tool_shared_css.js';
+import './support_tool_shared.css.js';
 
 import {CrToastElement} from 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import {WebUIListenerMixin} from 'chrome://resources/js/web_ui_listener_mixin.js';
+import {WebUIListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {BrowserProxy, BrowserProxyImpl, PIIDataItem} from './browser_proxy.js';
+
+import {BrowserProxy, BrowserProxyImpl, PIIDataItem, StartDataCollectionResult} from './browser_proxy.js';
 import {DataCollectorsElement} from './data_collectors.js';
 import {DataExportDoneElement} from './data_export_done.js';
 import {IssueDetailsElement} from './issue_details.js';
@@ -34,11 +33,11 @@ export enum SupportToolPageIndex {
   DATA_EXPORT_DONE,
 }
 
-export type DataExportResult = {
-  success: boolean,
-  path: string,
-  error: string,
-};
+export interface DataExportResult {
+  success: boolean;
+  path: string;
+  error: string;
+}
 
 export interface SupportToolElement {
   $: {
@@ -46,6 +45,7 @@ export interface SupportToolElement {
     dataCollectors: DataCollectorsElement,
     spinnerPage: SpinnerPageElement,
     piiSelection: PIISelectionElement,
+    exportSpinner: SpinnerPageElement,
     dataExportDone: DataExportDoneElement,
     errorMessageToast: CrToastElement,
   };
@@ -67,6 +67,7 @@ export class SupportToolElement extends SupportToolElementBase {
       selectedPage_: {
         type: SupportToolPageIndex,
         value: SupportToolPageIndex.ISSUE_DETAILS,
+        observer: 'onSelectedPageChange_',
       },
       supportToolPageIndex_: {
         readonly: true,
@@ -77,7 +78,7 @@ export class SupportToolElement extends SupportToolElementBase {
       errorMessage_: {
         type: String,
         value: '',
-      }
+      },
     };
   }
 
@@ -133,6 +134,14 @@ export class SupportToolElement extends SupportToolElementBase {
     }
   }
 
+  private onDataCollectionStart_(result: StartDataCollectionResult) {
+    if (result.success) {
+      this.selectedPage_ = SupportToolPageIndex.SPINNER;
+    } else {
+      this.displayError_(result.errorMessage);
+    }
+  }
+
   private onErrorMessageToastCloseClicked_() {
     this.$.errorMessageToast.hide();
   }
@@ -141,11 +150,14 @@ export class SupportToolElement extends SupportToolElementBase {
     // If we are currently on data collectors selection page, send signal to
     // start data collection.
     if (this.selectedPage_ === SupportToolPageIndex.DATA_COLLECTOR_SELECTION) {
-      this.browserProxy_.startDataCollection(
-          this.$.issueDetails.getIssueDetails(),
-          this.$.dataCollectors.getDataCollectors());
+      this.browserProxy_
+          .startDataCollection(
+              this.$.issueDetails.getIssueDetails(),
+              this.$.dataCollectors.getDataCollectors())
+          .then(this.onDataCollectionStart_.bind(this));
+    } else {
+      this.selectedPage_ = this.selectedPage_ + 1;
     }
-    this.selectedPage_ = this.selectedPage_ + 1;
   }
 
   private onBackClick_() {
@@ -161,6 +173,33 @@ export class SupportToolElement extends SupportToolElementBase {
     // Continue button container will only be shown in issue details page and
     // data collectors selection page.
     return this.selectedPage_ >= SupportToolPageIndex.SPINNER;
+  }
+
+  private onSelectedPageChange_() {
+    // On every selected page change, the focus will be moved to each page's
+    // header to ensure a smooth experience in terms of accessibility.
+    switch (this.selectedPage_) {
+      case SupportToolPageIndex.ISSUE_DETAILS:
+        this.$.issueDetails.ensureFocusOnPageHeader();
+        break;
+      case SupportToolPageIndex.DATA_COLLECTOR_SELECTION:
+        this.$.dataCollectors.ensureFocusOnPageHeader();
+        break;
+      case SupportToolPageIndex.SPINNER:
+        this.$.spinnerPage.ensureFocusOnPageHeader();
+        break;
+      case SupportToolPageIndex.PII_SELECTION:
+        this.$.piiSelection.ensureFocusOnPageHeader();
+        break;
+      case SupportToolPageIndex.EXPORT_SPINNER:
+        this.$.exportSpinner.ensureFocusOnPageHeader();
+        break;
+      case SupportToolPageIndex.DATA_EXPORT_DONE:
+        this.$.dataExportDone.ensureFocusOnPageHeader();
+        break;
+      default:
+        break;
+    }
   }
 }
 

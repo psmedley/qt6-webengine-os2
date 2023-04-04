@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@ void SetUpOpenH264Params(const VideoEncoder::Options& options,
   params->iComplexityMode = MEDIUM_COMPLEXITY;
   params->iUsageType = CAMERA_VIDEO_REAL_TIME;
   params->bEnableDenoise = false;
+  params->eSpsPpsIdStrategy = SPS_LISTING;
   // Set to 1 due to https://crbug.com/583348
   params->iMultipleThreadIdc = 1;
   if (options.framerate.has_value())
@@ -132,6 +133,12 @@ void OpenH264VideoEncoder::Initialize(VideoCodecProfile profile,
     return;
   }
 
+  if (options.frame_size.height() < 16 || options.frame_size.width() < 16) {
+    std::move(done_cb).Run(
+        EncoderStatus(EncoderStatus::Codes::kEncoderInitializationError,
+                      "Unsupported frame size which is less than 16"));
+    return;
+  }
   SetUpOpenH264Params(options, &params);
 
   if (int err = codec->InitializeExt(&params)) {
@@ -171,7 +178,7 @@ EncoderStatus OpenH264VideoEncoder::DrainOutputs(const SFrameBSInfo& frame_info,
 
   DCHECK_GT(frame_info.iFrameSizeInBytes, 0);
   size_t total_chunk_size = frame_info.iFrameSizeInBytes;
-  result.data.reset(new uint8_t[total_chunk_size]);
+  result.data = std::make_unique<uint8_t[]>(total_chunk_size);
   auto* gather_buffer = result.data.get();
 
   if (h264_converter_) {
@@ -310,9 +317,9 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
   picture.iPicHeight = frame->visible_rect().height();
   picture.iColorFormat = EVideoFormatType::videoFormatI420;
   picture.uiTimeStamp = frame->timestamp().InMilliseconds();
-  picture.pData[0] = frame->visible_data(VideoFrame::kYPlane);
-  picture.pData[1] = frame->visible_data(VideoFrame::kUPlane);
-  picture.pData[2] = frame->visible_data(VideoFrame::kVPlane);
+  picture.pData[0] = frame->GetWritableVisibleData(VideoFrame::kYPlane);
+  picture.pData[1] = frame->GetWritableVisibleData(VideoFrame::kUPlane);
+  picture.pData[2] = frame->GetWritableVisibleData(VideoFrame::kVPlane);
   picture.iStride[0] = frame->stride(VideoFrame::kYPlane);
   picture.iStride[1] = frame->stride(VideoFrame::kUPlane);
   picture.iStride[2] = frame->stride(VideoFrame::kVPlane);
@@ -328,7 +335,8 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
   }
 
   SFrameBSInfo frame_info = {};
-  TRACE_EVENT0("media", "OpenH264::EncodeFrame");
+  TRACE_EVENT1("media", "OpenH264::EncodeFrame", "timestamp",
+               frame->timestamp());
   if (int err = codec_->EncodeFrame(&picture, &frame_info)) {
     std::move(done_cb).Run(
         EncoderStatus(EncoderStatus::Codes::kEncoderFailedEncode,

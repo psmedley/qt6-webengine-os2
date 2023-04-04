@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,18 @@ class Origin;
 }  // namespace url
 
 namespace network {
+
+// The "Sec-CH-Prefers-Color-Scheme" header values.
+COMPONENT_EXPORT(NETWORK_CPP)
+extern const char kPrefersColorSchemeDark[];
+COMPONENT_EXPORT(NETWORK_CPP)
+extern const char kPrefersColorSchemeLight[];
+
+// The "Sec-CH-Prefers-Reduced-Motion" header values.
+COMPONENT_EXPORT(NETWORK_CPP)
+extern const char kPrefersReducedMotionNoPreference[];
+COMPONENT_EXPORT(NETWORK_CPP)
+extern const char kPrefersReducedMotionReduce[];
 
 using ClientHintToNameMap =
     base::flat_map<network::mojom::WebClientHintsType, std::string>;
@@ -47,13 +59,24 @@ struct COMPONENT_EXPORT(NETWORK_CPP) ClientHintToDelegatedThirdPartiesHeader {
   bool had_invalid_origins{false};
 };
 
+enum class MetaCHType {
+  // This syntax can only activate client hints for the first party origin.
+  // <meta http-equiv="accept-ch" content="Sec-CH-DPR">
+  // Introduced in M69.
+  HttpEquivAcceptCH,
+  // This syntax can activate and delegate client hints to any origin.
+  // <meta http-equiv="delegate-ch" content="Sec-CH-DPR https://foo.com/">
+  // Introduced in M105.
+  HttpEquivDelegateCH,
+};
+
 // Tries to parse an Accept-CH header w/ third-party delegation ability (i.e. a
 // named meta tag). Returns absl::nullopt if parsing failed and the header
 // should be ignored; otherwise returns a (possibly empty) map of hints to
 // delegated third-parties.
-absl::optional<const ClientHintToDelegatedThirdPartiesHeader> COMPONENT_EXPORT(
-    NETWORK_CPP)
-    ParseClientHintToDelegatedThirdPartiesHeader(const std::string& header);
+const ClientHintToDelegatedThirdPartiesHeader COMPONENT_EXPORT(NETWORK_CPP)
+    ParseClientHintToDelegatedThirdPartiesHeader(const std::string& header,
+                                                 MetaCHType type);
 
 }  // namespace network
 

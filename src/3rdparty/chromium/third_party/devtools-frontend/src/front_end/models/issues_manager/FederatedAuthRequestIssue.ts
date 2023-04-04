@@ -7,8 +7,12 @@ import type * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 
 import {Issue, IssueCategory, IssueKind} from './Issue.js';
-import type {MarkdownIssueDescription, LazyMarkdownIssueDescription} from './MarkdownIssueDescription.js';
-import {resolveLazyDescription} from './MarkdownIssueDescription.js';
+
+import {
+  resolveLazyDescription,
+  type MarkdownIssueDescription,
+  type LazyMarkdownIssueDescription,
+} from './MarkdownIssueDescription.js';
 
 const UIStrings = {
   /**
@@ -72,16 +76,6 @@ export class FederatedAuthRequestIssue extends Issue {
 }
 
 const issueDescriptions: Map<Protocol.Audits.FederatedAuthRequestIssueReason, LazyMarkdownIssueDescription> = new Map([
-  [
-    Protocol.Audits.FederatedAuthRequestIssueReason.ApprovalDeclined,
-    {
-      file: 'federatedAuthRequestApprovalDeclined.md',
-      links: [{
-        link: 'https://fedidcg.github.io/FedCM/',
-        linkTitle: i18nLazyString(UIStrings.fedCm),
-      }],
-    },
-  ],
   [
     Protocol.Audits.FederatedAuthRequestIssueReason.TooManyRequests,
     {

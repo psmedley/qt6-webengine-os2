@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,9 @@ void SaveGeneratedPasswordAction::InternalProcessAction(
   delegate_->GetPasswordChangeSuccessTracker()->OnChangePasswordFlowCompleted(
       delegate_->GetUserData()->selected_login_->origin,
       delegate_->GetUserData()->selected_login_->username,
-      PasswordChangeSuccessTracker::EndEvent::kAutomatedGeneratedPasswordFlow);
+      PasswordChangeSuccessTracker::EndEvent::
+          kAutomatedFlowGeneratedPasswordChosen,
+      /* phished= */ false);
 
   EndAction(ClientStatus(ACTION_APPLIED));
 }

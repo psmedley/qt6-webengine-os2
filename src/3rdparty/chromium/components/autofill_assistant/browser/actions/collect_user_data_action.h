@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,9 @@
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/autofill_assistant/browser/actions/action.h"
 #include "components/autofill_assistant/browser/metrics.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/user_data.h"
 #include "components/autofill_assistant/browser/user_model.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace autofill_assistant {
@@ -77,7 +77,7 @@ class CollectUserDataAction : public Action,
                                        const UserModel* user_model);
   bool IsValidUserFormSection(
       const autofill_assistant::UserFormSectionProto& proto);
-  void ReloadUserData(UserData* user_data);
+  void ReloadUserData(UserDataEventField event_field, UserData* user_data);
 
   // Only used for logging purposes.
   void OnSelectionStateChanged(UserDataEventField field,
@@ -88,10 +88,16 @@ class CollectUserDataAction : public Action,
   void ShowToUser();
   void OnShowToUser(UserData* user_data, UserDataFieldChange* field_change);
   void UpdateUserData(UserData* user_data);
-  void OnRequestUserData(UserData* user_data,
+  void UseChromeData(UserData* user_data,
+                     Metrics::UserDataSource user_data_source);
+  void OnRequestUserData(bool is_initial_request,
+                         UserData* user_data,
                          bool success,
                          const GetUserDataResponseProto& response);
-  void UpdateMetrics(UserData* user_data);
+  void FallbackToChromeData(UserData* user_data,
+                            Metrics::UserDataSource user_data_source);
+  void UpdateMetrics(UserData* user_data,
+                     Metrics::UserDataSource user_data_source);
   void UpdateUi();
 
   // Creates a new instance of |CollectUserDataOptions| from |proto_|.

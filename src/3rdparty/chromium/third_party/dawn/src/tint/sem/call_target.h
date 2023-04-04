@@ -18,9 +18,10 @@
 #include <vector>
 
 #include "src/tint/sem/node.h"
-#include "src/tint/sem/sampler_type.h"
+#include "src/tint/sem/sampler.h"
 #include "src/tint/sem/variable.h"
 #include "src/tint/utils/hash.h"
+#include "src/tint/utils/vector.h"
 
 // Forward declarations
 namespace tint::sem {
@@ -31,59 +32,74 @@ namespace tint::sem {
 
 /// CallTargetSignature holds the return type and parameters for a call target
 struct CallTargetSignature {
-  /// Constructor
-  /// @param ret_ty the call target return type
-  /// @param params the call target parameters
-  CallTargetSignature(const sem::Type* ret_ty, const ParameterList& params);
+    /// Constructor
+    /// @param ret_ty the call target return type
+    /// @param params the call target parameters
+    CallTargetSignature(const sem::Type* ret_ty, utils::VectorRef<const Parameter*> params);
 
-  /// Copy constructor
-  CallTargetSignature(const CallTargetSignature&);
+    /// Copy constructor
+    CallTargetSignature(const CallTargetSignature&);
 
-  /// Destructor
-  ~CallTargetSignature();
+    /// Destructor
+    ~CallTargetSignature();
 
-  /// The type of the call target return value
-  const sem::Type* const return_type = nullptr;
-  /// The parameters of the call target
-  const ParameterList parameters;
+    /// The type of the call target return value
+    const sem::Type* const return_type = nullptr;
+    /// The parameters of the call target
+    const utils::Vector<const sem::Parameter*, 8> parameters;
 
-  /// Equality operator
-  /// @param other the signature to compare this to
-  /// @returns true if this signature is equal to other
-  bool operator==(const CallTargetSignature& other) const;
+    /// Equality operator
+    /// @param other the signature to compare this to
+    /// @returns true if this signature is equal to other
+    bool operator==(const CallTargetSignature& other) const;
 
-  /// @param usage the parameter usage to find
-  /// @returns the index of the parameter with the given usage, or -1 if no
-  /// parameter with the given usage exists.
-  int IndexOf(ParameterUsage usage) const;
+    /// @param usage the parameter usage to find
+    /// @returns the index of the parameter with the given usage, or -1 if no
+    /// parameter with the given usage exists.
+    int IndexOf(ParameterUsage usage) const;
+
+    /// @param usage  the parameter usage to find
+    /// @returns the the parameter with the given usage, or nullptr if no parameter with the given
+    /// usage exists.
+    inline const sem::Parameter* Parameter(ParameterUsage usage) const {
+        auto idx = IndexOf(usage);
+        return (idx >= 0) ? parameters[static_cast<size_t>(idx)] : nullptr;
+    }
 };
 
 /// CallTarget is the base for callable functions, builtins, type constructors
 /// and type casts.
 class CallTarget : public Castable<CallTarget, Node> {
- public:
-  /// Constructor
-  /// @param return_type the return type of the call target
-  /// @param parameters the parameters for the call target
-  CallTarget(const sem::Type* return_type, const ParameterList& parameters);
+  public:
+    /// Constructor
+    /// @param stage the earliest evaluation stage for a call to this target
+    /// @param return_type the return type of the call target
+    /// @param parameters the parameters for the call target
+    CallTarget(const sem::Type* return_type,
+               utils::VectorRef<const Parameter*> parameters,
+               EvaluationStage stage);
 
-  /// Copy constructor
-  CallTarget(const CallTarget&);
+    /// Copy constructor
+    CallTarget(const CallTarget&);
 
-  /// Destructor
-  ~CallTarget() override;
+    /// Destructor
+    ~CallTarget() override;
 
-  /// @return the return type of the call target
-  const sem::Type* ReturnType() const { return signature_.return_type; }
+    /// @return the return type of the call target
+    const sem::Type* ReturnType() const { return signature_.return_type; }
 
-  /// @return the parameters of the call target
-  const ParameterList& Parameters() const { return signature_.parameters; }
+    /// @return the parameters of the call target
+    auto& Parameters() const { return signature_.parameters; }
 
-  /// @return the signature of the call target
-  const CallTargetSignature& Signature() const { return signature_; }
+    /// @return the signature of the call target
+    const CallTargetSignature& Signature() const { return signature_; }
 
- private:
-  CallTargetSignature signature_;
+    /// @return the earliest evaluation stage for a call to this target
+    EvaluationStage Stage() const { return stage_; }
+
+  private:
+    CallTargetSignature signature_;
+    EvaluationStage stage_;
 };
 
 }  // namespace tint::sem
@@ -95,10 +111,10 @@ namespace std {
 /// std::unordered_set.
 template <>
 class hash<tint::sem::CallTargetSignature> {
- public:
-  /// @param sig the CallTargetSignature to hash
-  /// @return the hash value
-  std::size_t operator()(const tint::sem::CallTargetSignature& sig) const;
+  public:
+    /// @param sig the CallTargetSignature to hash
+    /// @return the hash value
+    std::size_t operator()(const tint::sem::CallTargetSignature& sig) const;
 };
 
 }  // namespace std

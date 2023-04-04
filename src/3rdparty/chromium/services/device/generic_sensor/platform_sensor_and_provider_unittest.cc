@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #include "services/device/generic_sensor/platform_sensor_provider.h"
 
 #include "base/bind.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory_mapping.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
 #include "services/device/generic_sensor/fake_platform_sensor_and_provider.h"
@@ -130,13 +132,14 @@ TEST_F(PlatformSensorAndProviderTest, ResourcesAreNotFreedOnPendingRequest) {
 
 // This test verifies that the shared buffer's default values are 0.
 TEST_F(PlatformSensorAndProviderTest, SharedBufferDefaultValue) {
-  mojo::ScopedSharedBufferHandle handle = provider_->CloneSharedBufferHandle();
-  mojo::ScopedSharedBufferMapping mapping = handle->MapAtOffset(
-      sizeof(SensorReadingSharedBuffer),
-      SensorReadingSharedBuffer::GetOffset(mojom::SensorType::AMBIENT_LIGHT));
+  base::ReadOnlySharedMemoryRegion region =
+      provider_->CloneSharedMemoryRegion();
+  base::ReadOnlySharedMemoryMapping mapping = region.MapAt(
+      SensorReadingSharedBuffer::GetOffset(mojom::SensorType::AMBIENT_LIGHT),
+      sizeof(SensorReadingSharedBuffer));
 
-  SensorReadingSharedBuffer* buffer =
-      static_cast<SensorReadingSharedBuffer*>(mapping.get());
+  const SensorReadingSharedBuffer* buffer =
+      static_cast<const SensorReadingSharedBuffer*>(mapping.memory());
   EXPECT_THAT(buffer->reading.als.value, 0);
 }
 
@@ -163,7 +166,7 @@ TEST_F(PlatformSensorAndProviderTest, SharedBufferCleared) {
 
 // Rounding to nearest 50 (see kAlsRoundingMultiple). 25 (see
 // kAlsSignificanceThreshold) difference in values reported in significance
-// test.
+// test, if rounded values differs from previous rounded value.
 TEST_F(PlatformSensorAndProviderTest, SensorValueValidityCheckAmbientLight) {
   scoped_refptr<FakePlatformSensor> fake_sensor =
       CreateSensorSync(SensorType::AMBIENT_LIGHT);
@@ -190,13 +193,15 @@ TEST_F(PlatformSensorAndProviderTest, SensorValueValidityCheckAmbientLight) {
   // 7. New value is set to 24. And test checks it is correctly rounded to 0.
   //    New value is allowed as it is significantly different compared to old
   //    value (49).
+  // 8. Last two values test that if rounded values are same, new reading event
+  //    is not triggered.
   const struct {
     const double attempted_als_value;
     const double expected_als_value;
     const bool expect_reading_changed_event;
   } kTestSteps[] = {
-      {24, 0, true},   {35, 0, false}, {49, 50, true},
-      {35, 50, false}, {24, 0, true},
+      {24, 0, true}, {35, 0, false}, {49, 50, true},  {35, 50, false},
+      {24, 0, true}, {50, 50, true}, {25, 50, false},
   };
 
   for (const auto& test_case : kTestSteps) {
@@ -254,8 +259,8 @@ TEST_F(PlatformSensorAndProviderTest, SensorValueValidityCheckPressure) {
   }
 }
 
-// Rounding to nearest 0.1 (see kAccelerometerRoundingMultiple). Any change in
-// values reported in significance test.
+// Rounding to nearest 0.1 (see kAccelerometerRoundingMultiple). New reading
+// event is triggered if rounded values differs from previous rounded value.
 TEST_F(PlatformSensorAndProviderTest, SensorValueValidityCheckAccelerometer) {
   const double kTestValue = 10.0;  // Made up test value.
   scoped_refptr<FakePlatformSensor> fake_sensor =
@@ -272,12 +277,11 @@ TEST_F(PlatformSensorAndProviderTest, SensorValueValidityCheckAccelerometer) {
   } kTestSteps[] = {
       {kTestValue, kTestValue, true},
       {kTestValue, kTestValue, false},
-      {kTestValue + kEpsilon, kTestValue, true},
-      {kTestValue, kTestValue, true},
+      {kTestValue + kEpsilon, kTestValue, false},
       {kTestValue + kAccelerometerRoundingMultiple - kEpsilon,
        kTestValue + kAccelerometerRoundingMultiple, true},
       {kTestValue + kAccelerometerRoundingMultiple + kEpsilon,
-       kTestValue + kAccelerometerRoundingMultiple, true},
+       kTestValue + kAccelerometerRoundingMultiple, false},
   };
 
   for (const auto& test_case : kTestSteps) {

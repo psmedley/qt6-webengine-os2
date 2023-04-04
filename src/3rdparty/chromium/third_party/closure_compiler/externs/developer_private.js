@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,10 @@
 // Please run the closure compiler before committing changes.
 // See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
-/** @fileoverview Externs generated from namespace: developerPrivate */
+/**
+ * @fileoverview Externs generated from namespace: developerPrivate
+ * @externs
+ */
 
 /** @const */
 chrome.developerPrivate = {};
@@ -72,6 +75,7 @@ chrome.developerPrivate.Location = {
   FROM_STORE: 'FROM_STORE',
   UNPACKED: 'UNPACKED',
   THIRD_PARTY: 'THIRD_PARTY',
+  INSTALLED_BY_DEFAULT: 'INSTALLED_BY_DEFAULT',
   UNKNOWN: 'UNKNOWN',
 };
 
@@ -88,6 +92,7 @@ chrome.developerPrivate.ViewType = {
   EXTENSION_POPUP: 'EXTENSION_POPUP',
   EXTENSION_SERVICE_WORKER_BACKGROUND: 'EXTENSION_SERVICE_WORKER_BACKGROUND',
   TAB_CONTENTS: 'TAB_CONTENTS',
+  OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT',
 };
 
 /**
@@ -322,7 +327,8 @@ chrome.developerPrivate.Permissions;
  *   version: string,
  *   views: !Array<!chrome.developerPrivate.ExtensionView>,
  *   webStoreUrl: string,
- *   showSafeBrowsingAllowlistWarning: boolean
+ *   showSafeBrowsingAllowlistWarning: boolean,
+ *   showAccessRequestsInToolbar: boolean
  * }}
  */
 chrome.developerPrivate.ExtensionInfo;
@@ -385,7 +391,8 @@ chrome.developerPrivate.GetExtensionsInfoOptions;
  *   fileAccess: (boolean|undefined),
  *   incognitoAccess: (boolean|undefined),
  *   errorCollection: (boolean|undefined),
- *   hostAccess: (!chrome.developerPrivate.HostAccess|undefined)
+ *   hostAccess: (!chrome.developerPrivate.HostAccess|undefined),
+ *   showAccessRequestsInToolbar: (boolean|undefined)
  * }}
  */
 chrome.developerPrivate.ExtensionConfigurationUpdate;
@@ -428,14 +435,15 @@ chrome.developerPrivate.LoadUnpackedOptions;
 /**
  * @enum {string}
  */
-chrome.developerPrivate.UserSiteSet = {
-  PERMITTED: 'PERMITTED',
-  RESTRICTED: 'RESTRICTED',
+chrome.developerPrivate.SiteSet = {
+  USER_PERMITTED: 'USER_PERMITTED',
+  USER_RESTRICTED: 'USER_RESTRICTED',
+  EXTENSION_SPECIFIED: 'EXTENSION_SPECIFIED',
 };
 
 /**
  * @typedef {{
- *   siteList: !chrome.developerPrivate.UserSiteSet,
+ *   siteSet: !chrome.developerPrivate.SiteSet,
  *   hosts: !Array<string>
  * }}
  */
@@ -448,6 +456,32 @@ chrome.developerPrivate.UserSiteSettingsOptions;
  * }}
  */
 chrome.developerPrivate.UserSiteSettings;
+
+/**
+ * @typedef {{
+ *   siteSet: !chrome.developerPrivate.SiteSet,
+ *   numExtensions: number,
+ *   site: string
+ * }}
+ */
+chrome.developerPrivate.SiteInfo;
+
+/**
+ * @typedef {{
+ *   etldPlusOne: string,
+ *   numExtensions: number,
+ *   sites: !Array<!chrome.developerPrivate.SiteInfo>
+ * }}
+ */
+chrome.developerPrivate.SiteGroup;
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   siteAccess: !chrome.developerPrivate.HostAccess
+ * }}
+ */
+chrome.developerPrivate.MatchingExtensionInfo;
 
 /**
  * @enum {string}
@@ -806,7 +840,7 @@ chrome.developerPrivate.removeHostPermission = function(extensionId, host, callb
 /**
  * Returns the user specified site settings (which origins can extensions
  * always/never run on) for the current profile.
- * @param {function(!chrome.developerPrivate.UserSiteSettings): void=} callback
+ * @param {function(!chrome.developerPrivate.UserSiteSettings): void} callback
  */
 chrome.developerPrivate.getUserSiteSettings = function(callback) {};
 
@@ -824,8 +858,23 @@ chrome.developerPrivate.addUserSpecifiedSites = function(options, callback) {};
  * @param {!chrome.developerPrivate.UserSiteSettingsOptions} options
  * @param {function(): void=} callback
  */
-chrome.developerPrivate.removeUserSpecifiedSites = function(
-    options, callback) {};
+chrome.developerPrivate.removeUserSpecifiedSites = function(options, callback) {};
+
+/**
+ * Returns all hosts specified by user site settings, grouped by each host's
+ * eTLD+1.
+ * @param {function(!Array<!chrome.developerPrivate.SiteGroup>): void} callback
+ */
+chrome.developerPrivate.getUserAndExtensionSitesByEtld = function(callback) {};
+
+/**
+ * Returns a list of extensions which have at least one matching site in common
+ * between its set of host permissions and `site`.
+ * @param {string} site
+ * @param {function(!Array<!chrome.developerPrivate.MatchingExtensionInfo>): void}
+ *     callback
+ */
+chrome.developerPrivate.getMatchingExtensionsForSite = function(site, callback) {};
 
 /**
  * @param {string} id

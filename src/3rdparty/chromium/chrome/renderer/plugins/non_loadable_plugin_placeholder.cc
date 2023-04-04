@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,11 +29,11 @@ plugins::PluginPlaceholder* CreateNonLoadablePlaceholderHelper(
       ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
           IDR_BLOCKED_PLUGIN_HTML);
 
-  base::DictionaryValue values;
-  values.SetStringKey("name", "");
-  values.SetStringKey("message", message);
+  base::Value::Dict values;
+  values.Set("name", "");
+  values.Set("message", message);
 
-  std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
+  std::string html_data = webui::GetI18nTemplateHtml(template_html, values);
 
   // PluginPlaceholder will destroy itself when its WebViewPlugin is going away.
   return new plugins::PluginPlaceholder(render_frame, params, html_data);
@@ -65,15 +65,15 @@ NonLoadablePluginPlaceholder::CreateFlashDeprecatedPlaceholder(
 plugins::PluginPlaceholder* NonLoadablePluginPlaceholder::CreateErrorPlugin(
     content::RenderFrame* render_frame,
     const base::FilePath& file_path) {
-  base::DictionaryValue values;
-  values.SetStringKey("name", "");
-  values.SetStringKey(
-      "message", l10n_util::GetStringUTF8(IDS_PLUGIN_INITIALIZATION_ERROR));
+  base::Value::Dict values;
+  values.Set("name", "");
+  values.Set("message",
+             l10n_util::GetStringUTF8(IDS_PLUGIN_INITIALIZATION_ERROR));
 
   std::string template_html =
       ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
           IDR_BLOCKED_PLUGIN_HTML);
-  std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
+  std::string html_data = webui::GetI18nTemplateHtml(template_html, values);
 
   blink::WebPluginParams params;
   // PluginPlaceholder will destroy itself when its WebViewPlugin is going away.

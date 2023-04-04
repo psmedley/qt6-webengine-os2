@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/http/alternative_service.h"
 
 namespace base {
@@ -25,11 +25,12 @@ namespace net {
 // Contains information about a broken alternative service, and the context in
 // which it's known to be broken.
 struct NET_EXPORT_PRIVATE BrokenAlternativeService {
-  // If |use_network_isolation_key| is false, |network_isolation_key| is
-  // ignored, and an empty NetworkIsolationKey is used instead.
-  BrokenAlternativeService(const AlternativeService& alternative_service,
-                           const NetworkIsolationKey& network_isolation_key,
-                           bool use_network_isolation_key);
+  // If |use_network_anonymization_key| is false, |network_anonymization_key| is
+  // ignored, and an empty NetworkAnonymizationKey is used instead.
+  BrokenAlternativeService(
+      const AlternativeService& alternative_service,
+      const NetworkAnonymizationKey& network_anonymization_key,
+      bool use_network_anonymization_key);
 
   ~BrokenAlternativeService();
 
@@ -38,8 +39,8 @@ struct NET_EXPORT_PRIVATE BrokenAlternativeService {
   AlternativeService alternative_service;
 
   // The context in which the alternative service is known to be broken in. Used
-  // to avoid cross-NetworkIsolationKey communication.
-  NetworkIsolationKey network_isolation_key;
+  // to avoid cross-NetworkAnonymizationKey communication.
+  NetworkAnonymizationKey network_anonymization_key;
 };
 
 // Stores broken alternative services and when their brokenness expires.
@@ -50,7 +51,7 @@ typedef std::list<std::pair<BrokenAlternativeService, base::TimeTicks>>
 class RecentlyBrokenAlternativeServices
     : public base::LRUCache<BrokenAlternativeService, int> {
  public:
-  RecentlyBrokenAlternativeServices(
+  explicit RecentlyBrokenAlternativeServices(
       int max_recently_broken_alternative_service_entries)
       : base::LRUCache<BrokenAlternativeService, int>(
             max_recently_broken_alternative_service_entries) {}
@@ -73,8 +74,8 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
     // Called when a broken alternative service's expiration time is reached.
     virtual void OnExpireBrokenAlternativeService(
         const AlternativeService& expired_alternative_service,
-        const NetworkIsolationKey& network_isolation_key) = 0;
-    virtual ~Delegate() {}
+        const NetworkAnonymizationKey& network_anonymization_key) = 0;
+    virtual ~Delegate() = default;
   };
 
   // |delegate| will be notified when a broken alternative service expires. It
@@ -111,8 +112,8 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
 
   // Marks |broken_alternative_service| as recently broken. Being recently
   // broken will cause WasAlternativeServiceRecentlyBroken(alternative_service,
-  // network_isolation_key) to return true until Confirm(alternative_service,
-  // network_isolation_key) is called.
+  // network_anonymization_key) to return true until
+  // Confirm(alternative_service, network_anonymization_key) is called.
   void MarkRecentlyBroken(
       const BrokenAlternativeService& broken_alternative_service);
 
@@ -229,7 +230,7 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
   // initial_delay_for_broken_alternative_service * (1 << broken_count).
   // Otherwise, the delay would be initial_delay_for_broken_alternative_service,
   // 5min, 10min.. and so on.
-  bool exponential_backoff_on_initial_delay_;
+  bool exponential_backoff_on_initial_delay_ = true;
 
   base::WeakPtrFactory<BrokenAlternativeServices> weak_ptr_factory_{this};
 };

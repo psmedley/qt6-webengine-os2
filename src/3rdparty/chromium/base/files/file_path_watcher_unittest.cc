@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -576,6 +576,16 @@ TEST_F(FilePathWatcherTest, MAYBE_RecursiveWatch) {
   // Create "$dir/subdir".
   FilePath subdir(dir.AppendASCII("subdir"));
   ASSERT_TRUE(base::CreateDirectory(subdir));
+  ASSERT_TRUE(WaitForEvents());
+
+  // Create "$dir/subdir/subdir2".
+  FilePath subdir2(subdir.AppendASCII("subdir2"));
+  ASSERT_TRUE(base::CreateDirectory(subdir2));
+  ASSERT_TRUE(WaitForEvents());
+
+  // Rename "$dir/subdir/subdir2" to "$dir/subdir/subdir2b".
+  FilePath subdir2b(subdir.AppendASCII("subdir2b"));
+  base::Move(subdir2, subdir2b);
   ASSERT_TRUE(WaitForEvents());
 
 // Mac and Win don't generate events for Touch.

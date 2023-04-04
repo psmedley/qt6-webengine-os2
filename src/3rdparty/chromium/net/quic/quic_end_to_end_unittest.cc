@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
+#include "net/quic/crypto_test_utils_chromium.h"
 #include "net/quic/quic_context.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/ssl/ssl_config_service_defaults.h"
@@ -65,7 +66,7 @@ class TestTransactionFactory : public HttpTransactionFactory {
       : session_(std::make_unique<HttpNetworkSession>(session_params,
                                                       session_context)) {}
 
-  ~TestTransactionFactory() override {}
+  ~TestTransactionFactory() override = default;
 
   // HttpTransactionFactory methods
   int CreateTransaction(RequestPriority priority,
@@ -87,13 +88,11 @@ class TestTransactionFactory : public HttpTransactionFactory {
 class QuicEndToEndTest : public ::testing::Test, public WithTaskEnvironment {
  protected:
   QuicEndToEndTest()
-      : host_resolver_impl_(CreateResolverImpl()),
-        host_resolver_(std::move(host_resolver_impl_)),
-        ssl_config_service_(new SSLConfigServiceDefaults),
+      : host_resolver_(CreateResolverImpl()),
+        ssl_config_service_(std::make_unique<SSLConfigServiceDefaults>()),
         proxy_resolution_service_(
             ConfiguredProxyResolutionService::CreateDirect()),
-        auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault()),
-        strike_register_no_startup_period_(false) {
+        auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault()) {
     request_.method = "GET";
     request_.url = GURL("https://test.example.com/");
     request_.load_flags = 0;
@@ -124,8 +123,8 @@ class QuicEndToEndTest : public ::testing::Test, public WithTaskEnvironment {
 
   // Creates a mock host resolver in which test.example.com
   // resolves to localhost.
-  static MockHostResolver* CreateResolverImpl() {
-    MockHostResolver* resolver = new MockHostResolver();
+  static std::unique_ptr<MockHostResolver> CreateResolverImpl() {
+    auto resolver = std::make_unique<MockHostResolver>();
     resolver->rules()->AddRule("test.example.com", "127.0.0.1");
     return resolver;
   }
@@ -159,7 +158,7 @@ class QuicEndToEndTest : public ::testing::Test, public WithTaskEnvironment {
     server_config_.SetInitialSessionFlowControlWindowToSend(
         quic::test::kInitialSessionFlowControlWindowForTest);
     server_ = std::make_unique<QuicSimpleServer>(
-        quic::test::crypto_test_utils::ProofSourceForTesting(), server_config_,
+        net::test::ProofSourceForTestingChromium(), server_config_,
         server_config_options_, quic::AllSupportedVersions(),
         &memory_cache_backend_);
     server_->Listen(server_address_);
@@ -214,7 +213,6 @@ class QuicEndToEndTest : public ::testing::Test, public WithTaskEnvironment {
   }
 
   QuicContext quic_context_;
-  std::unique_ptr<MockHostResolver> host_resolver_impl_;
   MappedHostResolver host_resolver_;
   MockCertVerifier cert_verifier_;
   TransportSecurityState transport_security_state_;
@@ -236,7 +234,7 @@ class QuicEndToEndTest : public ::testing::Test, public WithTaskEnvironment {
   quic::QuicConfig server_config_;
   quic::QuicCryptoServerConfig::ConfigOptions server_config_options_;
   bool server_started_;
-  bool strike_register_no_startup_period_;
+  bool strike_register_no_startup_period_ = false;
 };
 
 TEST_F(QuicEndToEndTest, LargeGetWithNoPacketLoss) {

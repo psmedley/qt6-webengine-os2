@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <components/exo/wayland/protocol/aura-shell-client-protocol.h>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -20,6 +22,8 @@
 #include "ui/base/cursor/cursor_factory.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_factory_ozone.h"
 #include "ui/base/ime/linux/input_method_auralinux.h"
+#include "ui/base/ime/linux/linux_input_method_context_factory.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/display/display_switches.h"
 #include "ui/events/devices/device_data_manager.h"
 #include "ui/events/event.h"
@@ -37,14 +41,16 @@
 #include "ui/ozone/platform/wayland/host/wayland_buffer_manager_connector.h"
 #include "ui/ozone/platform/wayland/host/wayland_buffer_manager_host.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
+#include "ui/ozone/platform/wayland/host/wayland_event_source.h"
 #include "ui/ozone/platform/wayland/host/wayland_exchange_data_provider.h"
-#include "ui/ozone/platform/wayland/host/wayland_input_method_context_factory.h"
+#include "ui/ozone/platform/wayland/host/wayland_input_controller.h"
+#include "ui/ozone/platform/wayland/host/wayland_input_method_context.h"
 #include "ui/ozone/platform/wayland/host/wayland_menu_utils.h"
 #include "ui/ozone/platform/wayland/host/wayland_output_manager.h"
 #include "ui/ozone/platform/wayland/host/wayland_window.h"
+#include "ui/ozone/platform/wayland/host/wayland_zaura_shell.h"
 #include "ui/ozone/platform/wayland/wayland_utils.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
-#include "ui/ozone/public/input_controller.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/platform_menu_utils.h"
 #include "ui/ozone/public/system_input_injector.h"
@@ -99,6 +105,7 @@ class OzonePlatformWayland : public OzonePlatform,
 
   ~OzonePlatformWayland() override {
     KeyEvent::SetSynthesizeKeyRepeatEnabled(old_synthesize_key_repeat_enabled_);
+    GetInputMethodContextFactoryForOzone() = LinuxInputMethodContextFactory();
   }
 
   // OzonePlatform
@@ -164,19 +171,9 @@ class OzonePlatformWayland : public OzonePlatform,
   }
 
   std::unique_ptr<InputMethod> CreateInputMethod(
-      internal::InputMethodDelegate* delegate,
+      ImeKeyEventDispatcher* ime_key_event_dispatcher,
       gfx::AcceleratedWidget widget) override {
-    // Instantiate and set LinuxInputMethodContextFactory unless it is already
-    // set (e.g: tests may have already set it).
-    if (!LinuxInputMethodContextFactory::instance() &&
-        !input_method_context_factory_) {
-      input_method_context_factory_ =
-          std::make_unique<WaylandInputMethodContextFactory>(connection_.get());
-      LinuxInputMethodContextFactory::SetInstance(
-          input_method_context_factory_.get());
-    }
-
-    return std::make_unique<InputMethodAuraLinux>(delegate);
+    return std::make_unique<InputMethodAuraLinux>(ime_key_event_dispatcher);
   }
 
   PlatformMenuUtils* GetPlatformMenuUtils() override {
@@ -234,7 +231,7 @@ class OzonePlatformWayland : public OzonePlatform,
 #else
     cursor_factory_ = std::make_unique<WaylandCursorFactory>(connection_.get());
 #endif
-    input_controller_ = CreateStubInputController();
+    input_controller_ = CreateWaylandInputController(connection_.get());
     gpu_platform_support_host_.reset(CreateStubGpuPlatformSupportHost());
 
     supported_buffer_formats_ =
@@ -245,7 +242,18 @@ class OzonePlatformWayland : public OzonePlatform,
 #endif
 
     menu_utils_ = std::make_unique<WaylandMenuUtils>(connection_.get());
-    wayland_utils_ = std::make_unique<WaylandUtils>();
+    wayland_utils_ = std::make_unique<WaylandUtils>(connection_.get());
+
+    GetInputMethodContextFactoryForOzone() = base::BindRepeating(
+        [](WaylandConnection* connection,
+           WaylandKeyboard::Delegate* key_delegate,
+           LinuxInputMethodContextDelegate* ime_delegate)
+            -> std::unique_ptr<LinuxInputMethodContext> {
+          return std::make_unique<WaylandInputMethodContext>(
+              connection, key_delegate, ime_delegate);
+        },
+        base::Unretained(connection_.get()),
+        base::Unretained(connection_->event_source()));
 
     return true;
   }
@@ -269,8 +277,6 @@ class OzonePlatformWayland : public OzonePlatform,
       // be able to enable the system frame.
       properties->custom_frame_pref_default = true;
 
-      properties->uses_external_vulkan_image_factory = true;
-
       // Wayland uses sub-surfaces to show tooltips, and sub-surfaces must be
       // bound to their root surfaces always, but finding the correct root
       // surface at the moment of creating the tooltip is not always possible
@@ -281,13 +287,14 @@ class OzonePlatformWayland : public OzonePlatform,
       properties->set_parent_for_non_top_level_windows = true;
       properties->app_modal_dialogs_use_event_blocker = true;
 
-      // By design, clients are disallowed to manipulate global screen
-      // coordinates, instead only surface-local ones are supported.
+      // Xdg/Wl shell protocol does not disallow clients to manipulate global
+      // screen coordinates, instead only surface-local ones are supported.
       // Non-toplevel surfaces, for example, must be positioned relative to
       // their parents. As for toplevel surfaces, clients simply don't know
       // their position on screens and always assume they are located at some
       // arbitrary position.
-      properties->supports_global_screen_coordinates = false;
+      properties->supports_global_screen_coordinates =
+          features::IsWaylandScreenCoordinatesEnabled();
 
       initialised = true;
     }
@@ -307,11 +314,9 @@ class OzonePlatformWayland : public OzonePlatform,
       // These properties are set when GetPlatformRuntimeProperties is called on
       // the browser process side.
       properties.supports_server_side_window_decorations =
-          override_supports_ssd_for_test == SupportsSsdForTest::kNotSet
-              ? (connection_->xdg_decoration_manager_v1() != nullptr)
-              : (override_supports_ssd_for_test == SupportsSsdForTest::kNo
-                     ? false
-                     : true);
+          (connection_->xdg_decoration_manager_v1() != nullptr &&
+          override_supports_ssd_for_test == SupportsSsdForTest::kNotSet) ||
+          override_supports_ssd_for_test == SupportsSsdForTest::kYes;
       properties.supports_overlays =
           ui::IsWaylandOverlayDelegationEnabled() && connection_->viewporter();
       properties.supports_non_backed_solid_color_buffers =
@@ -324,6 +329,11 @@ class OzonePlatformWayland : public OzonePlatform,
       // accelerated widget to occlude contents below.
       properties.needs_background_image =
           ui::IsWaylandOverlayDelegationEnabled() && connection_->viewporter();
+      if (connection_->zaura_shell()) {
+        properties.supports_activation =
+            zaura_shell_get_version(connection_->zaura_shell()->wl_object()) >=
+            ZAURA_TOPLEVEL_ACTIVATE_SINCE_VERSION;
+      }
 
       if (surface_factory_) {
         DCHECK(has_initialized_gpu());
@@ -343,6 +353,7 @@ class OzonePlatformWayland : public OzonePlatform,
           buffer_manager_->supports_viewporter();
       properties.supports_native_pixmaps =
           surface_factory_->SupportsNativePixmaps();
+      properties.supports_clip_rect = buffer_manager_->supports_clip_rect();
     }
     return properties;
   }
@@ -397,8 +408,6 @@ class OzonePlatformWayland : public OzonePlatform,
   std::unique_ptr<CursorFactory> cursor_factory_;
   std::unique_ptr<InputController> input_controller_;
   std::unique_ptr<GpuPlatformSupportHost> gpu_platform_support_host_;
-  std::unique_ptr<WaylandInputMethodContextFactory>
-      input_method_context_factory_;
   std::unique_ptr<WaylandBufferManagerConnector> buffer_manager_connector_;
   std::unique_ptr<WaylandMenuUtils> menu_utils_;
   std::unique_ptr<WaylandUtils> wayland_utils_;

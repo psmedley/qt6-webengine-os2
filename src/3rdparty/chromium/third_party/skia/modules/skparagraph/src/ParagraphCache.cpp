@@ -73,7 +73,10 @@ public:
         , fWords(paragraph->fWords)
         , fBidiRegions(paragraph->fBidiRegions)
         , fUTF8IndexForUTF16Index(paragraph->fUTF8IndexForUTF16Index)
-        , fUTF16IndexForUTF8Index(paragraph->fUTF16IndexForUTF8Index) { }
+        , fUTF16IndexForUTF8Index(paragraph->fUTF16IndexForUTF8Index)
+        , fHasLineBreaks(paragraph->fHasLineBreaks)
+        , fHasWhitespacesInside(paragraph->fHasWhitespacesInside)
+        , fTrailingSpaces(paragraph->fTrailingSpaces) { }
 
     // Input == key
     ParagraphCacheKey fKey;
@@ -83,11 +86,14 @@ public:
     SkTArray<Cluster, true> fClusters;
     SkTArray<size_t, true> fClustersIndexFromCodeUnit;
     // ICU results
-    SkTArray<CodeUnitFlags> fCodeUnitProperties;
+    SkTArray<SkUnicode::CodeUnitFlags, true> fCodeUnitProperties;
     std::vector<size_t> fWords;
     std::vector<SkUnicode::BidiRegion> fBidiRegions;
     SkTArray<TextIndex, true> fUTF8IndexForUTF16Index;
     SkTArray<size_t, true> fUTF16IndexForUTF8Index;
+    bool fHasLineBreaks;
+    bool fHasWhitespacesInside;
+    TextIndex fTrailingSpaces;
 };
 
 uint32_t ParagraphCacheKey::mix(uint32_t hash, uint32_t data) {
@@ -138,6 +144,7 @@ uint32_t ParagraphCacheKey::computeHash() const {
 
     hash = mix(hash, SkGoodHash()(relax(fParagraphStyle.getHeight())));
     hash = mix(hash, SkGoodHash()(fParagraphStyle.getTextDirection()));
+    hash = mix(hash, SkGoodHash()(fParagraphStyle.getReplaceTabCharacters() ? 1 : 0));
 
     auto& strutStyle = fParagraphStyle.getStrutStyle();
     if (strutStyle.getStrutEnabled()) {
@@ -183,6 +190,10 @@ bool ParagraphCacheKey::operator==(const ParagraphCacheKey& other) const {
     }
 
     if (!(fParagraphStyle.getStrutStyle() == other.fParagraphStyle.getStrutStyle())) {
+        return false;
+    }
+
+    if (!(fParagraphStyle.getReplaceTabCharacters() == other.fParagraphStyle.getReplaceTabCharacters())) {
         return false;
     }
 
@@ -253,6 +264,9 @@ void ParagraphCache::updateTo(ParagraphImpl* paragraph, const Entry* entry) {
     paragraph->fBidiRegions = entry->fValue->fBidiRegions;
     paragraph->fUTF8IndexForUTF16Index = entry->fValue->fUTF8IndexForUTF16Index;
     paragraph->fUTF16IndexForUTF8Index = entry->fValue->fUTF16IndexForUTF8Index;
+    paragraph->fHasLineBreaks = entry->fValue->fHasLineBreaks;
+    paragraph->fHasWhitespacesInside = entry->fValue->fHasWhitespacesInside;
+    paragraph->fTrailingSpaces = entry->fValue->fTrailingSpaces;
     for (auto& run : paragraph->fRuns) {
         run.setOwner(paragraph);
     }

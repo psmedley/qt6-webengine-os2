@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -417,7 +417,9 @@ class _BuildArchive:
       for path in self.build.abs_apk_paths:
         self._ArchiveFile(path)
       for path in self.build.abs_mapping_paths:
-        self._ArchiveFile(path)
+        # TrichromeLibrary has no .mapping file.
+        if 'TrichromeLibrary' not in path:
+          self._ArchiveFile(path)
       self._ArchiveResourceSizes()
     self._ArchiveSizeFile()
     if self._save_unstripped:
@@ -770,7 +772,8 @@ def _ValidateRevs(rev, reference_rev, subrepo, extra_rev):
   if extra_rev:
     git_fatal(['cat-file', '-e', extra_rev], no_obj_message % extra_rev)
   git_fatal(['merge-base', '--is-ancestor', reference_rev, rev],
-            'reference-rev is newer than rev')
+            f'reference-rev ({reference_rev}) is not an ancestor of '
+            f'rev ({rev})')
 
 
 def _VerifyUserAccepts(message):

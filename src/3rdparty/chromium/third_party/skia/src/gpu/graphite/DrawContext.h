@@ -10,7 +10,9 @@
 
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkRefCnt.h"
+#include "include/core/SkSurfaceProps.h"
 
+#include "src/gpu/graphite/AttachmentTypes.h"
 #include "src/gpu/graphite/DrawList.h"
 #include "src/gpu/graphite/DrawOrder.h"
 #include "src/gpu/graphite/DrawTypes.h"
@@ -18,18 +20,26 @@
 
 #include <vector>
 
+#ifdef SK_ENABLE_PIET_GPU
+#include "src/gpu/graphite/PietRenderTask.h"
+namespace skgpu::piet {
+class Scene;
+}
+#endif
+
 class SkPixmap;
 
 namespace skgpu::graphite {
 
-class BoundsManager;
+class Geometry;
 class Recorder;
-class Shape;
 class Transform;
 
+class Caps;
 class DrawPass;
 class Task;
 class TextureProxy;
+class TextureProxyView;
 
 /**
  * DrawContext records draw commands into a specific Surface, via a general task graph
@@ -38,9 +48,8 @@ class TextureProxy;
 class DrawContext final : public SkRefCnt {
 public:
     static sk_sp<DrawContext> Make(sk_sp<TextureProxy> target,
-                                   sk_sp<SkColorSpace> colorSpace,
-                                   SkColorType colorType,
-                                   SkAlphaType alphaType);
+                                   const SkColorInfo&,
+                                   const SkSurfaceProps&);
 
     ~DrawContext() override;
 
@@ -48,13 +57,17 @@ public:
     TextureProxy* target()                { return fTarget.get(); }
     const TextureProxy* target()    const { return fTarget.get(); }
 
+    TextureProxyView readSurfaceView(const Caps*);
+
+    const SkSurfaceProps& surfaceProps() const { return fSurfaceProps; }
+
     int pendingDrawCount() const { return fPendingDraws->drawCount(); }
 
     void clear(const SkColor4f& clearColor);
 
-    void recordDraw(const Renderer& renderer,
+    void recordDraw(const Renderer* renderer,
                     const Transform& localToDevice,
-                    const Shape& shape,
+                    const Geometry& geometry,
                     const Clip& clip,
                     DrawOrder ordering,
                     const PaintParams* paint,
@@ -66,16 +79,21 @@ public:
                       const std::vector<MipLevel>& levels,
                       const SkIRect& dstRect);
 
+#ifdef SK_ENABLE_PIET_GPU
+    bool recordPietSceneRender(Recorder* recorder,
+                               sk_sp<TextureProxy> targetProxy,
+                               sk_sp<const skgpu::piet::Scene> pietScene);
+#endif
+
     // Ends the current DrawList being accumulated by the SDC, converting it into an optimized and
     // immutable DrawPass. The DrawPass will be ordered after any other snapped DrawPasses or
     // appended DrawPasses from a child SDC. A new DrawList is started to record subsequent drawing
     // operations.
     //
-    // If 'occlusionCuller' is null, then culling is skipped when converting the DrawList into a
-    // DrawPass.
+    // TBD - Should this take a special occluder list to filter the DrawList?
     // TBD - should this also return the task so the caller can point to it with its own
     // dependencies? Or will that be mostly automatic based on draws and proxy refs?
-    void snapDrawPass(Recorder*, const BoundsManager* occlusionCuller);
+    void snapDrawPass(Recorder*);
 
     // TBD: snapRenderPassTask() might not need to be public, and could be spec'ed to require that
     // snapDrawPass() must have been called first. A lot of it will depend on how the task graph is
@@ -86,7 +104,7 @@ public:
     // caller is responsible for configuring the returned Tasks's dependencies.
     //
     // Returns null if there are no pending commands or draw passes to move into a task.
-    sk_sp<Task> snapRenderPassTask(Recorder*, const BoundsManager* occlusionCuller);
+    sk_sp<Task> snapRenderPassTask(Recorder*);
 
     // Ends the current UploadList if needed, and moves the accumulated Uploads into an UploadTask
     // that can be drawn and depended on. The caller is responsible for configuring the returned
@@ -97,11 +115,16 @@ public:
     // TODO: see if we can merge transfers into this
     sk_sp<Task> snapUploadTask(Recorder*);
 
+#ifdef SK_ENABLE_PIET_GPU
+    sk_sp<Task> snapPietRenderTask(Recorder*);
+#endif
+
 private:
-    DrawContext(sk_sp<TextureProxy>, const SkImageInfo&);
+    DrawContext(sk_sp<TextureProxy>, const SkImageInfo&, const SkSurfaceProps&);
 
     sk_sp<TextureProxy> fTarget;
     SkImageInfo fImageInfo;
+    const SkSurfaceProps fSurfaceProps;
 
     // Stores the most immediately recorded draws into the SDC's surface. This list is mutable and
     // can be appended to, or have its commands rewritten if they are inlined into a parent SDC.
@@ -124,6 +147,10 @@ private:
     // Stores the most immediately recorded uploads into Textures. This list is mutable and
     // can be appended to, or have its commands rewritten if they are inlined into a parent DC.
     std::unique_ptr<UploadList> fPendingUploads;
+
+#ifdef SK_ENABLE_PIET_GPU
+    std::vector<PietRenderInstance> fPendingPietRenders;
+#endif
 };
 
 } // namespace skgpu::graphite

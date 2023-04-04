@@ -17,7 +17,6 @@
 #include "qwebenginenewwindowrequest_p.h"
 #include "qwebengineprofile.h"
 #include "qwebengineprofile_p.h"
-#include "qwebenginequotarequest.h"
 #include "qwebengineregisterprotocolhandlerrequest.h"
 #include "qwebenginescript.h"
 #include "qwebenginescriptcollection_p.h"
@@ -34,6 +33,7 @@
 #include "render_widget_host_view_qt_delegate.h"
 #include "render_widget_host_view_qt_delegate_client.h"
 #include "render_widget_host_view_qt_delegate_item.h"
+#include "touch_selection_menu_controller.h"
 #include "web_contents_adapter.h"
 
 #include <QAction>
@@ -502,12 +502,6 @@ void QWebEnginePagePrivate::runMouseLockPermissionRequest(const QUrl &securityOr
     Q_EMIT q->featurePermissionRequested(securityOrigin, QWebEnginePage::MouseLock);
 }
 
-void QWebEnginePagePrivate::runQuotaRequest(QWebEngineQuotaRequest request)
-{
-    Q_Q(QWebEnginePage);
-    Q_EMIT q->quotaRequested(request);
-}
-
 void QWebEnginePagePrivate::runRegisterProtocolHandlerRequest(QWebEngineRegisterProtocolHandlerRequest request)
 {
     Q_Q(QWebEnginePage);
@@ -742,12 +736,13 @@ QWebEnginePage::QWebEnginePage(QObject* parent)
 /*!
     \fn QWebEnginePage::quotaRequested(QWebEngineQuotaRequest quotaRequest)
     \since 5.11
+    \deprecated [6.5] This signal is no longer emitted.
 
-    This signal is emitted when the web page requests larger persistent storage
-    than the application's current allocation in File System API. The default quota
-    is 0 bytes.
+    Requesting host quota is no longer supported by Chromium.
+    The behavior of navigator.webkitPersistentStorage
+    is identical to navigator.webkitTemporaryStorage.
 
-    The request object \a quotaRequest can be used to accept or reject the request.
+    For further details, see https://crbug.com/1233525
 */
 
 /*!
@@ -1656,6 +1651,31 @@ void QWebEnginePagePrivate::printRequested()
     });
     if (view)
         view->printRequested();
+}
+
+QtWebEngineCore::TouchHandleDrawableDelegate *
+QWebEnginePagePrivate::createTouchHandleDelegate(const QMap<int, QImage> &images)
+{
+    return view->createTouchHandleDelegate(images);
+}
+
+void QWebEnginePagePrivate::showTouchSelectionMenu(
+        QtWebEngineCore::TouchSelectionMenuController *controller, const QRect &selectionBounds,
+        const QSize &handleSize)
+{
+    Q_UNUSED(handleSize);
+
+    if (controller->buttonCount() == 1) {
+        controller->runContextMenu();
+        return;
+    }
+
+    view->showTouchSelectionMenu(controller, selectionBounds);
+}
+
+void QWebEnginePagePrivate::hideTouchSelectionMenu()
+{
+    view->hideTouchSelectionMenu();
 }
 
 void QWebEnginePagePrivate::lifecycleStateChanged(LifecycleState state)

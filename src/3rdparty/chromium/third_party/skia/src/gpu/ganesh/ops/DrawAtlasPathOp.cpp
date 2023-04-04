@@ -31,7 +31,7 @@ public:
             , fAtlasAccess(GrSamplerState::Filter::kNearest,
                            fAtlasHelper->proxy()->backendFormat(),
                            fAtlasHelper->atlasSwizzle()) {
-        if (!shaderCaps.vertexIDSupport()) {
+        if (!shaderCaps.fVertexIDSupport) {
             constexpr static Attribute kUnitCoordAttrib(
                     "unitCoord", kFloat2_GrVertexAttribType, SkSLType::kFloat2);
             this->setVertexAttributesWithImplicitOffsets(&kUnitCoordAttrib, 1);
@@ -82,7 +82,7 @@ private:
         const auto& shader = args.fGeomProc.cast<DrawAtlasPathShader>();
         args.fVaryingHandler->emitAttributes(shader);
 
-        if (args.fShaderCaps->vertexIDSupport()) {
+        if (args.fShaderCaps->fVertexIDSupport) {
             // If we don't have sk_VertexID support then "unitCoord" already came in as a vertex
             // attrib.
             args.fVertBuilder->codeAppendf(R"(
@@ -95,7 +95,7 @@ private:
 
         if (shader.fUsesLocalCoords) {
             args.fVertBuilder->codeAppendf(R"(
-            float2x2 M = float2x2(affineMatrix);
+            float2x2 M = float2x2(affineMatrix.xy, affineMatrix.zw);
             float2 localCoord = inverse(M) * (devCoord - translate);)");
             gpArgs->fLocalCoordVar.set(SkSLType::kFloat2, "localCoord");
         }
@@ -163,7 +163,7 @@ void DrawAtlasPathOp::prepareProgram(const GrCaps& caps, SkArenaAlloc* arena,
                                                    *caps.shaderCaps());
     fProgram = arena->make<GrProgramInfo>(caps, writeView, usesMSAASurface, pipeline,
                                           &GrUserStencilSettings::kUnused, shader,
-                                          GrPrimitiveType::kTriangleStrip, 0,
+                                          GrPrimitiveType::kTriangleStrip,
                                           renderPassXferBarriers, colorLoadOp);
 }
 
@@ -204,7 +204,7 @@ void DrawAtlasPathOp::onPrepare(GrOpFlushState* flushState) {
         }
     }
 
-    if (!flushState->caps().shaderCaps()->vertexIDSupport()) {
+    if (!flushState->caps().shaderCaps()->fVertexIDSupport) {
         constexpr static SkPoint kUnitQuad[4] = {{0,0}, {0,1}, {1,0}, {1,1}};
 
         SKGPU_DEFINE_STATIC_UNIQUE_KEY(gUnitQuadBufferKey);

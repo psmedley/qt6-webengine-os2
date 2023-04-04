@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 #include <vector>
 
 #include "components/autofill/core/browser/data_model/autofill_structured_address_component.h"
-
-using autofill::structured_address::AddressComponent;
 
 namespace autofill {
 namespace structured_address {
@@ -190,6 +188,10 @@ class State : public AddressComponentWithRewriter {
  public:
   explicit State(AddressComponent* parent);
   ~State() override;
+
+  // For states we use the AlternativeStateNameMap to offer canonicalized state
+  // names.
+  absl::optional<std::u16string> GetCanonicalizedValue() const override;
 };
 
 // Stores the postal code of an address.

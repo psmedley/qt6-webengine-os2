@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include "base/notreached.h"
 #include "base/time/default_tick_clock.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager_impl.h"
 #include "components/autofill_assistant/browser/public/runtime_manager_impl.h"
 #include "components/autofill_assistant/browser/script_parameters.h"
-#include "components/autofill_assistant/browser/website_login_manager_impl.h"
 #include "components/version_info/channel.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "url/gurl.h"
@@ -16,8 +16,12 @@
 namespace autofill_assistant {
 
 StarterDelegateDesktop::StarterDelegateDesktop(
-    content::WebContents* web_contents)
-    : content::WebContentsUserData<StarterDelegateDesktop>(*web_contents) {}
+    content::WebContents* web_contents,
+    std::unique_ptr<CommonDependencies> common_dependencies,
+    std::unique_ptr<PlatformDependencies> platform_dependencies)
+    : content::WebContentsUserData<StarterDelegateDesktop>(*web_contents),
+      common_dependencies_(std::move(common_dependencies)),
+      platform_dependencies_(std::move(platform_dependencies)) {}
 
 StarterDelegateDesktop::~StarterDelegateDesktop() = default;
 
@@ -36,8 +40,7 @@ WebsiteLoginManager* StarterDelegateDesktop::GetWebsiteLoginManager() const {
 }
 
 version_info::Channel StarterDelegateDesktop::GetChannel() const {
-  // TODO(b/201964911): Inject on instantiation.
-  return version_info::Channel::DEV;
+  return common_dependencies_->GetChannel();
 }
 
 bool StarterDelegateDesktop::GetFeatureModuleInstalled() const {
@@ -52,7 +55,6 @@ void StarterDelegateDesktop::InstallFeatureModule(
 }
 
 bool StarterDelegateDesktop::GetIsFirstTimeUser() const {
-  NOTREACHED();
   return false;
 }
 
@@ -90,18 +92,20 @@ void StarterDelegateDesktop::SetProactiveHelpSettingEnabled(bool enabled) {
   NOTREACHED();
 }
 
-bool StarterDelegateDesktop::GetMakeSearchesAndBrowsingBetterEnabled() const {
-  // Only relevant for trigger scripts, which don't exist in headless.
-  return false;
+bool StarterDelegateDesktop::GetIsLoggedIn() {
+  return !common_dependencies_->GetSignedInEmail().empty();
 }
 
-bool StarterDelegateDesktop::GetIsLoggedIn() {
-  // Only relevant for trigger scripts, which don't exist in headless.
-  return false;
+bool StarterDelegateDesktop::GetIsSupervisedUser() {
+  return common_dependencies_->IsSupervisedUser();
+}
+
+bool StarterDelegateDesktop::GetIsAllowedForMachineLearning() {
+  return common_dependencies_->IsAllowedForMachineLearning();
 }
 
 bool StarterDelegateDesktop::GetIsCustomTab() const {
-  return false;
+  return platform_dependencies_->IsCustomTab(GetWebContents());
 }
 
 bool StarterDelegateDesktop::GetIsWebLayer() const {
@@ -114,8 +118,7 @@ bool StarterDelegateDesktop::GetIsTabCreatedByGSA() const {
 
 std::unique_ptr<AssistantFieldTrialUtil>
 StarterDelegateDesktop::CreateFieldTrialUtil() {
-  // TODO(b/201964911): Create a field trial util.
-  return nullptr;
+  return common_dependencies_->CreateFieldTrialUtil();
 }
 
 void StarterDelegateDesktop::StartScriptDefaultUi(
@@ -127,7 +130,7 @@ void StarterDelegateDesktop::StartScriptDefaultUi(
 }
 
 bool StarterDelegateDesktop::IsRegularScriptRunning() const {
-  // TODO(b/201964911): rework how we check for running scripts.
+  // TODO(b/249979875): rework how we check for running scripts.
   return false;
 }
 
@@ -137,6 +140,16 @@ bool StarterDelegateDesktop::IsRegularScriptVisible() const {
 
 bool StarterDelegateDesktop::IsAttached() {
   return true;
+}
+
+const CommonDependencies* StarterDelegateDesktop::GetCommonDependencies()
+    const {
+  return common_dependencies_.get();
+}
+
+const PlatformDependencies* StarterDelegateDesktop::GetPlatformDependencies()
+    const {
+  return platform_dependencies_.get();
 }
 
 base::WeakPtr<StarterPlatformDelegate> StarterDelegateDesktop::GetWeakPtr() {

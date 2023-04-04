@@ -26,6 +26,18 @@
 namespace perfetto {
 namespace trace_processor {
 
+enum TraceType {
+  kUnknownTraceType,
+  kProtoTraceType,
+  kJsonTraceType,
+  kFuchsiaTraceType,
+  kSystraceTraceType,
+  kGzipTraceType,
+  kCtraceTraceType,
+  kNinjaLogTraceType,
+  kAndroidBugreportTraceType,
+};
+
 class ArgsTracker;
 class ArgsTranslationTable;
 class AsyncTrackSetTracker;
@@ -42,6 +54,7 @@ class HeapProfileTracker;
 class PerfSampleTracker;
 class MetadataTracker;
 class ProtoImporterModule;
+class TrackEventModule;
 class ProcessTracker;
 class SliceTracker;
 class SliceTranslationTable;
@@ -56,6 +69,9 @@ class TraceProcessorContext {
  public:
   TraceProcessorContext();
   ~TraceProcessorContext();
+
+  TraceProcessorContext(TraceProcessorContext&&) = default;
+  TraceProcessorContext& operator=(TraceProcessorContext&&) = default;
 
   Config config;
 
@@ -90,18 +106,23 @@ class TraceProcessorContext {
   // the GetOrCreate() method on their subclass type, e.g.
   // SyscallTracker::GetOrCreate(context)
   std::unique_ptr<Destructible> android_probes_tracker;  // AndroidProbesTracker
-  std::unique_ptr<Destructible> syscall_tracker;         // SyscallTracker
-  std::unique_ptr<Destructible> sched_tracker;           // SchedEventTracker
   std::unique_ptr<Destructible> binder_tracker;          // BinderTracker
-  std::unique_ptr<Destructible> systrace_parser;         // SystraceParser
   std::unique_ptr<Destructible> heap_graph_tracker;      // HeapGraphTracker
+  std::unique_ptr<Destructible> sched_tracker;           // SchedEventTracker
+  std::unique_ptr<Destructible> syscall_tracker;         // SyscallTracker
   std::unique_ptr<Destructible> system_info_tracker;     // SystemInfoTracker
+  std::unique_ptr<Destructible> v4l2_tracker;            // V4l2Tracker
+  std::unique_ptr<Destructible> virtio_video_tracker;    // VirtioVideoTracker
+  std::unique_ptr<Destructible> systrace_parser;         // SystraceParser
+  std::unique_ptr<Destructible> thread_state_tracker;    // ThreadStateTracker
+  std::unique_ptr<Destructible> i2c_tracker;             // I2CTracker
 
   // These fields are trace readers which will be called by |forwarding_parser|
   // once the format of the trace is discovered. They are placed here as they
   // are only available in the storage_full target.
   std::unique_ptr<ChunkedTraceReader> json_trace_tokenizer;
   std::unique_ptr<ChunkedTraceReader> fuchsia_trace_tokenizer;
+  std::unique_ptr<ChunkedTraceReader> android_bugreport_parser;
   std::unique_ptr<ChunkedTraceReader> systrace_trace_parser;
   std::unique_ptr<ChunkedTraceReader> gzip_trace_parser;
 
@@ -119,12 +140,18 @@ class TraceProcessorContext {
   // TracePacket.
   std::vector<std::vector<ProtoImporterModule*>> modules_by_field;
   std::vector<std::unique_ptr<ProtoImporterModule>> modules;
+  // Pointers to modules from the modules vector that need to be called for
+  // all fields.
+  std::vector<ProtoImporterModule*> modules_for_all_fields;
   FtraceModule* ftrace_module = nullptr;
+  TrackEventModule* track_module = nullptr;
 
   // Marks whether the uuid was read from the trace.
   // If the uuid was NOT read, the uuid will be made from the hash of the first
   // 4KB of the trace.
   bool uuid_found_in_trace = false;
+
+  TraceType trace_type = kUnknownTraceType;
 };
 
 }  // namespace trace_processor

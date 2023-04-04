@@ -58,6 +58,8 @@
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/loader/resource/video_timing.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
@@ -258,7 +260,7 @@ bool HTMLVideoElement::IsURLAttribute(const Attribute& attribute) const {
 
 const AtomicString HTMLVideoElement::ImageSourceURL() const {
   const AtomicString& url = FastGetAttribute(html_names::kPosterAttr);
-  if (!StripLeadingAndTrailingHTMLSpaces(url).IsEmpty())
+  if (!StripLeadingAndTrailingHTMLSpaces(url).empty())
     return url;
   return default_poster_url_;
 }
@@ -402,6 +404,29 @@ bool HTMLVideoElement::HasAvailableVideoFrame() const {
   return false;
 }
 
+void HTMLVideoElement::OnFirstFrame(base::TimeTicks frame_time,
+                                    size_t bytes_to_first_frame) {
+  DCHECK(GetWebMediaPlayer());
+  LayoutObject* layout_object = GetLayoutObject();
+  // HasLocalBorderBoxProperties will be false in some cases, specifically
+  // picture-in-picture video may return false here.
+  if (layout_object &&
+      layout_object->FirstFragment().HasLocalBorderBoxProperties()) {
+    VideoTiming* video_timing = MakeGarbageCollected<VideoTiming>();
+    video_timing->SetFirstVideoFrameTime(frame_time);
+    video_timing->SetIsSufficientContentLoadedForPaint();
+    video_timing->SetUrl(currentSrc());
+    video_timing->SetContentSizeForEntropy(bytes_to_first_frame);
+    video_timing->SetTimingAllowPassed(
+        GetWebMediaPlayer()->PassedTimingAllowOriginCheck());
+
+    PaintTimingDetector::NotifyImagePaint(
+        *layout_object, videoVisibleSize(), *video_timing,
+        layout_object->FirstFragment().LocalBorderBoxProperties(),
+        layout_object->AbsoluteBoundingBoxRect());
+  }
+}
+
 void HTMLVideoElement::webkitEnterFullscreen() {
   if (!IsFullscreen()) {
     FullscreenOptions* options = FullscreenOptions::Create();
@@ -422,14 +447,6 @@ bool HTMLVideoElement::webkitSupportsFullscreen() {
 
 bool HTMLVideoElement::webkitDisplayingFullscreen() {
   return IsFullscreen();
-}
-
-bool HTMLVideoElement::UsesOverlayFullscreenVideo() const {
-  if (RuntimeEnabledFeatures::ForceOverlayFullscreenVideoEnabled())
-    return true;
-
-  return GetWebMediaPlayer() &&
-         GetWebMediaPlayer()->SupportsOverlayFullscreenVideo();
 }
 
 void HTMLVideoElement::DidEnterFullscreen() {
@@ -486,7 +503,7 @@ unsigned HTMLVideoElement::webkitDroppedFrameCount() const {
 
 KURL HTMLVideoElement::PosterImageURL() const {
   String url = StripLeadingAndTrailingHTMLSpaces(ImageSourceURL());
-  if (url.IsEmpty())
+  if (url.empty())
     return KURL();
   return GetDocument().CompleteURL(url);
 }
@@ -500,17 +517,21 @@ scoped_refptr<StaticBitmapImage> HTMLVideoElement::CreateStaticBitmapImage(
   media::PaintCanvasVideoRenderer* video_renderer = nullptr;
   scoped_refptr<media::VideoFrame> media_video_frame;
   if (auto* wmp = GetWebMediaPlayer()) {
-    media_video_frame = wmp->GetCurrentFrame();
+    media_video_frame = wmp->GetCurrentFrameThenUpdate();
     video_renderer = wmp->GetPaintCanvasVideoRenderer();
   }
 
   if (!media_video_frame || !video_renderer)
     return nullptr;
 
-  const gfx::Size intrinsic_size = media_video_frame->natural_size();
+  // TODO(https://crbug.com/1341235): The choice of color type, alpha type,
+  // and color space is inappropriate in many circumstances.
+  const auto resource_provider_info =
+      SkImageInfo::Make(gfx::SizeToSkISize(media_video_frame->natural_size()),
+                        kN32_SkColorType, kPremul_SkAlphaType, nullptr);
   if (!resource_provider_ ||
       allow_accelerated_images != resource_provider_->IsAccelerated() ||
-      intrinsic_size != resource_provider_->Size()) {
+      resource_provider_info != resource_provider_->GetSkImageInfo()) {
     viz::RasterContextProvider* raster_context_provider = nullptr;
     if (allow_accelerated_images) {
       if (auto wrapper = SharedGpuContext::ContextProviderWrapper()) {
@@ -520,7 +541,7 @@ scoped_refptr<StaticBitmapImage> HTMLVideoElement::CreateStaticBitmapImage(
     }
     // Providing a null |raster_context_provider| creates a software provider.
     resource_provider_ = CreateResourceProviderForVideoFrame(
-        intrinsic_size, raster_context_provider);
+        resource_provider_info, raster_context_provider);
     if (!resource_provider_)
       return nullptr;
   }
@@ -727,21 +748,17 @@ void HTMLVideoElement::OnIntersectionChangedForLazyLoad(
   GetDocument()
       .GetTaskRunner(TaskType::kInternalMedia)
       ->PostTask(FROM_HERE,
-                 WTF::Bind(notify_visible, WrapWeakPersistent(this)));
+                 WTF::BindOnce(notify_visible, WrapWeakPersistent(this)));
 }
 
 void HTMLVideoElement::OnWebMediaPlayerCreated() {
-  if (RuntimeEnabledFeatures::RequestVideoFrameCallbackEnabled()) {
-    if (auto* vfc_requester = VideoFrameCallbackRequester::From(*this))
-      vfc_requester->OnWebMediaPlayerCreated();
-  }
+  if (auto* vfc_requester = VideoFrameCallbackRequester::From(*this))
+    vfc_requester->OnWebMediaPlayerCreated();
 }
 
 void HTMLVideoElement::OnWebMediaPlayerCleared() {
-  if (RuntimeEnabledFeatures::RequestVideoFrameCallbackEnabled()) {
-    if (auto* vfc_requester = VideoFrameCallbackRequester::From(*this))
-      vfc_requester->OnWebMediaPlayerCleared();
-  }
+  if (auto* vfc_requester = VideoFrameCallbackRequester::From(*this))
+    vfc_requester->OnWebMediaPlayerCleared();
 }
 
 void HTMLVideoElement::AttributeChanged(
@@ -752,7 +769,6 @@ void HTMLVideoElement::AttributeChanged(
 }
 
 void HTMLVideoElement::OnRequestVideoFrameCallback() {
-  DCHECK(RuntimeEnabledFeatures::RequestVideoFrameCallbackEnabled());
   VideoFrameCallbackRequester::From(*this)->OnRequestVideoFrameCallback();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -213,9 +213,8 @@ void ModuleScriptLoader::FetchInternal(
 
   // Module scripts are always defer.
   fetch_params.SetDefer(FetchParameters::kLazyLoad);
-  // TODO(yoav): This is not accurate for module scripts with an async
-  // attribute.
-  fetch_params.SetRenderBlockingBehavior(RenderBlockingBehavior::kNonBlocking);
+  fetch_params.SetRenderBlockingBehavior(
+      module_request.Options().GetRenderBlockingBehavior());
 
   // [nospec] Unlike defer/async classic scripts, module scripts are fetched at
   // High priority.
@@ -277,12 +276,10 @@ void ModuleScriptLoader::NotifyFetchFinishedSuccess(
   // url, and options.</spec>
   switch (params.GetModuleType()) {
     case ModuleType::kJSON:
-      DCHECK(base::FeatureList::IsEnabled(blink::features::kJSONModules));
       module_script_ = ValueWrapperSyntheticModuleScript::
           CreateJSONWrapperSyntheticModuleScript(params, modulator_);
       break;
     case ModuleType::kCSS:
-      DCHECK(RuntimeEnabledFeatures::CSSModulesEnabled());
       module_script_ = ValueWrapperSyntheticModuleScript::
           CreateCSSWrapperSyntheticModuleScript(params, modulator_);
       break;

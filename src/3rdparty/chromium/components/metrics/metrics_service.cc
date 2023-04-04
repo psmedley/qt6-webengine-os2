@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -129,6 +129,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "base/location.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_flattener.h"
@@ -148,9 +149,11 @@
 #include "components/metrics/clean_exit_beacon.h"
 #include "components/metrics/environment_recorder.h"
 #include "components/metrics/field_trials_provider.h"
+#include "components/metrics/metrics_features.h"
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_log_manager.h"
 #include "components/metrics/metrics_log_uploader.h"
+#include "components/metrics/metrics_logs_event_manager.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_rotation_scheduler.h"
 #include "components/metrics/metrics_service_client.h"
@@ -232,7 +235,7 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
 MetricsService::MetricsService(MetricsStateManager* state_manager,
                                MetricsServiceClient* client,
                                PrefService* local_state)
-    : reporting_service_(client, local_state),
+    : reporting_service_(client, local_state, &logs_event_manager_),
       histogram_snapshot_manager_(this),
       state_manager_(state_manager),
       client_(client),
@@ -327,6 +330,10 @@ std::string MetricsService::GetClientId() const {
   return state_manager_->client_id();
 }
 
+void MetricsService::SetExternalClientId(const std::string& id) {
+  state_manager_->SetExternalClientId(id);
+}
+
 bool MetricsService::WasLastShutdownClean() const {
   return state_manager_->clean_exit_beacon()->exited_cleanly();
 }
@@ -364,6 +371,8 @@ void MetricsService::EnableRecording() {
   action_callback_ = base::BindRepeating(&MetricsService::OnUserAction,
                                          base::Unretained(this));
   base::AddActionCallback(action_callback_);
+
+  enablement_observers_.Notify(/*enabled=*/true);
 }
 
 void MetricsService::DisableRecording() {
@@ -378,6 +387,8 @@ void MetricsService::DisableRecording() {
   delegating_provider_.OnRecordingDisabled();
 
   PushPendingLogsToPersistentStorage();
+
+  enablement_observers_.Notify(/*enabled=*/false);
 }
 
 bool MetricsService::recording_active() const {
@@ -392,6 +403,10 @@ bool MetricsService::reporting_active() const {
 
 bool MetricsService::has_unsent_logs() const {
   return reporting_service_.metrics_log_store()->has_unsent_logs();
+}
+
+bool MetricsService::IsMetricsReportingEnabled() const {
+  return state_manager_->IsMetricsReportingEnabled();
 }
 
 void MetricsService::RecordDelta(const base::HistogramBase& histogram,
@@ -412,14 +427,6 @@ void MetricsService::HandleIdleSinceLastTransmission(bool in_idle) {
 void MetricsService::OnApplicationNotIdle() {
   if (recording_state_ == ACTIVE)
     HandleIdleSinceLastTransmission(false);
-}
-
-void MetricsService::RecordStartOfSessionEnd() {
-  LogCleanShutdown(false);
-}
-
-void MetricsService::RecordCompletedSessionEnd() {
-  LogCleanShutdown(true);
 }
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
@@ -463,12 +470,12 @@ void MetricsService::OnAppEnterForeground(bool force_open_new_log) {
     OpenNewLog();
   }
 }
-
-#else
-void MetricsService::LogNeedForCleanShutdown() {
-  state_manager_->LogHasSessionShutdownCleanly(false);
-}
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+
+void MetricsService::LogCleanShutdown() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  state_manager_->LogHasSessionShutdownCleanly(true);
+}
 
 void MetricsService::ClearSavedStabilityMetrics() {
   delegating_provider_.ClearSavedStabilityMetrics();
@@ -554,7 +561,9 @@ void MetricsService::UpdateCurrentUserMetricsConsent(
     bool user_metrics_consent) {
   client_->UpdateCurrentUserMetricsConsent(user_metrics_consent);
 }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if BUILDFLAG(IS_CHROMEOS)
 void MetricsService::ResetClientId() {
   // Pref must be cleared in order for ForceClientIdCreation to generate a new
   // client ID.
@@ -562,7 +571,7 @@ void MetricsService::ResetClientId() {
   state_manager_->ForceClientIdCreation();
   client_->SetMetricsClientId(state_manager_->client_id());
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 variations::SyntheticTrialRegistry*
 MetricsService::GetSyntheticTrialRegistry() {
@@ -688,14 +697,18 @@ void MetricsService::FinishedInitTask() {
   DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
   state_ = INIT_TASK_DONE;
 
-  // Create the initial log.
-  if (!initial_metrics_log_) {
-    initial_metrics_log_ = CreateLog(MetricsLog::ONGOING_LOG);
-    // Note: We explicitly do not call OnDidCreateMetricsLog() here, as this
-    // function would have already been called in Start() and this log will
-    // already contain any histograms logged there. OnDidCreateMetricsLog()
-    // will be called again after the initial log is closed, for the next log.
-    // TODO(crbug.com/1171830): Consider getting rid of |initial_metrics_log_|.
+  if (!base::FeatureList::IsEnabled(
+          features::kConsolidateMetricsServiceInitialLogLogic)) {
+    // Create the initial log.
+    if (!initial_metrics_log_) {
+      initial_metrics_log_ = CreateLog(MetricsLog::ONGOING_LOG);
+      // Note: We explicitly do not call OnDidCreateMetricsLog() here, as this
+      // function would have already been called in Start() and this log will
+      // already contain any histograms logged there. OnDidCreateMetricsLog()
+      // will be called again after the initial log is closed, for the next log.
+      // TODO(crbug.com/1171830): Consider getting rid of
+      // |initial_metrics_log_|.
+    }
   }
 
   rotation_scheduler_->InitTaskComplete();
@@ -786,7 +799,7 @@ void MetricsService::PushPendingLogsToPersistentStorage() {
     return;  // We didn't and still don't have time to get plugin list etc.
 
   CloseCurrentLog();
-  log_store()->TrimAndPersistUnsentLogs();
+  log_store()->TrimAndPersistUnsentLogs(/*overwrite_in_memory_store=*/true);
 }
 
 //------------------------------------------------------------------------------
@@ -825,9 +838,26 @@ void MetricsService::StartScheduledUpload() {
     return;
   }
 
+  if (base::FeatureList::IsEnabled(
+          features::kConsolidateMetricsServiceInitialLogLogic)) {
+    // The first ongoing log should be collected prior to sending any unsent
+    // logs.
+    if (state_ == INIT_TASK_DONE) {
+      client_->CollectFinalMetricsForLog(
+          base::BindOnce(&MetricsService::OnFinalLogInfoCollectionDone,
+                         self_ptr_factory_.GetWeakPtr()));
+      return;
+    }
+  }
+
   // If there are unsent logs, send the next one. If not, start the asynchronous
   // process of finalizing the current log for upload.
-  if (state_ == SENDING_LOGS && has_unsent_logs()) {
+  bool send_unsent_logs =
+      base::FeatureList::IsEnabled(
+          features::kConsolidateMetricsServiceInitialLogLogic)
+          ? has_unsent_logs()
+          : state_ == SENDING_LOGS && has_unsent_logs();
+  if (send_unsent_logs) {
     reporting_service_.Start();
     rotation_scheduler_->RotationFinished();
   } else {
@@ -840,6 +870,11 @@ void MetricsService::StartScheduledUpload() {
 
 void MetricsService::OnFinalLogInfoCollectionDone() {
   DVLOG(1) << "OnFinalLogInfoCollectionDone";
+  if (base::FeatureList::IsEnabled(
+          features::kConsolidateMetricsServiceInitialLogLogic)) {
+    DCHECK(state_ >= INIT_TASK_DONE);
+    state_ = SENDING_LOGS;
+  }
 
   // Abort if metrics were turned off during the final info gathering.
   if (!recording_active()) {
@@ -848,13 +883,28 @@ void MetricsService::OnFinalLogInfoCollectionDone() {
     return;
   }
 
-  if (state_ == INIT_TASK_DONE) {
-    PrepareInitialMetricsLog();
-  } else {
-    DCHECK_EQ(SENDING_LOGS, state_);
+  if (base::FeatureList::IsEnabled(
+          features::kConsolidateMetricsServiceInitialLogLogic)) {
     CloseCurrentLog();
     OpenNewLog();
+    // Trim and store unsent logs, including the log that was just closed, so
+    // that they're not lost in case of a crash before upload time. However, the
+    // in-memory log store is unchanged. I.e., logs that are trimmed will still
+    // be available in memory. This is to give the log that was just created a
+    // chance to be sent in case it is trimmed. After uploading (whether
+    // successful or not), the log store is trimmed and stored again, and at
+    // that time, the in-memory log store will be updated.
+    log_store()->TrimAndPersistUnsentLogs(/*overwrite_in_memory_store=*/false);
+  } else {
+    if (state_ == INIT_TASK_DONE) {
+      PrepareInitialMetricsLog();
+    } else {
+      DCHECK_EQ(SENDING_LOGS, state_);
+      CloseCurrentLog();
+      OpenNewLog();
+    }
   }
+
   reporting_service_.Start();
   rotation_scheduler_->RotationFinished();
   HandleIdleSinceLastTransmission(true);
@@ -887,7 +937,7 @@ bool MetricsService::PrepareInitialStabilityLog(
 
   // Store unsent logs, including the stability log that was just saved, so
   // that they're not lost in case of a crash before upload time.
-  log_store()->TrimAndPersistUnsentLogs();
+  log_store()->TrimAndPersistUnsentLogs(/*overwrite_in_memory_store=*/true);
 
   return true;
 }
@@ -925,14 +975,9 @@ void MetricsService::PrepareInitialMetricsLog() {
 
   // Store unsent logs, including the initial log that was just saved, so
   // that they're not lost in case of a crash before upload time.
-  log_store()->TrimAndPersistUnsentLogs();
+  log_store()->TrimAndPersistUnsentLogs(/*overwrite_in_memory_store=*/true);
 
   state_ = SENDING_LOGS;
-}
-
-void MetricsService::IncrementLongPrefsValue(const char* path) {
-  int64_t value = local_state_->GetInt64(path);
-  local_state_->SetInt64(path, value + 1);
 }
 
 void MetricsService::RegisterMetricsProvider(
@@ -961,6 +1006,21 @@ std::unique_ptr<MetricsLog> MetricsService::CreateLog(
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   return new_metrics_log;
+}
+
+void MetricsService::AddLogsObserver(
+    MetricsLogsEventManager::Observer* observer) {
+  logs_event_manager_.AddObserver(observer);
+}
+
+void MetricsService::RemoveLogsObserver(
+    MetricsLogsEventManager::Observer* observer) {
+  logs_event_manager_.RemoveObserver(observer);
+}
+
+base::CallbackListSubscription MetricsService::AddEnablementObserver(
+    const base::RepeatingCallback<void(bool)>& observer) {
+  return enablement_observers_.Add(observer);
 }
 
 void MetricsService::SetPersistentSystemProfile(
@@ -1078,11 +1138,6 @@ void MetricsService::PrepareProviderMetricsTask() {
       base::BindOnce(&MetricsService::PrepareProviderMetricsTask,
                      self_ptr_factory_.GetWeakPtr()),
       next_check);
-}
-
-void MetricsService::LogCleanShutdown(bool end_completed) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  state_manager_->LogHasSessionShutdownCleanly(true);
 }
 
 void MetricsService::UpdateLastLiveTimestampTask() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,10 +48,7 @@ static_assert((HttpResponseBodyDrainer::kDrainBodyBufferSize %
 
 class CloseResultWaiter {
  public:
-  CloseResultWaiter()
-      : result_(false),
-        have_result_(false),
-        waiting_for_result_(false) {}
+  CloseResultWaiter() = default;
 
   CloseResultWaiter(const CloseResultWaiter&) = delete;
   CloseResultWaiter& operator=(const CloseResultWaiter&) = delete;
@@ -74,23 +71,15 @@ class CloseResultWaiter {
   }
 
  private:
-  int result_;
-  bool have_result_;
-  bool waiting_for_result_;
+  int result_ = false;
+  bool have_result_ = false;
+  bool waiting_for_result_ = false;
 };
 
 class MockHttpStream : public HttpStream {
  public:
-  MockHttpStream(CloseResultWaiter* result_waiter)
-      : result_waiter_(result_waiter),
-        buf_len_(0),
-        closed_(false),
-        stall_reads_forever_(false),
-        num_chunks_(0),
-        is_sync_(false),
-        is_last_chunk_zero_size_(false),
-        is_complete_(false),
-        can_reuse_connection_(true) {}
+  explicit MockHttpStream(CloseResultWaiter* result_waiter)
+      : result_waiter_(result_waiter) {}
 
   MockHttpStream(const MockHttpStream&) = delete;
   MockHttpStream& operator=(const MockHttpStream&) = delete;
@@ -125,7 +114,9 @@ class MockHttpStream : public HttpStream {
   }
   void GetSSLInfo(SSLInfo* ssl_info) override {}
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override {}
-  bool GetRemoteEndpoint(IPEndPoint* endpoint) override { return false; }
+  int GetRemoteEndpoint(IPEndPoint* endpoint) override {
+    return ERR_UNEXPECTED;
+  }
 
   // Mocked API
   int ReadResponseBody(IOBuffer* buf,
@@ -137,7 +128,7 @@ class MockHttpStream : public HttpStream {
     result_waiter_->set_result(not_reusable);
   }
 
-  HttpStream* RenewStreamForAuth() override { return nullptr; }
+  std::unique_ptr<HttpStream> RenewStreamForAuth() override { return nullptr; }
 
   bool IsResponseBodyComplete() const override { return is_complete_; }
 
@@ -183,14 +174,14 @@ class MockHttpStream : public HttpStream {
   const raw_ptr<CloseResultWaiter> result_waiter_;
   scoped_refptr<IOBuffer> user_buf_;
   CompletionOnceCallback callback_;
-  int buf_len_;
-  bool closed_;
-  bool stall_reads_forever_;
-  int num_chunks_;
-  bool is_sync_;
-  bool is_last_chunk_zero_size_;
-  bool is_complete_;
-  bool can_reuse_connection_;
+  int buf_len_ = 0;
+  bool closed_ = false;
+  bool stall_reads_forever_ = false;
+  int num_chunks_ = 0;
+  bool is_sync_ = false;
+  bool is_last_chunk_zero_size_ = false;
+  bool is_complete_ = false;
+  bool can_reuse_connection_ = true;
 
   base::WeakPtrFactory<MockHttpStream> weak_factory_{this};
 };
@@ -247,15 +238,16 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
   HttpResponseBodyDrainerTest()
       : proxy_resolution_service_(
             ConfiguredProxyResolutionService::CreateDirect()),
-        ssl_config_service_(new SSLConfigServiceDefaults),
-        http_server_properties_(new HttpServerProperties()),
+        ssl_config_service_(std::make_unique<SSLConfigServiceDefaults>()),
+        http_server_properties_(std::make_unique<HttpServerProperties>()),
         session_(CreateNetworkSession()),
-        mock_stream_(new MockHttpStream(&result_waiter_)),
-        drainer_(new HttpResponseBodyDrainer(mock_stream_)) {}
+        mock_stream_(new MockHttpStream(&result_waiter_)) {
+    drainer_ = std::make_unique<HttpResponseBodyDrainer>(mock_stream_);
+  }
 
   ~HttpResponseBodyDrainerTest() override = default;
 
-  HttpNetworkSession* CreateNetworkSession() {
+  std::unique_ptr<HttpNetworkSession> CreateNetworkSession() {
     HttpNetworkSessionContext context;
     context.client_socket_factory = &socket_factory_;
     context.proxy_resolution_service = proxy_resolution_service_.get();
@@ -265,7 +257,8 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
     context.transport_security_state = &transport_security_state_;
     context.ct_policy_enforcer = &ct_policy_enforcer_;
     context.quic_context = &quic_context_;
-    return new HttpNetworkSession(HttpNetworkSessionParams(), context);
+    return std::make_unique<HttpNetworkSession>(HttpNetworkSessionParams(),
+                                                context);
   }
 
   std::unique_ptr<ProxyResolutionService> proxy_resolution_service_;
@@ -278,27 +271,27 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
   MockClientSocketFactory socket_factory_;
   const std::unique_ptr<HttpNetworkSession> session_;
   CloseResultWaiter result_waiter_;
-  const raw_ptr<MockHttpStream> mock_stream_;       // Owned by |drainer_|.
-  const raw_ptr<HttpResponseBodyDrainer> drainer_;  // Deletes itself.
+  const raw_ptr<MockHttpStream> mock_stream_;  // Owned by |drainer_|.
+  std::unique_ptr<HttpResponseBodyDrainer> drainer_;
 };
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncSingleOK) {
   mock_stream_->set_num_chunks(1);
   mock_stream_->set_sync();
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncOK) {
   mock_stream_->set_num_chunks(3);
   mock_stream_->set_sync();
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyAsyncOK) {
   mock_stream_->set_num_chunks(3);
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
@@ -308,7 +301,7 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodyAsyncOK) {
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyAsyncEmptyChunk) {
   mock_stream_->set_num_chunks(4);
   mock_stream_->set_is_last_chunk_zero_size();
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
@@ -316,28 +309,28 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncEmptyChunk) {
   mock_stream_->set_num_chunks(4);
   mock_stream_->set_sync();
   mock_stream_->set_is_last_chunk_zero_size();
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySizeEqualsDrainBuffer) {
   mock_stream_->set_num_chunks(
       HttpResponseBodyDrainer::kDrainBodyBufferSize / kMagicChunkSize);
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyTimeOut) {
   mock_stream_->set_num_chunks(2);
   mock_stream_->set_stall_reads_forever();
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_TRUE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, CancelledBySession) {
   mock_stream_->set_num_chunks(2);
   mock_stream_->set_stall_reads_forever();
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   // HttpNetworkSession should delete |drainer_|.
 }
 
@@ -347,14 +340,14 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodyTooLarge) {
   too_many_chunks += 1;  // Now it's too large.
 
   mock_stream_->set_num_chunks(too_many_chunks);
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_TRUE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyCantReuse) {
   mock_stream_->set_num_chunks(1);
   mock_stream_->set_can_reuse_connection(false);
-  drainer_->Start(session_.get());
+  session_->StartResponseDrainer(std::move(drainer_));
   EXPECT_TRUE(result_waiter_.WaitForResult());
 }
 

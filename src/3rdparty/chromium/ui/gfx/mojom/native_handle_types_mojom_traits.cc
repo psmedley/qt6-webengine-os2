@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,6 +47,8 @@ bool StructTraits<
                                    gfx::NativePixmapHandle* out) {
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   out->modifier = data.modifier();
+  out->supports_zero_copy_webgpu_import =
+      data.supports_zero_copy_webgpu_import();
 #endif
 
 #if BUILDFLAG(IS_FUCHSIA)

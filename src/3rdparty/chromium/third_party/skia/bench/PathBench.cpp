@@ -18,6 +18,7 @@
 #include "include/utils/SkRandom.h"
 
 #include "src/core/SkDraw.h"
+#include "src/core/SkPaintPriv.h"
 
 enum Flags {
     kStroke_Flag = 1 << 0,
@@ -854,7 +855,7 @@ private:
     }
 
     void onDelayedSetup() override {
-        fQueryRects.setCount(kQueryRectCnt);
+        fQueryRects.resize(kQueryRectCnt);
 
         SkRandom rand;
         for (int i = 0; i < kQueryRectCnt; ++i) {

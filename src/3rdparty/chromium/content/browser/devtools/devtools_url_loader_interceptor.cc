@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/unguessable_token.h"
 #include "content/browser/devtools/protocol/network.h"
 #include "content/browser/devtools/protocol/network_handler.h"
@@ -252,7 +253,7 @@ struct ResponseMetadata {
   network::mojom::URLResponseHeadPtr head =
       network::mojom::URLResponseHead::New();
   std::unique_ptr<net::RedirectInfo> redirect_info;
-  mojo_base::BigBuffer cached_metadata;
+  absl::optional<mojo_base::BigBuffer> cached_metadata;
   size_t encoded_length = 0;
   size_t transfer_size = 0;
   network::URLLoaderCompletionStatus status;
@@ -363,18 +364,19 @@ class InterceptionJob : public network::mojom::URLLoaderClient,
 
   // network::mojom::URLLoaderClient methods
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head,
-                         mojo::ScopedDataPipeConsumerHandle body) override;
+  void OnReceiveResponse(
+      network::mojom::URLResponseHeadPtr head,
+      mojo::ScopedDataPipeConsumerHandle body,
+      absl::optional<mojo_base::BigBuffer> cached_metadata) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          network::mojom::URLResponseHeadPtr head) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback callback) override;
-  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
-  void OnStartLoadingResponseBody(
-      mojo::ScopedDataPipeConsumerHandle body) override;
   void OnComplete(const network::URLLoaderCompletionStatus& status) override;
+
+  void StartLoadingResponseBody(mojo::ScopedDataPipeConsumerHandle body);
 
   bool CanGetResponseBody(std::string* error_reason);
   bool StartJobAndMaybeNotify();
@@ -421,6 +423,7 @@ class InterceptionJob : public network::mojom::URLLoaderClient,
   bool tainted_origin_ = false;
   bool fetch_cors_flag_ = false;
   std::string current_id_;
+  std::string redirected_request_id_;
 
   std::unique_ptr<BodyReader> body_reader_;
   std::unique_ptr<ResponseMetadata> response_metadata_;
@@ -833,7 +836,7 @@ void InterceptionJob::GetResponseBody(
   body_reader_->AddCallback(std::move(callback));
   // Needs to happen after |AddCallback| to avoid a DCHECK.
   if (body_reader_created && body_)
-    OnStartLoadingResponseBody(std::move(body_));
+    StartLoadingResponseBody(std::move(body_));
 }
 
 void InterceptionJob::TakeResponseBodyPipe(
@@ -851,7 +854,7 @@ void InterceptionJob::TakeResponseBodyPipe(
   pending_response_body_pipe_callback_ = std::move(callback);
   client_receiver_.Resume();
   if (body_)
-    OnStartLoadingResponseBody(std::move(body_));
+    StartLoadingResponseBody(std::move(body_));
   loader_->ResumeReadingBodyFromNet();
 }
 
@@ -874,6 +877,7 @@ void InterceptionJob::Detach() {
   if (state_ == State::kAuthRequired) {
     state_ = State::kRequestSent;
     waiting_for_resolution_ = false;
+    TRACE_EVENT_NESTABLE_ASYNC_END0("devtools", "Fetch.requestPaused", this);
     std::move(pending_auth_callback_).Run(true, absl::nullopt);
     return;
   }
@@ -887,7 +891,7 @@ Response InterceptionJob::InnerContinueRequest(
         "Invalid state for continueInterceptedRequest");
   }
   waiting_for_resolution_ = false;
-
+  TRACE_EVENT_NESTABLE_ASYNC_END0("devtools", "Fetch.requestPaused", this);
   if (modifications->intercept_response.isJust()) {
     if (modifications->intercept_response.fromJust()) {
       if (stage_ == InterceptionStage::REQUEST)
@@ -1006,12 +1010,11 @@ Response InterceptionJob::InnerContinueRequest(
     DCHECK_EQ(State::kResponseReceived, state_);
     DCHECK(!body_reader_);
     client_->OnReceiveResponse(std::move(response_metadata_->head),
-                               mojo::ScopedDataPipeConsumerHandle());
+                               std::move(body_),
+                               std::move(response_metadata_->cached_metadata));
     response_metadata_.reset();
     loader_->ResumeReadingBodyFromNet();
     client_receiver_.Resume();
-    if (body_)
-      OnStartLoadingResponseBody(std::move(body_));
     return Response::Success();
   }
 
@@ -1027,8 +1030,12 @@ void InterceptionJob::ApplyModificationsToRequest(
 
   // Note this redirect is not visible to the page by design. If they want a
   // visible redirect they can mock a response with a 302.
-  if (modifications->modified_url.isJust())
-    request->url = GURL(modifications->modified_url.fromJust());
+  if (modifications->modified_url.isJust()) {
+    DCHECK_EQ(url_chain_.back(), request->url);
+    const GURL new_url(modifications->modified_url.fromJust());
+    request->url = new_url;
+    url_chain_.back() = new_url;
+  }
 
   if (modifications->modified_method.isJust())
     request->method = modifications->modified_method.fromJust();
@@ -1173,7 +1180,7 @@ void InterceptionJob::ProcessSetCookies(const net::HttpResponseHeaders& headers,
   while (headers.EnumerateHeader(&iter, name, &cookie_line)) {
     std::unique_ptr<net::CanonicalCookie> cookie = net::CanonicalCookie::Create(
         create_loader_params_->request.url, cookie_line, now, server_time,
-        net::CookiePartitionKey::Todo());
+        absl::nullopt);
     if (cookie)
       cookies.emplace_back(std::move(cookie));
   }
@@ -1234,12 +1241,7 @@ void InterceptionJob::ProcessRedirectByClient(const GURL& redirect_url) {
 
 void InterceptionJob::SendResponse(scoped_refptr<base::RefCountedMemory> body,
                                    size_t offset) {
-  client_->OnReceiveResponse(std::move(response_metadata_->head),
-                             mojo::ScopedDataPipeConsumerHandle());
-  if (response_metadata_->cached_metadata.size() != 0)
-    client_->OnReceiveCachedMetadata(
-        std::move(response_metadata_->cached_metadata));
-
+  mojo::ScopedDataPipeConsumerHandle consumer_handle;
   if (body) {
     DCHECK_LE(offset, body->size());
     size_t body_size = body->size() - offset;
@@ -1248,7 +1250,6 @@ void InterceptionJob::SendResponse(scoped_refptr<base::RefCountedMemory> body,
     DCHECK_LE(body_size, UINT32_MAX)
         << "Response bodies larger than " << UINT32_MAX << " are not supported";
     mojo::ScopedDataPipeProducerHandle producer_handle;
-    mojo::ScopedDataPipeConsumerHandle consumer_handle;
     CHECK_EQ(mojo::CreateDataPipe(body_size, producer_handle, consumer_handle),
              MOJO_RESULT_OK);
     uint32_t num_bytes = body_size;
@@ -1256,8 +1257,11 @@ void InterceptionJob::SendResponse(scoped_refptr<base::RefCountedMemory> body,
         body->front() + offset, &num_bytes, MOJO_WRITE_DATA_FLAG_NONE);
     DCHECK_EQ(0u, res);
     DCHECK_EQ(num_bytes, body_size);
-    client_->OnStartLoadingResponseBody(std::move(consumer_handle));
   }
+  client_->OnReceiveResponse(std::move(response_metadata_->head),
+                             std::move(consumer_handle),
+                             std::move(response_metadata_->cached_metadata));
+
   if (response_metadata_->transfer_size)
     client_->OnTransferSizeUpdated(response_metadata_->transfer_size);
   CompleteRequest(response_metadata_->status);
@@ -1320,6 +1324,9 @@ std::unique_ptr<InterceptedRequestInfo> InterceptionJob::BuildRequestInfo(
 
   if (head && head->headers)
     result->response_headers = head->headers;
+  if (!redirected_request_id_.empty())
+    result->redirected_request_id = redirected_request_id_;
+
   return result;
 }
 
@@ -1379,6 +1386,7 @@ void InterceptionJob::NotifyClientWithCookies(
       protocol::NetworkHandler::CreateRequestFromResourceRequest(
           create_loader_params_->request, cookie_line);
 
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("devtools", "Fetch.requestPaused", this);
   waiting_for_resolution_ = true;
   interceptor_->request_intercepted_callback_.Run(std::move(request_info));
 }
@@ -1440,6 +1448,7 @@ void InterceptionJob::FollowRedirect(
   url_chain_.push_back(create_loader_params_->request.url);
 
   if (interceptor_) {
+    redirected_request_id_ = current_id_;
     // Pretend that each redirect hop is a new request -- this is for
     // compatibilty with URLRequestJob-based interception implementation.
     interceptor_->RemoveJob(current_id_);
@@ -1485,11 +1494,13 @@ void InterceptionJob::OnReceiveEarlyHints(
 
 void InterceptionJob::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr head,
-    mojo::ScopedDataPipeConsumerHandle body) {
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   state_ = State::kResponseReceived;
   DCHECK(!response_metadata_);
   if (!(stage_ & InterceptionStage::RESPONSE)) {
-    client_->OnReceiveResponse(std::move(head), std::move(body));
+    client_->OnReceiveResponse(std::move(head), std::move(body),
+                               std::move(cached_metadata));
     return;
   }
   loader_->PauseReadingBodyFromNet();
@@ -1504,6 +1515,7 @@ void InterceptionJob::OnReceiveResponse(
                            request.url, head->headers.get(), head->mime_type));
 
   response_metadata_ = std::make_unique<ResponseMetadata>(std::move(head));
+  response_metadata_->cached_metadata = std::move(cached_metadata);
 
   NotifyClient(std::move(request_info));
 }
@@ -1535,13 +1547,6 @@ void InterceptionJob::OnUploadProgress(int64_t current_position,
   client_->OnUploadProgress(current_position, total_size, std::move(callback));
 }
 
-void InterceptionJob::OnReceiveCachedMetadata(mojo_base::BigBuffer data) {
-  if (ShouldBypassForResponse())
-    client_->OnReceiveCachedMetadata(std::move(data));
-  else
-    response_metadata_->cached_metadata = std::move(data);
-}
-
 void InterceptionJob::OnTransferSizeUpdated(int32_t transfer_size_diff) {
   if (ShouldBypassForResponse())
     client_->OnTransferSizeUpdated(transfer_size_diff);
@@ -1549,7 +1554,7 @@ void InterceptionJob::OnTransferSizeUpdated(int32_t transfer_size_diff) {
     response_metadata_->transfer_size += transfer_size_diff;
 }
 
-void InterceptionJob::OnStartLoadingResponseBody(
+void InterceptionJob::StartLoadingResponseBody(
     mojo::ScopedDataPipeConsumerHandle body) {
   if (pending_response_body_pipe_callback_) {
     DCHECK_EQ(State::kResponseTaken, state_);
@@ -1560,10 +1565,8 @@ void InterceptionJob::OnStartLoadingResponseBody(
     return;
   }
   DCHECK_EQ(State::kResponseReceived, state_);
-  if (ShouldBypassForResponse())
-    client_->OnStartLoadingResponseBody(std::move(body));
-  else
-    body_reader_->StartReading(std::move(body));
+  DCHECK(!ShouldBypassForResponse());
+  body_reader_->StartReading(std::move(body));
 }
 
 void InterceptionJob::OnComplete(

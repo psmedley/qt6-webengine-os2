@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/android/generic_ui_interactions_android.h"
 #include "components/autofill_assistant/browser/android/generic_ui_nested_controller_android.h"
 #include "components/autofill_assistant/browser/android/view_handler_android.h"
@@ -90,7 +90,7 @@ InteractionHandlerAndroid::InteractionHandlerAndroid(
     BasicInteractions* basic_interactions,
     ViewHandlerAndroid* view_handler,
     RadioButtonController* radio_button_controller,
-    const Dependencies* dependencies,
+    const DependenciesAndroid* dependencies,
     base::android::ScopedJavaGlobalRef<jobject> jcontext,
     base::android::ScopedJavaGlobalRef<jobject> jinfo_page_util,
     base::android::ScopedJavaGlobalRef<jobject> jdelegate)
@@ -201,8 +201,14 @@ InteractionHandlerAndroid::CreateInteractionCallbackFromProto(
       return absl::optional<InteractionCallback>(base::BindRepeating(
           &android_interactions::ShowInfoPopup,
           proto.show_info_popup().info_popup(), jcontext_, jinfo_page_util_,
+          jdelegate_,
           GetDisplayStringUTF8(ClientSettingsProto::CLOSE,
                                basic_interactions_->GetClientSettings())));
+    }
+    case CallbackProto::kShowAccountScreen: {
+      return absl::optional<InteractionCallback>(base::BindRepeating(
+          &android_interactions::ShowAccountScreen,
+          basic_interactions_->GetWeakPtr(), proto.show_account_screen()));
     }
     case CallbackProto::kShowListPopup:
       if (!proto.show_list_popup().has_item_names()) {
@@ -364,6 +370,11 @@ InteractionHandlerAndroid::CreateInteractionCallbackFromProto(
       return absl::optional<InteractionCallback>(base::BindRepeating(
           &RunForEachLoop, proto.for_each(), GetWeakPtr(),
           user_model_->GetWeakPtr(), view_handler_->GetWeakPtr()));
+    }
+    case CallbackProto::kRequestBackendData: {
+      return absl::optional<InteractionCallback>(base::BindRepeating(
+          &android_interactions::RequestBackendData,
+          basic_interactions_->GetWeakPtr(), proto.request_backend_data()));
     }
     case CallbackProto::KIND_NOT_SET:
       VLOG(1) << "Error creating interaction: kind not set";

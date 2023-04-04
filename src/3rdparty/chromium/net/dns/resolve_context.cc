@@ -1,15 +1,15 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/dns/resolve_context.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <limits>
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/metrics/bucket_ranges.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_base.h"
@@ -119,7 +119,7 @@ static std::unique_ptr<base::SampleVector> GetRttHistogram(
 
 ResolveContext::ServerStats::ServerStats(
     std::unique_ptr<base::SampleVector> buckets)
-    : last_failure_count(0), rtt_histogram(std::move(buckets)) {}
+    : rtt_histogram(std::move(buckets)) {}
 
 ResolveContext::ServerStats::ServerStats(ServerStats&&) = default;
 
@@ -142,10 +142,9 @@ std::unique_ptr<DnsServerIterator> ResolveContext::GetDohIterator(
   // Make the iterator even if the session differs. The first call to the member
   // functions will catch the out of date session.
 
-  std::unique_ptr<DnsServerIterator> itr(new DohDnsServerIterator(
+  return std::make_unique<DohDnsServerIterator>(
       doh_server_stats_.size(), FirstServerIndex(true, session),
-      config.doh_attempts, config.attempts, mode, this, session));
-  return itr;
+      config.doh_attempts, config.attempts, mode, this, session);
 }
 
 std::unique_ptr<DnsServerIterator> ResolveContext::GetClassicDnsIterator(
@@ -154,10 +153,9 @@ std::unique_ptr<DnsServerIterator> ResolveContext::GetClassicDnsIterator(
   // Make the iterator even if the session differs. The first call to the member
   // functions will catch the out of date session.
 
-  std::unique_ptr<DnsServerIterator> itr(new ClassicDnsServerIterator(
+  return std::make_unique<ClassicDnsServerIterator>(
       config.nameservers.size(), FirstServerIndex(false, session),
-      config.attempts, config.attempts, this, session));
-  return itr;
+      config.attempts, config.attempts, this, session);
 }
 
 bool ResolveContext::GetDohServerAvailability(size_t doh_server_index,
@@ -333,7 +331,10 @@ void ResolveContext::UnregisterDohStatusObserver(
 void ResolveContext::InvalidateCachesAndPerSessionData(
     const DnsSession* new_session,
     bool network_change) {
-  DCHECK(MustRegisterForInvalidations());
+  // Network-bound ResolveContexts should never receive a cache invalidation due
+  // to a network change.
+  DCHECK(GetTargetNetwork() == handles::kInvalidNetworkHandle ||
+         !network_change);
   if (host_cache_)
     host_cache_->Invalidate();
 
@@ -379,17 +380,11 @@ void ResolveContext::InvalidateCachesAndPerSessionData(
     NotifyDohStatusObserversOfUnavailable(network_change);
 }
 
-NetworkChangeNotifier::NetworkHandle ResolveContext::GetTargetNetwork() const {
+handles::NetworkHandle ResolveContext::GetTargetNetwork() const {
   if (!url_request_context())
-    return NetworkChangeNotifier::kInvalidNetworkHandle;
+    return handles::kInvalidNetworkHandle;
 
   return url_request_context()->bound_network();
-}
-
-bool ResolveContext::MustRegisterForInvalidations() const {
-  // Resolve contexts targeting a network shouldn't have their cache invalidated
-  // when an network (or DNS) change occurs. More context at crbug.com/1292548.
-  return GetTargetNetwork() == NetworkChangeNotifier::kInvalidNetworkHandle;
 }
 
 size_t ResolveContext::FirstServerIndex(bool doh_server,
@@ -571,10 +566,9 @@ bool ResolveContext::GetProviderUseExtraLogging(size_t server_index,
 
   // Use extra logging if any matching provider entries have
   // `LoggingLevel::kExtra` set.
-  return std::any_of(
-      matching_entries.begin(), matching_entries.end(), [&](const auto* entry) {
-        return entry->logging_level == DohProviderEntry::LoggingLevel::kExtra;
-      });
+  return base::Contains(matching_entries,
+                        DohProviderEntry::LoggingLevel::kExtra,
+                        &DohProviderEntry::logging_level);
 }
 
 void ResolveContext::NotifyDohStatusObserversOfSessionChanged() {

@@ -32,10 +32,10 @@
 
 #include <memory>
 
+#include "base/synchronization/lock.h"
 #include "build/chromeos_buildflags.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
@@ -63,17 +63,18 @@
 #include "third_party/blink/renderer/core/xml/xpath_evaluator.h"
 #include "third_party/blink/renderer/core/xml/xpath_result.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
 namespace {
 
-Mutex& CreationMutex() {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, ());
-  return mutex;
+base::Lock& CreationLock() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(base::Lock, lock, ());
+  return lock;
 }
 
 LocalFrame* ToFrame(ExecutionContext* context) {
@@ -90,15 +91,14 @@ LocalFrame* ToFrame(ExecutionContext* context) {
 MainThreadDebugger* MainThreadDebugger::instance_ = nullptr;
 
 MainThreadDebugger::MainThreadDebugger(v8::Isolate* isolate)
-    : ThreadDebugger(isolate),
-      paused_(false) {
-  MutexLocker locker(CreationMutex());
+    : ThreadDebuggerCommonImpl(isolate), paused_(false) {
+  base::AutoLock locker(CreationLock());
   DCHECK(!instance_);
   instance_ = this;
 }
 
 MainThreadDebugger::~MainThreadDebugger() {
-  MutexLocker locker(CreationMutex());
+  base::AutoLock locker(CreationLock());
   DCHECK_EQ(instance_, this);
   instance_ = nullptr;
 }
@@ -366,7 +366,7 @@ v8::MaybeLocal<v8::Value> MainThreadDebugger::memoryInfo(
 void MainThreadDebugger::installAdditionalCommandLineAPI(
     v8::Local<v8::Context> context,
     v8::Local<v8::Object> object) {
-  ThreadDebugger::installAdditionalCommandLineAPI(context, object);
+  ThreadDebuggerCommonImpl::installAdditionalCommandLineAPI(context, object);
   CreateFunctionProperty(
       context, object, "$", MainThreadDebugger::QuerySelectorCallback,
       "function $(selector, [startNode]) { [Command Line API] }",
@@ -396,7 +396,7 @@ void MainThreadDebugger::QuerySelectorCallback(
   if (info.Length() < 1)
     return;
   String selector = ToCoreStringWithUndefinedOrNullCheck(info[0]);
-  if (selector.IsEmpty())
+  if (selector.empty())
     return;
   auto* container_node = DynamicTo<ContainerNode>(SecondArgumentAsNode(info));
   if (!container_node)
@@ -419,7 +419,7 @@ void MainThreadDebugger::QuerySelectorAllCallback(
   if (info.Length() < 1)
     return;
   String selector = ToCoreStringWithUndefinedOrNullCheck(info[0]);
-  if (selector.IsEmpty())
+  if (selector.empty())
     return;
   auto* container_node = DynamicTo<ContainerNode>(SecondArgumentAsNode(info));
   if (!container_node)
@@ -451,7 +451,7 @@ void MainThreadDebugger::XpathSelectorCallback(
   if (info.Length() < 1)
     return;
   String selector = ToCoreStringWithUndefinedOrNullCheck(info[0]);
-  if (selector.IsEmpty())
+  if (selector.empty())
     return;
   Node* node = SecondArgumentAsNode(info);
   if (!node || !node->IsContainerNode())

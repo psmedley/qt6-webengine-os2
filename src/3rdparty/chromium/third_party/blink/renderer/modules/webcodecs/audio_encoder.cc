@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,23 @@
 #include <cinttypes>
 #include <limits>
 
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/common/trace_event_common.h"
 #include "base/trace_event/trace_event.h"
-#include "media/audio/audio_features.h"
 #include "media/audio/audio_opus_encoder.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/limits.h"
+#include "media/base/media_switches.h"
 #include "media/base/mime_util.h"
 #include "media/base/offloading_audio_encoder.h"
 #include "media/mojo/clients/mojo_audio_encoder.h"
 #include "media/mojo/mojom/audio_encoder.mojom-blink.h"
 #include "media/mojo/mojom/interface_factory.mojom.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
@@ -35,6 +36,7 @@
 #include "third_party/blink/renderer/modules/webcodecs/allow_shared_buffer_source_util.h"
 #include "third_party/blink/renderer/modules/webcodecs/encoded_audio_chunk.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_handle.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -101,8 +103,7 @@ bool VerifyParameterValues(const T& value,
                            ExceptionState* exception_state,
                            WTF::String error_message,
                            WTF::Vector<T> supported_values) {
-  if (std::find(supported_values.begin(), supported_values.end(), value) ==
-      supported_values.end()) {
+  if (!base::Contains(supported_values, value)) {
     if (exception_state) {
       WTF::StringBuilder error_builder;
       error_builder.Append(error_message);
@@ -151,26 +152,29 @@ bool VerifyCodecSupportStatic(AudioEncoderTraits::ParsedConfig* config,
       return true;
     }
     case media::AudioCodec::kAAC: {
-      if (!VerifyParameterValues(config->options.channels, exception_state,
-                                 "Unsupported number of channels.",
-                                 {1, 2, 6})) {
-        return false;
-      }
-      if (config->options.bitrate.has_value()) {
-        if (!VerifyParameterValues(config->options.bitrate.value(),
-                                   exception_state, "Unsupported bitrate.",
-                                   {96000, 128000, 160000, 192000})) {
+      if (base::FeatureList::IsEnabled(media::kPlatformAudioEncoder)) {
+        if (!VerifyParameterValues(config->options.channels, exception_state,
+                                   "Unsupported number of channels.",
+                                   {1, 2, 6})) {
           return false;
         }
-      }
-      if (!VerifyParameterValues(config->options.sample_rate, exception_state,
-                                 "Unsupported sample rate.", {44100, 48000})) {
-        return false;
-      }
-    }
-      if (base::FeatureList::IsEnabled(features::kPlatformAudioEncoder))
+        if (config->options.bitrate.has_value()) {
+          if (!VerifyParameterValues(config->options.bitrate.value(),
+                                     exception_state, "Unsupported bitrate.",
+                                     {96000, 128000, 160000, 192000})) {
+            return false;
+          }
+        }
+        if (!VerifyParameterValues(config->options.sample_rate, exception_state,
+                                   "Unsupported sample rate.",
+                                   {44100, 48000})) {
+          return false;
+        }
+
         return true;
+      }
       [[fallthrough]];
+    }
     default:
       if (exception_state) {
         exception_state->ThrowDOMException(DOMExceptionCode::kNotSupportedError,
@@ -269,10 +273,11 @@ void AudioEncoder::ProcessConfigure(Request* request) {
   }
 
   auto output_cb = ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
-      &AudioEncoder::CallOutputCallback, WrapCrossThreadWeakPersistent(this),
+      &AudioEncoder::CallOutputCallback,
+      MakeUnwrappingCrossThreadWeakHandle(this),
       // We can't use |active_config_| from |this| because it can change by
       // the time the callback is executed.
-      WrapCrossThreadPersistent(active_config_.Get()), reset_count_));
+      MakeUnwrappingCrossThreadHandle(active_config_.Get()), reset_count_));
 
   auto done_callback = [](AudioEncoder* self, media::AudioCodec codec,
                           Request* req, media::EncoderStatus status) {
@@ -299,8 +304,9 @@ void AudioEncoder::ProcessConfigure(Request* request) {
   media_encoder_->Initialize(
       active_config_->options, std::move(output_cb),
       ConvertToBaseOnceCallback(CrossThreadBindOnce(
-          done_callback, WrapCrossThreadWeakPersistent(this),
-          active_config_->options.codec, WrapCrossThreadPersistent(request))));
+          done_callback, MakeUnwrappingCrossThreadWeakHandle(this),
+          active_config_->options.codec,
+          MakeUnwrappingCrossThreadHandle(request))));
 }
 
 void AudioEncoder::ProcessEncode(Request* request) {
@@ -356,10 +362,12 @@ void AudioEncoder::ProcessEncode(Request* request) {
   base::TimeTicks timestamp = base::TimeTicks() + data->timestamp();
 
   --requested_encodes_;
-  media_encoder_->Encode(std::move(audio_bus), timestamp,
-                         ConvertToBaseOnceCallback(CrossThreadBindOnce(
-                             done_callback, WrapCrossThreadWeakPersistent(this),
-                             WrapCrossThreadPersistent(request))));
+  ScheduleDequeueEvent();
+  media_encoder_->Encode(
+      std::move(audio_bus), timestamp,
+      ConvertToBaseOnceCallback(CrossThreadBindOnce(
+          done_callback, MakeUnwrappingCrossThreadWeakHandle(this),
+          MakeUnwrappingCrossThreadHandle(request))));
 
   audio_data->close();
 }
@@ -452,6 +460,10 @@ ScriptPromise AudioEncoder::isConfigSupported(ScriptState* script_state,
   return ScriptPromise::Cast(
       script_state, ToV8Traits<AudioEncoderSupport>::ToV8(script_state, support)
                         .ToLocalChecked());
+}
+
+const AtomicString& AudioEncoder::InterfaceName() const {
+  return event_target_names::kAudioEncoder;
 }
 
 }  // namespace blink

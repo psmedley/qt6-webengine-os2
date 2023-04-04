@@ -26,39 +26,10 @@ class RendererVk;
 class RenderTargetVk;
 class WindowSurfaceVk;
 
-// FramebufferVk Cache
-class FramebufferCache final : angle::NonCopyable
-{
-  public:
-    FramebufferCache() = default;
-    ~FramebufferCache() { ASSERT(mPayload.empty()); }
-
-    void destroy(RendererVk *rendererVk);
-
-    bool get(ContextVk *contextVk,
-             const vk::FramebufferDesc &desc,
-             vk::FramebufferHelper **framebufferOut);
-    void insert(const vk::FramebufferDesc &desc, vk::FramebufferHelper &&framebufferHelper);
-    void clear(ContextVk *contextVk);
-
-  private:
-    angle::HashMap<vk::FramebufferDesc, vk::FramebufferHelper> mPayload;
-    CacheStats mCacheStats;
-};
-
 class FramebufferVk : public FramebufferImpl
 {
   public:
-    // Factory methods so we don't have to use constructors with overloads.
-    static FramebufferVk *CreateUserFBO(RendererVk *renderer, const gl::FramebufferState &state);
-
-    // The passed-in SurfaceVk must be destroyed after this FBO is destroyed. Our Surface code is
-    // ref-counted on the number of 'current' contexts, so we shouldn't get any dangling surface
-    // references. See Surface::setIsCurrent(bool).
-    static FramebufferVk *CreateDefaultFBO(RendererVk *renderer,
-                                           const gl::FramebufferState &state,
-                                           WindowSurfaceVk *backbuffer);
-
+    FramebufferVk(RendererVk *renderer, const gl::FramebufferState &state);
     ~FramebufferVk() override;
     void destroy(const gl::Context *context) override;
 
@@ -151,7 +122,8 @@ class FramebufferVk : public FramebufferImpl
         vk::ImageOrBufferViewSubresourceSerial resolveImageViewSerial);
 
     angle::Result getFramebuffer(ContextVk *contextVk,
-                                 vk::Framebuffer **framebufferOut,
+                                 vk::MaybeImagelessFramebuffer *framebufferOut,
+                                 RenderTargetVk *resolveRenderTargetIn,
                                  const vk::ImageView *resolveImageViewIn,
                                  const SwapchainResolveMode swapchainResolveMode);
 
@@ -165,16 +137,43 @@ class FramebufferVk : public FramebufferImpl
     void updateRenderPassReadOnlyDepthMode(ContextVk *contextVk,
                                            vk::RenderPassCommandBufferHelper *renderPass);
 
-    void onSwitchProgramFramebufferFetch(ContextVk *contextVk, bool programUsesFramebufferFetch);
-    bool hasFramebufferFetch() const { return mCurrentFramebufferDesc.hasFramebufferFetch(); }
+    void switchToFramebufferFetchMode(ContextVk *contextVk, bool hasFramebufferFetch);
 
     void removeColorResolveAttachment(uint32_t colorIndexGL);
 
-  private:
-    FramebufferVk(RendererVk *renderer,
-                  const gl::FramebufferState &state,
-                  WindowSurfaceVk *backbuffer);
+    void setBackbuffer(WindowSurfaceVk *backbuffer) { mBackbuffer = backbuffer; }
+    WindowSurfaceVk *getBackbuffer() const { return mBackbuffer; }
 
+    void releaseCurrentFramebuffer(ContextVk *contextVk);
+
+    vk::RenderPassSerial getLastRenderPassSerial() const { return mLastRenderPassSerial; }
+
+    enum class RenderTargetImage
+    {
+        AttachmentImage,
+        ResolveImage
+    };
+
+    struct RenderTargetInfo
+    {
+        RenderTargetInfo()
+            : renderTarget(nullptr), renderTargetImage(RenderTargetImage::AttachmentImage)
+        {}
+        RenderTargetInfo(RenderTargetVk *renderTarget, RenderTargetImage renderTargetImage)
+            : renderTarget(renderTarget), renderTargetImage(renderTargetImage)
+        {}
+        RenderTargetVk *renderTarget;
+        RenderTargetImage renderTargetImage;
+    };
+
+    angle::Result getAttachmentsAndRenderTargets(
+        ContextVk *contextVk,
+        const vk::ImageView *resolveImageViewIn,
+        RenderTargetVk *resolveRenderTargetIn,
+        vk::FramebufferAttachmentsVector<VkImageView> *attachments,
+        vk::FramebufferAttachmentsVector<RenderTargetInfo> *renderTargetsInfoOut);
+
+  private:
     // The 'in' rectangles must be clipped to the scissor and FBO. The clipping is done in 'blit'.
     angle::Result blitWithCommand(ContextVk *contextVk,
                                   const gl::Rectangle &sourceArea,
@@ -219,6 +218,8 @@ class FramebufferVk : public FramebufferImpl
                                 const VkClearColorValue &clearColorValue,
                                 const VkClearDepthStencilValue &clearDepthStencilValue);
     void redeferClears(ContextVk *contextVk);
+    void redeferClearsForReadFramebuffer(ContextVk *contextVk);
+    void redeferClearsImpl(ContextVk *contextVk);
     void clearWithCommand(ContextVk *contextVk, const gl::Rectangle &scissoredRenderArea);
     void clearWithLoadOp(ContextVk *contextVk);
     void updateActiveColorMasks(size_t colorIndex, bool r, bool g, bool b, bool a);
@@ -244,10 +245,13 @@ class FramebufferVk : public FramebufferImpl
 
     void updateLayerCount();
 
+    void insertCache(ContextVk *contextVk,
+                     const vk::FramebufferDesc &desc,
+                     vk::FramebufferHelper &&newFramebuffer);
+
     WindowSurfaceVk *mBackbuffer;
 
     vk::RenderPassDesc mRenderPassDesc;
-    vk::FramebufferHelper *mFramebuffer;
     RenderTargetCache<RenderTargetVk> mRenderTargetCache;
 
     // This variable is used to quickly compute if we need to do a masked clear. If a color
@@ -260,8 +264,13 @@ class FramebufferVk : public FramebufferImpl
     // contain the mask to apply to the alpha channel when drawing.
     gl::DrawBufferMask mEmulatedAlphaAttachmentMask;
 
+    // mCurrentFramebufferDesc is used to detect framebuffer changes using its serials. Therefore,
+    // it must be maintained even when using the imageless framebuffer extension.
     vk::FramebufferDesc mCurrentFramebufferDesc;
-    FramebufferCache mFramebufferCache;
+
+    // The framebuffer cache actually owns the Framebuffer object and manages its lifetime. We just
+    // store the current VkFramebuffer handle here that associated with mCurrentFramebufferDesc.
+    vk::Framebuffer mCurrentFramebuffer;
 
     vk::ClearValuesArray mDeferredClears;
 
@@ -269,6 +278,13 @@ class FramebufferVk : public FramebufferImpl
     // depth stencil read only mode. When we are in feedback loop, we must flush renderpass to exit
     // the loop instead of update the layout.
     bool mReadOnlyDepthFeedbackLoopMode;
+
+    gl::DrawBufferMask mIsAHBColorAttachments;
+
+    bool mIsCurrentFramebufferCached;
+
+    // Serial of the render pass this framebuffer has opened, if any.
+    vk::RenderPassSerial mLastRenderPassSerial;
 };
 }  // namespace rx
 

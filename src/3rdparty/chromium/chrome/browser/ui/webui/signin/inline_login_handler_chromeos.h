@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,6 @@
 #include "chrome/browser/ui/webui/signin/inline_login_handler.h"
 #include "chrome/browser/ui/webui/signin/signin_helper_chromeos.h"
 #include "components/account_manager_core/account.h"
-#include "components/account_manager_core/chromeos/account_manager.h"
-#include "google_apis/gaia/gaia_auth_consumer.h"
-#include "google_apis/gaia/gaia_auth_fetcher.h"
 
 class PrefRegistrySimple;
 
@@ -37,7 +34,7 @@ class InlineLoginHandlerChromeOS : public InlineLoginHandler {
   void RegisterMessages() override;
   void SetExtraInitParams(base::Value::Dict& params) override;
   void CompleteLogin(const CompleteLoginParams& params) override;
-  void HandleDialogClose(const base::ListValue* args) override;
+  void HandleDialogClose(const base::Value::List& args) override;
 
  private:
   // A callback for `GetAccounts` invoked from `CompleteLogin`.
@@ -62,15 +59,15 @@ class InlineLoginHandlerChromeOS : public InlineLoginHandler {
   void MakeAvailableInArcAndCloseDialog(const base::Value::List& args);
   void HandleSkipWelcomePage(const base::Value::List& args);
   void OpenGuestWindowAndCloseDialog(const base::Value::List& args);
-  // Show a screen to inform the user that adding `email` as a Secondary Account
-  // is not allowed by `email`'s user policies.
-  // See `SecondaryGoogleAccountUsage` for details.
-  void ShowSigninBlockedErrorPage(const std::string& email,
-                                  const std::string& hosted_domain);
+  // Fires WebUIListener `show-signin-error-page` that would display an error
+  // page informing the reason of the account not being added as a Secondary
+  // account.
+  void ShowSigninErrorPage(const std::string& email,
+                           const std::string& hosted_domain);
 
   base::RepeatingClosure close_dialog_closure_;
   base::RepeatingCallback<void(const std::string&, const std::string&)>
-      show_signin_blocked_error_;
+      show_signin_error_;
   base::WeakPtrFactory<InlineLoginHandlerChromeOS> weak_factory_{this};
 };
 

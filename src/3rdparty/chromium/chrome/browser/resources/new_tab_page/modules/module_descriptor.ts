@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@ export type InitializeModuleCallback = () => Promise<HTMLElement|null>;
 
 export type InitializeModuleCallbackV2 = () => Promise<HTMLElement>;
 
-export type Module = {
-  element: HTMLElement,
-  descriptor: ModuleDescriptor,
-};
+export interface Module {
+  element: HTMLElement;
+  descriptor: ModuleDescriptor;
+}
 
 export enum ModuleHeight {
   DYNAMIC = -1,
@@ -56,11 +56,12 @@ export class ModuleDescriptor {
   async initialize(timeout: number): Promise<HTMLElement|null> {
     const loadStartTime = WindowProxy.getInstance().now();
     const element = await Promise.race([
-      this.initializeCallback_(), new Promise<null>(resolve => {
+      this.initializeCallback_(),
+      new Promise<null>(resolve => {
         WindowProxy.getInstance().setTimeout(() => {
           resolve(null);
         }, timeout);
-      })
+      }),
     ]);
     if (!element) {
       return null;

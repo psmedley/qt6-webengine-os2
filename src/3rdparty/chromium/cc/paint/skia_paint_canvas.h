@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,8 +103,8 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
   bool getLocalClipBounds(SkRect* bounds) const override;
   SkIRect getDeviceClipBounds() const override;
   bool getDeviceClipBounds(SkIRect* bounds) const override;
-  void drawColor(SkColor color, SkBlendMode mode) override;
-  void clear(SkColor color) override;
+  void drawColor(SkColor4f color, SkBlendMode mode) override;
+  void clear(SkColor4f color) override;
 
   void drawLine(SkScalar x0,
                 SkScalar y0,

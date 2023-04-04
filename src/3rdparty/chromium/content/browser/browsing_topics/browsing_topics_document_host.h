@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,6 @@ class RenderFrameHost;
 class CONTENT_EXPORT BrowsingTopicsDocumentHost final
     : public DocumentService<blink::mojom::BrowsingTopicsDocumentService> {
  public:
-  BrowsingTopicsDocumentHost(
-      RenderFrameHost* render_frame_host,
-      mojo::PendingReceiver<blink::mojom::BrowsingTopicsDocumentService>
-          receiver);
-
   BrowsingTopicsDocumentHost(const BrowsingTopicsDocumentHost&) = delete;
   BrowsingTopicsDocumentHost& operator=(const BrowsingTopicsDocumentHost&) =
       delete;
@@ -36,9 +31,15 @@ class CONTENT_EXPORT BrowsingTopicsDocumentHost final
           receiver);
 
   // blink::mojom::BrowsingTopicsDocumentService.
-  void GetBrowsingTopics(GetBrowsingTopicsCallback callback) override;
+  void GetBrowsingTopics(bool observe,
+                         GetBrowsingTopicsCallback callback) override;
 
  private:
+  BrowsingTopicsDocumentHost(
+      RenderFrameHost& render_frame_host,
+      mojo::PendingReceiver<blink::mojom::BrowsingTopicsDocumentService>
+          receiver);
+
   // |this| can only be destroyed by DocumentService.
   ~BrowsingTopicsDocumentHost() override;
 };

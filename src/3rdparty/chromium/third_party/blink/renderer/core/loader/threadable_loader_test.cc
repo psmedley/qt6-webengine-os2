@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,13 +78,13 @@ bool IsNotCancellation(const ResourceError& error) {
 }
 
 KURL SuccessURL() {
-  return KURL("http://example.com/success").Copy();
+  return KURL("http://example.com/success");
 }
 KURL ErrorURL() {
-  return KURL("http://example.com/error").Copy();
+  return KURL("http://example.com/error");
 }
 KURL RedirectURL() {
-  return KURL("http://example.com/redirect").Copy();
+  return KURL("http://example.com/redirect");
 }
 
 void SetUpSuccessURL() {
@@ -191,6 +191,7 @@ class ThreadableLoaderTest : public testing::Test {
     ResourceRequest request(url);
     request.SetRequestContext(mojom::blink::RequestContextType::OBJECT);
     request.SetMode(request_mode);
+    request.SetTargetAddressSpace(network::mojom::IPAddressSpace::kUnknown);
     request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
     helper_->StartLoader(std::move(request));
   }

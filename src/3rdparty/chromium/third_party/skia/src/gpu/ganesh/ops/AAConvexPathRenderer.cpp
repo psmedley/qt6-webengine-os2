@@ -21,6 +21,7 @@
 #include "src/gpu/ganesh/GrGeometryProcessor.h"
 #include "src/gpu/ganesh/GrProcessor.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
 #include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
@@ -30,7 +31,6 @@
 #include "src/gpu/ganesh/glsl/GrGLSLVertexGeoBuilder.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 
 namespace skgpu::v1 {
 
@@ -678,7 +678,7 @@ GrGeometryProcessor* QuadEdgeEffect::TestCreate(GrProcessorTestData* d) {
     bool usesLocalCoords = d->fRandom->nextBool();
     bool wideColor = d->fRandom->nextBool();
     // Doesn't work without derivative instructions.
-    return d->caps()->shaderCaps()->shaderDerivativeSupport()
+    return d->caps()->shaderCaps()->fShaderDerivativeSupport
                    ? QuadEdgeEffect::Make(d->allocator(), localMatrix, usesLocalCoords, wideColor)
                    : nullptr;
 }
@@ -844,13 +844,13 @@ private:
     }
 
     void onExecute(GrOpFlushState* flushState, const SkRect& chainBounds) override {
-        if (!fProgramInfo || fDraws.isEmpty()) {
+        if (!fProgramInfo || fDraws.empty()) {
             return;
         }
 
         flushState->bindPipelineAndScissorClip(*fProgramInfo, chainBounds);
         flushState->bindTextures(fProgramInfo->geomProc(), nullptr, fProgramInfo->pipeline());
-        for (int i = 0; i < fDraws.count(); ++i) {
+        for (int i = 0; i < fDraws.size(); ++i) {
             for (int j = 0; j < fDraws[i].fMeshCount; ++j) {
                 flushState->drawMesh(fDraws[i].fMeshes[j]);
             }
@@ -906,7 +906,7 @@ private:
 PathRenderer::CanDrawPath AAConvexPathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
     // This check requires convexity and known direction, since the direction is used to build
     // the geometry segments. Degenerate convex paths will fall through to some other path renderer.
-    if (args.fCaps->shaderCaps()->shaderDerivativeSupport() &&
+    if (args.fCaps->shaderCaps()->fShaderDerivativeSupport &&
         (GrAAType::kCoverage == args.fAAType) && args.fShape->style().isSimpleFill() &&
         !args.fShape->inverseFilled() && args.fShape->knownToBeConvex() &&
         args.fShape->knownDirection()) {

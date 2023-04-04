@@ -1,8 +1,7 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -20,7 +19,7 @@
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_util.h"
-#include "net/cookies/same_party_context.h"
+#include "net/first_party_sets/same_party_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -209,26 +208,26 @@ TEST(CookieUtilTest, TestRequestCookieParsing) {
   std::vector<RequestCookieParsingTest> tests;
 
   // Simple case.
-  tests.push_back(RequestCookieParsingTest());
+  tests.emplace_back();
   tests.back().str = "key=value";
   tests.back().parsed.push_back(std::make_pair(std::string("key"),
                                                std::string("value")));
   // Multiple key/value pairs.
-  tests.push_back(RequestCookieParsingTest());
+  tests.emplace_back();
   tests.back().str = "key1=value1; key2=value2";
   tests.back().parsed.push_back(std::make_pair(std::string("key1"),
                                                std::string("value1")));
   tests.back().parsed.push_back(std::make_pair(std::string("key2"),
                                                std::string("value2")));
   // Empty value.
-  tests.push_back(RequestCookieParsingTest());
+  tests.emplace_back();
   tests.back().str = "key=; otherkey=1234";
   tests.back().parsed.push_back(std::make_pair(std::string("key"),
                                                std::string()));
   tests.back().parsed.push_back(std::make_pair(std::string("otherkey"),
                                                std::string("1234")));
   // Special characters (including equals signs) in value.
-  tests.push_back(RequestCookieParsingTest());
+  tests.emplace_back();
   tests.back().str = "key=; a2=s=(./&t=:&u=a#$; a3=+~";
   tests.back().parsed.push_back(std::make_pair(std::string("key"),
                                                std::string()));
@@ -237,7 +236,7 @@ TEST(CookieUtilTest, TestRequestCookieParsing) {
   tests.back().parsed.push_back(std::make_pair(std::string("a3"),
                                                std::string("+~")));
   // Quoted value.
-  tests.push_back(RequestCookieParsingTest());
+  tests.emplace_back();
   tests.back().str = "key=\"abcdef\"; otherkey=1234";
   tests.back().parsed.push_back(std::make_pair(std::string("key"),
                                                std::string("\"abcdef\"")));
@@ -505,11 +504,8 @@ class CookieUtilComputeSameSiteContextTest
     std::vector<SiteForCookies> cross_site_sfc;
     std::vector<SiteForCookies> same_site_sfc = GetSameSiteSitesForCookies();
     for (const SiteForCookies& sfc : GetAllSitesForCookies()) {
-      if (std::none_of(same_site_sfc.begin(), same_site_sfc.end(),
-                       [&sfc](const SiteForCookies& s) {
-                         return sfc.RepresentativeUrl() ==
-                                s.RepresentativeUrl();
-                       })) {
+      if (!base::Contains(same_site_sfc, sfc.RepresentativeUrl(),
+                          &SiteForCookies::RepresentativeUrl)) {
         cross_site_sfc.push_back(sfc);
       }
     }
@@ -1518,7 +1514,7 @@ TEST(CookieUtilTest, AdaptCookieAccessResultToBool) {
 }
 
 TEST(CookieUtilTest, GetSamePartyStatus_NotInSet) {
-  const bool first_party_sets_enabled = true;
+  const bool same_party_attribute_enabled = true;
   CookieOptions options;
   options.set_is_in_nontrivial_first_party_set(false);
 
@@ -1538,7 +1534,7 @@ TEST(CookieUtilTest, GetSamePartyStatus_NotInSet) {
             base::Time now = base::Time::Now();
             std::unique_ptr<CanonicalCookie> cookie =
                 CanonicalCookie::CreateUnsafeCookieForTesting(
-                    "cookie", "tasty", "example.test", "/", now, now, now,
+                    "cookie", "tasty", "example.test", "/", now, now, now, now,
                     secure, httponly, same_site,
                     CookiePriority::COOKIE_PRIORITY_DEFAULT, same_party);
 
@@ -1546,7 +1542,7 @@ TEST(CookieUtilTest, GetSamePartyStatus_NotInSet) {
                 SamePartyContext(party_context_type));
             EXPECT_EQ(CookieSamePartyStatus::kNoSamePartyEnforcement,
                       cookie_util::GetSamePartyStatus(
-                          *cookie, options, first_party_sets_enabled));
+                          *cookie, options, same_party_attribute_enabled));
           }
         }
       }
@@ -1555,7 +1551,7 @@ TEST(CookieUtilTest, GetSamePartyStatus_NotInSet) {
 }
 
 TEST(CookieUtilTest, GetSamePartyStatus_FeatureDisabled) {
-  const bool first_party_sets_enabled = false;
+  const bool same_party_attribute_enabled = false;
   CookieOptions options;
   options.set_is_in_nontrivial_first_party_set(true);
 
@@ -1575,7 +1571,7 @@ TEST(CookieUtilTest, GetSamePartyStatus_FeatureDisabled) {
             base::Time now = base::Time::Now();
             std::unique_ptr<CanonicalCookie> cookie =
                 CanonicalCookie::CreateUnsafeCookieForTesting(
-                    "cookie", "tasty", "example.test", "/", now, now, now,
+                    "cookie", "tasty", "example.test", "/", now, now, now, now,
                     secure, httponly, same_site,
                     CookiePriority::COOKIE_PRIORITY_DEFAULT, same_party);
 
@@ -1583,7 +1579,7 @@ TEST(CookieUtilTest, GetSamePartyStatus_FeatureDisabled) {
                 SamePartyContext(party_context_type));
             EXPECT_EQ(CookieSamePartyStatus::kNoSamePartyEnforcement,
                       cookie_util::GetSamePartyStatus(
-                          *cookie, options, first_party_sets_enabled));
+                          *cookie, options, same_party_attribute_enabled));
           }
         }
       }
@@ -1592,7 +1588,6 @@ TEST(CookieUtilTest, GetSamePartyStatus_FeatureDisabled) {
 }
 
 TEST(CookieUtilTest, GetSamePartyStatus_NotSameParty) {
-  const bool first_party_sets_enabled = true;
   CookieOptions options;
   options.set_is_in_nontrivial_first_party_set(true);
 
@@ -1611,14 +1606,16 @@ TEST(CookieUtilTest, GetSamePartyStatus_NotSameParty) {
           base::Time now = base::Time::Now();
           std::unique_ptr<CanonicalCookie> cookie =
               CanonicalCookie::CreateUnsafeCookieForTesting(
-                  "cookie", "tasty", "example.test", "/", now, now, now, secure,
-                  httponly, same_site, CookiePriority::COOKIE_PRIORITY_DEFAULT,
+                  "cookie", "tasty", "example.test", "/", now, now, now, now,
+                  secure, httponly, same_site,
+                  CookiePriority::COOKIE_PRIORITY_DEFAULT,
                   false /* same_party */);
 
           options.set_same_party_context(SamePartyContext(party_context_type));
           EXPECT_EQ(CookieSamePartyStatus::kNoSamePartyEnforcement,
-                    cookie_util::GetSamePartyStatus(*cookie, options,
-                                                    first_party_sets_enabled));
+                    cookie_util::GetSamePartyStatus(
+                        *cookie, options,
+                        /*same_party_attribute_enabled=*/true));
         }
       }
     }
@@ -1626,7 +1623,6 @@ TEST(CookieUtilTest, GetSamePartyStatus_NotSameParty) {
 }
 
 TEST(CookieUtilTest, GetSamePartyStatus_SamePartySemantics) {
-  const bool first_party_sets_enabled = true;
   CookieOptions options;
   options.set_is_in_nontrivial_first_party_set(true);
 
@@ -1667,7 +1663,7 @@ TEST(CookieUtilTest, GetSamePartyStatus_SamePartySemantics) {
           base::Time now = base::Time::Now();
           std::unique_ptr<CanonicalCookie> cookie =
               CanonicalCookie::CreateUnsafeCookieForTesting(
-                  "cookie", "tasty", "example.test", "/", now, now, now,
+                  "cookie", "tasty", "example.test", "/", now, now, now, now,
                   true /* secure */, httponly, same_site,
                   CookiePriority::COOKIE_PRIORITY_DEFAULT,
                   true /* same_party */);
@@ -1675,14 +1671,16 @@ TEST(CookieUtilTest, GetSamePartyStatus_SamePartySemantics) {
           options.set_same_party_context(
               SamePartyContext(SamePartyContext::Type::kCrossParty));
           EXPECT_EQ(CookieSamePartyStatus::kEnforceSamePartyExclude,
-                    cookie_util::GetSamePartyStatus(*cookie, options,
-                                                    first_party_sets_enabled));
+                    cookie_util::GetSamePartyStatus(
+                        *cookie, options,
+                        /*same_party_attribute_enabled=*/true));
 
           options.set_same_party_context(
               SamePartyContext(SamePartyContext::Type::kSameParty));
           EXPECT_EQ(CookieSamePartyStatus::kEnforceSamePartyInclude,
-                    cookie_util::GetSamePartyStatus(*cookie, options,
-                                                    first_party_sets_enabled));
+                    cookie_util::GetSamePartyStatus(
+                        *cookie, options,
+                        /*same_party_attribute_enabled=*/true));
         }
       }
     }

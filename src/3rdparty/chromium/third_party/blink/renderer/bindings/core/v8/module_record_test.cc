@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/script/js_module_script.h"
@@ -236,7 +237,7 @@ TEST_F(ModuleRecordTest, EvaluationErrorIsRemembered) {
       ModuleRecord::Instantiate(state, module_failure, js_url_f).IsEmpty());
   ScriptEvaluationResult evaluation_result1 =
       JSModuleScript::CreateForTest(modulator, module_failure, js_url_f)
-          ->RunScriptAndReturnValue();
+          ->RunScriptOnScriptStateAndReturnValue(scope.GetScriptState());
 
   resolver->PrepareMockResolveResult(module_failure);
 
@@ -248,10 +249,12 @@ TEST_F(ModuleRecordTest, EvaluationErrorIsRemembered) {
   ASSERT_TRUE(ModuleRecord::Instantiate(state, module, js_url_c).IsEmpty());
   ScriptEvaluationResult evaluation_result2 =
       JSModuleScript::CreateForTest(modulator, module, js_url_c)
-          ->RunScriptAndReturnValue();
+          ->RunScriptOnScriptStateAndReturnValue(scope.GetScriptState());
 
-  v8::Local<v8::Value> exception1 = GetException(state, evaluation_result1);
-  v8::Local<v8::Value> exception2 = GetException(state, evaluation_result2);
+  v8::Local<v8::Value> exception1 =
+      GetException(state, std::move(evaluation_result1));
+  v8::Local<v8::Value> exception2 =
+      GetException(state, std::move(evaluation_result2));
   EXPECT_FALSE(exception1.IsEmpty());
   EXPECT_FALSE(exception2.IsEmpty());
   EXPECT_EQ(exception1, exception2);
@@ -276,7 +279,7 @@ TEST_F(ModuleRecordTest, Evaluate) {
   ASSERT_TRUE(exception.IsEmpty());
 
   EXPECT_EQ(JSModuleScript::CreateForTest(modulator, module, js_url)
-                ->RunScriptAndReturnValue()
+                ->RunScriptOnScriptStateAndReturnValue(scope.GetScriptState())
                 .GetResultType(),
             ScriptEvaluationResult::ResultType::kSuccess);
   v8::Local<v8::Value> value =
@@ -312,9 +315,10 @@ TEST_F(ModuleRecordTest, EvaluateCaptureError) {
 
   ScriptEvaluationResult result =
       JSModuleScript::CreateForTest(modulator, module, js_url)
-          ->RunScriptAndReturnValue();
+          ->RunScriptOnScriptStateAndReturnValue(scope.GetScriptState());
 
-  v8::Local<v8::Value> exception = GetException(scope.GetScriptState(), result);
+  v8::Local<v8::Value> exception =
+      GetException(scope.GetScriptState(), std::move(result));
   ASSERT_TRUE(exception->IsString());
   EXPECT_EQ("bar", ToCoreString(exception.As<v8::String>()));
 }

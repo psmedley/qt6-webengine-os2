@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,13 +24,13 @@
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/sampler_manager.h"
-#include "gpu/command_buffer/service/shared_image_representation.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "gpu/command_buffer/service/texture_base.h"
 #include "gpu/gpu_gles2_export.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gl/gl_image.h"
 
 namespace gl {
+class GLImage;
 class ProgressReporter;
 }
 
@@ -764,16 +764,16 @@ class GPU_GLES2_EXPORT TextureRef : public base::RefCounted<TextureRef> {
   // TODO(ericrk): Remove this once the Texture itself is generated from and
   // owns the SharedImageRepresentation.
   void SetSharedImageRepresentation(
-      std::unique_ptr<SharedImageRepresentationGLTexture> shared_image);
+      std::unique_ptr<GLTextureImageRepresentation> shared_image);
   const Texture* texture() const { return texture_; }
   Texture* texture() { return texture_; }
   GLuint client_id() const { return client_id_; }
   GLuint service_id() const { return texture_->service_id(); }
   GLint num_observers() const { return num_observers_; }
-  SharedImageRepresentationGLTexture* shared_image() const {
+  GLTextureImageRepresentation* shared_image() const {
     return shared_image_.get();
   }
-  const std::unique_ptr<SharedImageRepresentationGLTexture::ScopedAccess>&
+  const std::unique_ptr<GLTextureImageRepresentation::ScopedAccess>&
   shared_image_scoped_access() const {
     return shared_image_scoped_access_;
   }
@@ -796,13 +796,13 @@ class GPU_GLES2_EXPORT TextureRef : public base::RefCounted<TextureRef> {
   void reset_client_id() { client_id_ = 0; }
 
   raw_ptr<TextureManager> manager_;
-  raw_ptr<Texture> texture_;
+  raw_ptr<Texture, DanglingUntriaged> texture_;
   GLuint client_id_;
   GLint num_observers_;
   bool force_context_lost_;
 
-  std::unique_ptr<SharedImageRepresentationGLTexture> shared_image_;
-  std::unique_ptr<SharedImageRepresentationGLTexture::ScopedAccess>
+  std::unique_ptr<GLTextureImageRepresentation> shared_image_;
+  std::unique_ptr<GLTextureImageRepresentation::ScopedAccess>
       shared_image_scoped_access_;
 };
 
@@ -989,7 +989,7 @@ class GPU_GLES2_EXPORT TextureManager
   // ID.
   TextureRef* ConsumeSharedImage(
       GLuint client_id,
-      std::unique_ptr<SharedImageRepresentationGLTexture> shared_image);
+      std::unique_ptr<GLTextureImageRepresentation> shared_image);
 
   // Sets |rect| of mip as cleared.
   void SetLevelClearedRect(TextureRef* ref,

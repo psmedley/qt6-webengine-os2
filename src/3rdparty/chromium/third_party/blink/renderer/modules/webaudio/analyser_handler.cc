@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,19 @@
 
 namespace blink {
 
+namespace {
+
+constexpr unsigned kDefaultNumberOfInputChannels2 = 2;
+constexpr unsigned kDefaultNumberOfOutputChannels2 = 1;
+
+}  // namespace
+
 AnalyserHandler::AnalyserHandler(AudioNode& node, float sample_rate)
     : AudioBasicInspectorHandler(kNodeTypeAnalyser, node, sample_rate),
       analyser_(
           node.context()->GetDeferredTaskHandler().RenderQuantumFrames()) {
-  channel_count_ = 2;
-  AddOutput(1);
+  channel_count_ = kDefaultNumberOfInputChannels2;
+  AddOutput(kDefaultNumberOfOutputChannels2);
 
   Initialize();
 }

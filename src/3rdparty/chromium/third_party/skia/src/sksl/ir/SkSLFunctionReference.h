@@ -23,34 +23,29 @@ public:
     inline static constexpr Kind kExpressionKind = Kind::kFunctionReference;
 
     FunctionReference(const Context& context, Position pos,
-                      std::vector<const FunctionDeclaration*> functions)
+                      const FunctionDeclaration* overloadChain)
         : INHERITED(pos, kExpressionKind, context.fTypes.fInvalid.get())
-        , fFunctions(std::move(functions)) {}
+        , fOverloadChain(overloadChain) {}
 
-    const std::vector<const FunctionDeclaration*>& functions() const {
-        return fFunctions;
+    const FunctionDeclaration* overloadChain() const {
+        return fOverloadChain;
     }
 
-    bool hasProperty(Property property) const override {
-        return false;
-    }
-
-    std::unique_ptr<Expression> clone() const override {
-        return std::unique_ptr<Expression>(new FunctionReference(fPosition, this->functions(),
+    std::unique_ptr<Expression> clone(Position pos) const override {
+        return std::unique_ptr<Expression>(new FunctionReference(pos, this->overloadChain(),
                                                                  &this->type()));
     }
 
-    std::string description() const override {
+    std::string description(OperatorPrecedence) const override {
         return "<function>";
     }
 
 private:
-    FunctionReference(Position pos, std::vector<const FunctionDeclaration*> functions,
-                      const Type* type)
-        : INHERITED(pos, kExpressionKind, type)
-        , fFunctions(std::move(functions)) {}
+    FunctionReference(Position pos, const FunctionDeclaration* overloadChain, const Type* type)
+            : INHERITED(pos, kExpressionKind, type)
+            , fOverloadChain(overloadChain) {}
 
-    std::vector<const FunctionDeclaration*> fFunctions;
+    const FunctionDeclaration* fOverloadChain;
 
     using INHERITED = Expression;
 };

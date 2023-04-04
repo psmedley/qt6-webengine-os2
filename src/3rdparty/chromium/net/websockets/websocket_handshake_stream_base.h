@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,7 +95,7 @@ class NET_EXPORT WebSocketHandshakeStreamBase : public HttpStream {
   // WebSocket connection.
   class NET_EXPORT_PRIVATE CreateHelper : public base::SupportsUserData::Data {
    public:
-    ~CreateHelper() override {}
+    ~CreateHelper() override = default;
 
     // Create a WebSocketBasicHandshakeStream. This is called after the
     // underlying connection has been established but before any handshake data

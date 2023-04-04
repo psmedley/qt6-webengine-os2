@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/containers/contains.h"
 #include "base/hash/hash.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/strings/pattern.h"
 #include "base/strings/strcat.h"
 #include "base/trace_event/common/trace_event_common.h"
@@ -65,14 +66,12 @@ constexpr uint32_t kClockIdAbsolute = 64;
 constexpr uint32_t kClockIdIncremental = 65;
 
 // Bits xor-ed into the track uuid of a thread track to make the track uuid of
-// a thread time / instruction count track. These bits are chosen from the
+// a thread time track. These bits are chosen from the
 // upper end of the uint64_t bytes, because the tid of the thread is hashed
 // into the least significant 32 bits of the uuid.
 constexpr uint64_t kThreadTimeTrackUuidBit = static_cast<uint64_t>(1u) << 32;
 constexpr uint64_t kAbsoluteThreadTimeTrackUuidBit = static_cast<uint64_t>(1u)
                                                      << 33;
-constexpr uint64_t kThreadInstructionCountTrackUuidBit =
-    static_cast<uint64_t>(1u) << 34;
 
 void AddConvertableToTraceFormat(
     base::trace_event::ConvertableToTraceFormat* value,
@@ -151,8 +150,8 @@ class LazyLegacyEventInitializer {
   // `track_event_` and `legacy_event_` are not a raw_ptr<...> for performance
   // reasons (based on analysis of sampling profiler data and
   // tab_search:top100:2020).
-  TrackEvent* track_event_;
-  TrackEvent::LegacyEvent* legacy_event_ = nullptr;
+  RAW_PTR_EXCLUSION TrackEvent* track_event_;
+  RAW_PTR_EXCLUSION TrackEvent::LegacyEvent* legacy_event_ = nullptr;
 };
 
 }  // namespace
@@ -170,7 +169,7 @@ TrackEventThreadLocalEventSink::TrackEventThreadLocalEventSink(
     bool disable_interning,
     bool proto_writer_filtering_enabled)
     : process_id_(TraceLog::GetInstance()->process_id()),
-      thread_id_(static_cast<int>(base::PlatformThread::CurrentId())),
+      thread_id_(base::PlatformThread::CurrentId()),
       privacy_filtering_enabled_(proto_writer_filtering_enabled),
       trace_writer_(std::move(trace_writer)),
       session_id_(session_id),
@@ -234,7 +233,7 @@ TrackEventThreadLocalEventSink::AddTypedTraceEvent(
   // |pending_trace_packet_| will be finalized in OnTrackEventCompleted() after
   // the code in //base ran the typed trace point's argument function.
   return base::trace_event::TrackEventHandle(track_event, &incremental_state_,
-                                             this);
+                                             this, privacy_filtering_enabled_);
 }
 
 void TrackEventThreadLocalEventSink::WriteInternedDataIntoTracePacket(
@@ -381,9 +380,6 @@ void TrackEventThreadLocalEventSink::UpdateIncrementalStateIfNeeded(
         extra_emitted_track_descriptor_uuids_.push_back(thread_time_track_uuid);
       }
     }
-
-    // We never emit instruction count for different threads.
-    DCHECK(trace_event->thread_instruction_count().is_null());
   }
 }
 
@@ -426,7 +422,8 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
                      force_absolute_timestamp);
 
   TrackEvent* track_event = (*trace_packet)->set_track_event();
-  perfetto::EventContext event_context(track_event, &incremental_state_);
+  perfetto::EventContext event_context(track_event, &incremental_state_,
+                                       privacy_filtering_enabled_);
 
   // TODO(eseckler): Split comma-separated category strings.
   const char* category_name =
@@ -445,7 +442,7 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
   // Legacy async events (TRACE_EVENT_ASYNC*) are only pass-through in trace
   // processor, so we still have to emit names for these.
   const char* trace_event_name = trace_event->name();
-  if (!is_sync_end && !is_nestable_async_end) {
+  if (!is_sync_end && !is_nestable_async_end && trace_event_name != nullptr) {
     bool filter_name =
         copy_strings && !is_java_event && privacy_filtering_enabled_;
     if (filter_name)
@@ -473,24 +470,13 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
     }
   }
 
-  bool has_thread_time = !trace_event->thread_timestamp().is_null();
-  bool has_instruction_count =
-      !trace_event->thread_instruction_count().is_null();
-
-  // We always snapshot the thread timestamp when we snapshot instruction
-  // count. If we didn't do this, we'd have to make sure to override the
-  // value of extra_counter_track_uuids.
-  DCHECK(has_thread_time || !has_instruction_count);
-
-  if (has_thread_time) {
+  if (!trace_event->thread_timestamp().is_null()) {
     if (is_for_different_thread) {
       // EarlyJava events are emitted on the main thread but may actually be for
       // different threads and specify their thread time.
 
-      // EarlyJava events are always for the same process and don't set
-      // instruction counts.
+      // EarlyJava events are always for the same process.
       DCHECK(!is_for_different_process);
-      DCHECK(!has_instruction_count);
 
       // Emit a value onto the absolute thread time track for the other thread.
       // We emit a descriptor for this in UpdateIncrementalStateIfNeeded().
@@ -513,22 +499,6 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
           (trace_event->thread_timestamp() - last_thread_time_)
               .InMicroseconds());
       last_thread_time_ = trace_event->thread_timestamp();
-
-      if (has_instruction_count) {
-        // Thread instruction counts are never user-provided, and since we split
-        // COMPLETE events into BEGIN+END event pairs, they should not appear
-        // out of order.
-        DCHECK(trace_event->thread_instruction_count().ToInternalValue() >=
-               last_thread_instruction_count_.ToInternalValue());
-
-        // TODO(crbug.com/925589): Add tests for instruction counts.
-        track_event->add_extra_counter_values(
-            (trace_event->thread_instruction_count() -
-             last_thread_instruction_count_)
-                .ToInternalValue());
-        last_thread_instruction_count_ =
-            trace_event->thread_instruction_count();
-      }
     }
   }
 
@@ -694,11 +664,10 @@ void TrackEventThreadLocalEventSink::UpdateDuration(
     int thread_id,
     bool explicit_timestamps,
     const base::TimeTicks& now,
-    const base::ThreadTicks& thread_now,
-    base::trace_event::ThreadInstructionCount thread_instruction_now) {
+    const base::ThreadTicks& thread_now) {
   base::trace_event::TraceEvent new_trace_event(
-      thread_id, now, thread_now, thread_instruction_now, TRACE_EVENT_PHASE_END,
-      category_group_enabled, name, trace_event_internal::kGlobalScope,
+      thread_id, now, thread_now, TRACE_EVENT_PHASE_END, category_group_enabled,
+      name, trace_event_internal::kGlobalScope,
       trace_event_internal::kNoId /* id */,
       trace_event_internal::kNoId /* bind_id */, nullptr,
       explicit_timestamps ? TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP
@@ -711,7 +680,7 @@ void TrackEventThreadLocalEventSink::Flush() {
 }
 
 void TrackEventThreadLocalEventSink::OnThreadNameChanged(const char* name) {
-  if (thread_id_ != static_cast<int>(base::PlatformThread::CurrentId()))
+  if (thread_id_ != base::PlatformThread::CurrentId())
     return;
   EmitThreadTrackDescriptor(nullptr, TRACE_TIME_TICKS_NOW(), name);
 }
@@ -817,15 +786,10 @@ void TrackEventThreadLocalEventSink::DoResetIncrementalState(
     tp_defaults->set_timestamp_clock_id(kClockIdIncremental);
     TrackEventDefaults* te_defaults = tp_defaults->set_track_event_defaults();
 
-    // Default to thread track, with counter values for thread time and
-    // instruction count, if supported.
+    // Default to thread track, with counter values for thread time.
     te_defaults->set_track_uuid(thread_track_uuid);
     te_defaults->add_extra_counter_track_uuids(thread_track_uuid ^
                                                kThreadTimeTrackUuidBit);
-    if (base::trace_event::ThreadInstructionCount::IsSupported()) {
-      te_defaults->add_extra_counter_track_uuids(
-          thread_track_uuid ^ kThreadInstructionCountTrackUuidBit);
-    }
 
     ClockSnapshot* clocks = packet->set_clock_snapshot();
     // Reference clock is in nanoseconds.
@@ -853,15 +817,9 @@ void TrackEventThreadLocalEventSink::DoResetIncrementalState(
         timestamp, thread_track_uuid, kThreadTimeTrackUuidBit,
         CounterDescriptor::COUNTER_THREAD_TIME_NS, 1000u);
   }
-  if (base::trace_event::ThreadInstructionCount::IsSupported()) {
-    EmitCounterTrackDescriptor(
-        timestamp, thread_track_uuid, kThreadInstructionCountTrackUuidBit,
-        CounterDescriptor::COUNTER_THREAD_INSTRUCTION_COUNT);
-  }
 
   // The first set of counter values should be absolute.
   last_thread_time_ = base::ThreadTicks();
-  last_thread_instruction_count_ = base::trace_event::ThreadInstructionCount();
 
   reset_incremental_state_ = false;
 }

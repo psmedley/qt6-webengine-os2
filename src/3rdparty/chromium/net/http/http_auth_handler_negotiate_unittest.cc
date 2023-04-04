@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,12 +60,14 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
   void SetUp() override {
     scoped_feature_list_.InitAndEnableFeature(
         features::kSplitHostCacheByNetworkIsolationKey);
-    network_isolation_key_ = NetworkIsolationKey::CreateTransient();
+    network_anoymization_key_ = NetworkAnonymizationKey::CreateTransient();
 #if BUILDFLAG(IS_WIN)
-    auth_library_ = new MockAuthLibrary(const_cast<wchar_t*>(NEGOSSP_NAME));
+    auto auth_library =
+        std::make_unique<MockAuthLibrary>(const_cast<wchar_t*>(NEGOSSP_NAME));
 #else
-    auth_library_ = new MockAuthLibrary();
+    auto auth_library = std::make_unique<MockAuthLibrary>();
 #endif
+    auth_library_ = auth_library.get();
     resolver_ = std::make_unique<MockCachingHostResolver>(
         /*cache_invalidation_num=*/0,
         /*default_result=*/MockHostResolverBase::RuleResolver::
@@ -78,11 +80,12 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
         HttpAuthMechanismFactory());
     factory_->set_http_auth_preferences(http_auth_preferences_.get());
 #if BUILDFLAG(IS_ANDROID)
+    auth_library_for_android_ = std::move(auth_library);
     http_auth_preferences_->set_auth_android_negotiate_account_type(
         "org.chromium.test.DummySpnegoAuthenticator");
     MockAuthLibrary::EnsureTestAccountExists();
 #else
-    factory_->set_library(base::WrapUnique(auth_library_.get()));
+    factory_->set_library(std::move(auth_library));
 #endif  // BUILDFLAG(IS_ANDROID)
   }
 
@@ -178,13 +181,11 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
             kAuthResponse)   // Output token
     };
 
-    for (size_t i = 0; i < std::size(queries); ++i) {
-      mock_library->ExpectSecurityContext(queries[i].expected_package,
-                                          queries[i].response_code,
-                                          queries[i].minor_response_code,
-                                          queries[i].context_info,
-                                          queries[i].expected_input_token,
-                                          queries[i].output_token);
+    for (const auto& query : queries) {
+      mock_library->ExpectSecurityContext(
+          query.expected_package, query.response_code,
+          query.minor_response_code, query.context_info,
+          query.expected_input_token, query.output_token);
     }
 #endif  // BUILDFLAG(IS_WIN)
   }
@@ -239,7 +240,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
     SSLInfo null_ssl_info;
     int rv = factory_->CreateAuthHandlerFromString(
         "Negotiate", HttpAuth::AUTH_SERVER, null_ssl_info,
-        network_isolation_key(), scheme_host_port, NetLogWithSource(),
+        network_anonymization_key(), scheme_host_port, NetLogWithSource(),
         resolver_.get(), &generic_handler);
     if (rv != OK)
       return rv;
@@ -255,17 +256,19 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest,
     return http_auth_preferences_.get();
   }
 
-  const NetworkIsolationKey& network_isolation_key() const {
-    return network_isolation_key_;
+  const NetworkAnonymizationKey& network_anonymization_key() const {
+    return network_anoymization_key_;
   }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 
-  NetworkIsolationKey network_isolation_key_;
+  NetworkAnonymizationKey network_anoymization_key_;
 
 #if BUILDFLAG(IS_WIN)
   std::unique_ptr<SecPkgInfoW> security_package_;
+#elif BUILDFLAG(IS_ANDROID)
+  std::unique_ptr<MockAuthLibrary> auth_library_for_android_;
 #endif
   // |auth_library_| is passed to |factory_|, which assumes ownership of it, but
   // can't be a scoped pointer to it since the tests need access when they set
@@ -348,23 +351,23 @@ TEST_F(HttpAuthHandlerNegotiateTest, CnameSync) {
   EXPECT_EQ("HTTP@canonical.example.com", auth_handler->spn_for_testing());
 #endif
 
-  // Make sure a cache-only lookup with the wrong NetworkIsolationKey (an empty
-  // one) fails, to make sure the right NetworkIsolationKey was used.
+  // Make sure a cache-only lookup with the wrong NetworkAnonymizationKey (an
+  // empty one) fails, to make sure the right NetworkAnonymizationKey was used.
   url::SchemeHostPort scheme_host_port{GURL(url_string)};
   HostResolver::ResolveHostParameters resolve_params;
   resolve_params.include_canonical_name = true;
   resolve_params.source = HostResolverSource::LOCAL_ONLY;
   std::unique_ptr<HostResolver::ResolveHostRequest> host_request1 =
-      resolver()->CreateRequest(scheme_host_port, NetworkIsolationKey(),
+      resolver()->CreateRequest(scheme_host_port, NetworkAnonymizationKey(),
                                 NetLogWithSource(), resolve_params);
   TestCompletionCallback callback2;
   int result = host_request1->Start(callback2.callback());
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, callback2.GetResult(result));
 
-  // Make sure a cache-only lookup with the same NetworkIsolationKey succeeds,
-  // to make sure the right NetworkIsolationKey was used.
+  // Make sure a cache-only lookup with the same NetworkAnonymizationKey
+  // succeeds, to make sure the right NetworkAnonymizationKey was used.
   std::unique_ptr<HostResolver::ResolveHostRequest> host_request2 =
-      resolver()->CreateRequest(scheme_host_port, network_isolation_key(),
+      resolver()->CreateRequest(scheme_host_port, network_anonymization_key(),
                                 NetLogWithSource(), resolve_params);
   TestCompletionCallback callback3;
   result = host_request2->Start(callback3.callback());
@@ -390,23 +393,23 @@ TEST_F(HttpAuthHandlerNegotiateTest, CnameAsync) {
   EXPECT_EQ("HTTP@canonical.example.com", auth_handler->spn_for_testing());
 #endif
 
-  // Make sure a cache-only lookup with the wrong NetworkIsolationKey (an empty
-  // one) fails, to make sure the right NetworkIsolationKey was used.
+  // Make sure a cache-only lookup with the wrong NetworkAnonymizationKey (an
+  // empty one) fails, to make sure the right NetworkAnonymizationKey was used.
   url::SchemeHostPort scheme_host_port{GURL(url_string)};
   HostResolver::ResolveHostParameters resolve_params;
   resolve_params.include_canonical_name = true;
   resolve_params.source = HostResolverSource::LOCAL_ONLY;
   std::unique_ptr<HostResolver::ResolveHostRequest> host_request1 =
-      resolver()->CreateRequest(scheme_host_port, NetworkIsolationKey(),
+      resolver()->CreateRequest(scheme_host_port, NetworkAnonymizationKey(),
                                 NetLogWithSource(), resolve_params);
   TestCompletionCallback callback2;
   int result = host_request1->Start(callback2.callback());
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, callback2.GetResult(result));
 
-  // Make sure a cache-only lookup with the same NetworkIsolationKey succeeds,
-  // to make sure the right NetworkIsolationKey was used.
+  // Make sure a cache-only lookup with the same NetworkAnonymizationKey
+  // succeeds, to make sure the right NetworkAnonymizationKey was used.
   std::unique_ptr<HostResolver::ResolveHostRequest> host_request2 =
-      resolver()->CreateRequest(scheme_host_port, network_isolation_key(),
+      resolver()->CreateRequest(scheme_host_port, network_anonymization_key(),
                                 NetLogWithSource(), resolve_params);
   TestCompletionCallback callback3;
   result = host_request2->Start(callback3.callback());
@@ -452,8 +455,8 @@ TEST_F(HttpAuthHandlerNegotiateTest, NoKerberosCredentials) {
 #if BUILDFLAG(USE_EXTERNAL_GSSAPI)
 TEST_F(HttpAuthHandlerNegotiateTest, MissingGSSAPI) {
   MockAllowHttpAuthPreferences http_auth_preferences;
-  std::unique_ptr<HttpAuthHandlerNegotiate::Factory> negotiate_factory(
-      new HttpAuthHandlerNegotiate::Factory(HttpAuthMechanismFactory()));
+  auto negotiate_factory = std::make_unique<HttpAuthHandlerNegotiate::Factory>(
+      HttpAuthMechanismFactory());
   negotiate_factory->set_http_auth_preferences(&http_auth_preferences);
   negotiate_factory->set_library(
       std::make_unique<GSSAPISharedLibrary>("/this/library/does/not/exist"));
@@ -461,15 +464,15 @@ TEST_F(HttpAuthHandlerNegotiateTest, MissingGSSAPI) {
   url::SchemeHostPort scheme_host_port(GURL("http://www.example.com"));
   std::unique_ptr<HttpAuthHandler> generic_handler;
   int rv = negotiate_factory->CreateAuthHandlerFromString(
-      "Negotiate", HttpAuth::AUTH_SERVER, SSLInfo(), NetworkIsolationKey(),
+      "Negotiate", HttpAuth::AUTH_SERVER, SSLInfo(), NetworkAnonymizationKey(),
       scheme_host_port, NetLogWithSource(), resolver(), &generic_handler);
   EXPECT_THAT(rv, IsError(ERR_UNSUPPORTED_AUTH_SCHEME));
   EXPECT_TRUE(generic_handler.get() == nullptr);
 }
 #endif  // BUILDFLAG(USE_EXTERNAL_GSSAPI)
 
-// AllowGssapiLibraryLoad() is only supported on Chrome OS.
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+// AllowGssapiLibraryLoad() is only supported on ChromeOS.
+#if BUILDFLAG(IS_CHROMEOS)
 TEST_F(HttpAuthHandlerNegotiateTest, AllowGssapiLibraryLoad) {
   // Disabling allow_gssapi_library_load should prevent handler creation.
   SetupMocks(AuthLibrary());
@@ -485,7 +488,7 @@ TEST_F(HttpAuthHandlerNegotiateTest, AllowGssapiLibraryLoad) {
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(auth_handler);
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #endif  // BUILDFLAG(IS_POSIX)
 
@@ -535,8 +538,8 @@ TEST_F(HttpAuthHandlerNegotiateTest, OverrideAuthSystem) {
   std::unique_ptr<HttpAuthHandler> handler;
   EXPECT_EQ(OK, negotiate_factory->CreateAuthHandlerFromString(
                     "Negotiate", HttpAuth::AUTH_SERVER, SSLInfo(),
-                    NetworkIsolationKey(), scheme_host_port, NetLogWithSource(),
-                    resolver(), &handler));
+                    NetworkAnonymizationKey(), scheme_host_port,
+                    NetLogWithSource(), resolver(), &handler));
   EXPECT_TRUE(handler);
 
   TestCompletionCallback callback;

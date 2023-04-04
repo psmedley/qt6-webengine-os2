@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   // based on whether installed apps were marked for deletion by the checkbox on
   // the installed apps warning dialog.
   std::unique_ptr<content::BrowsingDataFilterBuilder> ProcessInstalledApps(
-      base::Value::ConstListView installed_apps);
+      const base::Value::List& installed_apps);
 
   // Clears browsing data, called by Javascript.
   void HandleClearBrowsingData(const base::Value::List& value);
@@ -95,11 +95,17 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   // Initializes the dialog UI. Called by JavaScript when the DOM is ready.
   void HandleInitialize(const base::Value::List& args);
 
+  // Returns the current sync state to the WebUI.
+  void HandleGetSyncState(const base::Value::List& args);
+
   // Implementation of SyncServiceObserver.
   void OnStateChanged(syncer::SyncService* sync) override;
 
   // Updates the footer of the dialog when the sync state changes.
   virtual void UpdateSyncState();
+
+  // Create a SyncStateEvent containing the current sync state.
+  base::Value::Dict CreateSyncStateEvent();
 
   // Finds out whether we should show notice about other forms of history stored
   // in user's account.

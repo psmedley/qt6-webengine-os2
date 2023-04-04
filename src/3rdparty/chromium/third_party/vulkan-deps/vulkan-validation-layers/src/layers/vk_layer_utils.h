@@ -219,6 +219,28 @@ static inline bool IsImageLayoutReadOnly(VkImageLayout layout) {
                        [layout](const VkImageLayout read_only_layout) { return layout == read_only_layout; });
 }
 
+static inline bool IsImageLayoutDepthReadOnly(VkImageLayout layout) {
+    constexpr std::array<VkImageLayout, 7> read_only_layouts = {
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+    };
+    return std::any_of(read_only_layouts.begin(), read_only_layouts.end(),
+                       [layout](const VkImageLayout read_only_layout) { return layout == read_only_layout; });
+}
+
+static inline bool IsImageLayoutStencilReadOnly(VkImageLayout layout) {
+    constexpr std::array<VkImageLayout, 7> read_only_layouts = {
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+    };
+    return std::any_of(read_only_layouts.begin(), read_only_layouts.end(),
+                       [layout](const VkImageLayout read_only_layout) { return layout == read_only_layout; });
+}
+
 static inline bool IsIdentitySwizzle(VkComponentMapping components) {
     // clang-format off
     return (
@@ -264,6 +286,11 @@ static inline uint32_t GetPlaneIndex(VkImageAspectFlags aspect) {
     }
 }
 
+// all "advanced blend operation" found in spec
+static inline bool IsAdvanceBlendOperation(const VkBlendOp blend_op) {
+    return (static_cast<int>(blend_op) >= VK_BLEND_OP_ZERO_EXT) && (static_cast<int>(blend_op) <= VK_BLEND_OP_BLUE_EXT);
+}
+
 // Perform a zero-tolerant modulo operation
 static inline VkDeviceSize SafeModulo(VkDeviceSize dividend, VkDeviceSize divisor) {
     VkDeviceSize result = 0;
@@ -284,7 +311,7 @@ static inline VkDeviceSize SafeDivision(VkDeviceSize dividend, VkDeviceSize divi
 extern "C" {
 #endif
 
-#define VK_LAYER_API_VERSION VK_MAKE_VERSION(1, 0, VK_HEADER_VERSION)
+#define VK_LAYER_API_VERSION VK_HEADER_VERSION_COMPLETE
 
 typedef enum VkStringErrorFlagBits {
     VK_STRING_ERROR_NONE = 0x00000000,
@@ -490,7 +517,7 @@ class vl_concurrent_unordered_map {
         bool found = itr != maps[h].end();
 
         if (found) {
-            auto ret = std::move(FindResult(true, itr->second));
+            auto ret = FindResult(true, itr->second);
             maps[h].erase(itr);
             return ret;
         } else {

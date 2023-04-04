@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,6 +86,10 @@ class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
 
   // Returns true if BoundsAnimator is animating any view.
   bool IsAnimating() const;
+
+  // Finishes all animations, teleporting the views to their target bounds. Any
+  // views marked for deletion are deleted.
+  void Complete();
 
   // Cancels all animations, leaving the views at their current location and
   // size. Any views marked for deletion are deleted.

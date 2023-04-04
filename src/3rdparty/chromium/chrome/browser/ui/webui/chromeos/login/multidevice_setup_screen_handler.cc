@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,23 +13,14 @@
 
 namespace chromeos {
 
-constexpr StaticOobeScreenId MultiDeviceSetupScreenView::kScreenId;
-
 MultiDeviceSetupScreenHandler::MultiDeviceSetupScreenHandler()
-    : BaseScreenHandler(kScreenId) {
-  set_user_acted_method_path_deprecated(
-      "login.MultiDeviceSetupScreen.userActed");
-}
+    : BaseScreenHandler(kScreenId) {}
 
 MultiDeviceSetupScreenHandler::~MultiDeviceSetupScreenHandler() = default;
 
 void MultiDeviceSetupScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   multidevice_setup::AddLocalizedValuesToBuilder(builder);
-}
-
-void MultiDeviceSetupScreenHandler::Bind(MultiDeviceSetupScreen* screen) {
-  BaseScreenHandler::SetBaseScreenDeprecated(screen);
 }
 
 void MultiDeviceSetupScreenHandler::Show() {
@@ -42,9 +33,5 @@ void MultiDeviceSetupScreenHandler::GetAdditionalParameters(
   dict->Set("wifiSyncEnabled",
             base::Value(ash::features::IsWifiSyncAndroidEnabled()));
 }
-
-void MultiDeviceSetupScreenHandler::Hide() {}
-
-void MultiDeviceSetupScreenHandler::InitializeDeprecated() {}
 
 }  // namespace chromeos

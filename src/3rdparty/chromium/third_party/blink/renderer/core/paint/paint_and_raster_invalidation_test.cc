@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -300,7 +300,7 @@ TEST_P(PaintAndRasterInvalidationTest, ResizeRotated) {
                        "transform: rotate(45deg); width: 200px");
   UpdateAllLifecyclePhasesForTest();
   auto expected_rect =
-      TransformationMatrix().Rotate(45).MapRect(gfx::Rect(50, 0, 150, 100));
+      MakeRotationMatrix(45).MapRect(gfx::Rect(50, 0, 150, 100));
   expected_rect.Intersect(gfx::Rect(0, 0, 800, 600));
   EXPECT_THAT(GetRasterInvalidationTracking()->Invalidations(),
               UnorderedElementsAre(RasterInvalidationInfo{
@@ -325,8 +325,7 @@ TEST_P(PaintAndRasterInvalidationTest, ResizeRotatedChild) {
   child->setAttribute(html_names::kStyleAttr,
                       "width: 100px; height: 50px; background: red");
   UpdateAllLifecyclePhasesForTest();
-  auto expected_rect =
-      TransformationMatrix().Rotate(45).MapRect(gfx::Rect(50, 0, 50, 50));
+  auto expected_rect = MakeRotationMatrix(45).MapRect(gfx::Rect(50, 0, 50, 50));
   expected_rect.Intersect(gfx::Rect(0, 0, 800, 600));
   EXPECT_THAT(GetRasterInvalidationTracking()->Invalidations(),
               UnorderedElementsAre(RasterInvalidationInfo{
@@ -829,6 +828,23 @@ TEST_P(PaintAndRasterInvalidationTest, SVGHiddenContainer) {
   GetDocument().View()->SetTracksRasterInvalidations(false);
 }
 
+TEST_P(PaintAndRasterInvalidationTest, SVGWithFilterNoOpStyleUpdate) {
+  SetBodyInnerHTML(R"HTML(
+    <svg>
+      <filter id="f">
+        <feGaussianBlur stdDeviation="5"/>
+      </filter>
+      <rect width="100" height="100" style="filter: url(#f)"/>
+    </svg>
+  )HTML");
+
+  GetDocument().View()->SetTracksRasterInvalidations(true);
+  GetDocument().body()->setAttribute(html_names::kStyleAttr, "--x: 42");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(GetRasterInvalidationTracking()->HasInvalidations());
+  GetDocument().View()->SetTracksRasterInvalidations(false);
+}
+
 TEST_P(PaintAndRasterInvalidationTest, PaintPropertyChange) {
   SetUpHTML(*this);
   Element* target = GetDocument().getElementById("target");
@@ -963,7 +979,8 @@ TEST_P(PaintAndRasterInvalidationTest, NoDamageDueToFloatingPointError) {
 
   auto* canvas = GetDocument().getElementById("canvas");
   canvas->setAttribute(html_names::kClassAttr, "updated");
-  GetDocument().View()->SetPaintArtifactCompositorNeedsUpdate();
+  GetDocument().View()->SetPaintArtifactCompositorNeedsUpdate(
+      PaintArtifactCompositorUpdateReason::kTest);
 
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(GetRasterInvalidationTracking(1)->HasInvalidations());
@@ -1074,17 +1091,19 @@ TEST_F(PaintInvalidatorCustomClientTest,
   target->setAttribute(html_names::kStyleAttr, "opacity: 0.98");
   GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint(
       DocumentUpdateReason::kTest);
-  EXPECT_TRUE(
+  // Only paint property change doesn't need repaint.
+  EXPECT_FALSE(
       GetDocument().View()->GetLayoutView()->Layer()->DescendantNeedsRepaint());
+  // Just needs to invalidate the chrome client.
   EXPECT_TRUE(InvalidationRecorded());
 
   ResetInvalidationRecorded();
-  // Let PrePaintTreeWalk do something instead of no-op.
+  // Let PrePaintTreeWalk do something instead of no-op, without any real
+  // change.
   GetDocument().View()->SetNeedsPaintPropertyUpdate();
   GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint(
       DocumentUpdateReason::kTest);
-  // The layer DescendantNeedsRepaint flag is only cleared after paint.
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       GetDocument().View()->GetLayoutView()->Layer()->DescendantNeedsRepaint());
   EXPECT_FALSE(InvalidationRecorded());
 }

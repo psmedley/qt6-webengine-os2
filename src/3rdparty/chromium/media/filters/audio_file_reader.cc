@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -242,10 +242,18 @@ bool AudioFileReader::OnNewFrame(
   // silence from being output. In the case where we are also discarding some
   // portion of the packet (as indicated by a negative pts), we further want to
   // adjust the duration downward by however much exists before zero.
+#if BUILDFLAG(USE_SYSTEM_FFMPEG)
   if (audio_codec_ == AudioCodec::kAAC && frame->pkt_duration) {
+#else
+  if (audio_codec_ == AudioCodec::kAAC && frame->duration) {
+#endif  // BUILDFLAG(USE_SYSTEM_FFMPEG)
     const base::TimeDelta pkt_duration = ConvertFromTimeBase(
         glue_->format_context()->streams[stream_index_]->time_base,
+#if BUILDFLAG(USE_SYSTEM_FFMPEG)
         frame->pkt_duration + std::min(static_cast<int64_t>(0), frame->pts));
+#else
+        frame->duration + std::min(static_cast<int64_t>(0), frame->pts));
+#endif  // BUILDFLAG(USE_SYSTEM_FFMPEG)
     const base::TimeDelta frame_duration =
         base::Seconds(frames_read / static_cast<double>(sample_rate_));
 

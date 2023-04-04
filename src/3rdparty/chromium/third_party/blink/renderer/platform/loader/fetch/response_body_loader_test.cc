@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,6 +76,9 @@ class ResponseBodyLoaderTest : public testing::Test {
           break;
       }
     }
+    void DidReceiveDecodedData(
+        const String& data,
+        std::unique_ptr<Resource::DecodedDataInfo> info) override {}
     void DidFinishLoadingBody() override {
       DCHECK(!finished_);
       DCHECK(!failed_);
@@ -183,7 +186,7 @@ TEST_F(ResponseBodyLoaderTest, Load) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
 
   body_loader->Start();
 
@@ -211,7 +214,7 @@ TEST_F(ResponseBodyLoaderTest, LoadFailure) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
 
   body_loader->Start();
 
@@ -238,7 +241,7 @@ TEST_F(ResponseBodyLoaderTest, LoadWithDataAndDone) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
 
   body_loader->Start();
 
@@ -268,7 +271,7 @@ TEST_F(ResponseBodyLoaderTest, Abort) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
   EXPECT_FALSE(body_loader->IsAborted());
 
   body_loader->Start();
@@ -299,7 +302,7 @@ TEST_F(ResponseBodyLoaderTest, Suspend) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
   EXPECT_FALSE(body_loader->IsSuspended());
 
   body_loader->Start();
@@ -362,7 +365,7 @@ TEST_F(ResponseBodyLoaderTest, ReadTooBigBuffer) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
 
   body_loader->Start();
 
@@ -402,7 +405,7 @@ TEST_F(ResponseBodyLoaderTest, NotDrainable) {
 
   EXPECT_FALSE(client->LoadingIsFinished());
   EXPECT_FALSE(client->LoadingIsFailed());
-  EXPECT_TRUE(client->GetData().IsEmpty());
+  EXPECT_TRUE(client->GetData().empty());
 
   body_loader->Start();
 

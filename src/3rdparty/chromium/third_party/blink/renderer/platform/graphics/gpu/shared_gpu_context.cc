@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,9 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
+#include "third_party/blink/public/platform/web_url.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
@@ -116,17 +117,8 @@ void SharedGpuContext::CreateContextProviderIfNeeded(
     if (is_gpu_compositing_disabled_ && only_if_gpu_compositing)
       return;
     std::unique_ptr<blink::WebGraphicsContext3DProvider> context_provider;
-    if (base::FeatureList::IsEnabled(blink::features::kDawn2dCanvas)) {
-      context_provider =
-          Platform::Current()->CreateWebGPUGraphicsContext3DProvider(
-              blink::WebURL());
-      if (context_provider) {
-        context_provider->BindToCurrentThread();
-      }
-    } else {
-      context_provider =
-          Platform::Current()->CreateSharedOffscreenGraphicsContext3DProvider();
-    }
+    context_provider =
+        Platform::Current()->CreateSharedOffscreenGraphicsContext3DProvider();
     if (context_provider) {
       context_provider_wrapper_ =
           std::make_unique<WebGraphicsContext3DProviderWrapper>(
@@ -138,7 +130,7 @@ void SharedGpuContext::CreateContextProviderIfNeeded(
     // this once per thread.
     base::WaitableEvent waitable_event;
     scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-        Thread::MainThread()->GetTaskRunner();
+        Thread::MainThread()->GetTaskRunner(MainThreadTaskRunnerRestricted());
     PostCrossThreadTask(
         *task_runner, FROM_HERE,
         CrossThreadBindOnce(

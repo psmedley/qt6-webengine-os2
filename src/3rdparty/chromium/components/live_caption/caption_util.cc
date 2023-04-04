@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chromeos/lacros/lacros_service.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #endif
 
 namespace {
@@ -136,9 +136,7 @@ bool IsLiveCaptionFeatureSupported() {
   if (!base::FeatureList::IsEnabled(ash::features::kOnDeviceSpeechRecognition))
     return false;
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (!chromeos::LacrosService::Get()
-           ->init_params()
-           ->is_ondevice_speech_supported)
+  if (!chromeos::BrowserParamsProxy::Get()->IsOndeviceSpeechSupported())
     return false;
 #endif
 
@@ -153,11 +151,6 @@ bool IsLiveCaptionFeatureSupported() {
 #if BUILDFLAG(IS_WIN) && defined(ARCH_CPU_ARM64)
   // The Speech On-Device API (SODA) component does not support Windows on
   // arm64.
-  return false;
-#elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  // Disable Live Caption on LaCrOS. The feature has not been migrated there
-  // yet, and currently fails rather gracelessly (opening a non-existent .so).
-  // TODO(b/223493879): Remove this once it fails more gracefully.
   return false;
 #else
   return true;

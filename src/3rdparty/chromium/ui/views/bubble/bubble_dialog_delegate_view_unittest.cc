@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,7 @@
 #include "ui/views/test/test_views.h"
 #include "ui/views/test/test_widget_observer.h"
 #include "ui/views/test/views_test_base.h"
+#include "ui/views/test/views_test_utils.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
@@ -167,7 +168,7 @@ TEST_F(BubbleDialogDelegateViewTest, CreateDelegate) {
   bubble_widget->Show();
 
   BubbleBorder* border = bubble_delegate->GetBubbleFrameView()->bubble_border_;
-  EXPECT_EQ(bubble_delegate->color(), border->background_color());
+  EXPECT_EQ(bubble_delegate->color(), border->color());
   EXPECT_EQ(anchor_widget.get(), bubble_widget->parent());
 
   EXPECT_FALSE(bubble_observer.widget_closed());
@@ -609,20 +610,23 @@ TEST_F(BubbleDialogDelegateViewTest, CustomTitle) {
   BubbleFrameView* bubble_frame = static_cast<BubbleFrameView*>(
       bubble_widget->non_client_view()->frame_view());
   EXPECT_EQ(title_view, bubble_frame->title());
-  EXPECT_EQ(bubble_frame, title_view->parent());
+
+  View* title_container = title_view->parent();
+  EXPECT_EQ(bubble_frame, title_container->parent());
   // Title takes up the whole bubble width when there's no icon or close button.
   EXPECT_EQ(bubble_delegate->width(), title_view->size().width());
   EXPECT_EQ(kTitleHeight, title_view->size().height());
 
   bubble_delegate->show_close_button();
   bubble_frame->ResetWindowControls();
-  bubble_frame->Layout();
+  bubble_frame->InvalidateLayout();
+  views::test::RunScheduledLayout(bubble_frame);
 
   Button* close_button = bubble_frame->GetCloseButtonForTesting();
   // Title moves over for the close button.
   EXPECT_EQ(close_button->x() - LayoutProvider::Get()->GetDistanceMetric(
                                     DISTANCE_CLOSE_BUTTON_MARGIN),
-            title_view->bounds().right());
+            title_container->bounds().right());
 
   LayoutProvider* provider = LayoutProvider::Get();
   const gfx::Insets content_margins = provider->GetDialogInsetsForContentType(
@@ -820,30 +824,33 @@ class BubbleDialogDelegateViewArrowTest
     : public BubbleDialogDelegateViewTest,
       public testing::WithParamInterface<ArrowTestParameters> {
  public:
-  BubbleDialogDelegateViewArrowTest() : screen_override_(SetUpTestScreen()) {}
+  BubbleDialogDelegateViewArrowTest() { SetUpTestScreen(); }
 
   BubbleDialogDelegateViewArrowTest(const BubbleDialogDelegateViewArrowTest&) =
       delete;
   BubbleDialogDelegateViewArrowTest& operator=(
       const BubbleDialogDelegateViewArrowTest&) = delete;
 
-  ~BubbleDialogDelegateViewArrowTest() override = default;
+  ~BubbleDialogDelegateViewArrowTest() override {
+    display::Screen::SetScreenInstance(nullptr);
+  }
 
  private:
-  display::Screen* SetUpTestScreen() {
-    const display::Display test_display = test_screen_.GetPrimaryDisplay();
+  void SetUpTestScreen() {
+    DCHECK(!display::test::TestScreen::Get());
+    test_screen_ = std::make_unique<display::test::TestScreen>();
+    display::Screen::SetScreenInstance(test_screen_.get());
+    const display::Display test_display = test_screen_->GetPrimaryDisplay();
     display::Display display(test_display);
     display.set_id(0x2);
     display.set_bounds(gfx::Rect(0, 0, kScreenWidth, kScreenHeight));
     display.set_work_area(gfx::Rect(0, 0, kScreenWidth, kScreenHeight));
-    test_screen_.display_list().RemoveDisplay(test_display.id());
-    test_screen_.display_list().AddDisplay(display,
-                                           display::DisplayList::Type::PRIMARY);
-    return &test_screen_;
+    test_screen_->display_list().RemoveDisplay(test_display.id());
+    test_screen_->display_list().AddDisplay(
+        display, display::DisplayList::Type::PRIMARY);
   }
 
-  display::test::TestScreen test_screen_;
-  display::test::ScopedScreenOverride screen_override_;
+  std::unique_ptr<display::test::TestScreen> test_screen_;
 };
 
 TEST_P(BubbleDialogDelegateViewArrowTest, AvailableScreenSpaceTest) {

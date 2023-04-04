@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,7 +70,7 @@ class LockScreenServiceImplBrowserTest : public ContentBrowserTest {
       const GURL& url) {
     Shell* shell = CreateBrowser();
     EXPECT_TRUE(NavigateToURL(shell, url));
-    RenderFrameHost* rfh = shell->web_contents()->GetMainFrame();
+    RenderFrameHost* rfh = shell->web_contents()->GetPrimaryMainFrame();
     mojo::Remote<blink::mojom::LockScreenService> service;
     LockScreenServiceImpl::Create(rfh, service.BindNewPipeAndPassReceiver());
     return service;

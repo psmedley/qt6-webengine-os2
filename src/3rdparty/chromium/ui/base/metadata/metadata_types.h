@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,9 +110,14 @@ class COMPONENT_EXPORT(UI_BASE_METADATA) ClassMetaData {
   //    for(views::MemberMetaDataBase* member : class_meta_data) {
   //      OperateOn(member);
   //    }
-  class COMPONENT_EXPORT(UI_BASE_METADATA) ClassMemberIterator
-      : public std::iterator<std::forward_iterator_tag, MemberMetaDataBase*> {
+  class COMPONENT_EXPORT(UI_BASE_METADATA) ClassMemberIterator {
    public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = MemberMetaDataBase*;
+    using difference_type = std::ptrdiff_t;
+    using pointer = MemberMetaDataBase**;
+    using reference = MemberMetaDataBase*&;
+
     ClassMemberIterator(const ClassMemberIterator& other);
     ~ClassMemberIterator();
 

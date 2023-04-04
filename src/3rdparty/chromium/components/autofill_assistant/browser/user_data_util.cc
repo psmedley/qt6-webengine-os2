@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,16 @@
 #include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
+#include "components/autofill/core/browser/data_model/autofill_profile_comparator.h"
 #include "components/autofill/core/browser/geo/address_i18n.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill_assistant/browser/action_value.pb.h"
 #include "components/autofill_assistant/browser/cud_condition.pb.h"
 #include "components/autofill_assistant/browser/field_formatter.h"
 #include "components/autofill_assistant/browser/model.pb.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/url_utils.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "components/strings/grit/components_strings.h"
 #include "third_party/libaddressinput/chromium/addressinput_util.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
@@ -317,6 +320,25 @@ ClientStatus MoveAutofillValueRegexpToTextFilter(
   // Assigning text_filter will clear autofill_value_regexp.
   *value->mutable_text_filter() = text_filter;
   return re2_status;
+}
+
+template <typename T>
+void UpsertAutofillProfile(const autofill::AutofillProfile& profile,
+                           std::vector<std::unique_ptr<T>>& list) {
+  auto it =
+      base::ranges::find_if(list, [&profile](const std::unique_ptr<T>& ptr) {
+        return ptr->profile && ptr->profile->guid() == profile.guid();
+      });
+
+  auto new_profile = user_data::MakeUniqueFromProfile(profile);
+  if (it == list.end()) {
+    auto entry = std::make_unique<T>(std::move(new_profile));
+    entry->identifier = profile.guid();
+    list.emplace_back(std::move(entry));
+    return;
+  }
+
+  (*it)->profile = std::move(new_profile);
 }
 
 }  // namespace
@@ -881,6 +903,8 @@ ClientStatus ResolveSelectorUserData(SelectorProto* selector,
       case SelectorProto::Filter::kLabelled:
       case SelectorProto::Filter::kMatchCssSelector:
       case SelectorProto::Filter::kOnTop:
+      case SelectorProto::Filter::kParent:
+      case SelectorProto::Filter::kSemantic:
       case SelectorProto::Filter::FILTER_NOT_SET:
         break;
         // Do not add default here. In case a new filter gets added (that may
@@ -888,6 +912,91 @@ ClientStatus ResolveSelectorUserData(SelectorProto* selector,
     }
   }
   return OkClientStatus();
+}
+
+void UpsertContact(const autofill::AutofillProfile& profile,
+                   std::vector<std::unique_ptr<Contact>>& list) {
+  UpsertAutofillProfile(profile, list);
+}
+
+void UpsertPhoneNumber(const autofill::AutofillProfile& profile,
+                       std::vector<std::unique_ptr<PhoneNumber>>& list) {
+  UpsertAutofillProfile(profile, list);
+}
+
+bool ContactHasAtLeastOneRequiredField(
+    const autofill::AutofillProfile& profile,
+    const CollectUserDataOptions& collect_user_data_options) {
+  autofill::ServerFieldTypeSet non_empty_fields;
+  profile.GetNonEmptyTypes(kDefaultLocale, &non_empty_fields);
+
+  if (collect_user_data_options.request_payer_name &&
+      (non_empty_fields.contains(autofill::NAME_FULL) ||
+       non_empty_fields.contains(autofill::NAME_FIRST) ||
+       non_empty_fields.contains(autofill::NAME_LAST))) {
+    return true;
+  }
+
+  if (collect_user_data_options.request_payer_email &&
+      non_empty_fields.contains(autofill::EMAIL_ADDRESS)) {
+    return true;
+  }
+
+  if (collect_user_data_options.request_payer_phone &&
+      (non_empty_fields.contains(autofill::PHONE_HOME_NUMBER) ||
+       non_empty_fields.contains(autofill::PHONE_HOME_COUNTRY_CODE) ||
+       non_empty_fields.contains(autofill::PHONE_HOME_WHOLE_NUMBER))) {
+    return true;
+  }
+  return false;
+}
+
+std::vector<autofill::AutofillProfile*> GetUniqueProfiles(
+    const std::vector<autofill::AutofillProfile*> sorted_profiles,
+    const std::string app_locale,
+    const base::flat_set<autofill::ServerFieldType>& field_types) {
+  std::vector<autofill::AutofillProfile*> unique_profiles;
+  const autofill::AutofillProfileComparator comparator(app_locale);
+  autofill::ServerFieldTypeSet types(field_types.begin(), field_types.end());
+  for (size_t i = 0; i < sorted_profiles.size(); ++i) {
+    bool include = true;
+
+    autofill::AutofillProfile* profile_a = sorted_profiles[i];
+    for (size_t j = 0; j < sorted_profiles.size(); ++j) {
+      autofill::AutofillProfile* profile_b = sorted_profiles[j];
+      // Check if profile A is a subset of profile B. If not, continue.
+      if (i == j || !profile_a->IsSubsetOfForFieldSet(comparator, *profile_b,
+                                                      app_locale, types)) {
+        continue;
+      }
+
+      // Check if profile B is also a subset of profile A. If so, the
+      // profiles are identical. Include the first one but not the second.
+      if (i < j && profile_b->IsSubsetOfForFieldSet(comparator, *profile_a,
+                                                    app_locale, types)) {
+        continue;
+      }
+
+      // One-way subset. Don't include profile A.
+      include = false;
+      break;
+    }
+    if (include) {
+      unique_profiles.push_back(sorted_profiles[i]);
+    }
+  }
+  return unique_profiles;
+}
+
+void AddAutofillEntryToDataModel(autofill::ServerFieldType type,
+                                 const AutofillEntryProto& entry,
+                                 const std::string& locale,
+                                 autofill::AutofillDataModel* model) {
+  if (entry.raw()) {
+    model->SetRawInfo(type, base::UTF8ToUTF16(entry.value()));
+  } else {
+    model->SetInfo(type, base::UTF8ToUTF16(entry.value()), locale);
+  }
 }
 
 }  // namespace user_data

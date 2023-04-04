@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -419,7 +419,7 @@ void AudioOutputDevice::OnStreamCreated(
       audio_callback_->InitializePlayStartTime();
     audio_thread_ = std::make_unique<AudioDeviceThread>(
         audio_callback_.get(), std::move(socket_handle), "AudioOutputDevice",
-        base::ThreadPriority::REALTIME_AUDIO);
+        base::ThreadType::kRealtimeAudio);
   }
 }
 

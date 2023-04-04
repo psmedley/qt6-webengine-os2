@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,13 @@
 #include <utility>
 #include <vector>
 
+#include "base/feature_list.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/device_signals/core/common/signals_features.h"
+#include "extensions/common/mojom/api_permission_id.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::mojom::APIPermissionID;
@@ -274,6 +277,22 @@ class USBDevicesFormatter : public ChromePermissionMessageFormatter {
         permissions, submessages);
   }
 };
+
+int GetEnterpriseReportingPrivatePermissionMessageId() {
+#if !defined(TOOLKIT_QT)
+  if (!base::FeatureList::IsEnabled(
+          enterprise_signals::features::kNewEvSignalsEnabled)) {
+    return IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REPORTING_PRIVATE;
+  }
+#endif
+#if BUILDFLAG(IS_WIN)
+  return IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REPORTING_PRIVATE_ENABLED_WIN;
+#elif BUILDFLAG(IS_LINUX) or BUILDFLAG(IS_MAC)
+  return IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REPORTING_PRIVATE_ENABLED_LINUX_AND_MACOS;
+#else
+  return IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REPORTING_PRIVATE;
+#endif
+}
 
 }  // namespace
 
@@ -662,9 +681,6 @@ ChromePermissionMessageRule::GetAllRules() {
        {APIPermissionID::kNativeMessaging},
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_PRIVACY, {APIPermissionID::kPrivacy}, {}},
-      {IDS_EXTENSION_PROMPT_WARNING_SIGNED_IN_DEVICES,
-       {APIPermissionID::kSignedInDevices},
-       {}},
       {IDS_EXTENSION_PROMPT_WARNING_SYNCFILESYSTEM,
        {APIPermissionID::kSyncFileSystem},
        {}},
@@ -687,9 +703,6 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_ACTIVITY_LOG_PRIVATE,
        {APIPermissionID::kActivityLogPrivate},
        {}},
-      {IDS_EXTENSION_PROMPT_WARNING_MUSIC_MANAGER_PRIVATE,
-       {APIPermissionID::kMusicManagerPrivate},
-       {}},
       {IDS_EXTENSION_PROMPT_WARNING_SETTINGS_PRIVATE,
        {APIPermissionID::kSettingsPrivate},
        {}},
@@ -702,7 +715,7 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_USERS_PRIVATE,
        {APIPermissionID::kUsersPrivate},
        {}},
-      {IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REPORTING_PRIVATE,
+      {GetEnterpriseReportingPrivatePermissionMessageId(),
        {APIPermissionID::kEnterpriseReportingPrivate},
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_HARDWARE_PLATFORM,
@@ -724,6 +737,9 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_LOGIN_SCREEN_STORAGE,
        {APIPermissionID::kLoginScreenStorage},
        {}},
+      {IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REMOTE_APPS,
+       {APIPermissionID::kEnterpriseRemoteApps},
+       {}},
       {IDS_EXTENSION_PROMPT_WARNING_TRANSIENT_BACKGROUND,
        {APIPermissionID::kTransientBackground},
        {}},
@@ -738,7 +754,9 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_TELEMETRY_SERIAL_NUMBER,
        {APIPermissionID::kChromeOSTelemetrySerialNumber},
        {}},
-  };
+      {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_TELEMETRY_NETWORK_INFORMATION,
+       {APIPermissionID::kChromeOSTelemetryNetworkInformation},
+       {}}};
 
   return std::vector<ChromePermissionMessageRule>(
       std::make_move_iterator(std::begin(rules_arr)),

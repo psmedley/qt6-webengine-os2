@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,10 +27,10 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "components/subresource_filter/content/browser/async_document_subresource_filter.h"
+#include "components/subresource_filter/content/browser/child_frame_navigation_test_utils.h"
 #include "components/subresource_filter/content/browser/content_subresource_filter_web_contents_helper.h"
 #include "components/subresource_filter/content/browser/fake_safe_browsing_database_manager.h"
 #include "components/subresource_filter/content/browser/profile_interaction_manager.h"
-#include "components/subresource_filter/content/browser/subframe_navigation_test_utils.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_manager.h"
 #include "components/subresource_filter/content/browser/throttle_manager_test_support.h"
 #include "components/subresource_filter/content/mojom/subresource_filter.mojom.h"
@@ -103,15 +103,14 @@ class FakeSubresourceFilterAgent : public mojom::SubresourceFilterAgent {
       mojom::ActivationStatePtr activation_state,
       const absl::optional<blink::FrameAdEvidence>& ad_evidence) override {
     last_activation_ = std::move(activation_state);
-    is_ad_subframe_ =
-        ad_evidence.has_value() && ad_evidence->IndicatesAdSubframe();
+    is_ad_frame_ = ad_evidence.has_value() && ad_evidence->IndicatesAdFrame();
   }
 
   // These methods reset state back to default when they are called.
-  bool LastAdSubframe() {
-    bool is_ad_subframe = is_ad_subframe_;
-    is_ad_subframe_ = false;
-    return is_ad_subframe;
+  bool LastAdFrame() {
+    bool is_ad_frame = is_ad_frame_;
+    is_ad_frame_ = false;
+    return is_ad_frame;
   }
   absl::optional<bool> LastActivated() {
     if (!last_activation_)
@@ -124,7 +123,7 @@ class FakeSubresourceFilterAgent : public mojom::SubresourceFilterAgent {
 
  private:
   mojom::ActivationStatePtr last_activation_;
-  bool is_ad_subframe_ = false;
+  bool is_ad_frame_ = false;
   mojo::AssociatedReceiver<mojom::SubresourceFilterAgent> receiver_{this};
 };
 
@@ -209,7 +208,7 @@ class ContentSubresourceFilterThrottleManagerTest
     content::RenderViewHostTestHarness::SetUp();
     content::WebContents* web_contents =
         RenderViewHostTestHarness::web_contents();
-    CreateAgentForHost(web_contents->GetMainFrame());
+    CreateAgentForHost(web_contents->GetPrimaryMainFrame());
 
     // Initialize the ruleset dealer. Allowlisted URLs must also match a
     // disallowed rule in order to work correctly.
@@ -270,7 +269,7 @@ class ContentSubresourceFilterThrottleManagerTest
   void ExpectActivationSignalForFrame(
       content::RenderFrameHost* rfh,
       bool expect_activation,
-      bool expect_is_ad_subframe = false,
+      bool expect_is_ad_frame = false,
       bool expect_activation_sent_to_agent = true) {
     // In some cases we need to verify that messages were _not_ sent, in which
     // case using a Wait() idiom would cause hangs. RunUntilIdle instead to
@@ -279,7 +278,7 @@ class ContentSubresourceFilterThrottleManagerTest
     FakeSubresourceFilterAgent* agent = agent_map_[rfh].get();
     absl::optional<bool> last_activated = agent->LastActivated();
     EXPECT_EQ(expect_activation, last_activated && *last_activated);
-    EXPECT_EQ(expect_is_ad_subframe, agent->LastAdSubframe());
+    EXPECT_EQ(expect_is_ad_frame, agent->LastAdFrame());
     EXPECT_EQ(expect_activation_sent_to_agent, last_activated.has_value());
   }
 
@@ -288,15 +287,9 @@ class ContentSubresourceFilterThrottleManagerTest
   void CreateTestNavigation(const GURL& url,
                             content::RenderFrameHost* render_frame_host) {
     DCHECK(render_frame_host);
-    if (render_frame_host->IsFencedFrameRoot()) {
-      navigation_simulator_ =
-          content::NavigationSimulator::CreateForFencedFrame(url,
-                                                             render_frame_host);
-    } else {
-      navigation_simulator_ =
-          content::NavigationSimulator::CreateRendererInitiated(
-              url, render_frame_host);
-    }
+    navigation_simulator_ =
+        content::NavigationSimulator::CreateRendererInitiated(
+            url, render_frame_host);
   }
 
   content::NavigationSimulator* navigation_simulator() {
@@ -346,7 +339,8 @@ class ContentSubresourceFilterThrottleManagerTest
   bool ads_blocked_in_content_settings() {
     auto* content_settings =
         content_settings::PageSpecificContentSettings::GetForFrame(
-            content::RenderViewHostTestHarness::web_contents()->GetMainFrame());
+            content::RenderViewHostTestHarness::web_contents()
+                ->GetPrimaryMainFrame());
 
     return content_settings->IsContentBlocked(ContentSettingsType::ADS);
   }
@@ -538,7 +532,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
       navigation_simulator()->GetFinalRenderFrameHost();
   // But it should still be activated.
   ExpectActivationSignalForFrame(child, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
 
   EXPECT_FALSE(ads_blocked_in_content_settings());
 #if BUILDFLAG(IS_ANDROID)
@@ -815,7 +809,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
   // The aborted navigation does not pass through ReadyToCommitNavigation so no
   // ActivateForNextCommittedLoad mojo call is expected.
   ExpectActivationSignalForFrame(main_rfh(), false /* expect_activation */,
-                                 false /* expect_is_ad_subframe */,
+                                 false /* expect_is_ad_frame */,
                                  false /* expect_activation_sent_to_agent */);
 
   // A subframe navigation fail.
@@ -1063,7 +1057,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
   // Commit a navigation that triggers page level activation.
   NavigateAndCommitMainFrame(GURL(kTestURLWithActivation));
   ExpectActivationSignalForFrame(main_rfh(), true /* expect_activation */,
-                                 false /* is_ad_subframe */);
+                                 false /* is_ad_frame */);
 
   // A disallowed subframe navigation should be successfully filtered.
 #if BUILDFLAG(IS_ANDROID)
@@ -1086,14 +1080,14 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
        SubframeNavigationTaggedAsAdByRenderer) {
   NavigateAndCommitMainFrame(GURL(kTestURLWithDryRun));
   ExpectActivationSignalForFrame(main_rfh(), true /* expect_activation */,
-                                 false /* is_ad_subframe */);
+                                 false /* is_ad_frame */);
 
   content::RenderFrameHost* subframe = CreateSubframeWithTestNavigation(
       GURL("https://www.example.com/allowed.html"), main_rfh());
 
   EXPECT_FALSE(throttle_manager()->IsRenderFrameHostTaggedAsAd(subframe));
   throttle_manager()->OnChildFrameWasCreatedByAdScript(subframe);
-  throttle_manager()->OnFrameIsAdSubframe(subframe);
+  throttle_manager()->OnFrameIsAd(subframe);
 
   EXPECT_EQ(content::NavigationThrottle::PROCEED,
             SimulateStartAndGetResult(navigation_simulator()));
@@ -1103,7 +1097,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
   EXPECT_TRUE(subframe);
   EXPECT_TRUE(throttle_manager()->IsRenderFrameHostTaggedAsAd(subframe));
   ExpectActivationSignalForFrame(subframe, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
 
   // A non-ad navigation for the same frame should be considered an ad
   // subframe as well.
@@ -1112,7 +1106,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
             SimulateCommitAndGetResult(navigation_simulator()));
   subframe = navigation_simulator()->GetFinalRenderFrameHost();
   ExpectActivationSignalForFrame(subframe, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
 }
 
 // If the RenderFrame determines that the frame is an ad due to creation by ad
@@ -1124,7 +1118,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
 
   NavigateAndCommitMainFrame(GURL(kTestURLWithDryRun));
   ExpectActivationSignalForFrame(main_rfh(), true /* expect_activation */,
-                                 false /* is_ad_subframe */);
+                                 false /* is_ad_frame */);
 
   // Create a subframe to a different site. It will start as a same-process
   // frame but transition to a cross-process frame just before commit (after
@@ -1135,7 +1129,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
   // Simulate the render process telling the manager that the frame is an ad due
   // to creation by ad script.
   throttle_manager()->OnChildFrameWasCreatedByAdScript(initial_subframe);
-  throttle_manager()->OnFrameIsAdSubframe(initial_subframe);
+  throttle_manager()->OnFrameIsAd(initial_subframe);
 
   EXPECT_EQ(content::NavigationThrottle::PROCEED,
             SimulateStartAndGetResult(navigation_simulator()));
@@ -1148,7 +1142,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
 
   EXPECT_TRUE(throttle_manager()->IsRenderFrameHostTaggedAsAd(final_subframe));
   ExpectActivationSignalForFrame(final_subframe, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
 }
 
 // If the RenderFrame determines that the frame was created by ad script, it
@@ -1157,7 +1151,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
        GrandchildNavigationTaggedAsAdByRenderer) {
   NavigateAndCommitMainFrame(GURL(kTestURLWithDryRun));
   ExpectActivationSignalForFrame(main_rfh(), true /* expect_activation */,
-                                 false /* is_ad_subframe */);
+                                 false /* is_ad_frame */);
 
   // Create a subframe that's marked as an ad by the render process.
   content::RenderFrameHost* subframe = CreateSubframeWithTestNavigation(
@@ -1166,7 +1160,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
   // Simulate the render process telling the manager that the frame is an ad due
   // to creation by ad script.
   throttle_manager()->OnChildFrameWasCreatedByAdScript(subframe);
-  throttle_manager()->OnFrameIsAdSubframe(subframe);
+  throttle_manager()->OnFrameIsAd(subframe);
 
   EXPECT_EQ(content::NavigationThrottle::PROCEED,
             SimulateStartAndGetResult(navigation_simulator()));
@@ -1174,7 +1168,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
             SimulateCommitAndGetResult(navigation_simulator()));
   subframe = navigation_simulator()->GetFinalRenderFrameHost();
   ExpectActivationSignalForFrame(subframe, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
 
   // Create a grandchild frame that is marked as an ad because its parent is.
   content::RenderFrameHost* grandchild_frame = CreateSubframeWithTestNavigation(
@@ -1185,7 +1179,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
             SimulateCommitAndGetResult(navigation_simulator()));
   grandchild_frame = navigation_simulator()->GetFinalRenderFrameHost();
   ExpectActivationSignalForFrame(grandchild_frame, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
   EXPECT_TRUE(
       throttle_manager()->IsRenderFrameHostTaggedAsAd(grandchild_frame));
 }
@@ -1214,7 +1208,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
 
   // But it should still be activated.
   ExpectActivationSignalForFrame(child, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
   EXPECT_TRUE(throttle_manager()->IsRenderFrameHostTaggedAsAd(child));
 
   // Create a subframe which is allowed as per ruleset but should still be
@@ -1229,7 +1223,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
       navigation_simulator()->GetFinalRenderFrameHost();
   EXPECT_TRUE(grandchild);
   ExpectActivationSignalForFrame(grandchild, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
   EXPECT_TRUE(throttle_manager()->IsRenderFrameHostTaggedAsAd(grandchild));
 
   // Verify that a 2nd level nested frame should also be tagged.
@@ -1247,7 +1241,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
       navigation_simulator()->GetFinalRenderFrameHost();
   EXPECT_TRUE(greatGrandchild);
   ExpectActivationSignalForFrame(greatGrandchild, true /* expect_activation */,
-                                 true /* is_ad_subframe */);
+                                 true /* is_ad_frame */);
   EXPECT_TRUE(throttle_manager()->IsRenderFrameHostTaggedAsAd(greatGrandchild));
 
   EXPECT_FALSE(ads_blocked_in_content_settings());
@@ -1271,7 +1265,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
       navigation_simulator()->GetFinalRenderFrameHost();
   EXPECT_TRUE(child);
   ExpectActivationSignalForFrame(child, true /* expect_activation */,
-                                 false /* is_ad_subframe */);
+                                 false /* is_ad_frame */);
   EXPECT_FALSE(throttle_manager()->IsRenderFrameHostTaggedAsAd(child));
 
   // Create a subframe which is allowed as per ruleset and should not be tagged
@@ -1289,7 +1283,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerTest,
       navigation_simulator()->GetFinalRenderFrameHost();
   EXPECT_TRUE(grandchild);
   ExpectActivationSignalForFrame(grandchild, true /* expect_activation */,
-                                 false /* is_ad_subframe */);
+                                 false /* is_ad_frame */);
   EXPECT_FALSE(throttle_manager()->IsRenderFrameHostTaggedAsAd(grandchild));
 
   EXPECT_FALSE(ads_blocked_in_content_settings());
@@ -1749,6 +1743,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerFencedFrameTest,
             throttle_manager);
 
   navigation_simulator()->Commit();
+  fenced_frame_root = navigation_simulator()->GetFinalRenderFrameHost();
 
   // Committing the fenced frame navigation should not change the Page's
   // throttle manager.
@@ -1850,7 +1845,7 @@ TEST_P(ContentSubresourceFilterThrottleManagerInfoBarUiTest,
   // Same-document navigations do not pass through ReadyToCommitNavigation so no
   // ActivateForNextCommittedLoad mojo call is expected.
   ExpectActivationSignalForFrame(main_rfh(), false /* expect_activation */,
-                                 false /* expect_is_ad_subframe */,
+                                 false /* expect_is_ad_frame */,
                                  false /* expect_activation_sent_to_agent */);
 
   EXPECT_TRUE(ads_blocked_in_content_settings());

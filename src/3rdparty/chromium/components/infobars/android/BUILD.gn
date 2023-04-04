@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -70,6 +70,8 @@ android_library("java") {
     ":infobar_android_enums_java",
     ":java_resources",
     "//base:base_java",
+    "//base:jni_java",
+    "//build/android:build_java",
     "//components/browser_ui/styles/android:java",
     "//components/browser_ui/widget/android:java",
     "//components/infobars/core:infobar_enums_java",
@@ -100,20 +102,18 @@ generate_jni("jni_headers") {
   ]
 }
 
-android_library("javatests") {
+android_library("unit_device_javatests") {
   testonly = true
   sources = [
     "java/src/org/chromium/components/infobars/InfoBarControlLayoutTest.java",
   ]
   deps = [
     ":java",
-    "//base:base_java",
     "//base:base_java_test_support",
     "//components/browser_ui/theme/android:java_resources",
     "//components/browser_ui/widget/android:java",
     "//third_party/android_support_test_runner:rules_java",
     "//third_party/android_support_test_runner:runner_java",
-    "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_appcompat_appcompat_java",
     "//third_party/androidx:androidx_test_runner_java",
     "//third_party/junit:junit",

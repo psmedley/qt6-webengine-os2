@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,11 +33,12 @@
 #include "cc/paint/skottie_text_property_value.h"
 #include "cc/paint/skottie_wrapper.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkRRect.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/skia/include/core/SkRRect.h"
 #include "third_party/skia/include/core/SkScalar.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -145,13 +146,13 @@ struct CC_PAINT_EXPORT PlaybackParams {
 
   // `image_provider` is not a raw_ptr<...> for performance reasons (based on
   // analysis of sampling profiler data and tab_search:top100:2020).
-  ImageProvider* image_provider;
+  RAW_PTR_EXCLUSION ImageProvider* image_provider;
 
   SkM44 original_ctm;
   CustomDataRasterCallback custom_callback;
   DidDrawOpCallback did_draw_op_callback;
   absl::optional<bool> save_layer_alpha_should_preserve_lcd_text;
-  bool raw_draw_analysis;
+  bool is_analyzing = false;
 };
 
 class CC_PAINT_EXPORT PaintOp {
@@ -184,8 +185,7 @@ class CC_PAINT_EXPORT PaintOp {
                      SkottieSerializationHistory* skottie_serialization_history,
                      bool can_use_lcd_text,
                      bool context_supports_distance_field_text,
-                     int max_texture_size,
-                     bool raw_draw = false);
+                     int max_texture_size);
     SerializeOptions(const SerializeOptions&);
     SerializeOptions& operator=(const SerializeOptions&);
     ~SerializeOptions();
@@ -201,7 +201,6 @@ class CC_PAINT_EXPORT PaintOp {
     bool can_use_lcd_text = false;
     bool context_supports_distance_field_text = true;
     int max_texture_size = 0;
-    bool raw_draw = false;
 
     // TODO(crbug.com/1096123): Cleanup after study completion.
     //
@@ -269,22 +268,22 @@ class CC_PAINT_EXPORT PaintOp {
 
   // For draw ops, returns true if a conservative bounding rect can be provided
   // for the op.
-  static bool GetBounds(const PaintOp* op, SkRect* rect);
+  static bool GetBounds(const PaintOp& op, SkRect* rect);
 
   // Returns the minimum conservative bounding rect that |op| draws to on a
   // canvas. |clip_rect| and |ctm| are the current clip rect and transform on
   // this canvas.
-  static gfx::Rect ComputePaintRect(const PaintOp* op,
+  static gfx::Rect ComputePaintRect(const PaintOp& op,
                                     const SkRect& clip_rect,
                                     const SkMatrix& ctm);
 
   // Returns true if the op lies outside the current clip and should be skipped.
   // Should only be used with draw ops.
-  static bool QuickRejectDraw(const PaintOp* op, const SkCanvas* canvas);
+  static bool QuickRejectDraw(const PaintOp& op, const SkCanvas* canvas);
 
   // Returns true if executing this op will require decoding of any lazy
   // generated images.
-  static bool OpHasDiscardableImages(const PaintOp* op);
+  static bool OpHasDiscardableImages(const PaintOp& op);
 
   // Returns true if the given op type has PaintFlags.
   static bool TypeHasFlags(PaintOpType type);
@@ -522,7 +521,7 @@ class CC_PAINT_EXPORT DrawColorOp final : public PaintOp {
  public:
   static constexpr PaintOpType kType = PaintOpType::DrawColor;
   static constexpr bool kIsDrawOp = true;
-  DrawColorOp(SkColor color, SkBlendMode mode)
+  DrawColorOp(SkColor4f color, SkBlendMode mode)
       : PaintOp(kType), color(color), mode(mode) {}
   static void Raster(const DrawColorOp* op,
                      SkCanvas* canvas,
@@ -531,7 +530,7 @@ class CC_PAINT_EXPORT DrawColorOp final : public PaintOp {
   static bool AreEqual(const PaintOp* left, const PaintOp* right);
   HAS_SERIALIZATION_FUNCTIONS();
 
-  SkColor color;
+  SkColor4f color;
   SkBlendMode mode;
 
  private:
@@ -978,7 +977,8 @@ class CC_PAINT_EXPORT SaveLayerOp final : public PaintOpWithFlags {
 class CC_PAINT_EXPORT SaveLayerAlphaOp final : public PaintOp {
  public:
   static constexpr PaintOpType kType = PaintOpType::SaveLayerAlpha;
-  SaveLayerAlphaOp(const SkRect* bounds, uint8_t alpha)
+  template <class F, class = std::enable_if_t<std::is_same_v<F, float>>>
+  SaveLayerAlphaOp(const SkRect* bounds, F alpha)
       : PaintOp(kType), bounds(bounds ? *bounds : kUnsetRect), alpha(alpha) {}
   static void Raster(const SaveLayerAlphaOp* op,
                      SkCanvas* canvas,
@@ -990,7 +990,7 @@ class CC_PAINT_EXPORT SaveLayerAlphaOp final : public PaintOp {
   HAS_SERIALIZATION_FUNCTIONS();
 
   SkRect bounds;
-  uint8_t alpha;
+  float alpha;
 
  private:
   SaveLayerAlphaOp() : PaintOp(kType) {}
@@ -1080,6 +1080,9 @@ using LargestPaintOp =
                               DrawImageRectOp,
                               DrawDRRectOp>::type;
 
+// Defined outside of the class as this const is used in multiple files.
+static constexpr int kMinNumberOfSlowPathsForMSAA = 6;
+
 class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
  public:
   enum { kInitialBufferSize = 4096 };
@@ -1135,7 +1138,9 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
   size_t total_op_count() const { return op_count_ + subrecord_op_count_; }
 
   size_t next_op_offset() const { return used_; }
-  int num_slow_paths() const { return num_slow_paths_; }
+  int num_slow_paths_up_to_min_for_MSAA() const {
+    return num_slow_paths_up_to_min_for_MSAA_;
+  }
   bool HasNonAAPaint() const { return has_non_aa_paint_; }
   bool HasDiscardableImages() const { return has_discardable_images_; }
 
@@ -1160,12 +1165,12 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
   // Resize the PaintOpBuffer to exactly fit the current amount of used space.
   void ShrinkToFit();
 
-  const PaintOp* GetFirstOp() const {
-    return reinterpret_cast<const PaintOp*>(data_.get());
+  const PaintOp& GetFirstOp() const {
+    return reinterpret_cast<const PaintOp&>(*data_);
   }
 
   template <typename T, typename... Args>
-  const T* push(Args&&... args) {
+  const T& push(Args&&... args) {
     static_assert(std::is_convertible<T, PaintOp>::value, "T not a PaintOp.");
     static_assert(alignof(T) <= PaintOpAlign, "");
     static_assert(sizeof(T) < std::numeric_limits<uint16_t>::max(),
@@ -1177,7 +1182,7 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
     DCHECK_EQ(op->type, static_cast<uint32_t>(T::kType));
     op->skip = skip;
     AnalyzeAddedOp(op);
-    return op;
+    return *op;
   }
 
   void UpdateSaveLayerBounds(size_t offset, const SkRect& bounds) {
@@ -1204,8 +1209,10 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
     static_assert(!std::is_same<T, PaintOp>::value,
                   "AnalyzeAddedOp needs a subtype of PaintOp");
 
-    num_slow_paths_ += op->CountSlowPathsFromFlags();
-    num_slow_paths_ += op->CountSlowPaths();
+    if (num_slow_paths_up_to_min_for_MSAA_ < kMinNumberOfSlowPathsForMSAA) {
+      num_slow_paths_up_to_min_for_MSAA_ += op->CountSlowPathsFromFlags();
+      num_slow_paths_up_to_min_for_MSAA_ += op->CountSlowPaths();
+    }
 
     has_non_aa_paint_ |= op->HasNonAAPaint();
 
@@ -1227,46 +1234,50 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
   const T* GetOpAtForTesting(size_t index) const {
     size_t i = 0;
     for (PaintOpBuffer::Iterator it(this); it && i <= index; ++it, ++i) {
-      if (i == index && (*it)->GetType() == T::kType)
-        return static_cast<const T*>(*it);
+      if (i == index && it->GetType() == T::kType)
+        return static_cast<const T*>(it.get());
     }
     return nullptr;
   }
 
-  size_t GetOpOffsetForTracing(const PaintOp* op) const {
-    DCHECK_GE(reinterpret_cast<const char*>(op), data_.get());
-    size_t result = reinterpret_cast<const char*>(op) - data_.get();
+  size_t GetOpOffsetForTracing(const PaintOp& op) const {
+    DCHECK_GE(reinterpret_cast<const char*>(&op), data_.get());
+    size_t result =
+        static_cast<size_t>(reinterpret_cast<const char*>(&op) - data_.get());
     DCHECK_LT(result, used_);
     return result;
   }
 
   class CC_PAINT_EXPORT Iterator {
    public:
+    using value_type = PaintOp;
     explicit Iterator(const PaintOpBuffer* buffer)
         : Iterator(buffer, buffer->data_.get(), 0u) {}
 
-    PaintOp* operator->() const { return reinterpret_cast<PaintOp*>(ptr_); }
-    PaintOp* operator*() const { return operator->(); }
-    Iterator begin() { return Iterator(buffer_); }
-    Iterator end() {
+    PaintOp* get() const { return reinterpret_cast<PaintOp*>(ptr_); }
+    PaintOp* operator->() const { return get(); }
+    PaintOp& operator*() const { return *get(); }
+    Iterator begin() const { return Iterator(buffer_); }
+    Iterator end() const {
       return Iterator(buffer_, buffer_->data_.get() + buffer_->used_,
                       buffer_->used_);
     }
-    bool operator!=(const Iterator& other) {
+    bool operator==(const Iterator& other) const {
       // Not valid to compare iterators on different buffers.
       DCHECK_EQ(other.buffer_, buffer_);
-      return other.op_offset_ != op_offset_;
+      return other.op_offset_ == op_offset_;
     }
+    bool operator!=(const Iterator& other) const { return !(*this == other); }
     Iterator& operator++() {
       DCHECK(*this);
-      const PaintOp* op = **this;
-      ptr_ += op->skip;
-      op_offset_ += op->skip;
+      const PaintOp& op = **this;
+      ptr_ += op.skip;
+      op_offset_ += op.skip;
 
       CHECK_LE(op_offset_, buffer_->used_);
       return *this;
     }
-    operator bool() const { return op_offset_ < buffer_->used_; }
+    explicit operator bool() const { return op_offset_ < buffer_->used_; }
 
    private:
     Iterator(const PaintOpBuffer* buffer, char* ptr, size_t op_offset)
@@ -1276,14 +1287,15 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
 
     // `buffer_` and `ptr_` are not a raw_ptr<...> for performance reasons
     // (based on analysis of sampling profiler data and tab_search:top100:2020).
-    const PaintOpBuffer* buffer_ = nullptr;
-    char* ptr_ = nullptr;
+    RAW_PTR_EXCLUSION const PaintOpBuffer* buffer_ = nullptr;
+    RAW_PTR_EXCLUSION char* ptr_ = nullptr;
 
     size_t op_offset_ = 0;
   };
 
   class CC_PAINT_EXPORT OffsetIterator {
    public:
+    using value_type = PaintOp;
     // Offsets and paint op buffer must come from the same DisplayItemList.
     OffsetIterator(const PaintOpBuffer* buffer,
                    const std::vector<size_t>* offsets)
@@ -1297,17 +1309,21 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
       ptr_ += op_offset_;
     }
 
-    PaintOp* operator->() const { return reinterpret_cast<PaintOp*>(ptr_); }
-    PaintOp* operator*() const { return operator->(); }
-    OffsetIterator begin() { return OffsetIterator(buffer_, offsets_); }
-    OffsetIterator end() {
+    PaintOp* get() const { return reinterpret_cast<PaintOp*>(ptr_); }
+    PaintOp* operator->() const { return get(); }
+    PaintOp& operator*() const { return *get(); }
+    OffsetIterator begin() const { return OffsetIterator(buffer_, offsets_); }
+    OffsetIterator end() const {
       return OffsetIterator(buffer_, buffer_->data_.get() + buffer_->used_,
                             buffer_->used_, offsets_);
     }
-    bool operator!=(const OffsetIterator& other) {
+    bool operator==(const OffsetIterator& other) const {
       // Not valid to compare iterators on different buffers.
       DCHECK_EQ(other.buffer_, buffer_);
-      return other.op_offset_ != op_offset_;
+      return other.op_offset_ == op_offset_;
+    }
+    bool operator!=(const OffsetIterator& other) const {
+      return !(*this == other);
     }
     OffsetIterator& operator++() {
       if (++offsets_index_ >= offsets_->size()) {
@@ -1331,7 +1347,7 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
       return *this;
     }
 
-    operator bool() const { return op_offset_ < buffer_->used_; }
+    explicit operator bool() const { return op_offset_ < buffer_->used_; }
 
    private:
     OffsetIterator(const PaintOpBuffer* buffer,
@@ -1345,9 +1361,9 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
     // `buffer_`, `ptr_`, and `offsets_` are not a raw_ptr<...> for performance
     // reasons (based on analysis of sampling profiler data and
     // tab_search:top100:2020).
-    const PaintOpBuffer* buffer_ = nullptr;
-    char* ptr_ = nullptr;
-    const std::vector<size_t>* offsets_;
+    RAW_PTR_EXCLUSION const PaintOpBuffer* buffer_ = nullptr;
+    RAW_PTR_EXCLUSION char* ptr_ = nullptr;
+    RAW_PTR_EXCLUSION const std::vector<size_t>* offsets_;
 
     size_t op_offset_ = 0;
     size_t offsets_index_ = 0;
@@ -1355,42 +1371,47 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
 
   class CC_PAINT_EXPORT CompositeIterator {
    public:
+    using value_type = PaintOp;
     // Offsets and paint op buffer must come from the same DisplayItemList.
     CompositeIterator(const PaintOpBuffer* buffer,
                       const std::vector<size_t>* offsets);
     CompositeIterator(const CompositeIterator& other);
     CompositeIterator(CompositeIterator&& other);
 
-    PaintOp* operator->() const {
-      return using_offsets_ ? **offset_iter_ : **iter_;
+    PaintOp* get() const {
+      return absl::visit([](const auto& iter) { return iter.get(); }, iter_);
     }
-    PaintOp* operator*() const {
-      return using_offsets_ ? **offset_iter_ : **iter_;
+    PaintOp* operator->() const { return get(); }
+    PaintOp& operator*() const { return *get(); }
+    CompositeIterator begin() const {
+      return absl::holds_alternative<Iterator>(iter_)
+                 ? CompositeIterator(absl::get<Iterator>(iter_).begin())
+                 : CompositeIterator(absl::get<OffsetIterator>(iter_).begin());
     }
-    bool operator==(const CompositeIterator& other) {
-      if (using_offsets_ != other.using_offsets_)
-        return false;
-      return using_offsets_ ? (*offset_iter_ == *other.offset_iter_)
-                            : (*iter_ == *other.iter_);
+    CompositeIterator end() const {
+      return absl::holds_alternative<Iterator>(iter_)
+                 ? CompositeIterator(absl::get<Iterator>(iter_).end())
+                 : CompositeIterator(absl::get<OffsetIterator>(iter_).end());
     }
-    bool operator!=(const CompositeIterator& other) {
+    bool operator==(const CompositeIterator& other) const {
+      return iter_ == other.iter_;
+    }
+    bool operator!=(const CompositeIterator& other) const {
       return !(*this == other);
     }
     CompositeIterator& operator++() {
-      if (using_offsets_)
-        ++*offset_iter_;
-      else
-        ++*iter_;
+      absl::visit([](auto& iter) { ++iter; }, iter_);
       return *this;
     }
-    operator bool() const {
-      return using_offsets_ ? !!*offset_iter_ : !!*iter_;
+    explicit operator bool() const {
+      return absl::visit([](const auto& iter) { return !!iter; }, iter_);
     }
 
    private:
-    bool using_offsets_ = false;
-    absl::optional<OffsetIterator> offset_iter_;
-    absl::optional<Iterator> iter_;
+    explicit CompositeIterator(OffsetIterator iter) : iter_(std::move(iter)) {}
+    explicit CompositeIterator(Iterator iter) : iter_(std::move(iter)) {}
+
+    absl::variant<Iterator, OffsetIterator> iter_;
   };
 
   class CC_PAINT_EXPORT PlaybackFoldingIterator {
@@ -1399,18 +1420,21 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
                             const std::vector<size_t>* offsets);
     ~PlaybackFoldingIterator();
 
+    const PaintOp* get() const { return current_op_; }
     const PaintOp* operator->() const { return current_op_; }
-    const PaintOp* operator*() const { return current_op_; }
+    const PaintOp& operator*() const { return *current_op_; }
 
     PlaybackFoldingIterator& operator++() {
       FindNextOp();
       return *this;
     }
 
-    operator bool() const { return !!current_op_; }
+    explicit operator bool() const { return !!current_op_; }
 
     // Guaranteed to be 255 for all ops without flags.
-    uint8_t alpha() const { return current_alpha_; }
+    uint8_t alpha() const {
+      return static_cast<uint8_t>(current_alpha_ * 255.0f);
+    }
 
    private:
     void FindNextOp();
@@ -1424,9 +1448,9 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
 
     // `current_op_` is not a raw_ptr<...> for performance reasons (based on
     // analysis of sampling profiler data and tab_search:top100:2020).
-    const PaintOp* current_op_ = nullptr;
+    RAW_PTR_EXCLUSION const PaintOp* current_op_ = nullptr;
 
-    uint8_t current_alpha_ = 255;
+    float current_alpha_ = 1.0f;
   };
 
  private:
@@ -1454,8 +1478,10 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
   size_t subrecord_bytes_used_ = 0;
   // Record total op count of referenced sub-record and display lists.
   size_t subrecord_op_count_ = 0;
-  // Record paths for veto-to-msaa for gpu raster.
-  int num_slow_paths_ = 0;
+  // Record paths for veto-to-msaa for gpu raster. Counting slow paths can be
+  // very expensive, we stop counting them once reaching the minimum number
+  // required for an MSAA sample count for raster.
+  int num_slow_paths_up_to_min_for_MSAA_ = 0;
 
   bool has_non_aa_paint_ : 1;
   bool has_discardable_images_ : 1;

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,10 @@ class BLINK_COMMON_EXPORT ContentToVisibleTimeReporter {
     // TabWasShown called twice for a frame without TabWasHidden between. Treat
     // the first TabWasShown as an incomplete tab switch.
     kMissedTabHide = 3,
-    kMaxValue = kMissedTabHide,
+    // DEPRECATED: The tab switch couldn't be measured because of an unhandled
+    // path in the compositor.
+    DEPRECATED_kUnhandled = 4,
+    kMaxValue = DEPRECATED_kUnhandled,
   };
 
   ContentToVisibleTimeReporter();
@@ -54,7 +57,6 @@ class BLINK_COMMON_EXPORT ContentToVisibleTimeReporter {
       base::TimeTicks event_start_time,
       bool destination_is_loaded,
       bool show_reason_tab_switching,
-      bool show_reason_unoccluded,
       bool show_reason_bfcache_restore);
 
   // Indicates that the tab associated with this recorder was hidden. If no
@@ -70,9 +72,20 @@ class BLINK_COMMON_EXPORT ContentToVisibleTimeReporter {
   void RecordHistogramsAndTraceEvents(
       TabSwitchResult tab_switch_result,
       bool show_reason_tab_switching,
-      bool show_reason_unoccluded,
       bool show_reason_bfcache_restore,
       const gfx::PresentationFeedback& feedback);
+
+  // Saves the given `state` and `has_saved_frames`, and invalidates all
+  // existing callbacks that might reference the old state.
+  void OverwriteTabSwitchStartState(
+      mojom::RecordContentToVisibleTimeRequestPtr state,
+      bool has_saved_frames);
+
+  // Clears state and invalidates all existing callbacks that might reference
+  // the old state.
+  void ResetTabSwitchStartState() {
+    OverwriteTabSwitchStartState(nullptr, false);
+  }
 
   // Whether there was a saved frame for the last tab switch.
   bool has_saved_frames_;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #include "base/memory/raw_ptr.h"
 
 #include "ui/shell_dialogs/selected_file_info.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -27,7 +28,8 @@ class CancellingSelectFileDialog : public ui::SelectFileDialog {
                       int file_type_index,
                       const base::FilePath::StringType& default_extension,
                       gfx::NativeWindow owning_window,
-                      void* params) override {
+                      void* params,
+                      const GURL* caller) override {
     if (out_params_) {
       out_params_->type = type;
       if (file_types)
@@ -37,6 +39,7 @@ class CancellingSelectFileDialog : public ui::SelectFileDialog {
       out_params_->owning_window = owning_window;
       out_params_->file_type_index = file_type_index;
       out_params_->default_path = default_path;
+      out_params_->title = title;
     }
     listener_->FileSelectionCanceled(params);
   }
@@ -70,7 +73,8 @@ class FakeSelectFileDialog : public ui::SelectFileDialog {
                       int file_type_index,
                       const base::FilePath::StringType& default_extension,
                       gfx::NativeWindow owning_window,
-                      void* params) override {
+                      void* params,
+                      const GURL* caller) override {
     if (out_params_) {
       out_params_->type = type;
       if (file_types)
@@ -80,6 +84,7 @@ class FakeSelectFileDialog : public ui::SelectFileDialog {
       out_params_->owning_window = owning_window;
       out_params_->file_type_index = file_type_index;
       out_params_->default_path = default_path;
+      out_params_->title = title;
     }
     // The selected files are passed by reference to the listener. Ensure they
     // outlive the dialog if it is immediately deleted by the listener.

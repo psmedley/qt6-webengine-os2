@@ -1,12 +1,12 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/ozone/platform/wayland/host/wayland_buffer_backing_shm.h"
 
 #include "build/chromeos_buildflags.h"
+#include "ui/ozone/platform/wayland/host/wayland_buffer_factory.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
-#include "ui/ozone/platform/wayland/host/wayland_shm.h"
 
 namespace ui {
 
@@ -39,10 +39,16 @@ void WaylandBufferBackingShm::RequestBufferHandle(
 #else
   const bool with_alpha_channel = true;
 #endif
-  std::move(callback).Run(connection_->shm()->CreateBuffer(fd_, length_, size(),
-                                                           with_alpha_channel));
+  std::move(callback).Run(
+      connection()->wayland_buffer_factory()->CreateShmBuffer(
+          fd_, length_, size(), with_alpha_channel));
   if (UseExplicitSyncRelease())
     auto close = std::move(fd_);
+}
+
+WaylandBufferBacking::BufferBackingType
+WaylandBufferBackingShm::GetBackingType() const {
+  return WaylandBufferBacking::BufferBackingType::kShm;
 }
 
 }  // namespace ui

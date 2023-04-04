@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,10 +43,10 @@ class MimeUtil : public PlatformMimeUtil {
       const std::string& mime_type,
       base::FilePath::StringType* extension) const;
 
-  bool MatchesMimeType(const std::string &mime_type_pattern,
-                       const std::string &mime_type) const;
+  bool MatchesMimeType(const std::string& mime_type_pattern,
+                       const std::string& mime_type) const;
 
-  bool ParseMimeTypeWithoutParameter(const std::string& type_string,
+  bool ParseMimeTypeWithoutParameter(base::StringPiece type_string,
                                      std::string* top_level_type,
                                      std::string* subtype) const;
 
@@ -165,7 +165,7 @@ static const MimeInfo kPrimaryMappings[] = {
     {"image/jpeg", "jpeg,jpg"},
     {"image/jxl", "jxl"},
     {"image/png", "png"},
-    {"image/apng", "png"},
+    {"image/apng", "png,apng"},
     {"image/svg+xml", "svg,svgz"},
     {"image/webp", "webp"},
     {"multipart/related", "mht,mhtml"},
@@ -193,6 +193,7 @@ static const MimeInfo kSecondaryMappings[] = {
     {"application/gzip", "gz,tgz"},
     {"application/javascript", "js"},
     {"application/json", "json"},  // Per http://www.ietf.org/rfc/rfc4627.txt.
+    {"application/msword", "doc,dot"},
     {"application/octet-stream", "bin,exe,com"},
     {"application/pdf", "pdf"},
     {"application/pkcs7-mime", "p7m,p7c,p7z"},
@@ -204,8 +205,14 @@ static const MimeInfo kSecondaryMappings[] = {
     {"application/vnd.android.package-archive", "apk"},
     {"application/vnd.mozilla.xul+xml", "xul"},
     {"application/vnd.ms-excel", "xls"},
+    {"application/vnd.ms-powerpoint", "ppt"},
+    {"application/"
+     "vnd.openxmlformats-officedocument.presentationml.presentation",
+     "pptx"},
     {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
      "xlsx"},
+    {"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     "docx"},
     {"application/x-gzip", "gz,tgz"},
     {"application/x-mpegurl", "m3u8"},
     {"application/x-shockwave-flash", "swf,swl"},
@@ -570,23 +577,24 @@ bool ParseMimeType(const std::string& type_str,
   return true;
 }
 
-bool MimeUtil::ParseMimeTypeWithoutParameter(
-    const std::string& type_string,
-    std::string* top_level_type,
-    std::string* subtype) const {
-  std::vector<std::string> components = base::SplitString(
+bool MimeUtil::ParseMimeTypeWithoutParameter(base::StringPiece type_string,
+                                             std::string* top_level_type,
+                                             std::string* subtype) const {
+  std::vector<base::StringPiece> components = base::SplitStringPiece(
       type_string, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
   if (components.size() != 2)
     return false;
-  TrimWhitespaceASCII(components[0], base::TRIM_LEADING, &components[0]);
-  TrimWhitespaceASCII(components[1], base::TRIM_TRAILING, &components[1]);
+  components[0] = TrimWhitespaceASCII(components[0], base::TRIM_LEADING);
+  components[1] = TrimWhitespaceASCII(components[1], base::TRIM_TRAILING);
   if (!HttpUtil::IsToken(components[0]) || !HttpUtil::IsToken(components[1]))
     return false;
 
   if (top_level_type)
-    *top_level_type = components[0];
+    top_level_type->assign(std::string(components[0]));
+
   if (subtype)
-    *subtype = components[1];
+    subtype->assign(std::string(components[1]));
+
   return true;
 }
 
@@ -638,7 +646,7 @@ bool MatchesMimeType(const std::string& mime_type_pattern,
   return g_mime_util.Get().MatchesMimeType(mime_type_pattern, mime_type);
 }
 
-bool ParseMimeTypeWithoutParameter(const std::string& type_string,
+bool ParseMimeTypeWithoutParameter(base::StringPiece type_string,
                                    std::string* top_level_type,
                                    std::string* subtype) {
   return g_mime_util.Get().ParseMimeTypeWithoutParameter(

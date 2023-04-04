@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,9 +50,7 @@
 #include "content/renderer/agent_scheduling_group.h"
 #include "content/renderer/document_state.h"
 #include "content/renderer/navigation_state.h"
-#include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/render_process.h"
-#include "content/renderer/render_view_impl.h"
 #include "content/renderer/service_worker/service_worker_network_provider_for_frame.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
@@ -79,6 +77,7 @@
 #include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom.h"
+#include "third_party/blink/public/mojom/frame/remote_frame.mojom.h"
 #include "third_party/blink/public/mojom/frame/tree_scope_type.mojom.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_network_provider.h"
@@ -92,14 +91,16 @@
 #include "third_party/blink/public/web/web_document_loader.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_history_commit_type.h"
-#include "third_party/blink/public/web/web_history_entry.h"
 #include "third_party/blink/public/web/web_history_item.h"
 #include "third_party/blink/public/web/web_input_method_controller.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
+#include "third_party/blink/public/web/web_navigation_type.h"
 #include "third_party/blink/public/web/web_origin_trials.h"
 #include "third_party/blink/public/web/web_page_popup.h"
 #include "third_party/blink/public/web/web_performance.h"
+#include "third_party/blink/public/web/web_picture_in_picture_window_options.h"
+#include "third_party/blink/public/web/web_remote_frame.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
@@ -260,12 +261,26 @@ class MockedLocalFrameHostInterceptorTestRenderFrame : public TestRenderFrame {
 blink::mojom::CommitNavigationParamsPtr DummyCommitNavigationParams() {
   blink::mojom::CommitNavigationParamsPtr params =
       blink::CreateCommitNavigationParams();
-  params->sandbox_flags = network::mojom::WebSandboxFlags::kNone;
   return params;
 }
 
-mojom::RemoteMainFrameInterfacesPtr CreateStubRemoteFrameInterfaces() {
-  auto interfaces = mojom::RemoteMainFrameInterfaces::New();
+blink::mojom::RemoteFrameInterfacesFromBrowserPtr
+CreateStubRemoteFrameInterfaces() {
+  auto interfaces = blink::mojom::RemoteFrameInterfacesFromBrowser::New();
+
+  mojo::AssociatedRemote<blink::mojom::RemoteFrame> frame;
+  interfaces->frame_receiver = frame.BindNewEndpointAndPassDedicatedReceiver();
+
+  mojo::AssociatedRemote<blink::mojom::RemoteFrameHost> frame_host;
+  std::ignore = frame_host.BindNewEndpointAndPassDedicatedReceiver();
+  interfaces->frame_host = frame_host.Unbind();
+
+  return interfaces;
+}
+
+blink::mojom::RemoteMainFrameInterfacesPtr
+CreateStubRemoteMainFrameInterfaces() {
+  auto interfaces = blink::mojom::RemoteMainFrameInterfaces::New();
 
   mojo::AssociatedRemote<blink::mojom::RemoteMainFrame> main_frame;
   interfaces->main_frame = main_frame.BindNewEndpointAndPassDedicatedReceiver();
@@ -317,8 +332,6 @@ class RenderViewImplTest : public RenderViewTest {
   }
 
   ~RenderViewImplTest() override {}
-
-  RenderViewImpl* view() { return static_cast<RenderViewImpl*>(view_); }
 
   blink::WebFrameWidget* main_frame_widget() {
     return frame()->GetLocalRootWebFrameWidget();
@@ -604,9 +617,10 @@ TEST_F(RenderViewImplTest, IsPinchGestureActivePropagatesToProxies) {
           root_web_frame->FirstChild()->NextSibling()->ToWebLocalFrame()));
   ASSERT_TRUE(child_frame_2);
   static_cast<mojom::Frame*>(child_frame_1)
-      ->Unload(kProxyRoutingId, true,
+      ->Unload(/*is_loading=*/true,
                ReconstructReplicationStateForTesting(child_frame_1),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(root_web_frame->FirstChild()->IsWebRemoteFrame());
   EXPECT_FALSE(root_web_frame->FirstChild()
                    ->ToWebRemoteFrame()
@@ -629,12 +643,13 @@ TEST_F(RenderViewImplTest, IsPinchGestureActivePropagatesToProxies) {
                   .is_pinch_gesture_active);
 
   // Create a new remote child, and get its proxy. Unloading will force creation
-  // and registering of a new RenderFrameProxy, which should pick up the
+  // and registering of a new WebRemoteFrame, which should pick up the
   // existing setting.
   static_cast<mojom::Frame*>(child_frame_2)
-      ->Unload(kProxyRoutingId + 1, true,
+      ->Unload(/*is_loading=*/true,
                ReconstructReplicationStateForTesting(child_frame_2),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(root_web_frame->FirstChild()->NextSibling()->IsWebRemoteFrame());
   // Verify new child has the flag too.
   EXPECT_TRUE(root_web_frame->FirstChild()
@@ -701,9 +716,8 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
 
   // Check post data sent to browser matches
   EXPECT_TRUE(last_commit_params->page_state.IsValid());
-  std::unique_ptr<blink::WebHistoryEntry> entry =
-      PageStateToHistoryEntry(last_commit_params->page_state);
-  blink::WebHTTPBody body = entry->root().HttpBody();
+  blink::WebHTTPBody body =
+      blink::WebHistoryItem(last_commit_params->page_state).HttpBody();
   blink::WebHTTPBody::Element element;
   bool successful = body.ElementAt(0, element);
   EXPECT_TRUE(successful);
@@ -749,14 +763,7 @@ class RenderViewImplUpdateTitleTest : public RenderViewImplTest {
   }
 };
 
-#if BUILDFLAG(IS_ANDROID)
-// Failing on Android: http://crbug.com/1080328
-#define MAYBE_OnNavigationLoadDataWithBaseURL \
-  DISABLED_OnNavigationLoadDataWithBaseURL
-#else
-#define MAYBE_OnNavigationLoadDataWithBaseURL OnNavigationLoadDataWithBaseURL
-#endif
-TEST_F(RenderViewImplUpdateTitleTest, MAYBE_OnNavigationLoadDataWithBaseURL) {
+TEST_F(RenderViewImplUpdateTitleTest, OnNavigationLoadDataWithBaseURL) {
   auto common_params = blink::CreateCommonNavigationParams();
   common_params->url = GURL("data:text/html,");
   common_params->navigation_type =
@@ -766,19 +773,17 @@ TEST_F(RenderViewImplUpdateTitleTest, MAYBE_OnNavigationLoadDataWithBaseURL) {
   auto commit_params = DummyCommitNavigationParams();
   commit_params->data_url_as_string =
       "data:text/html,<html><head><title>Data page</title></head></html>";
-  FrameLoadWaiter waiter(frame());
-  frame()->Navigate(std::move(common_params), std::move(commit_params));
-  waiter.Wait();
-
-  // While LocalFrame is initialized, it's called with an empty title.
-  const absl::optional<::std::u16string> null_title;
-  EXPECT_CALL(*title_mock_frame_host(), UpdateTitle(null_title, testing::_))
-      .Times(1);
 
   const absl::optional<::std::u16string>& title =
       absl::make_optional(u"Data page");
   EXPECT_CALL(*title_mock_frame_host(), UpdateTitle(title, testing::_))
       .Times(1);
+  FrameLoadWaiter waiter(frame());
+  frame()->Navigate(std::move(common_params), std::move(commit_params));
+  waiter.Wait();
+
+  base::RunLoop().RunUntilIdle();
+  testing::Mock::VerifyAndClearExpectations(title_mock_frame_host());
 }
 #endif
 
@@ -864,7 +869,8 @@ TEST_F(RenderViewImplTest, BeginNavigationHandlesAllTopLevel) {
       blink::kWebNavigationTypeFormSubmitted,
       blink::kWebNavigationTypeBackForward,
       blink::kWebNavigationTypeReload,
-      blink::kWebNavigationTypeFormResubmitted,
+      blink::kWebNavigationTypeFormResubmittedBackForward,
+      blink::kWebNavigationTypeFormResubmittedReload,
       blink::kWebNavigationTypeOther,
   };
 
@@ -962,12 +968,12 @@ TEST_F(RenderViewImplTest, BeginNavigationForWebUI) {
   popup_request.SetMode(network::mojom::RequestMode::kNavigate);
   popup_request.SetRedirectMode(network::mojom::RedirectMode::kManual);
   popup_request.SetRequestContext(blink::mojom::RequestContextType::INTERNAL);
-  blink::WebView* new_web_view = view()->CreateView(
-      GetMainFrame(), popup_request, blink::WebWindowFeatures(), "foo",
+  blink::WebView* new_web_view = frame()->CreateNewWindow(
+      popup_request, blink::WebWindowFeatures(), "foo",
       blink::kWebNavigationPolicyNewForegroundTab,
       network::mojom::WebSandboxFlags::kNone,
       blink::AllocateSessionStorageNamespaceId(), consumed_user_gesture,
-      absl::nullopt);
+      absl::nullopt, absl::nullopt);
   auto popup_navigation_info = std::make_unique<blink::WebNavigationInfo>();
   popup_navigation_info->url_request = std::move(popup_request);
   popup_navigation_info->frame_type =
@@ -981,7 +987,7 @@ TEST_F(RenderViewImplTest, BeginNavigationForWebUI) {
   EXPECT_TRUE(frame()->IsURLOpened());
 }
 
-// This test verifies that when device emulation is enabled, RenderFrameProxy
+// This test verifies that when device emulation is enabled, WebRemoteFrame
 // continues to receive the original ScreenInfo and not the emualted
 // ScreenInfo.
 TEST_F(RenderViewImplScaleFactorTest, DeviceEmulationWithOOPIF) {
@@ -1000,23 +1006,21 @@ TEST_F(RenderViewImplScaleFactorTest, DeviceEmulationWithOOPIF) {
   ASSERT_TRUE(child_frame);
 
   static_cast<mojom::Frame*>(child_frame)
-      ->Unload(kProxyRoutingId + 1, true,
+      ->Unload(/*is_loading=*/true,
                ReconstructReplicationStateForTesting(child_frame),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(web_frame->FirstChild()->IsWebRemoteFrame());
-  RenderFrameProxy* child_proxy = RenderFrameProxy::FromWebFrame(
-      web_frame->FirstChild()->ToWebRemoteFrame());
-  ASSERT_TRUE(child_proxy);
 
   // Verify that the system device scale factor has propagated into the
-  // RenderFrameProxy.
+  // WebRemoteFrame.
   EXPECT_EQ(device_scale, GetMainRenderFrame()->GetDeviceScaleFactor());
   EXPECT_EQ(device_scale,
             main_frame_widget()->GetOriginalScreenInfo().device_scale_factor);
 
   TestEmulatedSizeDprDsf(640, 480, 3.f, device_scale);
 
-  // Verify that the RenderFrameProxy device scale factor is still the same.
+  // Verify that the WebRemoteFrame device scale factor is still the same.
   EXPECT_EQ(3.f, GetMainRenderFrame()->GetDeviceScaleFactor());
   EXPECT_EQ(device_scale,
             main_frame_widget()->GetOriginalScreenInfo().device_scale_factor);
@@ -1043,8 +1047,9 @@ TEST_F(RenderViewImplTest, OriginReplicationForUnload) {
   auto replication_state = ReconstructReplicationStateForTesting(child_frame);
   replication_state->origin = url::Origin::Create(GURL("http://foo.com"));
   static_cast<mojom::Frame*>(child_frame)
-      ->Unload(kProxyRoutingId, true, replication_state->Clone(),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+      ->Unload(/*is_loading=*/true, replication_state->Clone(),
+               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
 
   // The child frame should now be a WebRemoteFrame.
   EXPECT_TRUE(web_frame->FirstChild()->IsWebRemoteFrame());
@@ -1062,8 +1067,9 @@ TEST_F(RenderViewImplTest, OriginReplicationForUnload) {
       static_cast<TestRenderFrame*>(RenderFrame::FromWebFrame(
           web_frame->FirstChild()->NextSibling()->ToWebLocalFrame()));
   static_cast<mojom::Frame*>(child_frame2)
-      ->Unload(kProxyRoutingId + 1, true, std::move(replication_state),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+      ->Unload(/*is_loading=*/true, std::move(replication_state),
+               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(web_frame->FirstChild()->NextSibling()->IsWebRemoteFrame());
   EXPECT_TRUE(
       web_frame->FirstChild()->NextSibling()->GetSecurityOrigin().IsOpaque());
@@ -1085,12 +1091,13 @@ TEST_F(RenderViewImplScaleFactorTest, DeviceScaleCorrectAfterCrossOriginNav) {
   blink::VisualProperties test_visual_properties =
       MakeVisualPropertiesWithDeviceScaleFactor(device_scale);
 
+  blink::RemoteFrameToken remote_child_frame_token = blink::RemoteFrameToken();
   // Unload the main frame after which it should become a WebRemoteFrame.
   auto replication_state = ReconstructReplicationStateForTesting(frame());
   // replication_state.origin = url::Origin(GURL("http://foo.com"));
   static_cast<mojom::Frame*>(frame())->Unload(
-      kProxyRoutingId, true, replication_state->Clone(),
-      blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+      /*is_loading=*/true, replication_state->Clone(), remote_child_frame_token,
+      CreateStubRemoteFrameInterfaces(), CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(web_view_->MainFrame()->IsWebRemoteFrame());
 
   // Do the remote-to-local transition for the proxy, which is to create a
@@ -1129,11 +1136,16 @@ TEST_F(RenderViewImplScaleFactorTest, DeviceScaleCorrectAfterCrossOriginNav) {
       *agent_scheduling_group_, blink::LocalFrameToken(), routing_id,
       TestRenderFrame::CreateStubFrameReceiver(),
       TestRenderFrame::CreateStubBrowserInterfaceBrokerRemote(),
-      kProxyRoutingId, absl::nullopt, MSG_ROUTING_NONE, MSG_ROUTING_NONE,
+      TestRenderFrame::CreateStubAssociatedInterfaceProviderRemote(),
+      /*previous_frame_token=*/remote_child_frame_token,
+      /*opener_frame_token=*/absl::nullopt,
+      /*parent_frame_token=*/absl::nullopt,
+      /*previous_sibling_frame_token=*/absl::nullopt,
       base::UnguessableToken::Create(), blink::mojom::TreeScopeType::kDocument,
       std::move(replication_state), std::move(widget_params),
       blink::mojom::FrameOwnerProperties::New(),
-      /*has_committed_real_load=*/true, CreateStubPolicyContainer());
+      /*is_on_initial_empty_document=*/true, blink::DocumentToken(),
+      CreateStubPolicyContainer());
 
   TestRenderFrame* provisional_frame =
       static_cast<TestRenderFrame*>(RenderFrameImpl::FromRoutingID(routing_id));
@@ -1176,10 +1188,12 @@ TEST_F(RenderViewImplTest, DetachingProxyAlsoDestroysProvisionalFrame) {
       RenderFrame::FromWebFrame(web_frame->FirstChild()->ToWebLocalFrame()));
 
   // Unload the child frame.
+  blink::RemoteFrameToken child_remote_frame_token = blink::RemoteFrameToken();
   auto replication_state = ReconstructReplicationStateForTesting(child_frame);
   static_cast<mojom::Frame*>(child_frame)
-      ->Unload(kProxyRoutingId, true, replication_state.Clone(),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+      ->Unload(/*is_loading=*/true, replication_state.Clone(),
+               child_remote_frame_token, CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(web_frame->FirstChild()->IsWebRemoteFrame());
 
   // Do the first step of a remote-to-local transition for the child proxy,
@@ -1189,11 +1203,16 @@ TEST_F(RenderViewImplTest, DetachingProxyAlsoDestroysProvisionalFrame) {
       *agent_scheduling_group_, blink::LocalFrameToken(), routing_id,
       TestRenderFrame::CreateStubFrameReceiver(),
       TestRenderFrame::CreateStubBrowserInterfaceBrokerRemote(),
-      kProxyRoutingId, absl::nullopt, frame()->GetRoutingID(), MSG_ROUTING_NONE,
+      TestRenderFrame::CreateStubAssociatedInterfaceProviderRemote(),
+      child_remote_frame_token,
+      /*opener_frame_token=*/absl::nullopt,
+      /*parent_frame_token=*/web_frame->GetFrameToken(),
+      /*previous_sibling_frame_token=*/absl::nullopt,
       base::UnguessableToken::Create(), blink::mojom::TreeScopeType::kDocument,
       std::move(replication_state),
       /*widget_params=*/nullptr, blink::mojom::FrameOwnerProperties::New(),
-      /*has_committed_real_load=*/true, CreateStubPolicyContainer());
+      /*is_on_initial_empty_document=*/true, blink::DocumentToken(),
+      CreateStubPolicyContainer());
   {
     TestRenderFrame* provisional_frame = static_cast<TestRenderFrame*>(
         RenderFrameImpl::FromRoutingID(routing_id));
@@ -1203,9 +1222,9 @@ TEST_F(RenderViewImplTest, DetachingProxyAlsoDestroysProvisionalFrame) {
   // Detach the child frame (currently remote) in the main frame.
   ExecuteJavaScriptForTests(
       "document.body.removeChild(document.querySelector('iframe'));");
-  RenderFrameProxy* child_proxy =
-      RenderFrameProxy::FromRoutingID(kProxyRoutingId);
-  EXPECT_FALSE(child_proxy);
+  blink::WebRemoteFrame* child_remote_frame =
+      blink::WebRemoteFrame::FromFrameToken(child_remote_frame_token);
+  EXPECT_FALSE(child_remote_frame);
 
   // The provisional frame should have been deleted along with the proxy, and
   // thus any subsequent messages (such as OnNavigate) already in flight for it
@@ -1226,9 +1245,10 @@ TEST_F(RenderViewImplScaleFactorTest, SetZoomLevelAfterCrossProcessNavigation) {
   // Unload the main frame after which it should become a WebRemoteFrame.
   TestRenderFrame* main_frame = frame();
   static_cast<mojom::Frame*>(main_frame)
-      ->Unload(kProxyRoutingId, true,
+      ->Unload(/*is_loading=*/true,
                ReconstructReplicationStateForTesting(main_frame),
-               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+               blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+               CreateStubRemoteMainFrameInterfaces());
   EXPECT_TRUE(web_view_->MainFrame()->IsWebRemoteFrame());
 }
 
@@ -2554,8 +2574,6 @@ class RendererErrorPageTest : public RenderViewImplTest {
     return new TestContentRendererClient;
   }
 
-  RenderViewImpl* view() { return static_cast<RenderViewImpl*>(view_); }
-
   RenderFrameImpl* frame() {
     return static_cast<RenderFrameImpl*>(GetMainRenderFrame());
   }
@@ -2616,7 +2634,7 @@ TEST_F(RenderViewImplTest, SetAccessibilityMode) {
 TEST_F(RenderViewImplTest, AccessibilityModeOnClosingConnection) {
   // Force the RenderAccessibilityManager to bind a pending receiver so that we
   // can test what happens after closing the remote endpoint.
-  mojo::AssociatedRemote<mojom::RenderAccessibility> remote;
+  mojo::AssociatedRemote<blink::mojom::RenderAccessibility> remote;
   GetRenderAccessibilityManager()->BindReceiver(
       remote.BindNewEndpointAndPassReceiver());
 
@@ -2825,7 +2843,7 @@ TEST_F(RenderViewImplScaleFactorTest, PreferredSizeWithScaleFactor) {
   EXPECT_EQ(gfx::Size(400 + scrollbar_width, 400), size);
 }
 
-// Ensure the RenderViewImpl history list is properly updated when starting a
+// Ensure the `blink::WebView` history list is properly updated when starting a
 // new browser-initiated navigation.
 TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnNavigation) {
   blink::WebView* webview = web_view_;
@@ -2843,13 +2861,13 @@ TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnNavigation) {
   common_params->should_replace_current_entry = true;
   frame()->Navigate(std::move(common_params), std::move(commit_params));
 
-  // The current history list in RenderView is updated.
+  // The current history list in `blink::WebView` is updated.
   EXPECT_EQ(1, webview->HistoryBackListCount());
   EXPECT_EQ(2, webview->HistoryBackListCount() +
                    webview->HistoryForwardListCount() + 1);
 }
 
-// Ensure the RenderViewImpl history list is properly updated when starting a
+// Ensure the `blink::WebView` history list is properly updated when starting a
 // new history browser-initiated navigation.
 TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnHistoryNavigation) {
   blink::WebView* webview = web_view_;
@@ -2869,13 +2887,13 @@ TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnHistoryNavigation) {
   common_params->should_replace_current_entry = true;
   frame()->Navigate(std::move(common_params), std::move(commit_params));
 
-  // The current history list in RenderView is updated.
+  // The current history list in `blink::WebView` is updated.
   EXPECT_EQ(12, webview->HistoryBackListCount());
   EXPECT_EQ(25, webview->HistoryBackListCount() +
                     webview->HistoryForwardListCount() + 1);
 }
 
-// Ensure the RenderViewImpl history list is properly updated when starting a
+// Ensure the `blink::WebView` history list is properly updated when starting a
 // new history browser-initiated navigation with should_clear_history_list
 TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnShouldClearHistoryList) {
   blink::WebView* webview = web_view_;
@@ -2891,7 +2909,7 @@ TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnShouldClearHistoryList) {
   frame()->Navigate(blink::CreateCommonNavigationParams(),
                     std::move(commit_params));
 
-  // The current history list in RenderView is updated.
+  // The current history list in `blink::WebView` is updated.
   EXPECT_EQ(0, webview->HistoryBackListCount());
   EXPECT_EQ(1, webview->HistoryBackListCount() +
                    webview->HistoryForwardListCount() + 1);
@@ -2953,18 +2971,19 @@ TEST_F(RenderViewImplAddMessageToConsoleTest,
   base::RunLoop run_loop;
   bool was_callback_run = false;
   message_mock_frame_host()->SetDidAddMessageToConsoleCallback(
-      base::BindOnce(base::BindLambdaForTesting([&](const std::u16string& msg) {
+      base::BindLambdaForTesting([&](const std::u16string& msg) {
         // Makes sure this happens during the beforeunload handler.
         EXPECT_EQ(u"OnBeforeUnload called", msg);
 
         // Unloads the main frame.
         static_cast<mojom::Frame*>(frame())->Unload(
-            1, false, blink::mojom::FrameReplicationState::New(),
-            blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces());
+            /*is_loading=*/false, blink::mojom::FrameReplicationState::New(),
+            blink::RemoteFrameToken(), CreateStubRemoteFrameInterfaces(),
+            CreateStubRemoteMainFrameInterfaces());
 
         was_callback_run = true;
         run_loop.Quit();
-      })));
+      }));
 
   // Simulate a BeforeUnload IPC received from the browser.
   frame()->SimulateBeforeUnload(false);

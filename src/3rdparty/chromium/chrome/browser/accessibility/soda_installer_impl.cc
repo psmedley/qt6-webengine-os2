@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,11 +157,12 @@ void SodaInstallerImpl::OnEvent(Events event, const std::string& id) {
         base::UmaHistogramBoolean(kSodaBinaryInstallationResult, false);
       }
 
-      NotifyOnSodaError(language_code);
+      NotifyOnSodaInstallError(
+          language_code, speech::SodaInstaller::ErrorCode::kUnspecifiedError);
       break;
     case Events::COMPONENT_CHECKING_FOR_UPDATES:
     case Events::COMPONENT_UPDATED:
-    case Events::COMPONENT_NOT_UPDATED:
+    case Events::COMPONENT_ALREADY_UP_TO_DATE:
       // Do nothing.
       break;
   }

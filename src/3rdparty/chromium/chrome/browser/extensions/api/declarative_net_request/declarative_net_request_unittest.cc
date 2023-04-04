@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -382,7 +382,7 @@ class DeclarativeNetRequestUnittest : public DNRTestBase {
 
     std::u16string error;
     std::vector<std::string> actual_ids;
-    for (const auto& val : ids_value.GetListDeprecated())
+    for (const auto& val : ids_value.GetList())
       actual_ids.push_back(val.GetString());
 
     EXPECT_THAT(expected_ids, UnorderedElementsAreArray(actual_ids));
@@ -509,7 +509,7 @@ class SingleRulesetTest : public DeclarativeNetRequestUnittest {
     if (expected_rules_count)
       rules_count = *expected_rules_count;
     else if (rules_value_ && rules_value_->is_list())
-      rules_count = rules_value_->GetListDeprecated().size();
+      rules_count = rules_value_->GetList().size();
     else
       rules_count = rules_list_.size();
 
@@ -1043,7 +1043,7 @@ TEST_P(SingleRulesetTest, SessionRules) {
 
   base::Value result(base::Value::Type::LIST);
   RunGetRulesFunction(*extension(), RulesetScope::kSession, &result);
-  EXPECT_TRUE(result.GetListDeprecated().empty());
+  EXPECT_TRUE(result.GetList().empty());
 
   TestRule rule_1 = CreateGenericRule();
   rule_1.id = 1;
@@ -1052,7 +1052,7 @@ TEST_P(SingleRulesetTest, SessionRules) {
   ASSERT_NO_FATAL_FAILURE(RunUpdateRulesFunction(
       *extension(), {}, {rule_1, rule_2}, RulesetScope::kSession));
   RunGetRulesFunction(*extension(), RulesetScope::kSession, &result);
-  EXPECT_THAT(result.GetListDeprecated(),
+  EXPECT_THAT(result.GetList(),
               ::testing::UnorderedElementsAre(
                   ::testing::Eq(std::cref(*rule_1.ToValue())),
                   ::testing::Eq(std::cref(*rule_2.ToValue()))));
@@ -1061,16 +1061,15 @@ TEST_P(SingleRulesetTest, SessionRules) {
 
   // No dynamic rules should be returned.
   RunGetRulesFunction(*extension(), RulesetScope::kDynamic, &result);
-  EXPECT_TRUE(result.GetListDeprecated().empty());
+  EXPECT_TRUE(result.GetList().empty());
 
   ASSERT_NO_FATAL_FAILURE(RunUpdateRulesFunction(*extension(), {*rule_2.id}, {},
                                                  RulesetScope::kSession));
   RunGetRulesFunction(*extension(), RulesetScope::kSession, &result);
-  EXPECT_THAT(result.GetListDeprecated(),
-              ::testing::UnorderedElementsAre(
-                  ::testing::Eq(std::cref(*rule_1.ToValue()))));
+  EXPECT_THAT(result.GetList(), ::testing::UnorderedElementsAre(::testing::Eq(
+                                    std::cref(*rule_1.ToValue()))));
   RunGetRulesFunction(*extension(), RulesetScope::kDynamic, &result);
-  EXPECT_TRUE(result.GetListDeprecated().empty());
+  EXPECT_TRUE(result.GetList().empty());
 }
 
 // Ensure an error is raised when an extension adds a session-scoped regex rule
@@ -1394,7 +1393,7 @@ class MultipleRulesetsTest : public DeclarativeNetRequestUnittest {
     size_t rules_count = 0u;
     size_t rules_enabled_count = 0u;
     for (const TestRulesetInfo& info : rulesets_) {
-      size_t count = info.rules_value.GetListDeprecated().size();
+      size_t count = info.rules_value.GetList().size();
 
       // We only index up to |static_rule_limit| rules per ruleset, but
       // may index more rules than this limit across rulesets.
@@ -2148,6 +2147,68 @@ TEST_P(MultipleRulesetsTest, UpdateAndGetEnabledRulesets_RuleCountExceeded) {
   VerifyPublicRulesetIDs(*extension(), {kId1, kId3});
   VerifyGetEnabledRulesetsFunction(*extension(), {kId1, kId3});
   CheckExtensionAllocationInPrefs(extension()->id(), 200);
+}
+
+TEST_P(MultipleRulesetsTest,
+       UpdateAndGetEnabledRulesets_KeepEnabledStaticRulesetsAfterReload) {
+  AddRuleset(CreateRuleset(kId1, 90, 0, false));
+  AddRuleset(CreateRuleset(kId2, 60, 0, false));
+  AddRuleset(CreateRuleset(kId3, 150, 0, false));
+
+  RulesetManagerObserver ruleset_waiter(manager());
+
+  DeclarativeNetRequestUnittest::LoadAndExpectSuccess(
+      300, 0, false /* expect_rulesets_indexed */);
+
+  ruleset_waiter.WaitForExtensionsWithRulesetsCount(0);
+
+  RunUpdateEnabledRulesetsFunction(*extension(), {}, {kId2, kId3},
+                                   absl::nullopt /* expected_error */);
+  VerifyPublicRulesetIDs(*extension(), {kId2, kId3});
+  VerifyGetEnabledRulesetsFunction(*extension(), {kId2, kId3});
+
+  // Ensure the set of enabled rulesets persists across extension reloads.
+  // Regression test for crbug.com/1346185.
+  const ExtensionId extension_id = extension()->id();
+  service()->DisableExtension(extension_id,
+                              disable_reason::DISABLE_USER_ACTION);
+
+  ruleset_waiter.WaitForExtensionsWithRulesetsCount(0);
+
+  service()->EnableExtension(extension_id);
+
+  ruleset_waiter.WaitForExtensionsWithRulesetsCount(1);
+
+  const Extension* extension =
+      registry()->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
+  ASSERT_TRUE(extension);
+  VerifyPublicRulesetIDs(*extension, {kId2, kId3});
+  VerifyGetEnabledRulesetsFunction(*extension, {kId2, kId3});
+}
+
+// Tests attempting to disable rulesets when there are no rulesets active.
+// Regression test for https://crbug.com/1354385.
+TEST_P(MultipleRulesetsTest,
+       UpdateAndGetEnabledRulesets_DisableRulesetsWhenEmptyEnabledRulesets) {
+  AddRuleset(CreateRuleset(kId1, 90, 0, false));
+  AddRuleset(CreateRuleset(kId2, 60, 0, false));
+  AddRuleset(CreateRuleset(kId3, 150, 0, false));
+
+  RulesetManagerObserver ruleset_waiter(manager());
+
+  DeclarativeNetRequestUnittest::LoadAndExpectSuccess(
+      300, 0, false /* expect_rulesets_indexed */);
+
+  ruleset_waiter.WaitForExtensionsWithRulesetsCount(0);
+
+  // Even though rulesets kId2 and kId3 are already disabled, the service
+  // can't know about that right away because there could be pending calls to
+  // complete. This means the service will still (appropriately) try and
+  // disable these rulesets.
+  RunUpdateEnabledRulesetsFunction(*extension(), {kId2, kId3}, {},
+                                   absl::nullopt /* expected_error */);
+  ASSERT_FALSE(manager()->GetMatcherForExtension(extension()->id()));
+  VerifyGetEnabledRulesetsFunction(*extension(), {});
 }
 
 // Test that getAvailableStaticRuleCount returns the correct number of rules an

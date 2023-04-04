@@ -1,12 +1,14 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_OZONE_PLATFORM_WAYLAND_HOST_XDG_TOPLEVEL_WRAPPER_IMPL_H_
 #define UI_OZONE_PLATFORM_WAYLAND_HOST_XDG_TOPLEVEL_WRAPPER_IMPL_H_
 
+#include <xdg-shell-client-protocol.h>
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "ui/ozone/platform/wayland/host/shell_toplevel_wrapper.h"
 
 namespace ui {
@@ -45,12 +47,21 @@ class XDGToplevelWrapperImpl : public ShellToplevelWrapper {
   void Lock(WaylandOrientationLockType lock_type) override;
   void Unlock() override;
   void RequestWindowBounds(const gfx::Rect& bounds) override;
+  void SetRestoreInfo(int32_t, int32_t) override;
+  void SetRestoreInfoWithWindowIdSource(int32_t, const std::string&) override;
+  void SetSystemModal(bool modal) override;
+  bool SupportsScreenCoordinates() const override;
+  void EnableScreenCoordinates() override;
+  void SetFloat() override;
+  void UnSetFloat() override;
+  void SetZOrder(ZOrderLevel z_order) override;
+  bool SupportsActivation() override;
+  void Activate() override;
+  void Deactivate() override;
 
   XDGSurfaceWrapperImpl* xdg_surface_wrapper() const;
 
  private:
-  bool ProtocolSupportsScreenCoordinates();
-
   // xdg_toplevel_listener
   static void ConfigureTopLevel(void* data,
                                 struct xdg_toplevel* xdg_toplevel,
@@ -58,6 +69,19 @@ class XDGToplevelWrapperImpl : public ShellToplevelWrapper {
                                 int32_t height,
                                 struct wl_array* states);
   static void CloseTopLevel(void* data, struct xdg_toplevel* xdg_toplevel);
+
+#if defined(XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION)
+  static void ConfigureBounds(void* data,
+                              struct xdg_toplevel* xdg_toplevel,
+                              int32_t width,
+                              int32_t height);
+#endif
+
+#if defined(XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION)
+  static void WmCapabilities(void* data,
+                             struct xdg_toplevel* xdg_toplevel,
+                             struct wl_array* capabilities);
+#endif
 
   // zxdg_decoration_listener
   static void ConfigureDecoration(
@@ -89,8 +113,8 @@ class XDGToplevelWrapperImpl : public ShellToplevelWrapper {
   std::unique_ptr<XDGSurfaceWrapperImpl> xdg_surface_wrapper_;
 
   // Non-owing WaylandWindow that uses this toplevel wrapper.
-  WaylandWindow* const wayland_window_;
-  WaylandConnection* const connection_;
+  const raw_ptr<WaylandWindow> wayland_window_;
+  const raw_ptr<WaylandConnection> connection_;
 
   // XDG Shell Stable object.
   wl::Object<xdg_toplevel> xdg_toplevel_;

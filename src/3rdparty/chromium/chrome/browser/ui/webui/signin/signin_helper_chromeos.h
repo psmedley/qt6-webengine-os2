@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,8 +84,7 @@ class SigninHelper : public GaiaAuthConsumer {
   void UpsertAccount(const std::string& refresh_token);
 
   // Receives the callback for `GetSecondaryGoogleAccountUsage()`.
-  // Virtual for testing.
-  virtual void OnGetSecondaryGoogleAccountUsage(
+  void OnGetSecondaryGoogleAccountUsage(
       ash::UserCloudSigninRestrictionPolicyFetcherChromeOS::Status status,
       absl::optional<std::string> policy_result,
       const std::string& hosted_domain);
@@ -110,6 +109,12 @@ class SigninHelper : public GaiaAuthConsumer {
   scoped_refptr<network::SharedURLLoaderFactory> GetUrlLoaderFactory();
 
  private:
+  // Returns the account that must be auto-signed-in to the Main Profile in
+  // Lacros. This is, when available, the account used to sign into the Chrome
+  // OS session. This may be a Gaia account or a Microsoft Active Directory
+  // account. This field will be null for Guest sessions, Managed Guest
+  // sessions, Demo mode, and Kiosks.
+  bool IsInitialPrimaryAccount();
   // Fetcher to get SecondaryGoogleAccountUsage policy value.
   std::unique_ptr<ash::UserCloudSigninRestrictionPolicyFetcherChromeOS>
       restriction_fetcher_;

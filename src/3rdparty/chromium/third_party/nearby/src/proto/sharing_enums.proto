@@ -31,6 +31,8 @@ pair of events (start and end of a session).
 enum EventType {
   UNKNOWN_EVENT_TYPE = 0;
 
+  // LINT.IfChange(EventType)
+
   // When new users accept agreements (like grant permission to contacts for
   // CONTACT_ONLY visibility) and are enrolled into Nearby Sharing. This event
   // is used to count number of new users.
@@ -185,6 +187,11 @@ enum EventType {
 
   // Track device states in Nearby Share setting.
   DEVICE_SETTINGS = 49;
+
+  // Receiver auto dismisses a fast initialization notification.
+  AUTO_DISMISS_FAST_INITIALIZATION = 50;
+
+  // LINT.ThenChange(//depot/google3/location/nearby/proto/nearby_event_codes.proto:SharingEventCode)
 }
 
 // Event category to differentiate whether this comes from sender or receiver,
@@ -305,6 +312,7 @@ enum OSType {
   ANDROID = 1;
   CHROME_OS = 2;
   IOS = 3;
+  WINDOWS = 4;
 }
 
 // Relationship of remote device to sender device.
@@ -336,6 +344,8 @@ enum LogSource {
   OEM_DEVICES = 4;
   // Represents the device for debugging.
   DEBUG_DEVICES = 5;
+  // Represents the device for Nearby Module Food.
+  NEARBY_MODULE_FOOD_DEVICES = 6;
 }
 
 // The Fast Share server action name.
@@ -349,6 +359,7 @@ enum ServerActionName {
   UPDATE_DEVICE_NAME = 5;
   UPLOAD_SENDER_CERTIFICATES = 6;
   DOWNLOAD_SENDER_CERTIFICATES = 7;
+  UPLOAD_CONTACTS_AND_CERTIFICATES = 8;
 }
 
 // The Fast Share server response state.
@@ -368,6 +379,9 @@ enum ServerResponseState {
 
   // For GoogleAuthException.
   SERVER_RESPONSE_GOOGLE_AUTH_FAILURE = 8;
+
+  // For Internet connect status.
+  SERVER_RESPONSE_NOT_CONNECTED_TO_INTERNET = 10;
 }
 
 // The type of Nearby Sharing scanning.
@@ -391,6 +405,7 @@ enum ActivityName {
   CONSENTS_ACTIVITY = 6;
   SET_DEVICE_NAME_DIALOG = 7;
   SET_DATA_USAGE_DIALOG = 8;
+  QUICK_SETTINGS_ACTIVITY = 9;
 }
 
 // The type of consent page user launches.
@@ -458,4 +473,13 @@ enum PermissionRequestType {
   PERMISSION_WIFI = 2;
   PERMISSION_BLUETOOTH = 3;
   PERMISSION_LOCATION = 4;
+}
+
+enum SharingUseCase {
+  USE_CASE_UNKNOWN = 0;
+
+  USE_CASE_NEARBY_SHARE = 1;
+  USE_CASE_REMOTE_COPY_PASTE = 2;
+  USE_CASE_WIFI_CREDENTIAL = 3;
+  USE_CASE_APP_SHARE = 4;
 }

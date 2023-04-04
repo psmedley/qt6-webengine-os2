@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,13 +51,16 @@ class PlayerCompositorDelegate {
   PlayerCompositorDelegate(const PlayerCompositorDelegate&) = delete;
   PlayerCompositorDelegate& operator=(const PlayerCompositorDelegate&) = delete;
 
+  // Callback used for compositor error
+  using CompositorErrorCallback = base::OnceCallback<void(int32_t)>;
+
   // Initializes the compositor.
   void Initialize(
       PaintPreviewBaseService* paint_preview_service,
       const GURL& url,
       const DirectoryKey& key,
       bool main_frame_mode,
-      base::OnceCallback<void(int)> compositor_error,
+      CompositorErrorCallback compositor_error,
       base::TimeDelta timeout_duration,
       std::array<size_t, PressureLevelCount::kLevels> max_requests_map);
 
@@ -116,7 +119,7 @@ class PlayerCompositorDelegate {
       const GURL& expected_url,
       const DirectoryKey& key,
       bool main_frame_mode,
-      base::OnceCallback<void(int)> compositor_error,
+      CompositorErrorCallback compositor_error,
       base::TimeDelta timeout_duration,
       std::array<size_t, PressureLevelCount::kLevels> max_requests_map,
       std::unique_ptr<PaintPreviewCompositorService, base::OnTaskRunnerDeleter>
@@ -131,7 +134,7 @@ class PlayerCompositorDelegate {
   }
 
  protected:
-  base::OnceCallback<void(int)> compositor_error_;
+  CompositorErrorCallback compositor_error_;
 
   virtual base::MemoryPressureMonitor* memory_pressure_monitor();
 
@@ -141,7 +144,7 @@ class PlayerCompositorDelegate {
       const GURL& expected_url,
       const DirectoryKey& key,
       bool main_frame_mode,
-      base::OnceCallback<void(int)> compositor_error,
+      CompositorErrorCallback compositor_error,
       base::TimeDelta timeout_duration,
       std::array<size_t, PressureLevelCount::kLevels> max_requests_map);
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,6 +65,8 @@ class InstanceRegistry {
     // indirectly (e.g. via base::ScopedObservation::Remove or via
     // Observe(nullptr)).
     virtual void OnInstanceRegistryWillBeDestroyed(InstanceRegistry* cache) = 0;
+
+    InstanceRegistry* instance_registry() const { return instance_registry_; }
 
    protected:
     // Use this constructor when the observer |this| is tied to a single

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@
 #include "chrome/browser/extensions/api/printing/printing_api_utils.h"
 #include "chrome/browser/printing/printing_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/extensions/extensions_dialogs.h"
 #include "chrome/browser/ui/native_window_tracker.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/services/printing/public/mojom/pdf_flattener.mojom.h"
@@ -77,11 +77,11 @@ bool IsUserConfirmationRequired(content::BrowserContext* browser_context,
                                 const std::string& extension_id) {
   if (g_skip_confirmation_dialog_for_testing)
     return false;
-  const base::Value* list =
+  const base::Value::List& list =
       Profile::FromBrowserContext(browser_context)
           ->GetPrefs()
           ->GetList(prefs::kPrintingAPIExtensionsAllowlist);
-  return !base::Contains(list->GetListDeprecated(), base::Value(extension_id));
+  return !base::Contains(list, base::Value(extension_id));
 }
 
 }  // namespace
@@ -149,8 +149,7 @@ bool PrintJobSubmitter::CheckContentType() const {
 }
 
 bool PrintJobSubmitter::CheckPrintTicket() {
-  settings_ = ParsePrintTicket(
-      base::Value::FromUniquePtrValue(request_.job.ticket.ToValue()));
+  settings_ = ParsePrintTicket(base::Value(request_.job.ticket.ToValue()));
   if (!settings_)
     return false;
   settings_->set_title(base::UTF8ToUTF16(request_.job.title));
@@ -263,7 +262,7 @@ void PrintJobSubmitter::ShowPrintJobConfirmationDialog(
   if (native_window_tracker_ && native_window_tracker_->WasNativeWindowClosed())
     native_window_ = gfx::kNullNativeWindow;
 
-  chrome::ShowPrintJobConfirmationDialog(
+  extensions::ShowPrintJobConfirmationDialog(
       native_window_, extension_->id(), base::UTF8ToUTF16(extension_->name()),
       extension_icon.AsImageSkia(), settings_->title(), printer_name_,
       base::BindOnce(&PrintJobSubmitter::OnPrintJobConfirmationDialogClosed,

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "components/autofill/core/browser/data_model/autofill_offer_data.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/data_model/iban.h"
 #include "components/autofill/core/browser/geo/autofill_country.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
@@ -211,6 +212,32 @@ void AutofillWebDataService::AddFullServerCreditCard(
       FROM_HERE,
       base::BindOnce(&AutofillWebDataBackendImpl::AddFullServerCreditCard,
                      autofill_backend_, credit_card));
+}
+
+void AutofillWebDataService::AddIBAN(const IBAN& iban) {
+  wdbs_->ScheduleDBTask(FROM_HERE,
+                        base::BindOnce(&AutofillWebDataBackendImpl::AddIBAN,
+                                       autofill_backend_, iban));
+}
+
+WebDataServiceBase::Handle AutofillWebDataService::GetIBANs(
+    WebDataServiceConsumer* consumer) {
+  return wdbs_->ScheduleDBTaskWithResult(
+      FROM_HERE,
+      base::BindOnce(&AutofillWebDataBackendImpl::GetIBANs, autofill_backend_),
+      consumer);
+}
+
+void AutofillWebDataService::UpdateIBAN(const IBAN& iban) {
+  wdbs_->ScheduleDBTask(FROM_HERE,
+                        base::BindOnce(&AutofillWebDataBackendImpl::UpdateIBAN,
+                                       autofill_backend_, iban));
+}
+
+void AutofillWebDataService::RemoveIBAN(const std::string& guid) {
+  wdbs_->ScheduleDBTask(FROM_HERE,
+                        base::BindOnce(&AutofillWebDataBackendImpl::RemoveIBAN,
+                                       autofill_backend_, guid));
 }
 
 WebDataServiceBase::Handle AutofillWebDataService::GetCreditCards(

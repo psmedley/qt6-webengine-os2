@@ -31,12 +31,16 @@ class CXFA_ViewLayoutProcessor
 
  public:
   struct BreakData {
+    CPPGC_STACK_ALLOCATED();  // Raw/Unowned pointers allowed.
+   public:
     CXFA_Node* pLeader;
     CXFA_Node* pTrailer;
     bool bCreatePage;
   };
 
   struct OverflowData {
+    CPPGC_STACK_ALLOCATED();  // Raw/Unowned pointers allowed.
+   public:
     CXFA_Node* pLeader;
     CXFA_Node* pTrailer;
   };
@@ -90,18 +94,16 @@ class CXFA_ViewLayoutProcessor
                            CXFA_LayoutProcessor* pLayoutProcessor);
 
   bool AppendNewPage(bool bFirstTemPage);
-  void ReorderPendingLayoutRecordToTail(CXFA_ViewRecord* pNewRecord,
-                                        CXFA_ViewRecord* pPrevRecord);
   void RemoveLayoutRecord(CXFA_ViewRecord* pNewRecord,
                           CXFA_ViewRecord* pPrevRecord);
   bool HasCurrentViewRecord() const {
     return m_CurrentViewRecordIter != m_ProposedViewRecords.end();
   }
   CXFA_ViewRecord* GetCurrentViewRecord() {
-    return m_CurrentViewRecordIter->Get();
+    return HasCurrentViewRecord() ? m_CurrentViewRecordIter->Get() : nullptr;
   }
   const CXFA_ViewRecord* GetCurrentViewRecord() const {
-    return m_CurrentViewRecordIter->Get();
+    return HasCurrentViewRecord() ? m_CurrentViewRecordIter->Get() : nullptr;
   }
   void ResetToFirstViewRecord() {
     m_CurrentViewRecordIter = m_ProposedViewRecords.begin();

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "net/filter/source_stream.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_util.h"
-#include "services/network/public/cpp/constants.h"
 #include "services/network/public/cpp/optional_trust_token_params.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_request_body.h"
@@ -39,41 +38,10 @@
 namespace blink {
 namespace {
 
-constexpr char kStylesheetAcceptHeader[] = "text/css,*/*;q=0.1";
-constexpr char kWebBundleAcceptHeader[] =
-    "application/webbundle;v=b2,application/webbundle;v=b1;q=0.8";
-
 // TODO(yhirano): Unify these with variables in
 // content/public/common/content_constants.h.
 constexpr char kCorsExemptPurposeHeaderName[] = "Purpose";
 constexpr char kCorsExemptRequestedWithHeaderName[] = "X-Requested-With";
-
-// This is complementary to ConvertNetPriorityToWebKitPriority, defined in
-// service_worker_context_client.cc.
-net::RequestPriority ConvertWebKitPriorityToNetPriority(
-    WebURLRequest::Priority priority) {
-  switch (priority) {
-    case WebURLRequest::Priority::kVeryHigh:
-      return net::HIGHEST;
-
-    case WebURLRequest::Priority::kHigh:
-      return net::MEDIUM;
-
-    case WebURLRequest::Priority::kMedium:
-      return net::LOW;
-
-    case WebURLRequest::Priority::kLow:
-      return net::LOWEST;
-
-    case WebURLRequest::Priority::kVeryLow:
-      return net::IDLE;
-
-    case WebURLRequest::Priority::kUnresolved:
-    default:
-      NOTREACHED();
-      return net::LOW;
-  }
-}
 
 // TODO(yhirano) Dedupe this and the same-name function in
 // web_url_request_util.cc.
@@ -233,8 +201,7 @@ void PopulateResourceRequestBody(const EncodedFormData& src,
 }  // namespace
 
 scoped_refptr<network::ResourceRequestBody> NetworkResourceRequestBodyFor(
-    ResourceRequestBody src_body,
-    bool allow_http1_for_streaming_upload) {
+    ResourceRequestBody src_body) {
   scoped_refptr<network::ResourceRequestBody> dest_body;
   if (const EncodedFormData* form_body = src_body.FormBody().get()) {
     dest_body = base::MakeRefCounted<network::ResourceRequestBody>();
@@ -247,8 +214,9 @@ scoped_refptr<network::ResourceRequestBody> NetworkResourceRequestBodyFor(
     dest_body->SetToChunkedDataPipe(
         ToCrossVariantMojoType(std::move(stream_body)),
         network::ResourceRequestBody::ReadOnlyOnce(true));
-    dest_body->SetAllowHTTP1ForStreamingUpload(
-        allow_http1_for_streaming_upload);
+  }
+  if (dest_body) {
+    dest_body->SetAllowHTTP1ForStreamingUpload(false);
   }
   return dest_body;
 }
@@ -257,7 +225,7 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
                              ResourceRequestBody src_body,
                              network::ResourceRequest* dest) {
   dest->method = src.HttpMethod().Latin1();
-  dest->url = src.Url();
+  dest->url = GURL(src.Url());
   dest->site_for_cookies = src.SiteForCookies();
   dest->upgrade_if_insecure = src.UpgradeIfInsecure();
   dest->is_revalidating = src.IsRevalidating();
@@ -281,8 +249,8 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
 
   DCHECK(dest->navigation_redirect_chain.empty());
   dest->navigation_redirect_chain.reserve(src.NavigationRedirectChain().size());
-  for (const auto& url : src.NavigationRedirectChain()) {
-    dest->navigation_redirect_chain.push_back(url);
+  for (const KURL& url : src.NavigationRedirectChain()) {
+    dest->navigation_redirect_chain.push_back(GURL(url));
   }
 
   if (src.IsolatedWorldOrigin()) {
@@ -302,13 +270,13 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
   }
   // Set X-Requested-With header to cors_exempt_headers rather than headers to
   // be exempted from CORS checks.
-  if (!src.GetRequestedWithHeader().IsEmpty()) {
+  if (!src.GetRequestedWithHeader().empty()) {
     dest->cors_exempt_headers.SetHeader(kCorsExemptRequestedWithHeaderName,
                                         src.GetRequestedWithHeader().Utf8());
   }
   // Set Purpose header to cors_exempt_headers rather than headers to be
   // exempted from CORS checks.
-  if (!src.GetPurposeHeader().IsEmpty()) {
+  if (!src.GetPurposeHeader().empty()) {
     dest->cors_exempt_headers.SetHeader(kCorsExemptPurposeHeaderName,
                                         src.GetPurposeHeader().Utf8());
   }
@@ -317,7 +285,7 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
   dest->load_flags = WrappedResourceRequest(ResourceRequest(src))
                          .GetLoadFlagsForWebUrlRequest();
   dest->recursive_prefetch_token = src.RecursivePrefetchToken();
-  dest->priority = ConvertWebKitPriorityToNetPriority(src.Priority());
+  dest->priority = WebURLRequest::ConvertToNetPriority(src.Priority());
   dest->cors_preflight_policy = src.CorsPreflightPolicy();
   dest->skip_service_worker = src.GetSkipServiceWorker();
   dest->mode = src.GetMode();
@@ -328,7 +296,7 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
   if (src.GetWebBundleTokenParams().has_value()) {
     dest->web_bundle_token_params =
         absl::make_optional(network::ResourceRequest::WebBundleTokenParams(
-            src.GetWebBundleTokenParams()->bundle_url,
+            GURL(src.GetWebBundleTokenParams()->bundle_url),
             src.GetWebBundleTokenParams()->token,
             ToCrossVariantMojoType(
                 src.GetWebBundleTokenParams()->CloneHandle())));
@@ -365,18 +333,11 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
     dest->devtools_stack_id = src.GetDevToolsStackId().value().Ascii();
   }
 
-  if (src.IsSignedExchangePrefetchCacheEnabled()) {
-    DCHECK_EQ(src.GetRequestContext(),
-              mojom::blink::RequestContextType::PREFETCH);
-    dest->is_signed_exchange_prefetch_cache_enabled = true;
-  }
-
   dest->is_fetch_like_api = src.IsFetchLikeAPI();
 
   dest->is_favicon = src.IsFavicon();
 
-  dest->request_body = NetworkResourceRequestBodyFor(
-      std::move(src_body), src.AllowHTTP1ForStreamingUpload());
+  dest->request_body = NetworkResourceRequestBodyFor(std::move(src_body));
   if (dest->request_body) {
     DCHECK_NE(dest->method, net::HttpRequestHeaders::kGetMethod);
     DCHECK_NE(dest->method, net::HttpRequestHeaders::kHeadMethod);
@@ -384,24 +345,7 @@ void PopulateResourceRequest(const ResourceRequestHead& src,
 
   network::mojom::RequestDestination request_destination =
       src.GetRequestDestination();
-  if (request_destination == network::mojom::RequestDestination::kStyle ||
-      request_destination == network::mojom::RequestDestination::kXslt) {
-    dest->headers.SetHeader(net::HttpRequestHeaders::kAccept,
-                            kStylesheetAcceptHeader);
-  } else if (request_destination ==
-             network::mojom::RequestDestination::kImage) {
-    dest->headers.SetHeaderIfMissing(net::HttpRequestHeaders::kAccept,
-                                     network_utils::ImageAcceptHeader());
-  } else if (request_destination ==
-             network::mojom::RequestDestination::kWebBundle) {
-    dest->headers.SetHeader(net::HttpRequestHeaders::kAccept,
-                            kWebBundleAcceptHeader);
-  } else {
-    // Calling SetHeaderIfMissing() instead of SetHeader() because JS can
-    // manually set an accept header on an XHR.
-    dest->headers.SetHeaderIfMissing(net::HttpRequestHeaders::kAccept,
-                                     network::kDefaultAcceptHeaderValue);
-  }
+  network_utils::SetAcceptHeader(dest->headers, request_destination);
 
   dest->original_destination = src.GetOriginalDestination();
 }

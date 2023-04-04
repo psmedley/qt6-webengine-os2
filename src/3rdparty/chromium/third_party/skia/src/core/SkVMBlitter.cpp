@@ -21,7 +21,6 @@
 #include "src/core/SkVM.h"
 #include "src/core/SkVMBlitter.h"
 #include "src/shaders/SkColorFilterShader.h"
-#include "src/shaders/SkColorShader.h"
 
 #include <cinttypes>
 
@@ -49,7 +48,7 @@ namespace {
         };
     }
 
-    struct NoopColorFilter : public SkColorFilterBase {
+    struct NoopColorFilter final : public SkColorFilterBase {
         skvm::Color onProgram(skvm::Builder*, skvm::Color c,
                               const SkColorInfo&, skvm::Uniforms*, SkArenaAlloc*) const override {
             return c;
@@ -228,11 +227,17 @@ SkVMBlitter::Params SkVMBlitter::EffectiveParams(const SkPixmap& device,
     // but if there is a shader, it's modulated by the paint alpha.
     sk_sp<SkShader> shader = paint.refShader();
     if (!shader) {
-        shader = sk_make_sp<SkColor4Shader>(paint.getColor4f(), nullptr);
+        shader = SkShaders::Color(paint.getColor4f(), nullptr);
+        if (!shader) {
+            // If the paint color is non-finite (possible after RemoveColorFilter), we might not
+            // have a shader. (oss-fuzz:49391)
+            shader = SkShaders::Color(SK_ColorTRANSPARENT);
+        }
     } else if (paint.getAlphaf() < 1.0f) {
         shader = sk_make_sp<SkColorFilterShader>(std::move(shader),
                                                  paint.getAlphaf(),
                                                  sk_make_sp<NoopColorFilter>());
+        paint.setAlphaf(1.0f);
     }
 
     // Add dither to the end of the shader pipeline if requested and needed.

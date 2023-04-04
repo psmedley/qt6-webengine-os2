@@ -51,10 +51,10 @@ import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 // eslint-disable-next-line rulesdir/es_modules_import
 import objectValueStyles from '../../ui/legacy/components/object_ui/objectValue.css.js';
-import type {Chrome} from '../../../extension-api/ExtensionAPI.js'; // eslint-disable-line rulesdir/es_modules_import
+import {type Chrome} from '../../../extension-api/ExtensionAPI.js';  // eslint-disable-line rulesdir/es_modules_import
 
 import {format, updateStyle} from './ConsoleFormat.js';
-import type {ConsoleViewportElement} from './ConsoleViewport.js';
+import {type ConsoleViewportElement} from './ConsoleViewport.js';
 import consoleViewStyles from './consoleView.css.js';
 import {augmentErrorStackWithScriptIds, parseSourcePositionsFromErrorStack} from './ErrorStackParser.js';
 
@@ -1397,7 +1397,8 @@ export class ConsoleViewMessage implements ConsoleViewportElement {
       if (scripts.length) {
         const location =
             new SDK.DebuggerModel.Location(debuggerModel, scripts[0].scriptId, lineNumber || 0, columnNumber);
-        return await debuggerWorkspaceBinding.pluginManager.getFunctionInfo(scripts[0], location) ?? {frames: []};
+        const functionInfo = await debuggerWorkspaceBinding.pluginManager.getFunctionInfo(scripts[0], location);
+        return functionInfo && 'frames' in functionInfo ? functionInfo : {frames: []};
       }
     }
 
@@ -1439,7 +1440,8 @@ export class ConsoleViewMessage implements ConsoleViewportElement {
     }
 
     // SyntaxErrors might not populate the URL field. Try to resolve it via scriptId.
-    const url = exceptionDetails.url || debuggerModel.scriptForId(scriptId)?.sourceURL;
+    const url =
+        exceptionDetails.url as Platform.DevToolsPath.UrlString || debuggerModel.scriptForId(scriptId)?.sourceURL;
     if (!url) {
       return;
     }
@@ -1531,7 +1533,9 @@ export class ConsoleViewMessage implements ConsoleViewportElement {
   }
 
   private linkifyWithCustomLinkifier(
-      string: string, linkifier: (arg0: string, arg1: string, arg2?: number, arg3?: number) => Node): DocumentFragment {
+      string: string,
+      linkifier: (arg0: string, arg1: Platform.DevToolsPath.UrlString, arg2?: number, arg3?: number) => Node):
+      DocumentFragment {
     if (string.length > getMaxTokenizableStringLength()) {
       const propertyValue = new ObjectUI.ObjectPropertiesSection.ExpandableTextPropertyValue(
           document.createElement('span'), string, getLongStringVisibleLength());
@@ -1563,7 +1567,7 @@ export class ConsoleViewMessage implements ConsoleViewportElement {
           if (splitResult) {
             linkNode = linkifier(token.text, sourceURL, splitResult.lineNumber, splitResult.columnNumber);
           } else {
-            linkNode = linkifier(token.text, '');
+            linkNode = linkifier(token.text, Platform.DevToolsPath.EmptyUrlString);
           }
           container.appendChild(linkNode);
           break;
@@ -1878,7 +1882,7 @@ export class ConsoleTableMessageView extends ConsoleViewMessage {
       let rowSubProperties: Protocol.Runtime.PropertyPreview[];
       if (rowProperty.valuePreview && rowProperty.valuePreview.properties.length) {
         rowSubProperties = rowProperty.valuePreview.properties;
-      } else if (rowProperty.value) {
+      } else if (rowProperty.value || rowProperty.value === '') {
         rowSubProperties =
             [{name: rawValueColumnSymbol as unknown as string, type: rowProperty.type, value: rowProperty.value}];
       } else {

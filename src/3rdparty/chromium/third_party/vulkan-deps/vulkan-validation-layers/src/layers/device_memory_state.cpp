@@ -1,7 +1,7 @@
-/* Copyright (c) 2015-2021 The Khronos Group Inc.
- * Copyright (c) 2015-2021 Valve Corporation
- * Copyright (c) 2015-2021 LunarG, Inc.
- * Copyright (C) 2015-2021 Google Inc.
+/* Copyright (c) 2015-2022 The Khronos Group Inc.
+ * Copyright (c) 2015-2022 Valve Corporation
+ * Copyright (c) 2015-2022 LunarG, Inc.
+ * Copyright (C) 2015-2022 Google Inc.
  * Modifications Copyright (C) 2020 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,6 +70,21 @@ static bool IsMultiInstance(const VkMemoryAllocateInfo *p_alloc_info, const VkMe
     return false;
 }
 
+#ifdef VK_USE_PLATFORM_METAL_EXT
+static bool GetMetalExport(const VkMemoryAllocateInfo *info) {
+    bool retval = false;
+    auto export_metal_object_info = LvlFindInChain<VkExportMetalObjectCreateInfoEXT>(info->pNext);
+    while (export_metal_object_info) {
+        if (export_metal_object_info->exportObjectType == VK_EXPORT_METAL_OBJECT_TYPE_METAL_BUFFER_BIT_EXT) {
+            retval = true;
+            break;
+        }
+        export_metal_object_info = LvlFindInChain<VkExportMetalObjectCreateInfoEXT>(export_metal_object_info->pNext);
+    }
+    return retval;
+}
+#endif  // VK_USE_PLATFORM_METAL_EXT
+
 DEVICE_MEMORY_STATE::DEVICE_MEMORY_STATE(VkDeviceMemory mem, const VkMemoryAllocateInfo *p_alloc_info,
                                          uint64_t fake_address,
                                          const VkMemoryType &memory_type, const VkMemoryHeap &memory_heap,
@@ -83,58 +98,35 @@ DEVICE_MEMORY_STATE::DEVICE_MEMORY_STATE(VkDeviceMemory mem, const VkMemoryAlloc
       multi_instance(IsMultiInstance(p_alloc_info, memory_heap, physical_device_count)),
       dedicated(std::move(dedicated_binding)),
       mapped_range{},
+#ifdef VK_USE_PLATFORM_METAL_EXT
+      metal_buffer_export(GetMetalExport(p_alloc_info)),
+#endif                                 // VK_USE_PLATFORM_METAL_EXT
       p_driver_data(nullptr),
       fake_base_address(fake_address) {}
-
-void BINDABLE::Destroy() {
-    for (auto &item: bound_memory_) {
-        if (item.second.mem_state) {
-            item.second.mem_state->RemoveParent(this);
-        }
-    }
-    bound_memory_.clear();
-    BASE_NODE::Destroy();
-}
-
-// SetMemBinding is used to establish immutable, non-sparse binding between a single image/buffer object and memory object.
-// Corresponding valid usage checks are in ValidateSetMemBinding().
-void BINDABLE::SetMemBinding(std::shared_ptr<DEVICE_MEMORY_STATE> &mem, VkDeviceSize memory_offset) {
-    if (!mem) {
-        return;
-    }
-    assert(!sparse);
-    if (bound_memory_.size() > 0) {
-        bound_memory_.clear();
-    }
-
-    MEM_BINDING binding = {
-        mem,
-        memory_offset,
-    };
-    binding.mem_state->AddParent(this);
-    bound_memory_.insert({mem->mem(), binding});
-}
-
-// For NULL mem case, clear any previous binding Else...
-// Make sure given object is in its object map
-//  IF a previous binding existed, update binding
-//  Add reference from objectInfo to memoryInfo
-//  Add reference off of object's binding info
-// Return VK_TRUE if addition is successful, VK_FALSE otherwise
-void BINDABLE::SetSparseMemBinding(std::shared_ptr<DEVICE_MEMORY_STATE> &mem, const VkDeviceSize mem_offset,
-                                   const VkDeviceSize mem_size) {
-    if (!mem) {
-        return;
-    }
-    assert(sparse);
-    MEM_BINDING sparse_binding = {mem, mem_offset, mem_size};
-    sparse_binding.mem_state->AddParent(this);
-    // Need to set mem binding for this object
-    bound_memory_.insert({mem->mem(), sparse_binding});
-}
 
 VkDeviceSize BINDABLE::GetFakeBaseAddress() const {
     assert(!sparse);  // not implemented yet
     const auto *binding = Binding();
-    return binding ? binding->offset + binding->mem_state->fake_base_address : 0;
+    return binding ? binding->memory_offset + binding->memory_state->fake_base_address : 0;
+}
+
+void BindableLinearMemoryTracker::BindMemory(BASE_NODE *parent, std::shared_ptr<DEVICE_MEMORY_STATE> &mem_state,
+                                             VkDeviceSize memory_offset, VkDeviceSize resource_offset, VkDeviceSize size) {
+    if (!mem_state) return;
+
+    mem_state->AddParent(parent);
+    binding_ = {mem_state, memory_offset, 0u};
+}
+
+BindableMemoryTracker::DeviceMemoryState BindableLinearMemoryTracker::GetBoundMemoryStates() const {
+    return binding_.memory_state ? DeviceMemoryState{binding_.memory_state} : DeviceMemoryState{};
+}
+
+BindableMemoryTracker::BoundMemoryRange BindableLinearMemoryTracker::GetBoundMemoryRange(
+    const sparse_container::range<VkDeviceSize> &range) const {
+    return binding_.memory_state
+               ? BoundMemoryRange{BoundMemoryRange::value_type{
+                     binding_.memory_state->mem(), BoundMemoryRange::value_type::second_type{{binding_.memory_offset + range.begin,
+                                                                                              binding_.memory_offset + range.end}}}}
+               : BoundMemoryRange{};
 }

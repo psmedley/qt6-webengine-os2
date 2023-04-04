@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,6 +65,7 @@ class POLICY_EXPORT UserCloudPolicyManager : public CloudPolicyManager {
   // This might be set to false if the user profile is an unmanaged consumer
   // profile.
   void SetPoliciesRequired(bool required);
+  bool ArePoliciesRequired() const;
 
   // Initializes the cloud connection. |local_state| must stay valid until this
   // object is deleted or DisconnectAndRemovePolicy() gets called. Virtual for

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
+#include "media/base/audio_decoder.h"
 #include "media/base/overlay_info.h"
 #include "media/base/supported_video_decoder_config.h"
 #include "media/media_buildflags.h"
 #include "media/mojo/buildflags.h"
 #include "media/mojo/mojom/frame_interface_factory.mojom.h"
 #include "media/mojo/mojom/renderer_extensions.mojom.h"
+#include "media/mojo/mojom/stable/stable_video_decoder.mojom.h"
 #include "media/mojo/mojom/video_decoder.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 
@@ -68,7 +70,8 @@ class MEDIA_MOJO_EXPORT MojoMediaClient {
       MediaLog* media_log,
       mojom::CommandBufferIdPtr command_buffer_id,
       RequestOverlayInfoCB request_overlay_info_cb,
-      const gfx::ColorSpace& target_color_space);
+      const gfx::ColorSpace& target_color_space,
+      mojo::PendingRemote<stable::mojom::StableVideoDecoder> oop_video_decoder);
 
   // Returns the Renderer to be used by MojoRendererService.
   // TODO(hubbe): Find out whether we should pass in |target_color_space| here.

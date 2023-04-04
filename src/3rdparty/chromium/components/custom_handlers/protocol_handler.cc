@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/custom_handlers/protocol_handler.h"
 
 #include "base/json/values_util.h"
+#include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/origin_util.h"
-#include "net/base/escape.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/common/custom_handlers/protocol_handler_utils.h"
 #include "third_party/blink/public/common/scheme_registry.h"
@@ -74,6 +74,9 @@ bool ProtocolHandler::IsValidDict(const base::Value::Dict& value) {
 
 bool ProtocolHandler::IsValid() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // We don't want to include URL's syntax checks because there are use cases of
+  // the protocol handlers logic that require more flexibility than the one
+  // specified for the registerProtocolHandler API (eg, Predefined Handlers).
   if (!blink::IsAllowedCustomHandlerURL(url_, security_level_))
     return false;
 
@@ -133,7 +136,7 @@ GURL ProtocolHandler::TranslateUrl(const GURL& url) const {
   std::string translatedUrlSpec(url_.spec());
   base::ReplaceFirstSubstringAfterOffset(
       &translatedUrlSpec, 0, "%s",
-      net::EscapeQueryParamValue(url.spec(), false));
+      base::EscapeQueryParamValue(url.spec(), false));
   return GURL(translatedUrlSpec);
 }
 

@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -464,6 +464,20 @@ class IdlType(WithExtendedAttributes, WithDebugInfo):
         return False
 
     @property
+    def is_event_handler(self):
+        """
+        Returns True if this is an event handler type.
+
+        Event handler types are EventHandler, OnBeforeUnloadEventHandler,
+        and OnErrorEventHandler.
+        """
+
+        return (self.is_typedef
+                and self.identifier in ("EventHandler",
+                                        "OnBeforeUnloadEventHandler",
+                                        "OnErrorEventHandler"))
+
+    @property
     def is_nullable(self):
         """
         Returns True if this is a nullable type.
@@ -630,7 +644,7 @@ class SimpleType(IdlType):
     # https://webidl.spec.whatwg.org/#BufferSource
     _BUFFER_SOURCE_TYPES = (
         ('ArrayBuffer', 'ArrayBufferView', 'DataView') + _TYPED_ARRAY_TYPES)
-    _MISC_TYPES = ('any', 'boolean', 'object', 'symbol', 'void')
+    _MISC_TYPES = ('any', 'boolean', 'object', 'symbol', 'undefined', 'void')
     _VALID_TYPES = set(_NUMERIC_TYPES + _STRING_TYPES + _BUFFER_SOURCE_TYPES +
                        _MISC_TYPES)
 
@@ -724,7 +738,7 @@ class SimpleType(IdlType):
 
     @property
     def is_void(self):
-        return self._name == 'void'
+        return self._name == 'undefined' or self._name == 'void'
 
 
 class ReferenceType(IdlType, RefById):

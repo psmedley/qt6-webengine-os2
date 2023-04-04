@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
  public:
   NGLineBoxFragmentBuilder(NGInlineNode node,
                            scoped_refptr<const ComputedStyle> style,
-                           const NGConstraintSpace* space,
+                           const NGConstraintSpace& space,
                            WritingDirectionMode writing_direction)
       : NGContainerFragmentBuilder(
             node,

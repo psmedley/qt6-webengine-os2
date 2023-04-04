@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,29 +7,47 @@
 
 #include "components/reporting/metrics/sampler.h"
 #include "components/reporting/proto/synced/metric_data.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace reporting {
 namespace test {
 
 class FakeSampler : public Sampler {
  public:
-  FakeSampler() = default;
+  FakeSampler();
 
   FakeSampler(const FakeSampler& other) = delete;
   FakeSampler& operator=(const FakeSampler& other) = delete;
 
-  ~FakeSampler() override = default;
+  ~FakeSampler() override;
 
-  void Collect(MetricCallback cb) override;
+  void MaybeCollect(OptionalMetricCallback cb) override;
 
-  void SetMetricData(MetricData metric_data);
+  void SetMetricData(absl::optional<MetricData> metric_data);
 
   int GetNumCollectCalls() const;
 
- private:
-  MetricData metric_data_;
+ protected:
+  absl::optional<MetricData> metric_data_;
 
   int num_calls_ = 0;
+};
+
+class FakeDelayedSampler : public FakeSampler {
+ public:
+  FakeDelayedSampler();
+
+  FakeDelayedSampler(const FakeDelayedSampler& other) = delete;
+  FakeDelayedSampler& operator=(const FakeDelayedSampler& other) = delete;
+
+  ~FakeDelayedSampler() override;
+
+  void MaybeCollect(OptionalMetricCallback cb) override;
+
+  void RunCallback();
+
+ private:
+  OptionalMetricCallback cb_;
 };
 
 class FakeMetricEventObserver : public MetricEventObserver {

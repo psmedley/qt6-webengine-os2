@@ -1,17 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
-import 'chrome://resources/cr_elements/icons.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import 'chrome://resources/cr_elements/icons.html.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import 'chrome://resources/polymer/v3_0/iron-collapse/iron-collapse.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import './searched_label.js';
-import './shared_style.js';
+import './shared_style.css.js';
 import './strings.m.js';
 
-import {FocusRow} from 'chrome://resources/js/cr/ui/focus_row.m.js';
+import {FocusRow} from 'chrome://resources/js/focus_row.js';
 import {getFaviconForPageURL} from 'chrome://resources/js/icon.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {IronCollapseElement} from 'chrome://resources/polymer/v3_0/iron-collapse/iron-collapse.js';
@@ -22,9 +22,9 @@ import {SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram} from './constants.js';
 import {ForeignSessionTab} from './externs.js';
 import {getTemplate} from './synced_device_card.html.js';
 
-type OpenTabEvent = {
-  model: {tab: ForeignSessionTab},
-};
+interface OpenTabEvent {
+  model: {tab: ForeignSessionTab};
+}
 
 declare global {
   interface HTMLElementTagNameMap {
@@ -80,9 +80,9 @@ export class HistorySyncedDeviceCardElement extends PolymerElement {
     };
   }
 
-  tabs: Array<ForeignSessionTab> = [];
+  tabs: ForeignSessionTab[] = [];
   opened: boolean;
-  separatorIndexes: Array<number>;
+  separatorIndexes: number[];
   sessionTag: string;
 
   override ready() {
@@ -99,13 +99,13 @@ export class HistorySyncedDeviceCardElement extends PolymerElement {
    * Create FocusRows for this card. One is always made for the card heading and
    * one for each result if the card is open.
    */
-  createFocusRows(): Array<FocusRow> {
+  createFocusRows(): FocusRow[] {
     const titleRow = new FocusRow(this.$['card-heading'], null);
     titleRow.addItem('menu', '#menu-button');
     titleRow.addItem('collapse', '#collapse-button');
     const rows = [titleRow];
     if (this.opened) {
-      this.shadowRoot!.querySelectorAll('.item-container')
+      this.shadowRoot!.querySelectorAll<HTMLElement>('.item-container')
           .forEach(function(el) {
             const row = new FocusRow(el, null);
             row.addItem('link', '.website-link');

@@ -1,14 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/renderer_main_platform_delegate.h"
 
 #include "base/android/build_info.h"
-#include "base/cpu_affinity_posix.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
-#include "content/public/common/content_features.h"
 #include "content/renderer/seccomp_sandbox_status_android.h"
 #include "sandbox/linux/seccomp-bpf-helpers/seccomp_starter_android.h"
 #include "sandbox/sandbox_buildflags.h"
@@ -39,8 +37,6 @@ bool RendererMainPlatformDelegate::EnableSandbox() {
 #if BUILDFLAG(USE_SECCOMP_BPF)
   sandbox::BaselinePolicyAndroid::RuntimeOptions options(
       starter.GetDefaultBaselineOptions());
-  options.allow_sched_affinity =
-      base::FeatureList::IsEnabled(features::kBigLittleScheduling);
   starter.set_policy(std::make_unique<sandbox::BaselinePolicyAndroid>(options));
 #endif
   starter.StartSandbox();

@@ -47,6 +47,10 @@ const UIStrings = {
   */
   threadS: 'Thread {PH1}',
   /**
+  *@description Text shown when rendering the User Interactions track in the Performance panel
+  */
+  userInteractions: 'User Interactions',
+  /**
   *@description Title of a worker in the timeline flame chart of the Performance panel
   *@example {https://google.com} PH1
   */
@@ -61,6 +65,51 @@ const UIStrings = {
   *@example {https://google.com} PH2
   */
   workerSS: '`Worker`: {PH1} — {PH2}',
+
+  /**
+   *@description Title of a bidder auction worklet with known URL in the timeline flame chart of the Performance panel
+   *@example {https://google.com} PH1
+   */
+  bidderWorkletS: 'Bidder Worklet — {PH1}',
+
+  /**
+   *@description Title of a seller auction worklet with known URL in the timeline flame chart of the Performance panel
+   *@example {https://google.com} PH1
+   */
+  sellerWorkletS: 'Seller Worklet — {PH1}',
+
+  /**
+   *@description Title of an auction worklet with known URL in the timeline flame chart of the Performance panel
+   *@example {https://google.com} PH1
+   */
+  unknownWorkletS: 'Auction Worklet — {PH1}',
+
+  /**
+   *@description Title of a bidder auction worklet in the timeline flame chart of the Performance panel
+   */
+  bidderWorklet: 'Bidder Worklet',
+
+  /**
+   *@description Title of a seller auction worklet in the timeline flame chart of the Performance panel
+   */
+  sellerWorklet: 'Seller Worklet',
+
+  /**
+   *@description Title of an auction worklet in the timeline flame chart of the Performance panel
+   */
+  unknownWorklet: 'Auction Worklet',
+
+  /**
+   *@description Title of control thread of a service process for an auction worklet in the timeline flame chart of the Performance panel
+   */
+  workletService: 'Auction Worklet Service',
+
+  /**
+   *@description Title of control thread of a service process for an auction worklet with known URL in the timeline flame chart of the Performance panel
+   * @example {https://google.com} PH1
+   */
+  workletServiceS: 'Auction Worklet Service — {PH1}',
+
 };
 const str_ = i18n.i18n.registerUIStrings('models/timeline_model/TimelineModel.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -73,6 +122,7 @@ export class TimelineModelImpl {
   private sessionId!: string|null;
   private mainFrameNodeId!: number|null;
   private pageFrames!: Map<Protocol.Page.FrameId, PageFrame>;
+  private auctionWorklets!: Map<string, AuctionWorklet>;
   private cpuProfilesInternal!: SDK.CPUProfileDataModel.CPUProfileDataModel[];
   private workerIdByThread!: WeakMap<SDK.TracingModel.Thread, string>;
   private requestsFromBrowser!: Map<string, SDK.TracingModel.Event>;
@@ -98,7 +148,6 @@ export class TimelineModelImpl {
   private lastRecalculateStylesEvent!: SDK.TracingModel.Event|null;
   private currentScriptEvent!: SDK.TracingModel.Event|null;
   private eventStack!: SDK.TracingModel.Event[];
-  private knownInputEvents!: Set<string>;
   private browserFrameTracking!: boolean;
   private persistentIds!: boolean;
   private legacyCurrentPage!: any;
@@ -182,7 +231,7 @@ export class TimelineModelImpl {
       case RecordType.MarkLoad:
       case RecordType.MarkLCPCandidate:
       case RecordType.MarkLCPInvalidate:
-        return Boolean(event.args['data']['isMainFrame']);
+        return Boolean(event.args['data']['isOutermostMainFrame'] ?? event.args['data']['isMainFrame']);
       default:
         return false;
     }
@@ -199,16 +248,41 @@ export class TimelineModelImpl {
   isUserTimingEvent(event: SDK.TracingModel.Event): boolean {
     return event.categoriesString === TimelineModelImpl.Category.UserTiming;
   }
+
+  isEventTimingInteractionEvent(event: SDK.TracingModel.Event): boolean {
+    if (event.name !== RecordType.EventTiming) {
+      return false;
+    }
+    type InteractionEventData = {
+      duration?: number, interactionId: number,
+    };
+    const data = event.args.data as InteractionEventData;
+    // Filter out:
+    // 1. events without a duration, or a duration of 0
+    // 2. events without an interactionId, or with an interactionId of 0,
+    //    which indicates that it's not a "top level" interaction event and
+    //    we can therefore ignore it. This can happen with "mousedown" for
+    //    example; an interaction ID is assigned to the "pointerdown" event
+    //    as it's the "first" event to be triggered when the user clicks,
+    //    but the browser doesn't attempt to assign IDs to all subsequent
+    //    events, as that's a hard heuristic to get right.
+    const duration = data.duration || 0;
+    const interactionId = data.interactionId || 0;
+    return (duration > 0 && interactionId > 0);
+  }
+
   isParseHTMLEvent(event: SDK.TracingModel.Event): boolean {
     return event.name === RecordType.ParseHTML;
   }
 
   isLCPCandidateEvent(event: SDK.TracingModel.Event): boolean {
-    return event.name === RecordType.MarkLCPCandidate && Boolean(event.args['data']['isMainFrame']);
+    return event.name === RecordType.MarkLCPCandidate &&
+        Boolean(event.args['data']['isOutermostMainFrame'] ?? event.args['data']['isMainFrame']);
   }
 
   isLCPInvalidateEvent(event: SDK.TracingModel.Event): boolean {
-    return event.name === RecordType.MarkLCPInvalidate && Boolean(event.args['data']['isMainFrame']);
+    return event.name === RecordType.MarkLCPInvalidate &&
+        Boolean(event.args['data']['isOutermostMainFrame'] ?? event.args['data']['isMainFrame']);
   }
 
   isFCPEvent(event: SDK.TracingModel.Event): boolean {
@@ -226,7 +300,8 @@ export class TimelineModelImpl {
   }
 
   isMainFrameNavigationStartEvent(event: SDK.TracingModel.Event): boolean {
-    return this.isNavigationStartEvent(event) && event.args['data']['isLoadingMainFrame'] &&
+    return this.isNavigationStartEvent(event) &&
+        (event.args['data']['isOutermostMainFrame'] ?? event.args['data']['isLoadingMainFrame']) &&
         event.args['data']['documentLoaderURL'];
   }
 
@@ -314,7 +389,43 @@ export class TimelineModelImpl {
     this.processAsyncBrowserEvents(tracingModel);
     this.buildGPUEvents(tracingModel);
     this.buildLoadingEvents(tracingModel, layoutShiftEvents);
+    this.collectInteractionEvents(tracingModel);
     this.resetProcessingState();
+  }
+
+  private collectInteractionEvents(tracingModel: SDK.TracingModel.TracingModel): void {
+    const interactionEvents: SDK.TracingModel.AsyncEvent[] = [];
+    for (const process of tracingModel.sortedProcesses()) {
+      // Interactions will only appear on the Renderer processes.
+      if (process.name() !== 'Renderer') {
+        continue;
+      }
+
+      // And also only on CrRendererMain threads.
+      const rendererThread = process.threadByName('CrRendererMain');
+      if (!rendererThread) {
+        continue;
+      }
+
+      // EventTiming events are async, so we only have to check asyncEvents,
+      // and not worry about sync events.
+      for (const event of rendererThread.asyncEvents()) {
+        if (!this.isEventTimingInteractionEvent(event)) {
+          continue;
+        }
+        interactionEvents.push(event);
+      }
+    }
+    if (interactionEvents.length === 0) {
+      // No events found, so bail early and don't bother creating the track
+      // because it will be empty.
+      return;
+    }
+
+    const track = this.ensureNamedTrack(TrackType.UserInteractions);
+    track.name = UIStrings.userInteractions;
+    track.forMainFrame = true;
+    track.asyncEvents = interactionEvents;
   }
 
   private processGenericTrace(tracingModel: SDK.TracingModel.TracingModel): void {
@@ -325,7 +436,8 @@ export class TimelineModelImpl {
     for (const process of tracingModel.sortedProcesses()) {
       for (const thread of process.sortedThreads()) {
         this.processThreadEvents(
-            tracingModel, [{from: 0, to: Infinity}], thread, thread === browserMainThread, false, true, null);
+            tracingModel, [{from: 0, to: Infinity}], thread, thread === browserMainThread, false, true,
+            WorkletType.NotWorklet, null);
       }
     }
   }
@@ -366,7 +478,7 @@ export class TimelineModelImpl {
         }
         this.processThreadEvents(
             tracingModel, [{from: startTime, to: endTime}], thread, thread === metaEvent.thread, Boolean(workerUrl),
-            true, workerUrl);
+            true, WorkletType.NotWorklet, workerUrl);
       }
       startTime = endTime;
     }
@@ -377,6 +489,7 @@ export class TimelineModelImpl {
       from: number,
       to: number,
       main: boolean,
+      workletType: WorkletType,
       url: Platform.DevToolsPath.UrlString,
     }[]>();
     for (const frame of this.pageFrames.values()) {
@@ -388,8 +501,31 @@ export class TimelineModelImpl {
           processData.set(pid, data);
         }
         const to = i === frame.processes.length - 1 ? (frame.deletedTime || Infinity) : frame.processes[i + 1].time;
-        data.push({from: frame.processes[i].time, to: to, main: !frame.parent, url: frame.processes[i].url});
+        data.push({
+          from: frame.processes[i].time,
+          to: to,
+          main: !frame.parent,
+          url: frame.processes[i].url,
+          workletType: WorkletType.NotWorklet,
+        });
       }
+    }
+    for (const auctionWorklet of this.auctionWorklets.values()) {
+      const pid = auctionWorklet.processId;
+      let data = processData.get(pid);
+      if (!data) {
+        data = [];
+        processData.set(pid, data);
+      }
+      data.push({
+        from: auctionWorklet.startTime,
+        to: auctionWorklet.endTime,
+        main: false,
+        workletType: auctionWorklet.workletType,
+        url:
+            (auctionWorklet.host ? 'https://' + auctionWorklet.host as Platform.DevToolsPath.UrlString :
+                                   Platform.DevToolsPath.EmptyUrlString),
+      });
     }
     const allMetadataEvents = tracingModel.devToolsMetadataEvents();
     for (const process of tracingModel.sortedProcesses()) {
@@ -402,6 +538,12 @@ export class TimelineModelImpl {
       let lastUrl: Platform.DevToolsPath.UrlString|null = null;
       let lastMainUrl: Platform.DevToolsPath.UrlString|null = null;
       let hasMain = false;
+      let allWorklet = true;
+
+      // false: not set, true: inconsistent.
+      let workletUrl: Platform.DevToolsPath.UrlString|boolean = false;
+      // NotWorklet used for not set.
+      let workletType: WorkletType = WorkletType.NotWorklet;
       for (const item of data) {
         const last = ranges[ranges.length - 1];
         if (!last || item.from > last.to) {
@@ -412,6 +554,23 @@ export class TimelineModelImpl {
         if (item.main) {
           hasMain = true;
         }
+        if (item.workletType === WorkletType.NotWorklet) {
+          allWorklet = false;
+        } else {
+          // Update combined workletUrl, checking for inconsistencies.
+          if (workletUrl === false) {
+            workletUrl = item.url;
+          } else if (workletUrl !== item.url) {
+            workletUrl = true;  // Process used for different things.
+          }
+
+          if (workletType === WorkletType.NotWorklet) {
+            workletType = item.workletType;
+          } else if (workletType !== item.workletType) {
+            workletType = WorkletType.UnknownWorklet;
+          }
+        }
+
         if (item.url) {
           if (item.main) {
             lastMainUrl = item.url;
@@ -424,7 +583,7 @@ export class TimelineModelImpl {
         if (thread.name() === TimelineModelImpl.RendererMainThreadName) {
           this.processThreadEvents(
               tracingModel, ranges, thread, true /* isMainThread */, false /* isWorker */, hasMain,
-              hasMain ? lastMainUrl : lastUrl);
+              WorkletType.NotWorklet, hasMain ? lastMainUrl : lastUrl);
         } else if (
             thread.name() === TimelineModelImpl.WorkerThreadName ||
             thread.name() === TimelineModelImpl.WorkerThreadNameLegacy) {
@@ -447,11 +606,25 @@ export class TimelineModelImpl {
           this.workerIdByThread.set(thread, workerMetaEvent.args['data']['workerId'] || '');
           this.processThreadEvents(
               tracingModel, ranges, thread, false /* isMainThread */, true /* isWorker */, false /* forMainFrame */,
-              workerMetaEvent.args['data']['url'] || Platform.DevToolsPath.EmptyUrlString);
+              WorkletType.NotWorklet, workerMetaEvent.args['data']['url'] || Platform.DevToolsPath.EmptyUrlString);
         } else {
+          let urlForOther: Platform.DevToolsPath.UrlString|null = null;
+          let workletTypeForOther: WorkletType = WorkletType.NotWorklet;
+          if (thread.name() === TimelineModelImpl.AuctionWorkletThreadName ||
+              thread.name() === TimelineModelImpl.UtilityMainThreadName) {
+            if (typeof workletUrl !== 'boolean') {
+              urlForOther = workletUrl;
+            }
+            workletTypeForOther = workletType;
+          } else {
+            // For processes that only do auction worklet things, skip other threads.
+            if (allWorklet) {
+              continue;
+            }
+          }
           this.processThreadEvents(
               tracingModel, ranges, thread, false /* isMainThread */, false /* isWorker */, false /* forMainFrame */,
-              null);
+              workletTypeForOther, urlForOther);
         }
       }
     }
@@ -573,7 +746,6 @@ export class TimelineModelImpl {
     this.lastRecalculateStylesEvent = null;
     this.currentScriptEvent = null;
     this.eventStack = [];
-    this.knownInputEvents = new Set();
     this.browserFrameTracking = false;
     this.persistentIds = false;
     this.legacyCurrentPage = null;
@@ -689,13 +861,26 @@ export class TimelineModelImpl {
     return events;
   }
 
+  private static nameAuctionWorklet(workletType: WorkletType, url: Platform.DevToolsPath.UrlString|null): string {
+    switch (workletType) {
+      case WorkletType.BidderWorklet:
+        return url ? i18nString(UIStrings.bidderWorkletS, {PH1: url}) : i18nString(UIStrings.bidderWorklet);
+
+      case WorkletType.SellerWorklet:
+        return url ? i18nString(UIStrings.sellerWorkletS, {PH1: url}) : i18nString(UIStrings.sellerWorklet);
+
+      default:
+        return url ? i18nString(UIStrings.unknownWorkletS, {PH1: url}) : i18nString(UIStrings.unknownWorklet);
+    }
+  }
+
   private processThreadEvents(
       tracingModel: SDK.TracingModel.TracingModel, ranges: {
         from: number,
         to: number,
       }[],
       thread: SDK.TracingModel.Thread, isMainThread: boolean, isWorker: boolean, forMainFrame: boolean,
-      url: Platform.DevToolsPath.UrlString|null): void {
+      workletType: WorkletType, url: Platform.DevToolsPath.UrlString|null): void {
     const track = new Track();
     track.name = thread.name() || i18nString(UIStrings.threadS, {PH1: thread.id()});
     track.type = TrackType.Other;
@@ -710,6 +895,12 @@ export class TimelineModelImpl {
       track.name = track.url ? i18nString(UIStrings.workerS, {PH1: track.url}) : i18nString(UIStrings.dedicatedWorker);
     } else if (thread.name().startsWith('CompositorTileWorker')) {
       track.type = TrackType.Raster;
+    } else if (thread.name() === TimelineModelImpl.AuctionWorkletThreadName) {
+      track.url = url || Platform.DevToolsPath.EmptyUrlString;
+      track.name = TimelineModelImpl.nameAuctionWorklet(workletType, url);
+    } else if (workletType !== WorkletType.NotWorklet && thread.name() === TimelineModelImpl.UtilityMainThreadName) {
+      track.url = url || Platform.DevToolsPath.EmptyUrlString;
+      track.name = url ? i18nString(UIStrings.workletServiceS, {PH1: url}) : i18nString(UIStrings.workletService);
     }
     this.tracksInternal.push(track);
 
@@ -831,40 +1022,6 @@ export class TimelineModelImpl {
 
         if (asyncEvent.name === RecordType.Animation) {
           group(TrackType.Animation).push(asyncEvent);
-          continue;
-        }
-
-        if (asyncEvent.hasCategory(TimelineModelImpl.Category.LatencyInfo) ||
-            asyncEvent.name === RecordType.ImplSideFling) {
-          const lastStep = asyncEvent.steps[asyncEvent.steps.length - 1];
-          if (!lastStep) {
-            throw new Error('AsyncEvent.steps access is out of bounds.');
-          }
-          // FIXME: fix event termination on the back-end instead.
-          if (lastStep.phase !== SDK.TracingModel.Phase.AsyncEnd) {
-            continue;
-          }
-          const data = lastStep.args['data'];
-          asyncEvent.causedFrame = Boolean(data && data['INPUT_EVENT_LATENCY_RENDERER_SWAP_COMPONENT']);
-          if (asyncEvent.hasCategory(TimelineModelImpl.Category.LatencyInfo)) {
-            if (lastStep.id && !this.knownInputEvents.has(lastStep.id)) {
-              continue;
-            }
-            if (asyncEvent.name === RecordType.InputLatencyMouseMove && !asyncEvent.causedFrame) {
-              continue;
-            }
-            // Coalesced events are not really been processed, no need to track them.
-            if (data['is_coalesced']) {
-              continue;
-            }
-            const rendererMain = data['INPUT_EVENT_LATENCY_RENDERER_MAIN_COMPONENT'];
-            if (rendererMain) {
-              const time = rendererMain['time'] / 1000;
-              TimelineData.forEvent(asyncEvent.steps[0]).timeWaitingForMainThread =
-                  time - asyncEvent.steps[0].startTime;
-            }
-          }
-          group(TrackType.Input).push(asyncEvent);
           continue;
         }
       }
@@ -1168,7 +1325,7 @@ export class TimelineModelImpl {
           break;
         }
         const frameId = TimelineModelImpl.eventFrameId(event);
-        const isMainFrame = Boolean(eventData['isMainFrame']);
+        const isOutermostMainFrame = Boolean(eventData['isOutermostMainFrame'] ?? eventData['isMainFrame']);
         const pageFrame = frameId ? this.pageFrames.get(frameId) : null;
         if (pageFrame) {
           pageFrame.update(event.startTime, eventData);
@@ -1179,13 +1336,13 @@ export class TimelineModelImpl {
             if (eventData['page'] && eventData['page'] !== this.legacyCurrentPage) {
               return false;
             }
-          } else if (isMainFrame) {
+          } else if (isOutermostMainFrame) {
             return false;
           } else if (!this.addPageFrame(event, eventData)) {
             return false;
           }
         }
-        if (isMainFrame && frameId) {
+        if (isOutermostMainFrame && frameId) {
           const frame = this.pageFrames.get(frameId);
           if (frame) {
             this.mainFrame = frame;
@@ -1206,14 +1363,6 @@ export class TimelineModelImpl {
   }
 
   private processBrowserEvent(event: SDK.TracingModel.Event): void {
-    if (event.name === RecordType.LatencyInfoFlow) {
-      const frameId = event.args['frameTreeNodeId'];
-      if (typeof frameId === 'number' && frameId === this.mainFrameNodeId && event.bind_id) {
-        this.knownInputEvents.add(event.bind_id);
-      }
-      return;
-    }
-
     if (event.name === RecordType.ResourceWillSendRequest) {
       const requestId = event.args?.data?.requestId;
       if (typeof requestId === 'string') {
@@ -1280,6 +1429,18 @@ export class TimelineModelImpl {
         }
         return;
       }
+      if (event.name === TimelineModelImpl.DevToolsMetadataEvent.AuctionWorkletRunningInProcess &&
+          this.browserFrameTracking) {
+        const worklet = new AuctionWorklet(event, data);
+        this.auctionWorklets.set(data['target'], worklet);
+      }
+      if (event.name === TimelineModelImpl.DevToolsMetadataEvent.AuctionWorkletDoneWithProcess &&
+          this.browserFrameTracking) {
+        const worklet = this.auctionWorklets.get(data['target']);
+        if (worklet) {
+          worklet.endTime = event.startTime;
+        }
+      }
     }
   }
 
@@ -1331,6 +1492,7 @@ export class TimelineModelImpl {
     this.cpuProfilesInternal = [];
     this.workerIdByThread = new WeakMap();
     this.pageFrames = new Map();
+    this.auctionWorklets = new Map();
     this.requestsFromBrowser = new Map();
 
     this.minimumRecordTimeInternal = 0;
@@ -1511,6 +1673,7 @@ export enum RecordType {
   TimeStamp = 'TimeStamp',
   ConsoleTime = 'ConsoleTime',
   UserTiming = 'UserTiming',
+  EventTiming = 'EventTiming',
 
   ResourceWillSendRequest = 'ResourceWillSendRequest',
   ResourceSendRequest = 'ResourceSendRequest',
@@ -1617,6 +1780,8 @@ export namespace TimelineModelImpl {
   export const WorkerThreadNameLegacy = 'DedicatedWorker Thread';
   export const RendererMainThreadName = 'CrRendererMain';
   export const BrowserMainThreadName = 'CrBrowserMain';
+  export const UtilityMainThreadName = 'CrUtilityMain';
+  export const AuctionWorkletThreadName = 'AuctionV8HelperThread';
 
   export const DevToolsMetadataEvent = {
     TracingStartedInBrowser: 'TracingStartedInBrowser',
@@ -1625,6 +1790,8 @@ export namespace TimelineModelImpl {
     FrameCommittedInBrowser: 'FrameCommittedInBrowser',
     ProcessReadyInBrowser: 'ProcessReadyInBrowser',
     FrameDeletedInBrowser: 'FrameDeletedInBrowser',
+    AuctionWorkletRunningInProcess: 'AuctionWorkletRunningInProcess',
+    AuctionWorkletDoneWithProcess: 'AuctionWorkletDoneWithProcess',
   };
 
   export const Thresholds = {
@@ -1712,7 +1879,6 @@ export class Track {
 export enum TrackType {
   MainThread = 'MainThread',
   Worker = 'Worker',
-  Input = 'Input',
   Animation = 'Animation',
   Timings = 'Timings',
   Console = 'Console',
@@ -1720,6 +1886,14 @@ export enum TrackType {
   GPU = 'GPU',
   Experience = 'Experience',
   Other = 'Other',
+  UserInteractions = 'UserInteractions',
+}
+
+const enum WorkletType {
+  NotWorklet = 0,
+  BidderWorklet = 1,
+  SellerWorklet = 2,
+  UnknownWorklet = 3,  // new type, or thread used for multiple ones.
 }
 
 export class PageFrame {
@@ -1773,6 +1947,29 @@ export class PageFrame {
   addChild(child: PageFrame): void {
     this.children.push(child);
     child.parent = this;
+  }
+}
+
+export class AuctionWorklet {
+  targetId: string;
+  processId: number;
+  host?: string;
+  startTime: number;
+  endTime: number;
+  workletType: WorkletType;
+  constructor(event: SDK.TracingModel.Event, data: any) {
+    this.targetId = (typeof data['target'] === 'string') ? data['target'] : '';
+    this.processId = (typeof data['pid'] === 'number') ? data['pid'] : 0;
+    this.host = (typeof data['host'] === 'string') ? data['host'] : undefined;
+    this.startTime = event.startTime;
+    this.endTime = Infinity;
+    if (data['type'] === 'bidder') {
+      this.workletType = WorkletType.BidderWorklet;
+    } else if (data['type'] === 'seller') {
+      this.workletType = WorkletType.SellerWorklet;
+    } else {
+      this.workletType = WorkletType.UnknownWorklet;
+    }
   }
 }
 

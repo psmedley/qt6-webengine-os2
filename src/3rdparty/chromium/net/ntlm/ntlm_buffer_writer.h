@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,7 @@
 #include "net/base/net_export.h"
 #include "net/ntlm/ntlm_constants.h"
 
-namespace net {
-namespace ntlm {
+namespace net::ntlm {
 
 // Supports various bounds checked low level buffer operations required by an
 // NTLM implementation.
@@ -188,10 +187,9 @@ class NET_EXPORT_PRIVATE NtlmBufferWriter {
   uint8_t* GetBufferPtrAtCursor() { return GetBufferPtr() + GetCursor(); }
 
   std::vector<uint8_t> buffer_;
-  size_t cursor_;
+  size_t cursor_ = 0;
 };
 
-}  // namespace ntlm
-}  // namespace net
+}  // namespace net::ntlm
 
 #endif  // NET_NTLM_NTLM_BUFFER_WRITER_H_

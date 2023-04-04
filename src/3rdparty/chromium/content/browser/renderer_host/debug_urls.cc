@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,6 +134,13 @@ bool HandleDebugURL(const GURL& url,
     return true;
   }
 
+  if (url == blink::kChromeUIBrowserDcheckURL) {
+    // Induce an intentional DCHECK in the browser process. This is used to
+    // see if a DCHECK will bring down the current process (is FATAL).
+    DCHECK(false);
+    return true;
+  }
+
 #if BUILDFLAG(IS_WIN)
   if (url == blink::kChromeUIBrowserHeapCorruptionURL) {
     // Induce an intentional heap corruption in the browser process.
@@ -155,7 +162,7 @@ bool HandleDebugURL(const GURL& url,
   }
 
   if (url == blink::kChromeUIGpuCleanURL) {
-    GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED,
+    GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
                              false /* force_create */,
                              base::BindOnce([](GpuProcessHost* host) {
                                if (host)
@@ -165,7 +172,7 @@ bool HandleDebugURL(const GURL& url,
   }
 
   if (url == blink::kChromeUIGpuCrashURL) {
-    GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED,
+    GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
                              false /* force_create */,
                              base::BindOnce([](GpuProcessHost* host) {
                                if (host)
@@ -176,7 +183,7 @@ bool HandleDebugURL(const GURL& url,
 
 #if BUILDFLAG(IS_ANDROID)
   if (url == blink::kChromeUIGpuJavaCrashURL) {
-    GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED,
+    GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
                              false /* force_create */,
                              base::BindOnce([](GpuProcessHost* host) {
                                if (host)
@@ -187,7 +194,7 @@ bool HandleDebugURL(const GURL& url,
 #endif
 
   if (url == blink::kChromeUIGpuHangURL) {
-    GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED,
+    GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
                              false /* force_create */,
                              base::BindOnce([](GpuProcessHost* host) {
                                if (host)

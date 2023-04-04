@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,9 @@
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory.h"
 #include "components/sync/model/syncable_service.h"
-#include "components/sync/test/model/fake_sync_change_processor.h"
-#include "components/sync/test/model/sync_change_processor_wrapper_for_test.h"
-#include "components/sync/test/model/sync_error_factory_mock.h"
+#include "components/sync/test/fake_sync_change_processor.h"
+#include "components/sync/test/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/test/sync_error_factory_mock.h"
 #include "components/version_info/channel.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/browser/api/storage/backend_task_runner.h"
@@ -188,11 +188,11 @@ class ExtensionSettingsApiTest : public ExtensionApiTest {
     loop.Run();
   }
 
-  void SetPolicies(const base::DictionaryValue& policies) {
+  void SetPolicies(const base::Value::Dict& policies) {
     std::unique_ptr<policy::PolicyBundle> bundle(new policy::PolicyBundle());
     policy::PolicyMap& policy_map = bundle->Get(policy::PolicyNamespace(
         policy::POLICY_DOMAIN_EXTENSIONS, kManagedStorageExtensionId));
-    policy_map.LoadFrom(&policies, policy::POLICY_LEVEL_MANDATORY,
+    policy_map.LoadFrom(policies, policy::POLICY_LEVEL_MANDATORY,
                         policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD);
     policy_provider_.UpdatePolicy(std::move(bundle));
   }
@@ -205,12 +205,13 @@ class ExtensionSettingsApiTest : public ExtensionApiTest {
       // May be NULL to imply not loading the extension.
       const std::string* extension_dir,
       bool is_final_action) {
-    ExtensionTestMessageListener listener("waiting", true);
-    ExtensionTestMessageListener listener_incognito("waiting_incognito", true);
+    ExtensionTestMessageListener listener("waiting", ReplyBehavior::kWillReply);
+    ExtensionTestMessageListener listener_incognito("waiting_incognito",
+                                                    ReplyBehavior::kWillReply);
 
     // Only load the extension after the listeners have been set up, to avoid
     // initialisation race conditions.
-    const Extension* extension = NULL;
+    const Extension* extension = nullptr;
     if (extension_dir) {
       extension = LoadExtension(
           test_data_dir_.AppendASCII("settings").AppendASCII(*extension_dir),
@@ -639,7 +640,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionSettingsManagedStorageApiTest,
   registry->AddObserver(&observer);
 
   // Install a managed extension.
-  ExtensionTestMessageListener listener("ready", false);
+  ExtensionTestMessageListener listener("ready");
   const Extension* extension = LoadExtension(
       test_data_dir_.AppendASCII("settings/managed_storage_schemas"));
   ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -728,7 +729,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionSettingsManagedStorageApiTest, ManagedStorage) {
                                     .Build())
                    .Build())
           .Build();
-  SetPolicies(*policy);
+  SetPolicies(policy->GetDict());
   // Now run the extension.
   ASSERT_TRUE(RunExtensionTest("settings/managed_storage")) << message_;
 }
@@ -748,9 +749,9 @@ IN_PROC_BROWSER_TEST_P(ExtensionSettingsManagedStorageApiTest,
           .Set("changes-policy", "bbb")
           .Set("deleted-policy", "ccc")
           .Build();
-  SetPolicies(*policy);
+  SetPolicies(policy->GetDict());
 
-  ExtensionTestMessageListener ready_listener("ready", false);
+  ExtensionTestMessageListener ready_listener("ready");
   // Load the extension to install the event listener and wait for the
   // extension's registration to be stored since it must persist after
   // this PRE_ step exits. Otherwise, the test will be flaky, since the
@@ -768,7 +769,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionSettingsManagedStorageApiTest,
       .Set("changes-policy", "ddd")
       .Set("new-policy", "eee")
       .Build();
-  SetPolicies(*policy);
+  SetPolicies(policy->GetDict());
   EXPECT_TRUE(events_result_catcher_.GetNextResult())
       << events_result_catcher_.message();
 }

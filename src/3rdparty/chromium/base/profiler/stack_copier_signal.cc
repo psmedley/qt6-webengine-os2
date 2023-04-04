@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ class AsyncSafeWaitableEvent {
     // futex() can wake up spuriously if this memory address was previously used
     // for a pthread mutex. So, also check the condition.
     while (true) {
-      int res =
+      long res =
           syscall(SYS_futex, futex_int_ptr(), FUTEX_WAIT | FUTEX_PRIVATE_FLAG,
                   0, nullptr, nullptr, 0);
       if (futex_.load(std::memory_order_acquire) != 0)

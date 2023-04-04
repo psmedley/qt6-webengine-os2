@@ -1,45 +1,44 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import {assert} from 'chrome://resources/js/assert_ts.js';
-import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
-import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
+import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
 
 import {NamedDestinationMessageData, SaveRequestType} from './constants.js';
 import {PdfPluginElement} from './internal_plugin.js';
 import {PinchPhase, Viewport} from './viewport.js';
 
-export type MessageData = {
-  type: string,
-  messageId?: string,
-};
+export interface MessageData {
+  type: string;
+  messageId?: string;
+}
 
-export type SaveAttachmentMessageData = {
-  type: string,
-  dataToSave: ArrayBuffer,
-  messageId: string,
-};
+export interface SaveAttachmentMessageData {
+  type: string;
+  dataToSave: ArrayBuffer;
+  messageId: string;
+}
 
-type SaveDataMessageData = {
-  dataToSave: ArrayBuffer,
-  token: string,
-  fileName: string,
-};
+interface SaveDataMessageData {
+  dataToSave: ArrayBuffer;
+  token: string;
+  fileName: string;
+}
 
-export type PrintPreviewParams = {
-  type: string,
-  url: string,
-  grayscale: boolean,
-  modifiable: boolean,
-  pageNumbers: number[],
-};
+export interface PrintPreviewParams {
+  type: string;
+  url: string;
+  grayscale: boolean;
+  modifiable: boolean;
+  pageNumbers: number[];
+}
 
-type ThumbnailMessageData = {
-  imageData: ArrayBuffer,
-  width: number,
-  height: number,
-};
+interface ThumbnailMessageData {
+  imageData: ArrayBuffer;
+  width: number;
+  height: number;
+}
 
 /**
  * Creates a cryptographically secure pseudorandom 128-bit token.
@@ -194,7 +193,7 @@ export class PluginController implements ContentController {
         layoutOptions: layoutOptions,
         xOffset: position.x,
         yOffset: position.y,
-        pinchPhase: pinchPhase
+        pinchPhase: pinchPhase,
       });
     }
   }
@@ -222,7 +221,7 @@ export class PluginController implements ContentController {
       pinchX: pinchCenter.x,
       pinchY: pinchCenter.y,
       pinchVectorX: pinchVector.x,
-      pinchVectorY: pinchVector.y
+      pinchVectorY: pinchVector.y,
     });
   }
 
@@ -304,7 +303,7 @@ export class PluginController implements ContentController {
       pageCount:
           (printPreviewParams.modifiable ?
                printPreviewParams.pageNumbers.length :
-               0)
+               0),
     });
   }
 
@@ -339,10 +338,10 @@ export class PluginController implements ContentController {
     });
   }
 
-  setReadOnly(enableReadOnly: boolean) {
+  setPresentationMode(enablePresentationMode: boolean) {
     this.postMessage_({
-      type: 'setReadOnly',
-      enableReadOnly: enableReadOnly,
+      type: 'setPresentationMode',
+      enablePresentationMode,
     });
   }
 
@@ -422,6 +421,9 @@ export class PluginController implements ContentController {
     switch (messageData.type) {
       case 'gesture':
         this.viewport_.dispatchGesture(messageData.gesture);
+        break;
+      case 'swipe':
+        this.viewport_.dispatchSwipe(messageData.direction);
         break;
       case 'goToPage':
         this.viewport_.goToPage(messageData.page);

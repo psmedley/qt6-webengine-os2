@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,14 +31,15 @@ class QuotaInternalsWebUiBrowserTest : public ContentBrowserTest {
   // to execute the script because WebUI has a default CSP policy denying
   // "eval()", which is what EvalJs uses under the hood.
   bool ExecJsInWebUI(const std::string& script) {
-    return ExecJs(shell()->web_contents()->GetMainFrame(), script,
+    return ExecJs(shell()->web_contents()->GetPrimaryMainFrame(), script,
                   EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1 /* world_id */);
   }
 };
 
 // Ensures that the page is loaded correctly.
+// https://crbug.com/1322015: flaky.
 IN_PROC_BROWSER_TEST_F(QuotaInternalsWebUiBrowserTest,
-                       NavigationUrl_ResolvedToWebUI) {
+                       DISABLED_NavigationUrl_ResolvedToWebUI) {
   EXPECT_TRUE(NavigateToURL(shell(), GURL(kQuotaInternalsUrl)));
   EXPECT_TRUE(
       ExecJsInWebUI("document.body.innerHTML.search('Total Space') >= 0;"));
@@ -81,6 +82,10 @@ IN_PROC_BROWSER_TEST_F(QuotaInternalsWebUiBrowserTest,
   EXPECT_TRUE(
       ExecJsInWebUI("document.getElementsByClassName('syncable-global-and-"
                     "unlimited-usage') >= 0;"));
+  EXPECT_TRUE(
+      ExecJsInWebUI("document.body.innerHTML.search('Temp Pool Size') >= 0;"));
+  EXPECT_TRUE(
+      ExecJsInWebUI("document.getElementsByClassName('temp-pool-size') >= 0;"));
 }
 
 }  // namespace content

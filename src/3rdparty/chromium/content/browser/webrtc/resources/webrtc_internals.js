@@ -1,9 +1,9 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import {addWebUIListener, sendWithPromise} from 'chrome://resources/js/cr.m.js';
-import {$} from 'chrome://resources/js/util.m.js';
+import {$} from 'chrome://resources/js/util.js';
 
 import {MAX_STATS_DATA_POINT_BUFFER_SIZE} from './data_series.js';
 import {DumpCreator, peerConnectionDataStore, userMediaRequests} from './dump_creator.js';
@@ -144,18 +144,31 @@ function initialize() {
         params.eventLogRecordingsToggleable);
   });
 
-  // Requests stats from all peer connections every second.
-  window.setInterval(requestStats, 1000);
+  // Requests stats from all peer connections every second unless specified via
+  // ?statsInterval=(milliseconds >= 100ms)
+  const searchParameters = new URLSearchParams(window.location.search);
+  let statsInterval = 1000;
+  if (searchParameters.has('statsInterval')) {
+    statsInterval = Math.max(
+        parseInt(searchParameters.get('statsInterval'), 10),
+        100);
+    if (!isFinite(statsInterval)) {
+      statsInterval = 1000;
+    }
+  }
+  window.setInterval(requestStats, statsInterval);
 }
 document.addEventListener('DOMContentLoaded', initialize);
 
 function createStatsSelectionOptionElements() {
-  const p = document.createElement('p');
-
-  const selectElement = document.createElement('select');
-  selectElement.setAttribute('id', 'statsSelectElement');
+  const statsElement = $('stats-template').content.cloneNode(true);
+  const selectElement = statsElement.getElementById('statsSelectElement');
+  const legacyStatsElement = statsElement.getElementById(
+      'legacy-stats-warning');
   selectElement.onchange = () => {
     currentGetStatsMethod = selectElement.value;
+    legacyStatsElement.style.display =
+        currentGetStatsMethod === OPTION_GETSTATS_LEGACY ? 'block' : 'none';
     Object.keys(peerConnectionDataStore).forEach(id => {
       const peerConnectionElement = $(id);
       statsTable.clearStatsLists(peerConnectionElement);
@@ -172,17 +185,7 @@ function createStatsSelectionOptionElements() {
   });
 
   selectElement.value = currentGetStatsMethod;
-
-  p.appendChild(document.createTextNode('Read Stats From: '));
-  p.appendChild(selectElement);
-
-  const statsDocumentation = document.createElement('p');
-  statsDocumentation.appendChild(
-    document.createTextNode('Note: computed stats are in []. ' +
-      'Experimental stats are marked with an * at the end.'));
-  p.appendChild(statsDocumentation);
-
-  return p;
+  return statsElement;
 }
 
 function requestStats() {
@@ -334,27 +337,6 @@ function addPeerConnection(data) {
   const deprecationNotices = document.createElement('ul');
   if (data.rtcConfiguration) {
     deprecationNotices.className = 'peerconnection-deprecations';
-    if (data.rtcConfiguration.indexOf('extmapAllowMixed: false') !== -1) {
-      // Hard deprecation, setting "false" will no longer work.
-      appendChildWithText(deprecationNotices, 'li',
-        'Note: The RTCPeerConnection offerAllowExtmapMixed ' +
-        'option is a non-standard feature. This feature will be removed ' +
-        'in M93 (Canary: July 15, 2021; Stable: August 24, 2021). For ' +
-        'interoperability with legacy WebRTC versions that throw errors ' +
-        'when attempting to parse the a=extmap-allow-mixed line in the ' +
-        'SDP remove the line from the SDP during signalling.');
-    }
-    if (data.rtcConfiguration.indexOf('sdpSemantics: "plan-b"') !== -1) {
-      appendChildWithText(deprecationNotices, 'li',
-        'Plan B SDP semantics, which is used when constructing an ' +
-        'RTCPeerConnection with {sdpSemantics:\"plan-b\"}, is a legacy ' +
-        'version of the Session Description Protocol that has severe ' +
-        'compatibility issues on modern browsers. The standardized SDP ' +
-        'format, \"unified-plan\", has been used by default since M72 ' +
-        '(January, 2019). Dropping support for Plan B is targeted for ' +
-        'M93. See https://www.chromestatus.com/feature/5823036655665152 ' +
-        'for more details.');
-    }
   }
   if (data.constraints) {
     if (data.constraints.indexOf('enableDtlsSrtp:') !== -1) {

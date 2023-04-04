@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 namespace chromeos {
 
-// WebUI implementation of AutoEnrollmentCheckScreenActor.
+// WebUI implementation of AutoEnrollmentCheckScreenView.
 class AutoEnrollmentCheckScreenHandler : public AutoEnrollmentCheckScreenView,
                                          public BaseScreenHandler {
  public:
@@ -23,25 +23,14 @@ class AutoEnrollmentCheckScreenHandler : public AutoEnrollmentCheckScreenView,
   AutoEnrollmentCheckScreenHandler& operator=(
       const AutoEnrollmentCheckScreenHandler&) = delete;
 
-  ~AutoEnrollmentCheckScreenHandler() override;
+  ~AutoEnrollmentCheckScreenHandler() override = default;
 
-  // AutoEnrollmentCheckScreenActor implementation:
+  // AutoEnrollmentCheckScreenView:
   void Show() override;
-  void SetDelegate(Delegate* delegate) override;
 
-  // BaseScreenHandler implementation:
+  // BaseScreenHandler:
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
-  void InitializeDeprecated() override;
-
-  // WebUIMessageHandler implementation:
-  void RegisterMessages() override;
-
- private:
-  Delegate* delegate_ = nullptr;
-
-  // Keeps whether screen should be shown right after initialization.
-  bool show_on_init_ = false;
 };
 
 }  // namespace chromeos

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,6 +50,7 @@ void SubscribeToWebFeedTask::Run() {
     feedwire::webfeed::FollowWebFeedRequest request;
     SetConsistencyToken(request, stream_.GetMetadata().consistency_token());
     request.set_name(request_.web_feed_id);
+    request.set_change_reason(request_.change_reason);
     stream_.GetNetwork().SendApiRequest<FollowWebFeedDiscoverApi>(
         request, stream_.GetAccountInfo(), stream_.GetSignedInRequestMetadata(),
         base::BindOnce(&SubscribeToWebFeedTask::RequestComplete,
@@ -70,6 +71,7 @@ void SubscribeToWebFeedTask::Run() {
     feedwire::webfeed::FollowWebFeedRequest request;
     SetConsistencyToken(request, stream_.GetMetadata().consistency_token());
     request.set_web_page_uri(request_.page_info.url().spec());
+    request.set_change_reason(request_.change_reason);
     if (request_.page_info.canonical_url().is_valid()) {
       request.set_canonical_uri(request_.page_info.canonical_url().spec());
     }
@@ -106,6 +108,7 @@ void SubscribeToWebFeedTask::Done(WebFeedSubscriptionRequestStatus status) {
   result.request_status = status;
   result.web_feed_info = subscribed_web_feed_info_;
   result.followed_web_feed_id = subscribed_web_feed_info_.web_feed_id();
+  result.change_reason = request_.change_reason;
   std::move(callback_).Run(std::move(result));
   TaskComplete();
 }

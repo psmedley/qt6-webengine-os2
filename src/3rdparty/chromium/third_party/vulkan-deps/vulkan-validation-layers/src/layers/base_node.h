@@ -36,13 +36,13 @@
 #include <atomic>
 
 // Intentionally ignore VulkanTypedHandle::node, it is optional
-inline bool operator==(const VulkanTypedHandle &a, const VulkanTypedHandle &b) NOEXCEPT {
+inline bool operator==(const VulkanTypedHandle &a, const VulkanTypedHandle &b) noexcept {
     return a.handle == b.handle && a.type == b.type;
 }
 namespace std {
 template <>
 struct hash<VulkanTypedHandle> {
-    size_t operator()(VulkanTypedHandle obj) const NOEXCEPT { return hash<uint64_t>()(obj.handle) ^ hash<uint32_t>()(obj.type); }
+    size_t operator()(VulkanTypedHandle obj) const noexcept { return hash<uint64_t>()(obj.handle) ^ hash<uint32_t>()(obj.type); }
 };
 }  // namespace std
 
@@ -95,6 +95,13 @@ class BASE_NODE : public std::enable_shared_from_this<BASE_NODE> {
     NodeMap ObjectBindings() const;
 
   protected:
+    template <typename Derived, typename Shared = std::shared_ptr<Derived>>
+    static Shared SharedFromThisImpl(Derived *derived) {
+        using Base = typename std::conditional<std::is_const<Derived>::value, const BASE_NODE, BASE_NODE>::type;
+        auto base = static_cast<Base *>(derived);
+        return std::static_pointer_cast<Derived>(base->shared_from_this());
+    }
+
     // Called recursively for every parent object of something that has become invalid
     virtual void NotifyInvalidate(const NodeList &invalid_nodes, bool unlink);
 

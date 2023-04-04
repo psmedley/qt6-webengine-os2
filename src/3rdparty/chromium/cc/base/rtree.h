@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,8 +94,8 @@ class RTree {
  private:
   // These values were empirically determined to produce reasonable performance
   // in most cases.
-  enum { kMinChildren = 6 };
-  enum { kMaxChildren = 11 };
+  static constexpr int kMinChildren = 6;
+  static constexpr int kMaxChildren = 11;
 
   template <typename U>
   struct Node;
@@ -152,8 +152,8 @@ class RTree {
 
   // This is the count of data elements (rather than total nodes in the tree)
   size_t num_data_elements_ = 0u;
-  Branch<T> root_;
   std::vector<Node<T>> nodes_;
+  Branch<T> root_;
 
   // If false, the rtree encountered overflow does not have reliable bounds.
   bool has_valid_bounds_ = true;
@@ -432,6 +432,7 @@ void RTree<T>::GetAllBoundsRecursive(Node<T>* node,
 template <typename T>
 void RTree<T>::Reset() {
   num_data_elements_ = 0;
+  root_.subtree = nullptr;
   nodes_.clear();
   root_.bounds = gfx::Rect();
   has_valid_bounds_ = true;

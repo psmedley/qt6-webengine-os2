@@ -31,10 +31,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <float.h>
-
 #include "libavutil/avassert.h"
-#include "libavutil/avstring.h"
+#include "libavutil/file_open.h"
 #include "libavutil/float_dsp.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
@@ -1478,7 +1476,7 @@ static int open_model(AVFilterContext *ctx, RNNModel **model)
 
     if (!s->model_name)
         return AVERROR(EINVAL);
-    f = av_fopen_utf8(s->model_name, "r");
+    f = avpriv_fopen_utf8(s->model_name, "r");
     if (!f) {
         av_log(ctx, AV_LOG_ERROR, "Failed to open model file: %s\n", s->model_name);
         return AVERROR(EINVAL);

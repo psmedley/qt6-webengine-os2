@@ -34,7 +34,8 @@ QuicEndpoint::QuicEndpoint(Simulator* simulator, std::string name,
   connection_ = std::make_unique<QuicConnection>(
       connection_id, GetAddressFromName(name), GetAddressFromName(peer_name),
       simulator, simulator->GetAlarmFactory(), &writer_, false, perspective,
-      ParsedVersionOfIndex(CurrentSupportedVersions(), 0));
+      ParsedVersionOfIndex(CurrentSupportedVersions(), 0),
+      connection_id_generator_);
   connection_->set_visitor(this);
   connection_->SetEncrypter(ENCRYPTION_FORWARD_SECURE,
                             std::make_unique<NullEncrypter>(perspective));
@@ -149,14 +150,6 @@ void QuicEndpoint::OnCanWrite() {
     return;
   }
   WriteStreamData();
-}
-
-bool QuicEndpoint::SendProbingData() {
-  if (connection()->sent_packet_manager().MaybeRetransmitOldestPacket(
-          PROBING_RETRANSMISSION)) {
-    return true;
-  }
-  return false;
 }
 
 bool QuicEndpoint::WillingAndAbleToWrite() const {

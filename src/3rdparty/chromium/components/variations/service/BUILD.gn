@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -39,7 +39,6 @@ static_library("service") {
 
   deps = [
     ":buildflags",
-    ":constants",
     "//base",
     "//build:branding_buildflags",
     "//build:chromeos_buildflags",
@@ -58,7 +57,7 @@ static_library("service") {
     "//services/network/public/cpp",
     "//ui/base",
   ]
-  if (use_qt) {
+  if (is_qtwebengine) {
     sources -= [
       "variations_field_trial_creator.cc",
       "variations_field_trial_creator.h",
@@ -80,7 +79,6 @@ source_set("unit_tests") {
 
   deps = [
     ":buildflags",
-    ":constants",
     ":service",
     "//base",
     "//base/test:test_support",
@@ -100,13 +98,4 @@ source_set("unit_tests") {
     "//services/network/public/cpp",
     "//testing/gtest",
   ]
-}
-
-static_library("constants") {
-  sources = [
-    "variations_safe_mode_constants.cc",
-    "variations_safe_mode_constants.h",
-  ]
-
-  deps = [ "//base" ]
 }

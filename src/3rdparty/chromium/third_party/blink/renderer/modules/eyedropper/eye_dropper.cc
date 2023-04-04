@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_color_selection_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_color_selection_result.h"
@@ -92,7 +91,8 @@ ScriptPromise EyeDropper::open(ScriptState* script_state,
         MakeGarbageCollected<OpenAbortAlgorithm>(this, signal_));
   }
 
-  resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   ScriptPromise promise = resolver_->Promise();
 
   auto* frame = window->GetFrame();
@@ -100,10 +100,10 @@ ScriptPromise EyeDropper::open(ScriptState* script_state,
       eye_dropper_chooser_.BindNewPipeAndPassReceiver(
           frame->GetTaskRunner(TaskType::kUserInteraction)));
   eye_dropper_chooser_.set_disconnect_handler(
-      WTF::Bind(&EyeDropper::EndChooser, WrapWeakPersistent(this)));
-  eye_dropper_chooser_->Choose(WTF::Bind(&EyeDropper::EyeDropperResponseHandler,
-                                         WrapPersistent(this),
-                                         WrapPersistent(resolver_.Get())));
+      WTF::BindOnce(&EyeDropper::EndChooser, WrapWeakPersistent(this)));
+  eye_dropper_chooser_->Choose(
+      resolver_->WrapCallbackInScriptScope(WTF::BindOnce(
+          &EyeDropper::EyeDropperResponseHandler, WrapPersistent(this))));
 
   return promise;
 }
@@ -143,16 +143,13 @@ void EyeDropper::EyeDropperResponseHandler(ScriptPromiseResolver* resolver,
   // so by receiving a reply, the eye dropper operation must *not* have
   // been aborted by the abort signal. Thus, the promise is not yet resolved,
   // so resolver_ must be non-null.
-  DCHECK(resolver_);
-  if (!IsInParallelAlgorithmRunnable(resolver_->GetExecutionContext(),
-                                     resolver_->GetScriptState()))
-    return;
-
-  ScriptState::Scope script_state_scope(resolver->GetScriptState());
+  DCHECK_EQ(resolver_, resolver);
 
   if (success) {
     ColorSelectionResult* result = ColorSelectionResult::Create();
-    result->setSRGBHex(Color(color).Serialized());
+    // TODO(https://1351544): The EyeDropper should return a Color or an
+    // SkColor4f, instead of an SkColor.
+    result->setSRGBHex(Color::FromRGBA32(color).SerializeAsCanvasColor());
     resolver->Resolve(result);
   } else {
     RejectPromiseHelper(DOMExceptionCode::kAbortError,
@@ -175,11 +172,7 @@ void EyeDropper::EndChooser() {
 
 void EyeDropper::RejectPromiseHelper(DOMExceptionCode exception_code,
                                      const WTF::String& message) {
-  v8::Local<v8::Value> v8_value = V8ThrowDOMException::CreateOrEmpty(
-      resolver_->GetScriptState()->GetIsolate(), exception_code, message);
-  if (!v8_value.IsEmpty())
-    resolver_->Reject(v8_value);
-
+  resolver_->RejectWithDOMException(exception_code, message);
   resolver_ = nullptr;
 }
 

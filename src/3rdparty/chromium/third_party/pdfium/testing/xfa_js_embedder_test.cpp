@@ -15,6 +15,9 @@
 #include "fxjs/xfa/cfxjse_value.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/base/check_op.h"
+#include "v8/include/v8-container.h"
+#include "v8/include/v8-local-handle.h"
+#include "v8/include/v8-value.h"
 
 XFAJSEmbedderTest::XFAJSEmbedderTest() = default;
 
@@ -40,7 +43,11 @@ CXFA_Document* XFAJSEmbedderTest::GetXFADocument() const {
   if (!pContext)
     return nullptr;
 
-  return pContext->GetXFADoc()->GetXFADoc();
+  CXFA_FFDoc* pFFDoc = pContext->GetXFADoc();
+  if (!pFFDoc)
+    return nullptr;
+
+  return pFFDoc->GetXFADoc();
 }
 
 v8::Local<v8::Value> XFAJSEmbedderTest::GetValue() const {
@@ -58,7 +65,11 @@ bool XFAJSEmbedderTest::OpenDocumentWithOptions(
           filename, password, linearize_option, javascript_option)) {
     return false;
   }
-  script_context_ = GetXFADocument()->GetScriptContext();
+  CXFA_Document* pDoc = GetXFADocument();
+  if (!pDoc)
+    return false;
+
+  script_context_ = pDoc->GetScriptContext();
   return true;
 }
 

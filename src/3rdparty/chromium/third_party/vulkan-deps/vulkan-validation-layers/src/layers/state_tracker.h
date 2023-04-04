@@ -88,8 +88,7 @@ struct create_shader_module_api_state {
 
 // This structure is used to save data across the CreateGraphicsPipelines down-chain API call
 struct create_graphics_pipeline_api_state {
-    std::vector<safe_VkGraphicsPipelineCreateInfo> gpu_create_infos;
-    std::vector<safe_VkGraphicsPipelineCreateInfo> printf_create_infos;
+    std::vector<safe_VkGraphicsPipelineCreateInfo> modified_create_infos;
     std::vector<std::shared_ptr<PIPELINE_STATE>> pipe_state;
     std::vector<std::vector<create_shader_module_api_state>> shader_states;
     const VkGraphicsPipelineCreateInfo* pCreateInfos;
@@ -97,24 +96,21 @@ struct create_graphics_pipeline_api_state {
 
 // This structure is used to save data across the CreateComputePipelines down-chain API call
 struct create_compute_pipeline_api_state {
-    std::vector<safe_VkComputePipelineCreateInfo> gpu_create_infos;
-    std::vector<safe_VkComputePipelineCreateInfo> printf_create_infos;
+    std::vector<safe_VkComputePipelineCreateInfo> modified_create_infos;
     std::vector<std::shared_ptr<PIPELINE_STATE>> pipe_state;
     const VkComputePipelineCreateInfo* pCreateInfos;
 };
 
 // This structure is used to save data across the CreateRayTracingPipelinesNV down-chain API call.
 struct create_ray_tracing_pipeline_api_state {
-    std::vector<safe_VkRayTracingPipelineCreateInfoCommon> gpu_create_infos;
-    std::vector<safe_VkRayTracingPipelineCreateInfoCommon> printf_create_infos;
+    std::vector<safe_VkRayTracingPipelineCreateInfoCommon> modified_create_infos;
     std::vector<std::shared_ptr<PIPELINE_STATE>> pipe_state;
     const VkRayTracingPipelineCreateInfoNV* pCreateInfos;
 };
 
 // This structure is used to save data across the CreateRayTracingPipelinesKHR down-chain API call.
 struct create_ray_tracing_pipeline_khr_api_state {
-    std::vector<safe_VkRayTracingPipelineCreateInfoCommon> gpu_create_infos;
-    std::vector<safe_VkRayTracingPipelineCreateInfoCommon> printf_create_infos;
+    std::vector<safe_VkRayTracingPipelineCreateInfoCommon> modified_create_infos;
     std::vector<std::shared_ptr<PIPELINE_STATE>> pipe_state;
     const VkRayTracingPipelineCreateInfoKHR* pCreateInfos;
 };
@@ -346,6 +342,22 @@ class ValidationStateTracker : public ValidationObject {
         return GetStateMap<State>().size();
     }
 
+    template <typename State, typename Fn>
+    void ForEachShared(Fn&& fn) const {
+        const auto& map = GetStateMap<State>();
+        for (const auto& entry : map.snapshot()) {
+            fn(entry.second);
+        }
+    }
+
+    template <typename State, typename Fn>
+    void ForEachShared(Fn&& fn) {
+        auto& map = GetStateMap<State>();
+        for (const auto& entry : map.snapshot()) {
+            fn(entry.second);
+        }
+    }
+
     template <typename State>
     void ForEach(std::function<void(const State& s)> fn) const {
         const auto& map = GetStateMap<State>();
@@ -425,7 +437,7 @@ class ValidationStateTracker : public ValidationObject {
         if (found_it == map.end()) {
             return nullptr;
         }
-        return std::move(found_it->second);
+        return found_it->second;
     };
 
     std::shared_ptr<BUFFER_STATE> GetBufferByAddress(VkDeviceAddress address) {
@@ -459,18 +471,6 @@ class ValidationStateTracker : public ValidationObject {
         return result;
     }
 
-    using CommandBufferResetCallback = std::function<void(VkCommandBuffer)>;
-    template <typename Fn>
-    void SetCommandBufferResetCallback(Fn&& fn) {
-        command_buffer_reset_callback.reset(new CommandBufferResetCallback(std::forward<Fn>(fn)));
-    }
-
-    using CommandBufferFreeCallback = std::function<void(VkCommandBuffer)>;
-    template <typename Fn>
-    void SetCommandBufferFreeCallback(Fn&& fn) {
-        command_buffer_free_callback.reset(new CommandBufferFreeCallback(std::forward<Fn>(fn)));
-    }
-
     using SetImageViewInitialLayoutCallback = std::function<void(CMD_BUFFER_STATE*, const IMAGE_VIEW_STATE&, VkImageLayout)>;
     template <typename Fn>
     void SetSetImageViewInitialLayoutCallback(Fn&& fn) {
@@ -501,7 +501,8 @@ class ValidationStateTracker : public ValidationObject {
     void PostCallRecordGetBufferMemoryRequirements2KHR(VkDevice device, const VkBufferMemoryRequirementsInfo2* pInfo,
                                                        VkMemoryRequirements2* pMemoryRequirements) override;
 
-    virtual std::shared_ptr<QUEUE_STATE> CreateQueue(VkQueue queue, uint32_t queue_family_index, VkDeviceQueueCreateFlags flags);
+    virtual std::shared_ptr<QUEUE_STATE> CreateQueue(VkQueue queue, uint32_t queue_family_index, VkDeviceQueueCreateFlags flags,
+                                                     const VkQueueFamilyProperties &queueFamilyProperties);
 
     void PostCallRecordGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue* pQueue) override;
     void PostCallRecordGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* pQueueInfo, VkQueue* pQueue) override;
@@ -583,6 +584,7 @@ class ValidationStateTracker : public ValidationObject {
                                                      VkResult result) override;
 #endif  // VK_USE_PLATFORM_WIN32_KHR
     void PostCallRecordSignalSemaphoreKHR(VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo, VkResult result) override;
+    void PostCallRecordSignalSemaphore(VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo, VkResult result) override;
 
     // Create/Destroy/Bind
     void PostCallRecordBindAccelerationStructureMemoryNV(VkDevice device, uint32_t bindInfoCount,
@@ -863,6 +865,13 @@ class ValidationStateTracker : public ValidationObject {
                                                          VkDescriptorUpdateTemplate descriptorUpdateTemplate,
                                                          const void* pData) override;
 
+    virtual std::shared_ptr<DEVICE_MEMORY_STATE> CreateDeviceMemoryState(VkDeviceMemory mem,
+                                                                         const VkMemoryAllocateInfo* p_alloc_info,
+                                                                         uint64_t fake_address, const VkMemoryType& memory_type,
+                                                                         const VkMemoryHeap& memory_heap,
+                                                                         layer_data::optional<DedicatedBinding>&& dedicated_binding,
+                                                                         uint32_t physical_device_count);
+
     // Memory mapping
     void PostCallRecordMapMemory(VkDevice device, VkDeviceMemory mem, VkDeviceSize offset, VkDeviceSize size, VkFlags flags,
                                  void** ppData, VkResult result) override;
@@ -1007,6 +1016,7 @@ class ValidationStateTracker : public ValidationObject {
                                                const VkStridedDeviceAddressRegionKHR *pHitShaderBindingTable,
                                                const VkStridedDeviceAddressRegionKHR *pCallableShaderBindingTable,
                                                VkDeviceAddress indirectDeviceAddress) override;
+    void PostCallRecordCmdTraceRaysIndirect2KHR(VkCommandBuffer commandBuffer, VkDeviceAddress indirectDeviceAddress) override;
     void PostCallRecordCmdEndDebugUtilsLabelEXT(VkCommandBuffer commandBuffer) override;
     void PostCallRecordCmdEndQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t slot) override;
     void PostCallRecordCmdEndQueryIndexedEXT(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t query,
@@ -1303,14 +1313,25 @@ class ValidationStateTracker : public ValidationObject {
         }
     }
 
+    template <typename ExtProp>
+    void GetPhysicalDeviceExtProperties(VkPhysicalDevice gpu, ExtProp* ext_prop) {
+        assert(ext_prop);
+        *ext_prop = LvlInitStruct<ExtProp>();
+        if (api_version < VK_API_VERSION_1_1) {
+            auto prop2 = LvlInitStruct<VkPhysicalDeviceProperties2>(ext_prop);
+            DispatchGetPhysicalDeviceProperties2KHR(gpu, &prop2);
+        } else {
+            auto prop2 = LvlInitStruct<VkPhysicalDeviceProperties2>(ext_prop);
+            DispatchGetPhysicalDeviceProperties2(gpu, &prop2);
+        }
+    }
+
     // Link to the device's physical-device data
     PHYSICAL_DEVICE_STATE* physical_device_state;
 
     // Link for derived device objects back to their parent instance object
     ValidationStateTracker* instance_state;
 
-    std::unique_ptr<CommandBufferResetCallback> command_buffer_reset_callback;
-    std::unique_ptr<CommandBufferFreeCallback> command_buffer_free_callback;
     std::unique_ptr<SetImageViewInitialLayoutCallback> set_image_view_initial_layout_callback;
 
     DeviceFeatures enabled_features = {};
@@ -1324,6 +1345,9 @@ class ValidationStateTracker : public ValidationObject {
     VkDeviceGroupDeviceCreateInfo device_group_create_info = {};
     uint32_t physical_device_count;
     uint32_t custom_border_color_sampler_count = 0;
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    std::vector <VkExportMetalObjectTypeFlagBitsEXT> export_metal_flags;
+#endif // VK_USE_PLATFORM_METAL_EXT
 
     // VK_KHR_format_feature_flags2 changes the behavior of the
     // app/layers/spec if present. So it needs its own special boolean unlike
@@ -1358,6 +1382,7 @@ class ValidationStateTracker : public ValidationObject {
         VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT blend_operation_advanced_props;
         VkPhysicalDeviceConservativeRasterizationPropertiesEXT conservative_rasterization_props;
         VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroup_size_control_props;
+        VkPhysicalDeviceSubgroupProperties subgroup_properties;
     };
     DeviceExtensionProperties phys_dev_ext_props = {};
     std::vector<VkCooperativeMatrixPropertiesNV> cooperative_matrix_properties;
@@ -1418,14 +1443,13 @@ class ValidationStateTracker : public ValidationObject {
       public:
         void Free(VkDeviceSize fake_address){};  // Define the interface just in case we ever need to be cleverer.
         VkDeviceSize Alloc(VkDeviceSize size) {
-            const auto alloc = free_;
-            assert(std::numeric_limits<VkDeviceSize>::max() - size >= free_);  //  776.722963 days later...
-            free_ = free_ + size;
+            const auto alloc = free_.fetch_add(size);
+            assert(std::numeric_limits<VkDeviceSize>::max() - size >= alloc);  //  776.722963 days later...
             return alloc;
         }
 
       private:
-        VkDeviceSize free_ = 1U << 20; // start at 1mb to leave room for a NULL address
+        std::atomic<VkDeviceSize> free_{1U << 20};  // start at 1mb to leave room for a NULL address
     };
     FakeAllocator fake_memory;
 };

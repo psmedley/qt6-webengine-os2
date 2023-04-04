@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ ContentCaptureSender::ContentCaptureSender(
     content::RenderFrame* render_frame,
     blink::AssociatedInterfaceRegistry* registry)
     : content::RenderFrameObserver(render_frame) {
-  registry->AddInterface(base::BindRepeating(
+  registry->AddInterface<mojom::ContentCaptureSender>(base::BindRepeating(
       &ContentCaptureSender::BindPendingReceiver, base::Unretained(this)));
 }
 

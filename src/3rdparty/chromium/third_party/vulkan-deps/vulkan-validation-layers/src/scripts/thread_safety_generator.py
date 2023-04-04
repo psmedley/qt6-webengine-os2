@@ -213,7 +213,7 @@ public:
         int64_t count;
     };
 
-    ObjectUseData() : thread(0), writer_reader_count(0) {
+    ObjectUseData() : thread(), writer_reader_count(0) {
         // silence -Wunused-private-field warning
         padding[0] = 0;
     }
@@ -245,7 +245,7 @@ public:
         }
     }
 
-    std::atomic<loader_platform_thread_id> thread;
+    std::atomic<std::thread::id> thread;
 
 private:
     // need to update write and read counts atomically. Writer in high
@@ -253,7 +253,7 @@ private:
     std::atomic<int64_t> writer_reader_count;
 
     // Put each lock on its own cache line to avoid false cache line sharing.
-    char padding[(-int(sizeof(std::atomic<loader_platform_thread_id>) + sizeof(std::atomic<int64_t>))) & 63];
+    char padding[(-int(sizeof(std::atomic<std::thread::id>) + sizeof(std::atomic<int64_t>))) & 63];
 };
 
 
@@ -278,9 +278,9 @@ public:
 
     std::shared_ptr<ObjectUseData> FindObject(T object) {
         assert(object_table.contains(object));
-        auto iter = std::move(object_table.find(object));
+        auto iter = object_table.find(object);
         if (iter != object_table.end()) {
-            return std::move(iter->second);
+            return iter->second;
         } else {
             object_data->LogError(object, kVUID_Threading_Info,
                     "Couldn't find %s Object 0x%" PRIxLEAST64
@@ -295,7 +295,7 @@ public:
             return;
         }
         bool skip = false;
-        loader_platform_thread_id tid = loader_platform_get_thread_id();
+        std::thread::id tid = std::this_thread::get_id();
 
         auto use_data = FindObject(object);
         if (!use_data) {
@@ -311,10 +311,11 @@ public:
                 assert(prevCount.GetWriteCount() != 0);
                 // There are no readers.  Two writers just collided.
                 if (use_data->thread != tid) {
-                    skip |= object_data->LogError(object, kVUID_Threading_MultipleThreads,
-                        "THREADING ERROR : %s(): object of type %s is simultaneously used in "
-                        "thread 0x%" PRIx64 " and thread 0x%" PRIx64, api_name,
-                        typeName, (uint64_t)use_data->thread.load(std::memory_order_relaxed), (uint64_t)tid);
+                    std::stringstream err_str;
+                    err_str << "THREADING ERROR : " << api_name << "(): object of type " << typeName
+                            <<" is simultaneously used in thread " << use_data->thread.load(std::memory_order_relaxed)
+                            <<" and thread " << tid;
+                    skip |= object_data->LogError(object, kVUID_Threading_MultipleThreads, "%s", err_str.str().c_str());
                     if (skip) {
                         // Wait for thread-safe access to object instead of skipping call.
                         use_data->WaitForObjectIdle(true);
@@ -331,10 +332,11 @@ public:
             } else {
                 // There are readers.  This writer collided with them.
                 if (use_data->thread != tid) {
-                    skip |= object_data->LogError(object, kVUID_Threading_MultipleThreads,
-                        "THREADING ERROR : %s(): object of type %s is simultaneously used in "
-                        "thread 0x%" PRIx64 " and thread 0x%" PRIx64, api_name,
-                        typeName, (uint64_t)use_data->thread.load(std::memory_order_relaxed), (uint64_t)tid);
+                    std::stringstream err_str;
+                    err_str << "THREADING ERROR : " << api_name << "(): object of type " << typeName
+                            <<" is simultaneously used in thread " << use_data->thread.load(std::memory_order_relaxed)
+                            <<" and thread " << tid;
+                    skip |= object_data->LogError(object, kVUID_Threading_MultipleThreads, "%s", err_str.str().c_str());
                     if (skip) {
                         // Wait for thread-safe access to object instead of skipping call.
                         use_data->WaitForObjectIdle(true);
@@ -369,7 +371,7 @@ public:
             return;
         }
         bool skip = false;
-        loader_platform_thread_id tid = loader_platform_get_thread_id();
+        std::thread::id tid = std::this_thread::get_id();
 
         auto use_data = FindObject(object);
         if (!use_data) {
@@ -382,10 +384,11 @@ public:
             use_data->thread = tid;
         } else if (prevCount.GetWriteCount() > 0 && use_data->thread != tid) {
             // There is a writer of the object.
-            skip |= object_data->LogError(object, kVUID_Threading_MultipleThreads,
-                "THREADING ERROR : %s(): object of type %s is simultaneously used in "
-                "thread 0x%" PRIx64 " and thread 0x%" PRIx64, api_name,
-                typeName, (uint64_t)use_data->thread.load(std::memory_order_relaxed), (uint64_t)tid);
+            std::stringstream err_str;
+            err_str << "THREADING ERROR : " << api_name << "(): object of type " << typeName
+                    <<" is simultaneously used in thread " << use_data->thread.load(std::memory_order_relaxed)
+                    <<" and thread " << tid;
+            skip |= object_data->LogError(object, kVUID_Threading_MultipleThreads, "%s", err_str.str().c_str());
             if (skip) {
                 // Wait for thread-safe access to object instead of skipping call.
                 use_data->WaitForObjectIdle(false);
@@ -429,19 +432,21 @@ public:
     layer_data::unordered_map<VkCommandPool, layer_data::unordered_set<VkCommandBuffer>> pool_command_buffers_map;
     layer_data::unordered_map<VkDevice, layer_data::unordered_set<VkQueue>> device_queues_map;
 
-    // Track per-descriptorsetlayout and per-descriptorset whether UPDATE_AFTER_BIND is used.
-    // This is used to (sloppily) implement the relaxed externsync rules for UPDATE_AFTER_BIND
-    // descriptors. We model updates of UPDATE_AFTER_BIND descriptors as if they were reads
+    // Track per-descriptorsetlayout and per-descriptorset whether read_only is used.
+    // This is used to (sloppily) implement the relaxed externsync rules for read_only
+    // descriptors. We model updates of read_only descriptors as if they were reads
     // rather than writes, because they only conflict with the set being freed or reset.
     //
-    // We don't track the UPDATE_AFTER_BIND state per-binding for a couple reasons:
+    // We don't track the read_only state per-binding for a couple reasons:
     // (1) We only have one counter per object, and if we treated non-UAB as writes
     //     and UAB as reads then they'd appear to conflict with each other.
     // (2) Avoid additional tracking of descriptor binding state in the descriptor set
     //     layout, and tracking of which bindings are accessed by a VkDescriptorUpdateTemplate.
-    vl_concurrent_unordered_map<VkDescriptorSetLayout, bool, 4> dsl_update_after_bind_map;
-    vl_concurrent_unordered_map<VkDescriptorSet, bool, 6> ds_update_after_bind_map;
-    bool DsUpdateAfterBind(VkDescriptorSet) const;
+    // Descriptor sets using VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_EXT can also
+    // be used simultaneously in multiple threads
+    vl_concurrent_unordered_map<VkDescriptorSetLayout, bool, 4> dsl_read_only_map;
+    vl_concurrent_unordered_map<VkDescriptorSet, bool, 6> ds_read_only_map;
+    bool DsReadOnly(VkDescriptorSet) const;
 
     counter<VkCommandBuffer> c_VkCommandBuffer;
     counter<VkDevice> c_VkDevice;
@@ -682,18 +687,20 @@ void ThreadSafety::PostCallRecordCreateDescriptorSetLayout(
     if (result == VK_SUCCESS) {
         CreateObject(*pSetLayout);
 
-        // Check whether any binding uses UPDATE_AFTER_BIND
-        bool update_after_bind = false;
-        const auto *flags_create_info = LvlFindInChain<VkDescriptorSetLayoutBindingFlagsCreateInfo>(pCreateInfo->pNext);
-        if (flags_create_info) {
-            for (uint32_t i = 0; i < flags_create_info->bindingCount; ++i) {
-                if (flags_create_info->pBindingFlags[i] & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) {
-                    update_after_bind = true;
-                    break;
+        // Check whether any binding uses read_only
+        bool read_only = (pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_EXT) != 0;
+        if (!read_only) {
+            const auto *flags_create_info = LvlFindInChain<VkDescriptorSetLayoutBindingFlagsCreateInfo>(pCreateInfo->pNext);
+            if (flags_create_info) {
+                for (uint32_t i = 0; i < flags_create_info->bindingCount; ++i) {
+                    if (flags_create_info->pBindingFlags[i] & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) {
+                        read_only = true;
+                        break;
+                    }
                 }
             }
         }
-        dsl_update_after_bind_map.insert_or_assign(*pSetLayout, update_after_bind);
+        dsl_read_only_map.insert_or_assign(*pSetLayout, read_only);
     }
 }
 
@@ -716,9 +723,9 @@ void ThreadSafety::PostCallRecordAllocateDescriptorSets(VkDevice device, const V
             CreateObject(pDescriptorSets[index0]);
             pool_descriptor_sets.insert(pDescriptorSets[index0]);
 
-            auto iter = dsl_update_after_bind_map.find(pAllocateInfo->pSetLayouts[index0]);
-            if (iter != dsl_update_after_bind_map.end()) {
-                ds_update_after_bind_map.insert_or_assign(pDescriptorSets[index0], iter->second);
+            auto iter = dsl_read_only_map.find(pAllocateInfo->pSetLayouts[index0]);
+            if (iter != dsl_read_only_map.end()) {
+                ds_read_only_map.insert_or_assign(pDescriptorSets[index0], iter->second);
             } else {
                 assert(0 && "descriptor set layout not found");
             }
@@ -765,7 +772,7 @@ void ThreadSafety::PostCallRecordFreeDescriptorSets(
             auto descriptor_set = pDescriptorSets[index0];
             DestroyObject(descriptor_set);
             pool_descriptor_sets.erase(descriptor_set);
-            ds_update_after_bind_map.erase(descriptor_set);
+            ds_read_only_map.erase(descriptor_set);
         }
     }
 }
@@ -801,7 +808,7 @@ void ThreadSafety::PostCallRecordDestroyDescriptorPool(
         for(auto descriptor_set : pool_descriptor_sets_map[descriptorPool]) {
             FinishWriteObject(descriptor_set, "vkDestroyDescriptorPool");
             DestroyObject(descriptor_set);
-            ds_update_after_bind_map.erase(descriptor_set);
+            ds_read_only_map.erase(descriptor_set);
         }
         pool_descriptor_sets_map[descriptorPool].clear();
         pool_descriptor_sets_map.erase(descriptorPool);
@@ -841,16 +848,16 @@ void ThreadSafety::PostCallRecordResetDescriptorPool(
         for(auto descriptor_set : pool_descriptor_sets_map[descriptorPool]) {
             FinishWriteObject(descriptor_set, "vkResetDescriptorPool");
             DestroyObject(descriptor_set);
-            ds_update_after_bind_map.erase(descriptor_set);
+            ds_read_only_map.erase(descriptor_set);
         }
         pool_descriptor_sets_map[descriptorPool].clear();
     }
 }
 
-bool ThreadSafety::DsUpdateAfterBind(VkDescriptorSet set) const
+bool ThreadSafety::DsReadOnly(VkDescriptorSet set) const
 {
-    auto iter = ds_update_after_bind_map.find(set);
-    if (iter != ds_update_after_bind_map.end()) {
+    auto iter = ds_read_only_map.find(set);
+    if (iter != ds_read_only_map.end()) {
         return iter->second;
     }
     return false;
@@ -866,8 +873,8 @@ void ThreadSafety::PreCallRecordUpdateDescriptorSets(
     if (pDescriptorWrites) {
         for (uint32_t index=0; index < descriptorWriteCount; index++) {
             auto dstSet = pDescriptorWrites[index].dstSet;
-            bool update_after_bind = DsUpdateAfterBind(dstSet);
-            if (update_after_bind) {
+            bool read_only = DsReadOnly(dstSet);
+            if (read_only) {
                 StartReadObject(dstSet, "vkUpdateDescriptorSets");
             } else {
                 StartWriteObject(dstSet, "vkUpdateDescriptorSets");
@@ -877,8 +884,8 @@ void ThreadSafety::PreCallRecordUpdateDescriptorSets(
     if (pDescriptorCopies) {
         for (uint32_t index=0; index < descriptorCopyCount; index++) {
             auto dstSet = pDescriptorCopies[index].dstSet;
-            bool update_after_bind = DsUpdateAfterBind(dstSet);
-            if (update_after_bind) {
+            bool read_only = DsReadOnly(dstSet);
+            if (read_only) {
                 StartReadObject(dstSet, "vkUpdateDescriptorSets");
             } else {
                 StartWriteObject(dstSet, "vkUpdateDescriptorSets");
@@ -900,8 +907,8 @@ void ThreadSafety::PostCallRecordUpdateDescriptorSets(
     if (pDescriptorWrites) {
         for (uint32_t index=0; index < descriptorWriteCount; index++) {
             auto dstSet = pDescriptorWrites[index].dstSet;
-            bool update_after_bind = DsUpdateAfterBind(dstSet);
-            if (update_after_bind) {
+            bool read_only = DsReadOnly(dstSet);
+            if (read_only) {
                 FinishReadObject(dstSet, "vkUpdateDescriptorSets");
             } else {
                 FinishWriteObject(dstSet, "vkUpdateDescriptorSets");
@@ -911,8 +918,8 @@ void ThreadSafety::PostCallRecordUpdateDescriptorSets(
     if (pDescriptorCopies) {
         for (uint32_t index=0; index < descriptorCopyCount; index++) {
             auto dstSet = pDescriptorCopies[index].dstSet;
-            bool update_after_bind = DsUpdateAfterBind(dstSet);
-            if (update_after_bind) {
+            bool read_only = DsReadOnly(dstSet);
+            if (read_only) {
                 FinishReadObject(dstSet, "vkUpdateDescriptorSets");
             } else {
                 FinishWriteObject(dstSet, "vkUpdateDescriptorSets");
@@ -932,8 +939,8 @@ void ThreadSafety::PreCallRecordUpdateDescriptorSetWithTemplate(
     StartReadObjectParentInstance(device, "vkUpdateDescriptorSetWithTemplate");
     StartReadObject(descriptorUpdateTemplate, "vkUpdateDescriptorSetWithTemplate");
 
-    bool update_after_bind = DsUpdateAfterBind(descriptorSet);
-    if (update_after_bind) {
+    bool read_only = DsReadOnly(descriptorSet);
+    if (read_only) {
         StartReadObject(descriptorSet, "vkUpdateDescriptorSetWithTemplate");
     } else {
         StartWriteObject(descriptorSet, "vkUpdateDescriptorSetWithTemplate");
@@ -949,8 +956,8 @@ void ThreadSafety::PostCallRecordUpdateDescriptorSetWithTemplate(
     FinishReadObjectParentInstance(device, "vkUpdateDescriptorSetWithTemplate");
     FinishReadObject(descriptorUpdateTemplate, "vkUpdateDescriptorSetWithTemplate");
 
-    bool update_after_bind = DsUpdateAfterBind(descriptorSet);
-    if (update_after_bind) {
+    bool read_only = DsReadOnly(descriptorSet);
+    if (read_only) {
         FinishReadObject(descriptorSet, "vkUpdateDescriptorSetWithTemplate");
     } else {
         FinishWriteObject(descriptorSet, "vkUpdateDescriptorSetWithTemplate");
@@ -966,8 +973,8 @@ void ThreadSafety::PreCallRecordUpdateDescriptorSetWithTemplateKHR(
     StartReadObjectParentInstance(device, "vkUpdateDescriptorSetWithTemplateKHR");
     StartReadObject(descriptorUpdateTemplate, "vkUpdateDescriptorSetWithTemplateKHR");
 
-    bool update_after_bind = DsUpdateAfterBind(descriptorSet);
-    if (update_after_bind) {
+    bool read_only = DsReadOnly(descriptorSet);
+    if (read_only) {
         StartReadObject(descriptorSet, "vkUpdateDescriptorSetWithTemplateKHR");
     } else {
         StartWriteObject(descriptorSet, "vkUpdateDescriptorSetWithTemplateKHR");
@@ -983,8 +990,8 @@ void ThreadSafety::PostCallRecordUpdateDescriptorSetWithTemplateKHR(
     FinishReadObjectParentInstance(device, "vkUpdateDescriptorSetWithTemplateKHR");
     FinishReadObject(descriptorUpdateTemplate, "vkUpdateDescriptorSetWithTemplateKHR");
 
-    bool update_after_bind = DsUpdateAfterBind(descriptorSet);
-    if (update_after_bind) {
+    bool read_only = DsReadOnly(descriptorSet);
+    if (read_only) {
         FinishReadObject(descriptorSet, "vkUpdateDescriptorSetWithTemplateKHR");
     } else {
         FinishWriteObject(descriptorSet, "vkUpdateDescriptorSetWithTemplateKHR");

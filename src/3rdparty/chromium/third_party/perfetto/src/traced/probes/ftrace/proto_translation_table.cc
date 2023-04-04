@@ -61,7 +61,7 @@ ProtoTranslationTable::FtracePageHeaderSpec MakeFtracePageHeaderSpec(
 // matches the userspace bitness.
 ProtoTranslationTable::FtracePageHeaderSpec GuessFtracePageHeaderSpec() {
   ProtoTranslationTable::FtracePageHeaderSpec spec{};
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) && __i386__
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) && defined(__i386__)
   // local_t is arch-specific and models the largest size of an integer that is
   // still atomic across bus transactions, exceptions and IRQ. On android x86
   // this is always size 8
@@ -443,6 +443,20 @@ std::unique_ptr<ProtoTranslationTable> ProtoTranslationTable::Create(
             FtraceEvent::Field{"char buf", 16, 0, 0});
       } else {
         continue;
+      }
+    }
+
+    // Special case function_graph events as they use a u64 field for kernel
+    // function pointers. Fudge the type so that |MergeFields| correctly tags
+    // the fields for kernel address symbolization (kFtraceSymAddr64).
+    if (!strcmp(event.group, "ftrace") &&
+        (!strcmp(event.name, "funcgraph_entry") ||
+         !strcmp(event.name, "funcgraph_exit"))) {
+      for (auto& field : ftrace_event.fields) {
+        if (GetNameFromTypeAndName(field.type_and_name) == "func") {
+          field.type_and_name = "void * func";
+          break;
+        }
       }
     }
 

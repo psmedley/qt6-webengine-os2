@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/mac/scoped_launch_data.h"
+#include "base/numerics/safe_conversions.h"
 
 // This file is written in terms of launch_data_t, which is deprecated but has
 // no replacement. Ignore the deprecation warnings for now.
@@ -72,7 +73,7 @@ pid_t PIDForJob(const std::string& job_label) {
     return -1;
   }
 
-  return launch_data_get_integer(pid_data);
+  return checked_cast<pid_t>(launch_data_get_integer(pid_data));
 }
 
 }  // namespace base::mac

@@ -25,7 +25,11 @@
 
 #include <vector>
 
-class SkGlyphRunList;
+namespace sktext {
+class GlyphRun;
+class GlyphRunList;
+}
+
 class SkKeyedImage;
 class SkPDFArray;
 class SkPDFDevice;
@@ -84,9 +88,14 @@ public:
                        const SkSamplingOptions&,
                        const SkPaint&,
                        SkCanvas::SrcRectConstraint) override;
-    void onDrawGlyphRunList(SkCanvas*, const SkGlyphRunList&, const SkPaint&) override;
+    void onDrawGlyphRunList(SkCanvas*,
+                            const sktext::GlyphRunList&,
+                            const SkPaint& initialPaint,
+                            const SkPaint& drawingPaint) override;
     void drawVertices(const SkVertices*, sk_sp<SkBlender>, const SkPaint&, bool) override;
-    void drawCustomMesh(SkCustomMesh, sk_sp<SkBlender>, const SkPaint&) override;
+#ifdef SK_ENABLE_SKSL
+    void drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) override;
+#endif
 
     // PDF specific methods.
     void drawSprite(const SkBitmap& bitmap, int x, int y,
@@ -161,8 +170,10 @@ private:
     void finishContentEntry(const SkClipStack*, SkBlendMode, SkPDFIndirectReference, SkPath*);
     bool isContentEmpty();
 
-    void internalDrawGlyphRun(const SkGlyphRun& glyphRun, SkPoint offset, const SkPaint& runPaint);
-    void drawGlyphRunAsPath(const SkGlyphRun& glyphRun, SkPoint offset, const SkPaint& runPaint);
+    void internalDrawGlyphRun(
+            const sktext::GlyphRun& glyphRun, SkPoint offset, const SkPaint& runPaint);
+    void drawGlyphRunAsPath(
+            const sktext::GlyphRun& glyphRun, SkPoint offset, const SkPaint& runPaint);
 
     void internalDrawImageRect(SkKeyedImage,
                                const SkRect* src,

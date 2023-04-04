@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -367,7 +367,11 @@ bool SandboxLinux::InitializeSandbox(sandbox::mojom::Sandbox sandbox_type,
       sandbox_failure_fatal = switch_value != "no";
     }
 
-    if (sandbox_failure_fatal) {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+    CHECK(process_type != switches::kGpuProcess || sandbox_failure_fatal);
+#endif
+
+    if (sandbox_failure_fatal && !IsUnsandboxedSandboxType(sandbox_type)) {
       error_message += " Try waiting for /proc to be updated.";
       LOG(ERROR) << error_message;
       // This will return if /proc/self eventually reports this process is
@@ -401,6 +405,13 @@ bool SandboxLinux::InitializeSandbox(sandbox::mojom::Sandbox sandbox_type,
       << "opened. This breaks the security of the setuid sandbox.";
 
   InitLibcLocaltimeFunctions();
+
+  if (!IsUnsandboxedSandboxType(sandbox_type)) {
+    // No sandboxed process should make use of getaddrinfo() as it is impossible
+    // to sandbox (e.g. glibc loads arbitrary third party DNS resolution
+    // libraries).
+    DiscourageGetaddrinfo();
+  }
 
   // Attempt to limit the future size of the address space of the process.
   // Fine to call with multiple threads as we don't use RLIMIT_STACK.
@@ -551,7 +562,7 @@ void SandboxLinux::SealSandbox() {
 void SandboxLinux::CheckForBrokenPromises(
     sandbox::mojom::Sandbox sandbox_type) {
   if (sandbox_type != sandbox::mojom::Sandbox::kRenderer
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
       && sandbox_type != sandbox::mojom::Sandbox::kPpapi
 #endif
   ) {

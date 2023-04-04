@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
   * TODO(crbug.com/647084): Enable checkTypes error for this file.
   * @suppress {checkTypes}
   */
-goog.provide('__crWeb.autofill');
 
 /**
  * The autofill data for a form.
@@ -27,9 +26,6 @@ goog.provide('__crWeb.autofill');
  */
 // eslint-disable-next-line no-var
 var FormData;
-
-/* Beginning of anonymous object. */
-(function() {
 
 /**
  * Namespace for this file. It depends on |__gCrWeb| having already been
@@ -411,7 +407,7 @@ __gCrWeb.autofill.extractNewForms = function(
       continue;
     }
 
-    const form = new __gCrWeb['common'].JSONSafeObject;
+    const form = new __gCrWeb['common'].JSONSafeObject();
     if (!__gCrWeb.fill.webFormElementToFormData(
             window, formElement, null, extractMask, form, null /* field */)) {
       continue;
@@ -435,7 +431,7 @@ __gCrWeb.autofill.extractNewForms = function(
   const numEditableUnownedElements =
       scanFormControlElements_(unownedControlElements);
   if (numEditableUnownedElements > 0) {
-    const unownedForm = new __gCrWeb['common'].JSONSafeObject;
+    const unownedForm = new __gCrWeb['common'].JSONSafeObject();
     const hasUnownedForm =
         __gCrWeb.fill.unownedFormElementsAndFieldSetsToFormData(
             window, fieldsets, unownedControlElements, extractMask,
@@ -560,8 +556,8 @@ __gCrWeb.autofill['fillPredictionData'] = function(data) {
       if (!__gCrWeb.fill.isAutofillableElement(element)) {
         continue;
       }
-      const elementName = __gCrWeb.form.getFieldIdentifier(element);
-      const value = formData[elementName];
+      const elementID = __gCrWeb.fill.getUniqueID(element);
+      const value = formData[elementID];
       if (value) {
         element.placeholder = value;
       }
@@ -585,5 +581,3 @@ __gCrWeb.autofill['sanitizedFieldIsEmpty'] = function(value) {
   // formatting characters.
   return __gCrWeb.common.trim(value.replace(/[-_()/|]/g, '')) === '';
 };
-
-}());  // End of anonymous object

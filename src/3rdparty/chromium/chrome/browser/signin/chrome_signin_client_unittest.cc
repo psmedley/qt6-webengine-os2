@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -260,7 +260,9 @@ bool IsSignoutDisallowedByPolicy(
     case signin_metrics::ProfileSignout::
         AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN:
     case signin_metrics::ProfileSignout::SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT:
-    case signin_metrics::ProfileSignout::USER_TUNED_OFF_SYNC_FROM_DICE_UI:
+    case signin_metrics::ProfileSignout::SIGNIN_RETRIGGERD_FROM_WEB_SIGNIN:
+    case signin_metrics::ProfileSignout::
+        USER_CLICKED_SIGNOUT_FROM_CLEAR_BROWSING_DATA_PAGE:
       return true;
     case signin_metrics::ProfileSignout::ACCOUNT_REMOVED_FROM_DEVICE:
     case signin_metrics::ProfileSignout::
@@ -289,6 +291,13 @@ bool IsSignoutDisallowedByPolicy(
     case signin_metrics::ProfileSignout::
         USER_CLICKED_REVOKE_SYNC_CONSENT_SETTINGS:
       return false;
+    case signin_metrics::ProfileSignout::USER_CLICKED_SIGNOUT_PROFILE_MENU:
+      return false;
+    case signin_metrics::ProfileSignout::
+        USER_CLICKED_SIGNOUT_FROM_USER_POLICY_NOTIFICATION_DIALOG:
+      return false;
+    case signin_metrics::ProfileSignout::ACCOUNT_EMAIL_UPDATED:
+      return true;
     case signin_metrics::ProfileSignout::NUM_PROFILE_SIGNOUT_METRICS:
       NOTREACHED();
       return false;
@@ -416,7 +425,6 @@ const signin_metrics::ProfileSignout kSignoutSources[] = {
     signin_metrics::ProfileSignout::SERVER_FORCED_DISABLE,
     signin_metrics::ProfileSignout::TRANSFER_CREDENTIALS,
     signin_metrics::ProfileSignout::AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN,
-    signin_metrics::ProfileSignout::USER_TUNED_OFF_SYNC_FROM_DICE_UI,
     signin_metrics::ProfileSignout::ACCOUNT_REMOVED_FROM_DEVICE,
     signin_metrics::ProfileSignout::SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT,
     signin_metrics::ProfileSignout::FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST,
@@ -426,11 +434,21 @@ const signin_metrics::ProfileSignout kSignoutSources[] = {
     signin_metrics::ProfileSignout::
         IOS_ACCOUNT_REMOVED_FROM_DEVICE_AFTER_RESTORE,
     signin_metrics::ProfileSignout::USER_CLICKED_REVOKE_SYNC_CONSENT_SETTINGS,
-
+    signin_metrics::ProfileSignout::USER_CLICKED_SIGNOUT_PROFILE_MENU,
+    signin_metrics::ProfileSignout::SIGNIN_RETRIGGERD_FROM_WEB_SIGNIN,
+    signin_metrics::ProfileSignout::
+        USER_CLICKED_SIGNOUT_FROM_USER_POLICY_NOTIFICATION_DIALOG,
+    signin_metrics::ProfileSignout::ACCOUNT_EMAIL_UPDATED,
+    signin_metrics::ProfileSignout::
+        USER_CLICKED_SIGNOUT_FROM_CLEAR_BROWSING_DATA_PAGE,
 };
-static_assert(std::size(kSignoutSources) ==
+// kNumberOfObsoleteSignoutSources should be updated when a ProfileSignout
+// value is deprecated.
+const int kNumberOfObsoleteSignoutSources = 1;
+static_assert(std::size(kSignoutSources) + kNumberOfObsoleteSignoutSources ==
                   signin_metrics::ProfileSignout::NUM_PROFILE_SIGNOUT_METRICS,
-              "kSignoutSources should enumerate all ProfileSignout values");
+              "kSignoutSources should enumerate all ProfileSignout values that "
+              "are not obsolete");
 
 INSTANTIATE_TEST_SUITE_P(AllSignoutSources,
                          ChromeSigninClientSignoutSourceTest,

@@ -1,8 +1,8 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {quoteString} from 'chrome://resources/js/util.m.js';
+import {quoteString} from 'chrome://resources/js/util.js';
 import {get as deepGet} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import Fuse from './fuse.js';
@@ -75,7 +75,7 @@ function cloneTabDataObj<T extends ItemData>(tabData: T): T {
  * ranges {start:start1, length:length1}, {start:start2, length:length2} ...
  * to be used by search_highlight_utils.js
  */
-function convertToRanges(matches: ReadonlyArray<Fuse.RangeTuple>):
+function convertToRanges(matches: readonly Fuse.RangeTuple[]):
     Array<{start: number, length: number}> {
   return matches.map(
       ([start, end]) => ({start: start, length: end - start + 1}));
@@ -130,7 +130,7 @@ function exactSearch<T extends ItemData>(
     if (matchFound) {
       exactMatches.push({
         tab: matchedRecord,
-        score: scoringFunction(matchedRecord, distance, searchFieldWeights)
+        score: scoringFunction(matchedRecord, distance, searchFieldWeights),
       });
     }
   }

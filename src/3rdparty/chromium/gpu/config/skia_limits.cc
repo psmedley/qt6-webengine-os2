@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ void DetermineGrCacheLimitsFromAvailableMemory(
   // Limits for glyph cache textures.
   constexpr size_t kMaxLowEndGlyphCacheTextureBytes = 1024 * 512 * 4;
   // High-end / low-end memory cutoffs.
-  constexpr int64_t kHighEndMemoryThreshold = 4096LL * 1024 * 1024;
+  constexpr uint64_t kHighEndMemoryThreshold = 4096ULL * 1024 * 1024;
 
   if (base::SysInfo::IsLowEndDevice()) {
     *max_resource_cache_bytes = kMaxLowEndGaneshResourceCacheBytes;

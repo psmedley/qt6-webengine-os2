@@ -45,7 +45,7 @@
   }
 
   .file-description {
-    color: var(--cr-secondary-text-color);
+    color: var(--color-new-tab-page-secondary-foreground);
     font-size: 12px;
   }
 
@@ -72,6 +72,9 @@
     disable-text="[[i18nRecursive('',
                                   'modulesDisableButtonText',
                                   'modulesDriveSentence2')]]"
+    dismiss-text="[[i18nRecursive('',
+                                  'modulesDismissButtonText',
+                                  'modulesDriveFilesLower')]]"
     icon-src="icons/drive_logo.svg"
     show-info-button on-info-button-click="onInfoButtonClick_"
     show-dismiss-button on-dismiss-button-click="onDismissButtonClick_"

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "content/browser/renderer_host/media/video_capture_provider.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/video_capture_device_launcher.h"
+#include "media/base/scoped_async_trace.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "services/video_capture/public/mojom/device_factory.mojom.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 
 namespace content {
@@ -46,11 +46,15 @@ class CONTENT_EXPORT ServiceVideoCaptureDeviceLauncher
     DEVICE_START_ABORTING
   };
 
+  using ScopedCaptureTrace =
+      media::TypedScopedAsyncTrace<media::TraceCategory::kVideoAndImageCapture>;
+
   void OnCreatePushSubscriptionCallback(
       mojo::Remote<video_capture::mojom::VideoSource> source,
       mojo::Remote<video_capture::mojom::PushVideoStreamSubscription>
           subscription,
       base::OnceClosure connection_lost_cb,
+      std::unique_ptr<ScopedCaptureTrace> scoped_trace,
       video_capture::mojom::CreatePushSubscriptionResultCodePtr result_code,
       const media::VideoCaptureParams& params);
 
@@ -59,7 +63,7 @@ class CONTENT_EXPORT ServiceVideoCaptureDeviceLauncher
   ConnectToDeviceFactoryCB connect_to_source_provider_cb_;
   scoped_refptr<RefCountedVideoSourceProvider> service_connection_;
   State state_;
-  base::SequenceChecker sequence_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
   base::OnceClosure done_cb_;
   raw_ptr<Callbacks> callbacks_;
 };

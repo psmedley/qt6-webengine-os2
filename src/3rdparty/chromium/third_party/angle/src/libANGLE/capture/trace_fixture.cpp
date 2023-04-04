@@ -23,18 +23,31 @@ void UpdateResourceMap(GLuint *resourceMap, GLuint id, GLsizei readBufferOffset)
 }
 
 DecompressCallback gDecompressCallback;
+DeleteCallback gDeleteCallback;
 std::string gBinaryDataDir = ".";
+
+void DeleteBinaryData()
+{
+    if (gBinaryData)
+    {
+        if (gDeleteCallback)
+        {
+            gDeleteCallback(gBinaryData);
+        }
+        else
+        {
+            delete[] gBinaryData;
+        }
+        gBinaryData = nullptr;
+    }
+}
 
 void LoadBinaryData(const char *fileName)
 {
-    // TODO(b/179188489): Fix cross-module deallocation.
-    if (gBinaryData != nullptr)
-    {
-        delete[] gBinaryData;
-    }
+    DeleteBinaryData();
     char pathBuffer[1000] = {};
 
-    sprintf(pathBuffer, "%s/%s", gBinaryDataDir.c_str(), fileName);
+    snprintf(pathBuffer, sizeof(pathBuffer), "%s/%s", gBinaryDataDir.c_str(), fileName);
     FILE *fp = fopen(pathBuffer, "rb");
     if (fp == 0)
     {
@@ -126,9 +139,15 @@ GLuint *gTextureMap;
 GLuint *gTransformFeedbackMap;
 GLuint *gVertexArrayMap;
 
-void SetBinaryDataDecompressCallback(DecompressCallback callback)
+ClientBufferMap gClientBufferMap;
+EGLImageMap gEGLImageMap;
+SurfaceMap gSurfaceMap;
+
+void SetBinaryDataDecompressCallback(DecompressCallback decompressCallback,
+                                     DeleteCallback deleteCallback)
 {
-    gDecompressCallback = callback;
+    gDecompressCallback = decompressCallback;
+    gDeleteCallback     = deleteCallback;
 }
 
 void SetBinaryDataDir(const char *dataDir)
@@ -208,6 +227,8 @@ void FinishReplay()
     delete[] gSemaphoreMap;
     delete[] gTransformFeedbackMap;
     delete[] gVertexArrayMap;
+
+    DeleteBinaryData();
 }
 
 void SetValidateSerializedStateCallback(ValidateSerializedStateCallback callback)
@@ -302,11 +323,6 @@ void UpdateVertexArrayID(GLuint id, GLsizei readBufferOffset)
 
 void SetResourceID(GLuint *map, GLuint id)
 {
-    if (map[id] != 0)
-    {
-        fprintf(stderr, "%s: resource ID %d is already reserved\n", __func__, id);
-        exit(1);
-    }
     map[id] = id;
 }
 
@@ -330,6 +346,46 @@ void SetTextureID(GLuint id)
     SetResourceID(gTextureMap, id);
 }
 
+void UpdateClientBuffer(EGLClientBuffer key, EGLClientBuffer data)
+{
+    gClientBufferMap[key] = data;
+}
+
+EGLClientBuffer GetClientBuffer(EGLenum target, uint64_t key)
+{
+    switch (target)
+    {
+        case EGL_GL_TEXTURE_2D:
+        case EGL_GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+        case EGL_GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+        case EGL_GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+        case EGL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+        case EGL_GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+        case EGL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+        case EGL_GL_TEXTURE_3D:
+        {
+            GLuint64 id = gTextureMap[key];
+            return reinterpret_cast<EGLClientBuffer>(id);
+        }
+        case EGL_GL_RENDERBUFFER:
+        {
+            GLuint64 id = gRenderbufferMap[key];
+            return reinterpret_cast<EGLClientBuffer>(id);
+        }
+        default:
+        {
+            const auto &iData = gClientBufferMap.find(reinterpret_cast<EGLClientBuffer>(key));
+            return iData != gClientBufferMap.end() ? iData->second : nullptr;
+        }
+    }
+}
+
+GLeglImageOES GetEGLImage(uintptr_t key)
+{
+    auto iData = gEGLImageMap.find(key);
+    return iData != gEGLImageMap.end() ? iData->second : nullptr;
+}
+
 void ValidateSerializedState(const char *serializedState, const char *fileName, uint32_t line)
 {
     if (gValidateSerializedStateCallback)
@@ -337,3 +393,8 @@ void ValidateSerializedState(const char *serializedState, const char *fileName, 
         gValidateSerializedStateCallback(serializedState, fileName, line);
     }
 }
+
+ANGLE_REPLAY_EXPORT PFNEGLCREATEIMAGEPROC r_eglCreateImage;
+ANGLE_REPLAY_EXPORT PFNEGLCREATEIMAGEKHRPROC r_eglCreateImageKHR;
+ANGLE_REPLAY_EXPORT PFNEGLDESTROYIMAGEPROC r_eglDestroyImage;
+ANGLE_REPLAY_EXPORT PFNEGLDESTROYIMAGEKHRPROC r_eglDestroyImageKHR;

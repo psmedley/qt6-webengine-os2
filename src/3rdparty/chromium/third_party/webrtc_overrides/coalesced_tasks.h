@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 #include "base/callback.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/functional/any_invocable.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/webrtc/api/task_queue/queued_task.h"
 #include "third_party/webrtc/rtc_base/system/rtc_export.h"
 
 namespace blink {
@@ -37,7 +37,7 @@ class RTC_EXPORT CoalescedTasks {
   // `scheduled_time`. In this case, the caller is responsible for scheduling a
   // call to RunScheduledTasks() at `scheduled_time`.
   bool QueueDelayedTask(base::TimeTicks task_time,
-                        std::unique_ptr<webrtc::QueuedTask> task,
+                        absl::AnyInvocable<void() &&> task,
                         base::TimeTicks scheduled_time);
   // Run all queued tasks up to and including `scheduled_time`. If multiple
   // tasks were queued onto the same `scheduled_time` they will execute in order
@@ -52,6 +52,12 @@ class RTC_EXPORT CoalescedTasks {
   // them.
   void Clear();
 
+  // Returns true if there are no stored tasks.
+  bool Empty() const {
+    base::AutoLock lock(lock_);
+    return delayed_tasks_.empty();
+  }
+
  private:
   // The (time_ticks, unique_id) pair allows multiple tasks to be scheduled on
   // the same `time_ticks`.
@@ -65,10 +71,10 @@ class RTC_EXPORT CoalescedTasks {
     uint64_t unique_id;
   };
 
-  base::Lock lock_;
+  mutable base::Lock lock_;
   std::set<base::TimeTicks> scheduled_ticks_ GUARDED_BY(lock_);
   uint64_t next_unique_id_ GUARDED_BY(lock_) = 0;
-  std::map<UniqueTimeTicks, std::unique_ptr<webrtc::QueuedTask>> delayed_tasks_
+  std::map<UniqueTimeTicks, absl::AnyInvocable<void() &&>> delayed_tasks_
       GUARDED_BY(lock_);
 };
 

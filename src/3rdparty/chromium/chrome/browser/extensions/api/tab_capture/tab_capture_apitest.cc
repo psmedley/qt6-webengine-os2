@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,8 +93,8 @@ class TabCaptureApiPixelTest : public TabCaptureApiTest {
 #endif  // BUILDFLAG(IS_MAC)
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ApiTests) {
   AddExtensionToCommandLineAllowlist();
-  ASSERT_TRUE(
-      RunExtensionTest("tab_capture/api_tests", {.page_url = "api_tests.html"}))
+  ASSERT_TRUE(RunExtensionTest("tab_capture/api_tests",
+                               {.extension_url = "api_tests.html"}))
       << message_;
 }
 
@@ -117,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest,
   // tested by a suite of content_browsertests.
   ASSERT_TRUE(RunExtensionTest(
       "tab_capture/end_to_end",
-      {.page_url = "end_to_end.html?method=local&colorDeviation=50"}))
+      {.extension_url = "end_to_end.html?method=local&colorDeviation=50"}))
       << message_;
 }
 
@@ -136,16 +136,16 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest, DISABLED_EndToEndThroughWebRTC) {
   // being set so high.
   ASSERT_TRUE(RunExtensionTest(
       "tab_capture/end_to_end",
-      {.page_url = "end_to_end.html?method=webrtc&colorDeviation=50"}))
+      {.extension_url = "end_to_end.html?method=webrtc&colorDeviation=50"}))
       << message_;
 }
 
 // Tests that getUserMedia() is NOT a way to start tab capture.
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GetUserMediaTest) {
-  ExtensionTestMessageListener listener("ready", true);
+  ExtensionTestMessageListener listener("ready", ReplyBehavior::kWillReply);
 
   ASSERT_TRUE(RunExtensionTest("tab_capture/get_user_media_test",
-                               {.page_url = "get_user_media_test.html"}))
+                               {.extension_url = "get_user_media_test.html"}))
       << message_;
 
   EXPECT_TRUE(listener.WaitUntilSatisfied());
@@ -155,7 +155,8 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GetUserMediaTest) {
                                 ui::PAGE_TRANSITION_LINK, false);
   content::WebContents* web_contents = browser()->OpenURL(params);
 
-  content::RenderFrameHost* const main_frame = web_contents->GetMainFrame();
+  content::RenderFrameHost* const main_frame =
+      web_contents->GetPrimaryMainFrame();
   ASSERT_TRUE(main_frame);
   listener.Reply(base::StringPrintf("web-contents-media-stream://%i:%i",
                                     main_frame->GetProcess()->GetID(),
@@ -168,20 +169,20 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GetUserMediaTest) {
 
 // Make sure tabCapture.capture only works if the tab has been granted
 // permission via an extension icon click or the extension is allowlisted.
-// TODO(crbug.com/1306351): Flaky on Mac and Win.
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-#define MAYBE_ActiveTabPermission DISABLED_ActiveTabPermission
-#else
-#define MAYBE_ActiveTabPermission ActiveTabPermission
-#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ActiveTabPermission) {
-  ExtensionTestMessageListener before_open_tab("ready1", true);
-  ExtensionTestMessageListener before_grant_permission("ready2", true);
-  ExtensionTestMessageListener before_open_new_tab("ready3", true);
-  ExtensionTestMessageListener before_allowlist_extension("ready4", true);
+// TODO(crbug.com/1306351): Flaky on all platforms
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, DISABLED_ActiveTabPermission) {
+  ExtensionTestMessageListener before_open_tab("ready1",
+                                               ReplyBehavior::kWillReply);
+  ExtensionTestMessageListener before_grant_permission(
+      "ready2", ReplyBehavior::kWillReply);
+  ExtensionTestMessageListener before_open_new_tab("ready3",
+                                                   ReplyBehavior::kWillReply);
+  ExtensionTestMessageListener before_allowlist_extension(
+      "ready4", ReplyBehavior::kWillReply);
 
-  ASSERT_TRUE(RunExtensionTest("tab_capture/active_tab_permission_test",
-                               {.page_url = "active_tab_permission_test.html"}))
+  ASSERT_TRUE(
+      RunExtensionTest("tab_capture/active_tab_permission_test",
+                       {.extension_url = "active_tab_permission_test.html"}))
       << message_;
 
   // Open a new tab and make sure capture is denied.
@@ -224,11 +225,11 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ActiveTabPermission) {
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, FullscreenEvents) {
   AddExtensionToCommandLineAllowlist();
 
-  ExtensionTestMessageListener capture_started("tab_capture_started", false);
-  ExtensionTestMessageListener entered_fullscreen("entered_fullscreen", false);
+  ExtensionTestMessageListener capture_started("tab_capture_started");
+  ExtensionTestMessageListener entered_fullscreen("entered_fullscreen");
 
   ASSERT_TRUE(RunExtensionTest("tab_capture/fullscreen_test",
-                               {.page_url = "fullscreen_test.html"}))
+                               {.extension_url = "fullscreen_test.html"}))
       << message_;
   EXPECT_TRUE(capture_started.WaitUntilSatisfied());
 
@@ -247,9 +248,11 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, FullscreenEvents) {
 }
 
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GrantForChromePages) {
-  ExtensionTestMessageListener before_open_tab("ready1", true);
-  ASSERT_TRUE(RunExtensionTest("tab_capture/active_tab_chrome_pages",
-                               {.page_url = "active_tab_chrome_pages.html"}))
+  ExtensionTestMessageListener before_open_tab("ready1",
+                                               ReplyBehavior::kWillReply);
+  ASSERT_TRUE(
+      RunExtensionTest("tab_capture/active_tab_chrome_pages",
+                       {.extension_url = "active_tab_chrome_pages.html"}))
       << message_;
   EXPECT_TRUE(before_open_tab.WaitUntilSatisfied());
 
@@ -277,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, CaptureInSplitIncognitoMode) {
   AddExtensionToCommandLineAllowlist();
   ASSERT_TRUE(RunExtensionTest(
       "tab_capture/start_tab_capture",
-      {.page_url = "start_tab_capture.html", .open_in_incognito = true},
+      {.extension_url = "start_tab_capture.html", .open_in_incognito = true},
       {.allow_in_incognito = true}))
       << message_;
 }
@@ -287,7 +290,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, CaptureInSplitIncognitoMode) {
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, Constraints) {
   AddExtensionToCommandLineAllowlist();
   ASSERT_TRUE(RunExtensionTest("tab_capture/constraints",
-                               {.page_url = "constraints.html"}))
+                               {.extension_url = "constraints.html"}))
       << message_;
 }
 
@@ -330,7 +333,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, TabIndicator) {
   // the indicator to turn on.
   AddExtensionToCommandLineAllowlist();
   ASSERT_TRUE(RunExtensionTest("tab_capture/start_tab_capture",
-                               {.page_url = "start_tab_capture.html"}))
+                               {.extension_url = "start_tab_capture.html"}))
       << message_;
 
   // Run the browser until the indicator turns on.

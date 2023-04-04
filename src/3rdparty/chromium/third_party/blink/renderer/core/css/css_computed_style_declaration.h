@@ -117,6 +117,10 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
   const CSSValue* GetPropertyCSSValueInternal(
       const AtomicString& custom_property_name) override;
   String GetPropertyValueInternal(CSSPropertyID) override;
+  String GetPropertyValueWithHint(const String& property_name,
+                                  unsigned index) override;
+  String GetPropertyPriorityWithHint(const String& property_name,
+                                     unsigned index) override;
   void SetPropertyInternal(CSSPropertyID,
                            const String& custom_property_name,
                            const String& value,
@@ -126,9 +130,9 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
 
   bool CssPropertyMatches(CSSPropertyID, const CSSValue&) const override;
 
+  AtomicString pseudo_argument_;
   Member<Node> node_;
   PseudoId pseudo_element_specifier_;
-  AtomicString pseudo_argument_;
   bool allow_visited_style_;
 };
 

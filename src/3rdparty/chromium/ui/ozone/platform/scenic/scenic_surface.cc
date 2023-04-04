@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -354,7 +354,7 @@ scoped_refptr<gfx::NativePixmap> ScenicSurface::AllocatePrimaryPlanePixmap(
   image_format.coded_height = size.height();
   image_pipe_->AddImage(image_id, image_id, 0, image_format);
 
-  return buffer_collection->CreateNativePixmap(0);
+  return buffer_collection->CreateNativePixmap(0, size);
 }
 
 void ScenicSurface::SetTextureToNewImagePipe(

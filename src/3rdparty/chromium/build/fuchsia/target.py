@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -174,9 +174,7 @@ class Target(object):
 
     Returns the exit code of the command.
     """
-    logging.debug('running \'%s\'.', ' '.join(command))
-    return self.GetCommandRunner().RunCommand(command, silent,
-                                              timeout_secs=timeout_secs)
+    return self.GetCommandRunner().RunCommand(command, silent, timeout_secs)
 
   def EnsureIsolatedPathsExist(self, for_package, for_realms):
     """Ensures that the package's isolated /data and /tmp exist."""
@@ -356,7 +354,7 @@ class Target(object):
         logging.info('Installing %s...', package_name)
         return_code = self.RunCommand(
             ['pkgctl', 'resolve',
-             _GetPackageUri(package_name), '>/dev/null'],
+             _GetPackageUri(package_name)],
             timeout_secs=_INSTALL_TIMEOUT_SECS)
         if return_code != 0:
           raise Exception(
@@ -372,25 +370,14 @@ class Target(object):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
         pkgctl_out, pkgctl_err = pkgctl.communicate()
+        pkgctl_out = pkgctl_out.strip()
 
         # Read the expected version from the meta.far Merkel hash file alongside
         # the package's FAR.
         meta_far_path = os.path.join(os.path.dirname(package_path), 'meta.far')
-        meta_far_merkel = subprocess.check_output(
+        meta_far_merkle = subprocess.check_output(
             [common.GetHostToolPathFromPlatform('merkleroot'),
              meta_far_path]).split()[0]
-        if pkgctl_out != meta_far_merkel:
+        if pkgctl_out != meta_far_merkle:
           raise Exception('Hash mismatch for %s after resolve (%s vs %s).' %
-                          (package_name, pkgctl_out, meta_far_merkel))
-
-  def RunFFXCommand(self, ffx_args):
-    """Automatically gets the FFX path and runs FFX based on the
-    arguments provided.
-
-    Args:
-      ffx_args: The arguments for a ffx command.
-
-    Returns:
-      A Popen object for the command.
-    """
-    return self._ffx_runner.open_ffx(ffx_args)
+                          (package_name, pkgctl_out, meta_far_merkle))

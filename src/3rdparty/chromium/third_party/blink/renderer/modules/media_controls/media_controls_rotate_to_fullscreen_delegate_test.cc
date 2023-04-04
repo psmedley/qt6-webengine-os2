@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -749,6 +749,30 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   RotateTo(display::mojom::blink::ScreenOrientation::kLandscapePrimary);
 
   // Should not enter fullscreen when controlsList=nofullscreen.
+  EXPECT_FALSE(GetVideo().IsFullscreen());
+}
+
+TEST_F(MediaControlsRotateToFullscreenDelegateTest, EnterFailPictureInPicture) {
+  // Portrait screen, landscape video.
+  InitScreenAndVideo(display::mojom::blink::ScreenOrientation::kPortraitPrimary,
+                     gfx::Size(640, 480));
+  EXPECT_EQ(SimpleOrientation::kPortrait, ObservedScreenOrientation());
+  EXPECT_EQ(SimpleOrientation::kLandscape, ComputeVideoOrientation());
+
+  EXPECT_FALSE(ObservedVisibility());
+
+  PlayVideo();
+  UpdateVisibilityObserver();
+
+  EXPECT_TRUE(ObservedVisibility());
+
+  // Simulate Picture-in-Picture.
+  GetVideo().SetPersistentState(true);
+
+  // Rotate screen to landscape.
+  RotateTo(display::mojom::blink::ScreenOrientation::kLandscapePrimary);
+
+  // Should not enter fullscreen when Picture-in-Picture.
   EXPECT_FALSE(GetVideo().IsFullscreen());
 }
 

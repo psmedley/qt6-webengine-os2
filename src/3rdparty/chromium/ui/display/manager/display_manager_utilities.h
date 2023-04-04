@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,16 +84,15 @@ DisplayIdList GenerateDisplayIdList(ForwardIterator first,
                                     ForwardIterator last,
                                     Generator generator = Generator()) {
   DisplayIdList list;
-  while (first != last) {
-    list.push_back(generator(*first));
-    ++first;
-  }
+  std::transform(first, last, std::back_inserter(list), generator);
   SortDisplayIdList(&list);
   return list;
 }
 
 // Creates sorted DisplayIdList.
 DISPLAY_MANAGER_EXPORT DisplayIdList CreateDisplayIdList(const Displays& list);
+DISPLAY_MANAGER_EXPORT DisplayIdList
+CreateDisplayIdList(const DisplayInfoList& updated_displays);
 
 DISPLAY_MANAGER_EXPORT std::string DisplayIdListToString(
     const DisplayIdList& list);

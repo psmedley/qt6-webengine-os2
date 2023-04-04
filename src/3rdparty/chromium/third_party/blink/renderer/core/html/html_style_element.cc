@@ -59,6 +59,7 @@ void HTMLStyleElement::ParseAttribute(
     blocking_attribute_->DidUpdateAttributeValue(params.old_value,
                                                  params.new_value);
     blocking_attribute_->CountTokenUsage();
+    BlockingAttributeChanged(*this);
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -135,7 +136,7 @@ void HTMLStyleElement::NotifyLoadedSheetAndAllCriticalSubresources(
       .GetTaskRunner(TaskType::kNetworking)
       ->PostTask(
           FROM_HERE,
-          WTF::Bind(
+          WTF::BindOnce(
               &HTMLStyleElement::DispatchPendingEvent, WrapPersistent(this),
               std::make_unique<IncrementLoadEventDelayCount>(GetDocument()),
               is_load_event));
@@ -151,6 +152,10 @@ bool HTMLStyleElement::disabled() const {
 void HTMLStyleElement::setDisabled(bool set_disabled) {
   if (CSSStyleSheet* style_sheet = sheet())
     style_sheet->setDisabled(set_disabled);
+}
+
+bool HTMLStyleElement::IsPotentiallyRenderBlocking() const {
+  return blocking_attribute_->HasRenderToken() || CreatedByParser();
 }
 
 void HTMLStyleElement::Trace(Visitor* visitor) const {

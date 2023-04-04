@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -367,7 +367,7 @@ base::Value StringToCharList(const std::string& s);
 
 // Converts a list of integer values between 0 and 255 into a string |*out|.
 // Returns true if the conversion was successful.
-bool CharListToString(base::Value::ConstListView list, std::string* out);
+bool CharListToString(const base::Value::List& list, std::string* out);
 
 // The following functions calculate and return the modifications to requests
 // commanded by extension handlers. All functions take the id of the extension
@@ -506,9 +506,6 @@ bool ShouldHideRequestHeader(content::BrowserContext* browser_context,
 
 // Returns whether a response header should be hidden from listeners.
 bool ShouldHideResponseHeader(int extra_info_spec, const std::string& name);
-
-// Returns true if we're in a Public Session and restrictions are enabled.
-bool ArePublicSessionRestrictionsEnabled();
 
 }  // namespace extension_web_request_api_helpers
 

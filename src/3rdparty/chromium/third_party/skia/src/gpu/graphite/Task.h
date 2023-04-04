@@ -10,6 +10,8 @@
 
 #include "include/core/SkRefCnt.h"
 
+class SkRuntimeEffectDictionary;
+
 namespace skgpu::graphite {
 
 class CommandBuffer;
@@ -18,6 +20,10 @@ class ResourceProvider;
 class Task : public SkRefCnt {
 public:
     ~Task() override;
+
+    // Instantiate and prepare any Resources that must happen while the Task is still on the
+    // Recorder.
+    virtual bool prepareResources(ResourceProvider*, const SkRuntimeEffectDictionary*) = 0;
 
     // Returns true on success; false on failure.
     virtual bool addCommands(ResourceProvider*, CommandBuffer*) = 0;

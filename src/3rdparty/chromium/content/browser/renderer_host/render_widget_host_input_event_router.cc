@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,9 +39,8 @@ namespace {
 void TransformEventTouchPositions(blink::WebTouchEvent* event,
                                   const gfx::Transform& transform) {
   for (unsigned i = 0; i < event->touches_length; ++i) {
-    gfx::PointF point(event->touches[i].PositionInWidget());
-    transform.TransformPoint(&point);
-    event->touches[i].SetPositionInWidget(point);
+    event->touches[i].SetPositionInWidget(
+        transform.MapPoint(event->touches[i].PositionInWidget()));
   }
 }
 
@@ -411,6 +410,9 @@ void RenderWidgetHostInputEventRouter::OnRenderWidgetHostViewBaseDestroyed(
 
   if (view == last_mouse_down_target_)
     last_mouse_down_target_ = nullptr;
+
+  if (view == last_emulated_event_root_view_)
+    last_emulated_event_root_view_ = nullptr;
 
   event_targeter_->ViewWillBeDestroyed(view);
 }
@@ -1606,7 +1608,8 @@ void RenderWidgetHostInputEventRouter::DispatchTouchscreenGestureEvent(
 
   if (!touchscreen_gesture_target_) {
     root_view->GestureEventAck(
-        gesture_event, blink::mojom::InputEventResultState::kNoConsumerExists);
+        gesture_event, blink::mojom::InputEventResultState::kNoConsumerExists,
+        nullptr);
     return;
   }
 
@@ -1708,7 +1711,7 @@ void RenderWidgetHostInputEventRouter::DispatchTouchpadGestureEvent(
     } else {
       root_view->GestureEventAck(
           touchpad_gesture_event,
-          blink::mojom::InputEventResultState::kNoConsumerExists);
+          blink::mojom::InputEventResultState::kNoConsumerExists, nullptr);
     }
     return;
   }
@@ -1723,7 +1726,7 @@ void RenderWidgetHostInputEventRouter::DispatchTouchpadGestureEvent(
     } else {
       root_view->GestureEventAck(
           touchpad_gesture_event,
-          blink::mojom::InputEventResultState::kNoConsumerExists);
+          blink::mojom::InputEventResultState::kNoConsumerExists, nullptr);
     }
     return;
   }
@@ -1738,7 +1741,7 @@ void RenderWidgetHostInputEventRouter::DispatchTouchpadGestureEvent(
   if (!touchpad_gesture_target_) {
     root_view->GestureEventAck(
         touchpad_gesture_event,
-        blink::mojom::InputEventResultState::kNoConsumerExists);
+        blink::mojom::InputEventResultState::kNoConsumerExists, nullptr);
     return;
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,8 @@ enum VideoCodecProfile {
   // Keep the values in this enum unique, as they imply format (h.264 vs. VP8,
   // for example), and keep the values for a particular format grouped
   // together for clarity.
+  // Next version: 2
+  // Next value: 37
   [Default] kVideoCodecProfileUnknown = -1,
   kH264ProfileMin = 0,
   kH264ProfileBaseline = kH264ProfileMin,
@@ -79,6 +81,16 @@ enum VideoCodecProfile {
   kAV1ProfileMax = kAV1ProfilePro,
   kDolbyVisionProfile8 = 27,
   kDolbyVisionProfile9 = 28,
+  [MinVersion=1] kHEVCProfileExtMin = 29,
+  [MinVersion=1] kHEVCProfileRext = kHEVCProfileExtMin,
+  [MinVersion=1] kHEVCProfileHighThroughput = 30,
+  [MinVersion=1] kHEVCProfileMultiviewMain = 31,
+  [MinVersion=1] kHEVCProfileScalableMain = 32,
+  [MinVersion=1] kHEVCProfile3dMain = 33,
+  [MinVersion=1] kHEVCProfileScreenExtended = 34,
+  [MinVersion=1] kHEVCProfileScalableRext = 35,
+  [MinVersion=1] kHEVCProfileHighThroughputScreenExtended = 36,
+  [MinVersion=1] kHEVCProfileExtMax = kHEVCProfileHighThroughputScreenExtended,
 };
 
 // Based on |media.mojom.SubsampleEntry|.
@@ -278,6 +290,7 @@ enum ColorSpaceTransferID {
   kCustom,
   kCustomHDR,
   kPiecewiseHDR,
+  [MinVersion=1] kScrgbLinear80Nits,
 };
 
 // Maps to |gfx.mojom.ColorSpaceMatrixID|.
@@ -412,7 +425,7 @@ struct GpuMemoryBufferVideoFrameData {
 };
 
 // Based on |media.mojom.VideoFrameMetadata| but does not depend on
-// |media.mojom.VideoTransformation| or |media.mojom.CopyMode|.
+// |media.mojom.VideoTransformation|.
 // Next min field ID: 6
 [Stable]
 struct VideoFrameMetadata {
@@ -512,6 +525,24 @@ struct MediaLogRecord {
 
   int32 id@0;
   Type type@1;
-  mojo_base.mojom.DeprecatedDictionaryValue params@2;
+  mojo_base.mojom.DictionaryValue params@2;
   mojo_base.mojom.TimeTicks time@3;
+};
+
+[Stable, Extensible]
+enum DecryptStatus {
+  kSuccess,
+  kNoKey,
+  [Default] kFailure,
+};
+
+[Stable, Extensible]
+enum CdmContextEvent {
+  // We use |kHasAdditionalUsableKey| as the default since this maps to an
+  // existing enum in Chrome that only has the two values below. Receiving an
+  // event for |kHasAdditionalUsableKey| is always safe because it is a benign
+  // indicator that if something was waiting for a key, it should check again.
+  // It is not an indicator that the key it actually wanted is ready.
+  [Default] kHasAdditionalUsableKey,
+  kHardwareContextReset,
 };

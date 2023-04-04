@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,14 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/timer/elapsed_timer.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom.h"
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 
 namespace password_manager {
 
@@ -39,6 +44,9 @@ enum UIDisplayDisposition {
   AUTOMATIC_SAVE_UNSYNCED_CREDENTIALS_LOCALLY = 10,
   AUTOMATIC_COMPROMISED_CREDENTIALS_REMINDER = 11,
   AUTOMATIC_MOVE_TO_ACCOUNT_STORE = 12,
+  MANUAL_BIOMETRIC_AUTHENTICATION_FOR_FILLING = 13,
+  AUTOMATIC_BIOMETRIC_AUTHENTICATION_FOR_FILLING = 14,
+  AUTOMATIC_BIOMETRIC_AUTHENTICATION_CONFIRMATION = 15,
   NUM_DISPLAY_DISPOSITIONS,
 };
 
@@ -65,7 +73,8 @@ enum UIDismissalReason {
 };
 
 // Enum representing the different leak detection dialogs shown to the user.
-// Corresponds to LeakDetectionDialogType suffix in histogram_suffixes_list.xml.
+// Corresponds to LeakDetectionDialogType suffix in histogram_suffixes_list.xml
+// and PasswordLeakDetectionDialogType in enums.xml.
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 enum class LeakDialogType {
@@ -212,7 +221,10 @@ enum class SubmittedFormFrame {
   MAIN_FRAME = 0,
   IFRAME_WITH_SAME_URL_AS_MAIN_FRAME = 1,
   IFRAME_WITH_DIFFERENT_URL_SAME_SIGNON_REALM_AS_MAIN_FRAME = 2,
-  IFRAME_WITH_DIFFERENT_SIGNON_REALM = 3,
+  // Deprecated and replaced with a combination of buckets 4 & 5.
+  // IFRAME_WITH_DIFFERENT_SIGNON_REALM = 3,
+  IFRAME_WITH_PSL_MATCHED_SIGNON_REALM = 4,
+  IFRAME_WITH_DIFFERENT_AND_NOT_PSL_MATCHED_SIGNON_REALM = 5,
   SUBMITTED_FORM_FRAME_COUNT
 };
 
@@ -398,7 +410,9 @@ enum class PasswordDropdownSelectedOption {
   kResigninToUnlockAccountStore = 5,
   // User selected a WebAuthn credential.
   kWebAuthn = 6,
-  kMaxValue = kWebAuthn
+  // User selected the "Sign in with another device" button.
+  kWebAuthnSignInWithAnotherDevice = 7,
+  kMaxValue = kWebAuthnSignInWithAnotherDevice
 };
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -451,8 +465,26 @@ enum class PasswordCheckInteraction {
   kShowPassword = 6,
   kMutePassword = 7,
   kUnmutePassword = 8,
+  kChangePasswordAutomatically = 9,
   // Must be last.
-  kMaxValue = kUnmutePassword,
+  kMaxValue = kChangePasswordAutomatically,
+};
+
+// Represents the (automatic password change) scripts cache state and the UI
+// reaction to it encountered on opening the password check subpage on Desktop.
+// These values are persisted to logs. Always keep this enum in sync with the
+// corresponding `PasswordCheckScriptsCacheState` in enums.xml.
+enum class PasswordCheckScriptsCacheState {
+  // The cache is already fresh and does not need to be refetched.
+  kCacheFresh = 0,
+  // The cache is stale, but none of the credentials has a password change
+  // script and therefore no UI update was triggered.
+  kCacheStaleAndNoUiUpdate = 1,
+  // The cache is stale and at least one of the credential has a password change
+  // script. A UI update was triggered (but, if the credential was already known
+  // to be compromised, the UI may not have changed).
+  kCacheStaleAndUiUpdate = 2,
+  kMaxValue = kCacheStaleAndUiUpdate
 };
 
 // Represents different user interactions related to adding credential from the
@@ -526,6 +558,26 @@ enum class PasswordEditUpdatedValues {
   kMaxValue = kBoth,
 };
 
+// Used to record usage of the note field in password editing / adding flows in
+// the settings UI. These values are persisted to logs. Entries should not be
+// renumbered and numeric values should never be reused.
+enum class PasswordNoteAction {
+  // A new credential is added from settings, with the note field not empty.
+  kNoteAddedInAddDialog = 0,
+  // Note changed from empty to non-empty from the password edit dialog in
+  // settings.
+  kNoteAddedInEditDialog = 1,
+  // Note changed from non-empty to another non-empty from the password edit
+  // dialog in settings.
+  kNoteEditedInEditDialog = 2,
+  // Note changed from non-empty to empty from the password edit dialog in
+  // settings.
+  kNoteRemovedInEditDialog = 3,
+  // Note did not change.
+  kNoteNotChanged = 4,
+  kMaxValue = kNoteNotChanged,
+};
+
 std::string GetPasswordAccountStorageUserStateHistogramSuffix(
     PasswordAccountStorageUserState user_state);
 
@@ -544,8 +596,94 @@ enum class PasswordAccountStorageUsageLevel {
   // The user has enabled Sync.
   kSyncing = 2,
 };
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class PasswordViewPageInteractions {
+  // The credential row is clicked in the password list in settings.
+  kCredentialRowClicked = 0,
+  // The user opens the password view page to view an existing credential.
+  kCredentialFound = 1,
+  // The user opens the password view page to view an non-existing credential.
+  // This will close the settings password view page.
+  kCredentialNotFound = 2,
+  // The copy username button in settings password view page is clicked.
+  kUsernameCopyButtonClicked = 3,
+  // The copy password button in settings password view page is clicked.
+  kPasswordCopyButtonClicked = 4,
+  // The show password button in settings password view page is clicked and the
+  // password is revealed.
+  kPasswordShowButtonClicked = 5,
+  // The edit button in settings password view page is clicked.
+  kPasswordEditButtonClicked = 6,
+  // The delete button in settings password view page is clicked.
+  kPasswordDeleteButtonClicked = 7,
+  // The credential's username, password or note is edited in settings password
+  // view page.
+  kCredentialEdited = 8,
+  // The password view page is closed while the edit dialog is open after
+  // an authentication timeout.
+  kTimedOutInEditDialog = 9,
+  // The password view page is closed while the edit dialog is closed after
+  // an authentication timeout.
+  kTimedOutInViewPage = 10,
+  // The credential is requested by typing the URL.
+  kCredentialRequestedByUrl = 11,
+  kMaxValue = kCredentialRequestedByUrl,
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class PasswordsImportDesktopInteractions {
+  // Import dialog opened from the three-dot menu.
+  kDialogOpenedFromThreeDot = 0,
+  // Import dialog opened from the empty passwords list.
+  kDialogOpenedFromEmptyState = 1,
+  // Import flow canceled before the file selection.
+  kCanceledBeforeFileSelect = 2,
+  kMaxValue = kCanceledBeforeFileSelect,
+};
+
 std::string GetPasswordAccountStorageUsageLevelHistogramSuffix(
     PasswordAccountStorageUsageLevel usage_level);
+
+// Records the `type` of a leak dialog shown to the user and the `reason`
+// why it was dismissed.
+class LeakDialogMetricsRecorder {
+ public:
+  // Create a LeakDialogMetricsRecorder corresponding to a navigation with
+  // `source_id`.
+  LeakDialogMetricsRecorder(ukm::SourceId source_id, LeakDialogType type);
+  LeakDialogMetricsRecorder(const LeakDialogMetricsRecorder&) = delete;
+  LeakDialogMetricsRecorder& operator=(const LeakDialogMetricsRecorder&) =
+      delete;
+
+  // Log the `reason` for dismissing the leak warning dialog, e.g. signaling
+  // that the user ignored it or that they asked for an automatic password
+  // change.
+  void LogLeakDialogTypeAndDismissalReason(LeakDialogDismissalReason reason);
+
+  // Helper method to overwrite the sampling rate during unit tests.
+  void SetSamplingRateForTesting(double rate) { ukm_sampling_rate_ = rate; }
+
+ private:
+  // The UMA prefix.
+  static constexpr char kHistogram[] =
+      "PasswordManager.LeakDetection.DialogDismissalReason";
+
+  // The sampling rate for UKM recording. A value of 0.1 corresponds to a
+  // sampling rate of 10%.
+  double ukm_sampling_rate_ = 0.1;
+
+  // Helper method to determine the suffix for the UMA.
+  const char* GetUMASuffix() const;
+
+  // The source id associated with the navigation.
+  ukm::SourceId source_id_;
+
+  // The type of the leak dialog.
+  LeakDialogType type_;
+};
 
 // Log the |reason| a user dismissed the password manager UI except save/update
 // bubbles.
@@ -575,11 +713,6 @@ void LogUpdateUIDismissalReason(
 // Log the |reason| a user dismissed the move password bubble.
 void LogMoveUIDismissalReason(UIDismissalReason reason,
                               PasswordAccountStorageUserState user_state);
-
-// Log the |type| of a leak dialog shown to the user and the |reason| why it was
-// dismissed.
-void LogLeakDialogTypeAndDismissalReason(LeakDialogType type,
-                                         LeakDialogDismissalReason reason);
 
 // Log the appropriate display disposition.
 void LogUIDisplayDisposition(UIDisplayDisposition disposition);
@@ -636,9 +769,6 @@ void LogPasswordSuccessfulSubmissionIndicatorEvent(
 void LogPasswordAcceptedSaveUpdateSubmissionIndicatorEvent(
     autofill::mojom::SubmissionIndicatorEvent event);
 
-// Log a frame of a submitted password form.
-void LogSubmittedFormFrame(SubmittedFormFrame frame);
-
 // Logs how many account-stored passwords are available for filling in the
 // current password form right after unlock.
 void LogPasswordsCountFromAccountStoreAfterUnlock(
@@ -663,9 +793,11 @@ void LogPasswordSettingsReauthResult(ReauthResult result);
 void LogDeleteUndecryptableLoginsReturnValue(
     DeleteCorruptedPasswordsResult result);
 
-// Log whether a saved password was generated.
-void LogNewlySavedPasswordIsGenerated(
-    bool value,
+// Log metrics about a newly saved password (e.g. whether a saved password was
+// generated).
+void LogNewlySavedPasswordMetrics(
+    bool is_generated_password,
+    bool is_username_empty,
     PasswordAccountStorageUsageLevel account_storage_usage_level);
 
 // Log whether the generated password was accepted or rejected for generation of
@@ -696,6 +828,26 @@ void LogPasswordEditResult(IsUsernameChanged password_changed,
 void LogUserInteractionsWhenAddingCredentialFromSettings(
     AddCredentialFromSettingsUserInteractions
         add_credential_from_settings_user_interaction);
+
+// Log how the user interaction with the note field in password add / edit
+// dialogs.
+void LogPasswordNoteActionInSettings(PasswordNoteAction action);
+
+// Wraps |callback| into another callback that measures the elapsed time between
+// construction and actual execution of the callback. Records the result to
+// |histogram|, which is expected to be a char literal.
+template <typename R, typename... Args>
+base::OnceCallback<R(Args...)> TimeCallback(
+    base::OnceCallback<R(Args...)> callback,
+    const char* histogram) {
+  return base::BindOnce(
+      [](const char* histogram, const base::ElapsedTimer& timer,
+         base::OnceCallback<R(Args...)> callback, Args... args) {
+        base::UmaHistogramTimes(histogram, timer.Elapsed());
+        return std::move(callback).Run(std::forward<Args>(args)...);
+      },
+      histogram, base::ElapsedTimer(), std::move(callback));
+}
 
 }  // namespace metrics_util
 

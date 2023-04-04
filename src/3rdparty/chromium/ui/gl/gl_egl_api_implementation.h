@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_export.h"
 
 namespace gl {
@@ -21,7 +22,7 @@ GL_EXPORT void InitializeStaticGLBindingsEGL();
 GL_EXPORT void ClearBindingsEGL();
 GL_EXPORT bool GetGLWindowSystemBindingInfoEGL(GLWindowSystemBindingInfo* info);
 GL_EXPORT void SetDisabledExtensionsEGL(const std::string& disabled_extensions);
-GL_EXPORT bool InitializeExtensionSettingsOneOffEGL();
+GL_EXPORT bool InitializeExtensionSettingsOneOffEGL(GLDisplayEGL* display);
 
 class GL_EXPORT EGLApiBase : public EGLApi {
  public:

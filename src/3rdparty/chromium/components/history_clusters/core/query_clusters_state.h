@@ -1,10 +1,11 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_HISTORY_CLUSTERS_CORE_QUERY_CLUSTERS_STATE_H_
 #define COMPONENTS_HISTORY_CLUSTERS_CORE_QUERY_CLUSTERS_STATE_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -15,12 +16,15 @@
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history_clusters/core/history_clusters_service_task_get_most_recent_clusters.h"
 #include "components/history_clusters/core/history_clusters_types.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace history_clusters {
 
 class HistoryClustersService;
+
+using LabelCount = std::pair<std::u16string, size_t>;
 
 // This object encapsulates the results of a query to HistoryClustersService.
 // It manages fetching more pages from the clustering backend as the user
@@ -41,7 +45,8 @@ class QueryClustersState {
                               bool is_continuation)>;
 
   QueryClustersState(base::WeakPtr<HistoryClustersService> service,
-                     const std::string& query);
+                     const std::string& query,
+                     bool recluster = false);
   ~QueryClustersState();
 
   QueryClustersState(const QueryClustersState&) = delete;
@@ -52,6 +57,14 @@ class QueryClustersState {
   // Used to request another batch of clusters of the same query.
   void LoadNextBatchOfClusters(ResultCallback callback);
 
+  // The list of raw labels in the same order as the clusters are ordered
+  // alongside the number of occurrences so far. The counts can be fetched by
+  // inputting the labels into the map as keys - but note, this only counts the
+  // number of label instances seen SO FAR, not necessarily in all of History.
+  const std::vector<LabelCount>& raw_label_counts_so_far() {
+    return raw_label_counts_so_far_;
+  }
+
  private:
   friend class QueryClustersStateTest;
 
@@ -60,18 +73,22 @@ class QueryClustersState {
   class PostProcessor;
 
   // Callback to `LoadNextBatchOfClusters()`.
-  void OnGotRawClusters(base::TimeTicks query_start_time,
-                        ResultCallback callback,
-                        std::vector<history::Cluster> clusters,
-                        base::Time continuation_end_time) const;
+  void OnGotRawClusters(
+      base::TimeTicks query_start_time,
+      ResultCallback callback,
+      std::vector<history::Cluster> clusters,
+      QueryClustersContinuationParams continuation_params) const;
 
   // Callback to `OnGotRawClusters()`.
   void OnGotClusters(base::ElapsedTimer post_processing_timer,
                      size_t clusters_from_backend_count,
                      base::TimeTicks query_start_time,
                      ResultCallback callback,
-                     base::Time continuation_end_time,
+                     QueryClustersContinuationParams continuation_params,
                      std::vector<history::Cluster> clusters);
+
+  // Updates the internal state of raw labels for this next batch of `clusters`.
+  void UpdateUniqueRawLabels(const std::vector<history::Cluster>& clusters);
 
   // A weak pointer to the service in case we outlive the service.
   // Never nullptr, except in unit tests.
@@ -80,17 +97,26 @@ class QueryClustersState {
   // The string query the user entered into the searchbox.
   const std::string query_;
 
-  // A nullopt `continuation_end_time` means we have exhausted History.
-  // Note that this differs from History itself, which uses base::Time() as the
-  // value to indicate we've exhausted history. I've found that to be not
-  // explicit enough in practice. This value will never be base::Time().
-  absl::optional<base::Time> continuation_end_time_;
+  // If true, forces reclustering as if `persist_clusters_in_history_db` were
+  // false.
+  bool recluster_;
+
+  // The de-duplicated list of raw labels we've seen so far and their number of
+  // occurrences, in the same order as the clusters themselves were provided.
+  // This is only computed if `query` is empty. For non-empty `query`, this will
+  // be an empty list.
+  std::vector<LabelCount> raw_label_counts_so_far_;
+
+  // The continuation params used to track where the last query left off and
+  // query for the "next page".
+  QueryClustersContinuationParams continuation_params_;
 
   // True for all 'next-page' responses, but false for the first page.
   bool is_continuation_ = false;
 
   // Used only to fast-cancel tasks in case we are destroyed.
-  base::CancelableTaskTracker task_tracker_;
+  std::unique_ptr<HistoryClustersServiceTaskGetMostRecentClusters>
+      query_clusters_task;
 
   // A task runner to run all the post-processing tasks on.
   scoped_refptr<base::SequencedTaskRunner> post_processing_task_runner_;

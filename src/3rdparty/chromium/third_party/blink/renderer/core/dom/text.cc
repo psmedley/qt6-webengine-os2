@@ -49,6 +49,10 @@ Text* Text::Create(Document& document, const String& data) {
   return MakeGarbageCollected<Text>(document, data, kCreateText);
 }
 
+Text* Text::Create(Document& document, String&& data) {
+  return MakeGarbageCollected<Text>(document, std::move(data), kCreateText);
+}
+
 Text* Text::CreateEditingText(Document& document, const String& data) {
   return MakeGarbageCollected<Text>(document, data, kCreateEditingText);
 }
@@ -226,7 +230,7 @@ Text* Text::ReplaceWholeText(const String& new_text) {
     }
   }
 
-  if (new_text.IsEmpty()) {
+  if (new_text.empty()) {
     if (parent && parentNode() == parent)
       parent->RemoveChild(this, IGNORE_EXCEPTION_FOR_TESTING);
     return nullptr;
@@ -238,10 +242,6 @@ Text* Text::ReplaceWholeText(const String& new_text) {
 
 String Text::nodeName() const {
   return "#text";
-}
-
-Node::NodeType Text::getNodeType() const {
-  return kTextNode;
 }
 
 Node* Text::Clone(Document& factory, CloneChildrenFlag) const {
@@ -262,7 +262,7 @@ static inline bool CanHaveWhitespaceChildren(
     return true;
 
   if (parent.IsTable() || parent.IsTableRow() || parent.IsTableSection() ||
-      parent.IsLayoutTableCol() || parent.IsFrameSet() ||
+      parent.IsLayoutTableCol() || parent.IsFrameSetIncludingNG() ||
       parent.IsFlexibleBoxIncludingNG() || parent.IsLayoutGridIncludingNG() ||
       parent.IsSVGRoot() || parent.IsSVGContainer() || parent.IsSVGImage() ||
       parent.IsSVGShape()) {

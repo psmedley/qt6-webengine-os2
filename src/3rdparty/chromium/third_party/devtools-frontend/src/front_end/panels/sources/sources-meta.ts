@@ -7,6 +7,7 @@ import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import * as Bindings from '../../models/bindings/bindings.js';
 import * as Workspace from '../../models/workspace/workspace.js';
 import * as ObjectUI from '../../ui/legacy/components/object_ui/object_ui.js';
 import * as QuickOpen from '../../ui/legacy/components/quick_open/quick_open.js';
@@ -378,6 +379,14 @@ const UIStrings = {
   * comes to a halt.
   */
   enableAutoFocusOnDebuggerPaused: 'Focus Sources panel when triggering a breakpoint',
+  /**
+  * @description Text for command of toggling navigator sidebar in Sources panel
+  */
+  toggleNavigatorSidebar: 'Toggle navigator sidebar',
+  /**
+  * @description Text for command of toggling debugger sidebar in Sources panel
+  */
+  toggleDebuggerSidebar: 'Toggle debugger sidebar',
 
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/sources-meta.ts', UIStrings);
@@ -504,6 +513,9 @@ UI.ViewManager.registerViewExtension({
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
   async loadView() {
     const Sources = await loadSourcesModule();
+    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.BREAKPOINT_VIEW)) {
+      return Sources.BreakpointsSidebarPane.BreakpointsSidebarPane.instance();
+    }
     return Sources.JavaScriptBreakpointsSidebarPane.JavaScriptBreakpointsSidebarPane.instance();
   },
 });
@@ -567,7 +579,7 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'debugger.step-over',
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
 
   title: i18nLazyString(UIStrings.stepOverNextFunctionCall),
@@ -599,7 +611,7 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'debugger.step-into',
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
   title: i18nLazyString(UIStrings.stepIntoNextFunctionCall),
   iconClass: UI.ActionRegistration.IconClass.LARGE_ICON_STEP_INTO,
@@ -630,7 +642,7 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'debugger.step',
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
   title: i18nLazyString(UIStrings.step),
   iconClass: UI.ActionRegistration.IconClass.LARGE_ICON_STEP,
@@ -652,7 +664,7 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'debugger.step-out',
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
   title: i18nLazyString(UIStrings.stepOutOfCurrentFunction),
   iconClass: UI.ActionRegistration.IconClass.LARGE_ICON_STEP_OUT,
@@ -683,7 +695,7 @@ UI.ActionRegistration.registerActionExtension({
   category: UI.ActionRegistration.ActionCategory.DEBUGGER,
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
   title: i18nLazyString(UIStrings.runSnippet),
   iconClass: UI.ActionRegistration.IconClass.LARGEICON_PLAY,
@@ -709,7 +721,7 @@ UI.ActionRegistration.registerActionExtension({
   toggleable: true,
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Sources => [Sources.SourcesView.SourcesView]);
@@ -764,7 +776,7 @@ UI.ActionRegistration.registerActionExtension({
   category: UI.ActionRegistration.ActionCategory.DEBUGGER,
   async loadActionDelegate() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesPanel.DebuggingActionDelegate.instance();
+    return Sources.SourcesPanel.ActionDelegate.instance();
   },
   title: i18nLazyString(UIStrings.evaluateSelectedTextInConsole),
   contextTypes() {
@@ -1240,10 +1252,62 @@ UI.ActionRegistration.registerActionExtension({
   ],
 });
 
+UI.ActionRegistration.registerActionExtension({
+  actionId: 'sources.toggle-navigator-sidebar',
+  category: UI.ActionRegistration.ActionCategory.SOURCES,
+  title: i18nLazyString(UIStrings.toggleNavigatorSidebar),
+  async loadActionDelegate() {
+    const Sources = await loadSourcesModule();
+    return Sources.SourcesPanel.ActionDelegate.instance();
+  },
+  contextTypes() {
+    return maybeRetrieveContextTypes(Sources => [Sources.SourcesView.SourcesView]);
+  },
+  bindings: [
+    {
+      platform: UI.ActionRegistration.Platforms.WindowsLinux,
+      shortcut: 'Ctrl+Shift+y',
+    },
+    {
+      platform: UI.ActionRegistration.Platforms.Mac,
+      shortcut: 'Meta+Shift+y',
+    },
+  ],
+});
+
+UI.ActionRegistration.registerActionExtension({
+  actionId: 'sources.toggle-debugger-sidebar',
+  category: UI.ActionRegistration.ActionCategory.SOURCES,
+  title: i18nLazyString(UIStrings.toggleDebuggerSidebar),
+  async loadActionDelegate() {
+    const Sources = await loadSourcesModule();
+    return Sources.SourcesPanel.ActionDelegate.instance();
+  },
+  contextTypes() {
+    return maybeRetrieveContextTypes(Sources => [Sources.SourcesView.SourcesView]);
+  },
+  bindings: [
+    {
+      platform: UI.ActionRegistration.Platforms.WindowsLinux,
+      shortcut: 'Ctrl+Shift+h',
+    },
+    {
+      platform: UI.ActionRegistration.Platforms.Mac,
+      shortcut: 'Meta+Shift+h',
+    },
+  ],
+});
+
 Common.Settings.registerSettingExtension({
   settingName: 'navigatorGroupByFolder',
   settingType: Common.Settings.SettingType.BOOLEAN,
   defaultValue: true,
+});
+
+Common.Settings.registerSettingExtension({
+  settingName: 'navigatorGroupByAuthored',
+  settingType: Common.Settings.SettingType.BOOLEAN,
+  defaultValue: false,
 });
 
 Common.Settings.registerSettingExtension({
@@ -1641,6 +1705,19 @@ Common.Revealer.registerRevealer({
   },
 });
 
+Common.Revealer.registerRevealer({
+  contextTypes() {
+    return [
+      Bindings.BreakpointManager.BreakpointLocation,
+    ];
+  },
+  destination: Common.Revealer.RevealerDestination.SOURCES_PANEL,
+  async loadRevealer() {
+    const Sources = await loadSourcesModule();
+    return Sources.DebuggerPlugin.BreakpointLocationRevealer.instance();
+  },
+});
+
 UI.Toolbar.registerToolbarItem({
   actionId: 'sources.add-folder-to-workspace',
   location: UI.Toolbar.ToolbarItemLocation.FILES_NAVIGATION_TOOLBAR,
@@ -1667,7 +1744,7 @@ UI.Context.registerListener({
   },
   async loadListener() {
     const Sources = await loadSourcesModule();
-    return Sources.JavaScriptBreakpointsSidebarPane.JavaScriptBreakpointsSidebarPane.instance();
+    return Sources.BreakpointsSidebarPane.BreakpointsSidebarController.instance();
   },
 });
 

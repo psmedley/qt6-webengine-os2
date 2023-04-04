@@ -44,7 +44,7 @@ static sk_sp<SkShader> make_shader1(SkScalar shaderScale) {
     const SkMatrix localMatrix = SkMatrix::Scale(shaderScale, shaderScale);
 
     sk_sp<SkShader> grad = SkGradientShader::MakeLinear(pts, colors, nullptr,
-                                                        SK_ARRAY_COUNT(colors),
+                                                        std::size(colors),
                                                         SkTileMode::kMirror, 0,
                                                         &localMatrix);
     // Throw in a couple of local matrix wrappers for good measure.
@@ -71,7 +71,7 @@ static constexpr uint16_t kMeshFan[] = {
         0, 1, 2, 5, 8, 7, 6, 3, 0
 };
 
-static const int kMeshIndexCnt = (int)SK_ARRAY_COUNT(kMeshFan);
+static const int kMeshIndexCnt = (int)std::size(kMeshFan);
 static const int kMeshVertexCnt = 9;
 
 static void fill_mesh(SkPoint pts[kMeshVertexCnt], SkPoint texs[kMeshVertexCnt],
@@ -172,7 +172,6 @@ protected:
         SkPaint paint;
 
         canvas->translate(4, 4);
-        int x = 0;
         for (auto mode : modes) {
             canvas->save();
             for (float alpha : {1.0f, 0.5f}) {
@@ -194,7 +193,6 @@ protected:
                                                           kMeshIndexCnt, kMeshFan);
                             canvas->drawVertices(v, mode, paint);
                             canvas->translate(40, 0);
-                            ++x;
                         }
                     }
                 }
@@ -226,9 +224,9 @@ static void draw_batching(SkCanvas* canvas) {
     fill_mesh(pts, texs, colors, 1);
 
     SkTDArray<SkMatrix> matrices;
-    matrices.push()->reset();
-    matrices.push()->setTranslate(0, 40);
-    matrices.push()
+    matrices.append()->reset();
+    matrices.append()->setTranslate(0, 40);
+    matrices.append()
             ->setRotate(45, kMeshSize / 2, kMeshSize / 2)
             .postScale(1.2f, .8f, kMeshSize / 2, kMeshSize / 2)
             .postTranslate(0, 80);

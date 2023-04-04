@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump_type.h"
-#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/clamped_math.h"
 #include "base/process/process_metrics.h"
@@ -22,7 +23,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/timer/hi_res_timer_manager.h"
@@ -30,14 +31,13 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/viz/service/main/viz_main_impl.h"
+#include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/partition_alloc_support.h"
 #include "content/common/skia_utils.h"
 #include "content/gpu/gpu_child_thread.h"
-#include "content/gpu/gpu_process.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/result_codes.h"
@@ -75,12 +75,12 @@
 #if BUILDFLAG(IS_ANDROID)
 #include "base/trace_event/memory_dump_manager.h"
 #include "components/tracing/common/graphics_memory_dump_provider_android.h"
-#include "content/common/android/cpu_affinity_setter.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
 #include "base/trace_event/trace_event_etw_export_win.h"
 #include "base/win/scoped_com_initializer.h"
+#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "media/gpu/windows/dxva_video_decode_accelerator_win.h"
 #include "media/gpu/windows/media_foundation_video_encode_accelerator_win.h"
@@ -216,9 +216,10 @@ int GpuMain(MainFunctionParams parameters) {
   if (gpu_preferences.gpu_startup_dialog)
     WaitForDebugger("Gpu");
 
-  base::Time start_time = base::Time::Now();
+  base::TimeTicks start_time = base::TimeTicks::Now();
 
 #if BUILDFLAG(IS_WIN)
+  base::win::EnableHighDPISupport();
   base::trace_event::TraceEventETWExport::EnableETWExport();
 
   // Prevent Windows from displaying a modal dialog on failures like not being
@@ -289,13 +290,10 @@ int GpuMain(MainFunctionParams parameters) {
 
   base::PlatformThread::SetName("CrGpuMain");
 
-#if !BUILDFLAG(IS_MAC)
-  if (base::FeatureList::IsEnabled(features::kGpuUseDisplayThreadPriority)) {
-    // Set thread priority before sandbox initialization.
-    base::PlatformThread::SetCurrentThreadPriority(
-        base::ThreadPriority::DISPLAY);
+  // Set thread priority before sandbox initialization.
+  if (!features::IsGpuMainThreadForcedToNormalPriorityDrDc()) {
+    base::PlatformThread::SetCurrentThreadType(base::ThreadType::kCompositing);
   }
-#endif
 
   auto gpu_init = std::make_unique<gpu::GpuInit>();
   ContentSandboxHelper sandbox_helper;
@@ -309,10 +307,11 @@ int GpuMain(MainFunctionParams parameters) {
   // before it.
   InitializeSkia();
 
-  // Create the ThreadPool before invoking |gpu_init| as it needs the ThreadPool
-  // (in angle::InitializePlatform()). Do not start it until after the sandbox
-  // is initialized however to avoid creating threads outside the sandbox.
-  base::ThreadPoolInstance::Create("GPU");
+  // The ThreadPool must have been created before invoking |gpu_init| as it
+  // needs the ThreadPool (in angle::InitializePlatform()). Do not start it
+  // until after the sandbox is initialized however to avoid creating threads
+  // outside the sandbox.
+  DCHECK(base::ThreadPoolInstance::Get());
 
   // Gpu initialization may fail for various reasons, in which case we will need
   // to tear down this process. However, we can not do so safely until the IPC
@@ -326,29 +325,28 @@ int GpuMain(MainFunctionParams parameters) {
       const_cast<base::CommandLine*>(&command_line), gpu_preferences);
   const bool dead_on_arrival = !init_success;
 
+  auto* client = GetContentClient()->gpu();
+  if (client) {
+    client->PostSandboxInitialized();
+  }
+
   GetContentClient()->SetGpuInfo(gpu_init->gpu_info());
 
-  // Start the ThreadPoolInstance now that the sandbox is initialized.
-  base::ThreadPoolInstance::Get()->StartWithDefaultParams();
-
-  const base::ThreadPriority io_thread_priority =
-      base::FeatureList::IsEnabled(features::kGpuUseDisplayThreadPriority)
-          ? base::ThreadPriority::DISPLAY
-          : base::ThreadPriority::NORMAL;
+  base::ThreadType io_thread_type = base::ThreadType::kCompositing;
 #if BUILDFLAG(IS_MAC)
   // Increase the thread priority to get more reliable values in performance
   // test of mac_os.
-  GpuProcess gpu_process(
-      (command_line.HasSwitch(switches::kUseHighGPUThreadPriorityForPerfTests)
-           ? base::ThreadPriority::REALTIME_AUDIO
-           : io_thread_priority));
-#else
-  GpuProcess gpu_process(io_thread_priority);
+  if (command_line.HasSwitch(switches::kUseHighGPUThreadPriorityForPerfTests))
+    io_thread_type = base::ThreadType::kRealtimeAudio;
 #endif
+  // ChildProcess will start the ThreadPoolInstance now that the sandbox is
+  // initialized.
+  ChildProcess gpu_process(io_thread_type);
+  DCHECK(base::ThreadPoolInstance::Get()->WasStarted());
 
-  auto* client = GetContentClient()->gpu();
-  if (client)
+  if (client) {
     client->PostIOThreadCreated(gpu_process.io_task_runner());
+  }
 
   base::RunLoop run_loop;
   GpuChildThread* child_thread =
@@ -388,11 +386,6 @@ int GpuMain(MainFunctionParams parameters) {
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       tracing::GraphicsMemoryDumpProvider::GetInstance(), "AndroidGraphics",
       nullptr);
-  if (base::GetFieldTrialParamByFeatureAsBool(
-          features::kBigLittleScheduling,
-          features::kBigLittleSchedulingGpuMainBigParam, false)) {
-    SetCpuAffinityForCurrentThread(base::CpuAffinityMode::kBigCoresOnly);
-  }
 #endif
 
   internal::PartitionAllocSupport::Get()->ReconfigureAfterTaskRunnerInit(
@@ -425,12 +418,24 @@ bool StartSandboxLinux(gpu::GpuWatchdogThread* watchdog_thread,
   // SandboxLinux::InitializeSandbox() must always be called
   // with only one thread.
   sandbox::policy::SandboxLinux::Options sandbox_options;
-  sandbox_options.use_amd_specific_policies =
-      gpu_info && angle::IsAMD(gpu_info->active_gpu().vendor_id);
-  sandbox_options.use_intel_specific_policies =
-      gpu_info && angle::IsIntel(gpu_info->active_gpu().vendor_id);
-  sandbox_options.use_nvidia_specific_policies =
-      gpu_info && angle::IsNVIDIA(gpu_info->active_gpu().vendor_id);
+  if (gpu_info) {
+    // We have to enable sandbox settings for all GPUs in the system
+    // for Chrome to be able to access/use them.
+    sandbox_options.use_amd_specific_policies =
+        angle::IsAMD(gpu_info->active_gpu().vendor_id);
+    sandbox_options.use_intel_specific_policies =
+        angle::IsIntel(gpu_info->active_gpu().vendor_id);
+    sandbox_options.use_nvidia_specific_policies =
+        angle::IsNVIDIA(gpu_info->active_gpu().vendor_id);
+    for (const auto& gpu : gpu_info->secondary_gpus) {
+      if (angle::IsAMD(gpu.vendor_id))
+        sandbox_options.use_amd_specific_policies = true;
+      else if (angle::IsIntel(gpu.vendor_id))
+        sandbox_options.use_intel_specific_policies = true;
+      else if (angle::IsNVIDIA(gpu.vendor_id))
+        sandbox_options.use_nvidia_specific_policies = true;
+    }
+  }
   sandbox_options.accelerated_video_decode_enabled =
       !gpu_prefs.disable_accelerated_video_decode;
   sandbox_options.accelerated_video_encode_enabled =

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,8 @@ bool DevToolsAgentHostClient::MayAttachToURL(const GURL& url, bool is_webui) {
 }
 
 // Defaults to true, restricted clients must override this to false.
-bool DevToolsAgentHostClient::MayAttachToBrowser() {
+bool DevToolsAgentHostClient::IsTrusted() {
   return true;
-}
-
-bool DevToolsAgentHostClient::MaySendInputEventsToBrowser() {
-  return MayAttachToBrowser();
 }
 
 // File access is allowed by default, only restricted clients that represent

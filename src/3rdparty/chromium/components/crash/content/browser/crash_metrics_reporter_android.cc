@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -201,16 +201,29 @@ void CrashMetricsReporter::ChildProcessExited(
                 &reported_counts);
           }
           break;
-        case base::android::ChildBindingState::MODERATE:
+        case base::android::ChildBindingState::VISIBLE:
           if (intentional_kill || info.normal_termination) {
             ReportCrashCount(
                 ProcessedCrashCounts::
-                    kRendererForegroundInvisibleWithModerateBindingKilled,
+                    kRendererForegroundInvisibleWithVisibleBindingKilled,
                 &reported_counts);
           } else {
             ReportCrashCount(
                 ProcessedCrashCounts::
-                    kRendererForegroundInvisibleWithModerateBindingOom,
+                    kRendererForegroundInvisibleWithVisibleBindingOom,
+                &reported_counts);
+          }
+          break;
+        case base::android::ChildBindingState::NOT_PERCEPTIBLE:
+          if (intentional_kill || info.normal_termination) {
+            ReportCrashCount(
+                ProcessedCrashCounts::
+                    kRendererForegroundInvisibleWithNotPerceptibleBindingKilled,
+                &reported_counts);
+          } else {
+            ReportCrashCount(
+                ProcessedCrashCounts::
+                    kRendererForegroundInvisibleWithNotPerceptibleBindingOom,
                 &reported_counts);
           }
           break;

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,8 @@ class ViewsContentClientMainPartsAura : public ViewsContentClientMainParts {
       const ViewsContentClientMainPartsAura&) = delete;
 
  protected:
-  ViewsContentClientMainPartsAura(content::MainFunctionParams content_params,
-                                  ViewsContentClient* views_content_client);
+  explicit ViewsContentClientMainPartsAura(
+      ViewsContentClient* views_content_client);
   ~ViewsContentClientMainPartsAura() override;
 
   // content::BrowserMainParts:

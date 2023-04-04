@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -208,8 +208,7 @@ class TestClient final : public mojom::WebTransportClient {
 
   // mojom::WebTransportClient implementation.
   void OnDatagramReceived(base::span<const uint8_t> data) override {
-    received_datagrams_.push_back(
-        std::vector<uint8_t>(data.begin(), data.end()));
+    received_datagrams_.emplace_back(data.begin(), data.end());
   }
   void OnIncomingStreamClosed(uint32_t stream_id, bool fin_received) override {
     closed_incoming_streams_.insert(std::make_pair(stream_id, fin_received));
@@ -340,7 +339,7 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
   void CreateWebTransport(
       const GURL& url,
       const url::Origin& origin,
-      const net::NetworkIsolationKey& key,
+      const net::NetworkAnonymizationKey& key,
       std::vector<mojom::WebTransportCertificateFingerprintPtr> fingerprints,
       mojo::PendingRemote<mojom::WebTransportHandshakeClient>
           handshake_client) {
@@ -352,7 +351,7 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
       const url::Origin& origin,
       mojo::PendingRemote<mojom::WebTransportHandshakeClient>
           handshake_client) {
-    CreateWebTransport(url, origin, net::NetworkIsolationKey(), {},
+    CreateWebTransport(url, origin, net::NetworkAnonymizationKey(), {},
                        std::move(handshake_client));
   }
 
@@ -362,7 +361,7 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
       std::vector<mojom::WebTransportCertificateFingerprintPtr> fingerprints,
       mojo::PendingRemote<mojom::WebTransportHandshakeClient>
           handshake_client) {
-    CreateWebTransport(url, origin, net::NetworkIsolationKey(),
+    CreateWebTransport(url, origin, net::NetworkAnonymizationKey(),
                        std::move(fingerprints), std::move(handshake_client));
   }
 
@@ -385,7 +384,7 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
   }
 
  private:
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
+  quic::test::QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
   quic::ParsedQuicVersion version_;
   const url::Origin origin_;
   base::test::TaskEnvironment task_environment_;
@@ -609,6 +608,51 @@ TEST_F(WebTransportTest, EchoOnUnidirectionalStreams) {
       net_log_observer().GetEntriesWithType(
           net::NetLogEventType::QUIC_SESSION_RST_STREAM_FRAME_SENT);
   EXPECT_EQ(0u, resets_sent.size());
+}
+
+TEST_F(WebTransportTest, DeleteClientWithStreamsOpen) {
+  base::RunLoop run_loop_for_handshake;
+  mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client;
+  TestHandshakeClient test_handshake_client(
+      handshake_client.InitWithNewPipeAndPassReceiver(),
+      run_loop_for_handshake.QuitClosure());
+
+  CreateWebTransport(GetURL("/echo"),
+                     url::Origin::Create(GURL("https://example.org/")),
+                     std::move(handshake_client));
+
+  run_loop_for_handshake.Run();
+
+  ASSERT_TRUE(test_handshake_client.has_seen_connection_establishment());
+
+  TestClient client(test_handshake_client.PassClientReceiver());
+  mojo::Remote<mojom::WebTransport> transport_remote(
+      test_handshake_client.PassTransport());
+
+  constexpr int kNumStreams = 10;
+  auto writable_for_outgoing =
+      std::make_unique<mojo::ScopedDataPipeProducerHandle[]>(kNumStreams);
+  for (int i = 0; i < kNumStreams; i++) {
+    const MojoCreateDataPipeOptions options = {
+        sizeof(options), MOJO_CREATE_DATA_PIPE_FLAG_NONE, 1, 4 * 1024};
+    mojo::ScopedDataPipeConsumerHandle readable_for_outgoing;
+    ASSERT_EQ(MOJO_RESULT_OK,
+              mojo::CreateDataPipe(&options, writable_for_outgoing[i],
+                                   readable_for_outgoing));
+    base::RunLoop run_loop_for_stream_creation;
+    bool stream_created;
+    transport_remote->CreateStream(
+        std::move(readable_for_outgoing),
+        /*writable=*/{},
+        base::BindLambdaForTesting([&](bool b, uint32_t /*id*/) {
+          stream_created = b;
+          run_loop_for_stream_creation.Quit();
+        }));
+    run_loop_for_stream_creation.Run();
+    ASSERT_TRUE(stream_created);
+  }
+
+  // Keep the streams open so that they are closed via destructor.
 }
 
 // crbug.com/1129847: disabled because it is flaky.

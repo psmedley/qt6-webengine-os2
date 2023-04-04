@@ -5,16 +5,17 @@
  * found in the LICENSE file.
  */
 
-#ifndef AtlasTextOp_DEFINED
-#define AtlasTextOp_DEFINED
+#ifndef skgpu_ganesh_AtlasTextOp_DEFINED
+#define skgpu_ganesh_AtlasTextOp_DEFINED
 
+#include "src/gpu/AtlasTypes.h"
 #include "src/gpu/ganesh/effects/GrDistanceFieldGeoProc.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
-#include "src/gpu/ganesh/text/GrTextBlob.h"
+#include "src/text/gpu/TextBlob.h"
 
 class GrRecordingContext;
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 class AtlasTextOp final : public GrMeshDrawOp {
 public:
@@ -33,41 +34,35 @@ public:
     static void ClearCache();
 
     struct Geometry {
-        Geometry(const GrAtlasSubRun& subRun,
+        Geometry(const sktext::gpu::AtlasSubRun& subRun,
                  const SkMatrix& drawMatrix,
                  SkPoint drawOrigin,
                  SkIRect clipRect,
-                 sk_sp<SkRefCnt> supportData,
-                 GrAtlasSubRunOwner subRunOwner,
+                 sk_sp<SkRefCnt>&& supportData,
                  const SkPMColor4f& color)
             : fSubRun{subRun}
             , fSupportDataKeepAlive{std::move(supportData)}
-            , fSubRunDtor{std::move(subRunOwner)}
             , fDrawMatrix{drawMatrix}
             , fDrawOrigin{drawOrigin}
             , fClipRect{clipRect}
             , fColor{color} {
-                SkASSERT(fSupportDataKeepAlive != nullptr || fSubRunDtor != nullptr);
-                SkASSERT(SkToBool(fSubRunDtor) != SkToBool(fSupportDataKeepAlive));
+                SkASSERT(fSupportDataKeepAlive != nullptr);
         }
 
-        static Geometry* MakeForBlob(const GrAtlasSubRun& subRun,
-                                     const SkMatrix& drawMatrix,
-                                     SkPoint drawOrigin,
-                                     SkIRect clipRect,
-                                     sk_sp<SkRefCnt> supportData,
-                                     const SkPMColor4f& color,
-                                     SkArenaAlloc* alloc);
+        static Geometry* Make(const sktext::gpu::AtlasSubRun& subRun,
+                              const SkMatrix& drawMatrix,
+                              SkPoint drawOrigin,
+                              SkIRect clipRect,
+                              sk_sp<SkRefCnt>&& supportData,
+                              const SkPMColor4f& color,
+                              SkArenaAlloc* alloc);
 
         void fillVertexData(void* dst, int offset, int count) const;
 
-        const GrAtlasSubRun& fSubRun;
+        const sktext::gpu::AtlasSubRun& fSubRun;
 
-        // Either this Geometry holds a ref to the support data in the case of a blob based
-        // SubRun (WithCaching case), or it holds a unique_ptr to a SubRun allocated on the
-        // GrTextBlobAllocator in the NoCache case. It must hold one, and can't hold both.
+        // Keep the TextBlob or Slug alive until the op is deleted.
         sk_sp<SkRefCnt> fSupportDataKeepAlive;
-        GrAtlasSubRunOwner fSubRunDtor;
 
         const SkMatrix fDrawMatrix;
         const SkPoint fDrawOrigin;
@@ -104,7 +99,7 @@ public:
     };
     inline static constexpr int kMaskTypeCount = static_cast<int>(MaskType::kLast) + 1;
 
-#if GR_TEST_UTILS && SK_GPU_V1
+#if GR_TEST_UTILS
     static GrOp::Owner CreateOpTestingOnly(skgpu::v1::SurfaceDrawContext*,
                                            const SkPaint&,
                                            const SkFont&,
@@ -186,21 +181,21 @@ private:
     SkString onDumpInfo() const override;
 #endif
 
-    GrMaskFormat maskFormat() const {
+    skgpu::MaskFormat maskFormat() const {
         switch (this->maskType()) {
             case MaskType::kLCDCoverage:
-                return kA565_GrMaskFormat;
+                return skgpu::MaskFormat::kA565;
             case MaskType::kColorBitmap:
-                return kARGB_GrMaskFormat;
+                return skgpu::MaskFormat::kARGB;
             case MaskType::kGrayscaleCoverage:
             case MaskType::kAliasedDistanceField:
             case MaskType::kGrayscaleDistanceField:
             case MaskType::kLCDDistanceField:
             case MaskType::kLCDBGRDistanceField:
-                return kA8_GrMaskFormat;
+                return skgpu::MaskFormat::kA8;
         }
         // SkUNREACHABLE;
-        return kA8_GrMaskFormat;
+        return skgpu::MaskFormat::kA8;
     }
 
     bool usesDistanceFields() const {
@@ -233,14 +228,14 @@ private:
     int fNumGlyphs; // Sum of glyphs in each geometry's subrun
 
     // All combinable atlas ops have equal bit field values
-    uint32_t fDFGPFlags                    : 9; // Distance field properties
-    uint32_t fMaskType                     : 3; // MaskType
-    uint32_t fUsesLocalCoords              : 1; // Filled in post processor analysis
+    uint32_t fDFGPFlags                    : 10; // Distance field properties
+    uint32_t fMaskType                     : 3;  // MaskType
+    uint32_t fUsesLocalCoords              : 1;  // Filled in post processor analysis
     uint32_t fNeedsGlyphTransform          : 1;
-    uint32_t fHasPerspective               : 1; // True if perspective affects draw
+    uint32_t fHasPerspective               : 1;  // True if perspective affects draw
     uint32_t fUseGammaCorrectDistanceTable : 1;
     static_assert(kMaskTypeCount <= 8, "MaskType does not fit in 3 bits");
-    static_assert(kInvalid_DistanceFieldEffectFlag <= (1 << 8),  "DFGP Flags do not fit in 9 bits");
+    static_assert(kInvalid_DistanceFieldEffectFlag <= (1 << 9), "DFGP Flags do not fit in 10 bits");
 
     // Only used for distance fields; per-channel luminance for LCD, or gamma-corrected luminance
     // for single-channel distance fields.
@@ -252,6 +247,6 @@ private:
     using INHERITED = GrMeshDrawOp;
 };
 
-} // namespace skgpu::v1
+} // namespace skgpu::ganesh
 
-#endif // AtlasTextOp_DEFINED
+#endif // skgpu_ganesh_AtlasTextOp_DEFINED

@@ -9,7 +9,7 @@
 
 #include "include/gpu/GrBackendSurface.h"
 #include "include/gpu/GrDirectContext.h"
-#include "src/gpu/ganesh/GrBackendSurfaceMutableStateImpl.h"
+#include "src/gpu/MutableTextureStateRef.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/vk/GrVkCommandBuffer.h"
@@ -77,7 +77,7 @@ GrVkRenderTarget::GrVkRenderTarget(GrVkGpu* gpu,
         fResolveAttachment = fColorAttachment;
     }
 
-    SkASSERT(!resolveAttachment ||
+    SkASSERT(!fResolveAttachment ||
              (fResolveAttachment->isProtected() == fColorAttachment->isProtected()));
     SkASSERT(SkToBool(fColorAttachment->vkUsageFlags() & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT));
     this->setFlags();
@@ -129,7 +129,7 @@ sk_sp<GrVkRenderTarget> GrVkRenderTarget::MakeWrappedRenderTarget(
         SkISize dimensions,
         int sampleCnt,
         const GrVkImageInfo& info,
-        sk_sp<GrBackendSurfaceMutableStateImpl> mutableState) {
+        sk_sp<skgpu::MutableTextureStateRef> mutableState) {
     SkASSERT(VK_NULL_HANDLE != info.fImage);
     SkASSERT(1 == info.fLevelCount);
     SkASSERT(sampleCnt >= 1 && info.fSampleCount >= 1);
@@ -146,7 +146,8 @@ sk_sp<GrVkRenderTarget> GrVkRenderTarget::MakeWrappedRenderTarget(
                                    std::move(mutableState),
                                    GrAttachment::UsageFlags::kColorAttachment,
                                    kBorrow_GrWrapOwnership,
-                                   GrWrapCacheable::kNo);
+                                   GrWrapCacheable::kNo,
+                                   /*label=*/"VkImage_WrappedAttachment");
     if (!wrappedAttachment) {
         return nullptr;
     }
@@ -163,7 +164,7 @@ sk_sp<GrVkRenderTarget> GrVkRenderTarget::MakeWrappedRenderTarget(
                                                   std::move(colorAttachment),
                                                   nullptr,
                                                   CreateType::kDirectlyWrapped,
-                                                  /*label=*/{});
+                                                  /*label=*/"Vk_MakeWrappedRenderTarget");
     return sk_sp<GrVkRenderTarget>(vkRT);
 }
 
@@ -187,7 +188,7 @@ sk_sp<GrVkRenderTarget> GrVkRenderTarget::MakeSecondaryCBRenderTarget(
     info.fImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-    sk_sp<GrBackendSurfaceMutableStateImpl> mutableState(new GrBackendSurfaceMutableStateImpl(
+    sk_sp<skgpu::MutableTextureStateRef> mutableState(new skgpu::MutableTextureStateRef(
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_QUEUE_FAMILY_IGNORED));
 
     sk_sp<GrVkImage> colorAttachment =
@@ -198,6 +199,7 @@ sk_sp<GrVkRenderTarget> GrVkRenderTarget::MakeSecondaryCBRenderTarget(
                                    GrAttachment::UsageFlags::kColorAttachment,
                                    kBorrow_GrWrapOwnership,
                                    GrWrapCacheable::kNo,
+                                   "VkImage_ColorAttachment",
                                    true);
 
     std::unique_ptr<GrVkSecondaryCommandBuffer> scb(
@@ -211,7 +213,8 @@ sk_sp<GrVkRenderTarget> GrVkRenderTarget::MakeSecondaryCBRenderTarget(
             std::move(scb)));
 
     GrVkRenderTarget* vkRT =
-            new GrVkRenderTarget(gpu, dimensions, std::move(framebuffer), /*label=*/{});
+            new GrVkRenderTarget(gpu, dimensions, std::move(framebuffer),
+                                 /*label=*/"Vk_MakeSecondaryCBRenderTarget");
 
     return sk_sp<GrVkRenderTarget>(vkRT);
 }

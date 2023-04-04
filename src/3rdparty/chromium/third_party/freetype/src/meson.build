@@ -25,7 +25,6 @@
 
 project('freetype2', 'c',
   meson_version: '>= 0.55.0',
-  default_options: ['default_library=both'],
   version: run_command('builds/meson/extract_freetype_version.py',
                        'include/freetype/freetype.h',
                        check: true).stdout().strip(),
@@ -336,7 +335,8 @@ endif
 # Harfbuzz support
 harfbuzz_dep = dependency('harfbuzz',
   version: '>= 2.0.0',
-  required: get_option('harfbuzz'))
+  required: get_option('harfbuzz'),
+  default_options: ['freetype=disabled'])
 
 if harfbuzz_dep.found()
   ftoption_command += ['--enable=FT_CONFIG_OPTION_USE_HARFBUZZ']

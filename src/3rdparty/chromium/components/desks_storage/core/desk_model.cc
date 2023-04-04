@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,20 @@ DeskModel::GetTemplateJsonStatus ConvertGetEntryStatusToTemplateJsonStatus(
 
 }  // namespace
 
+DeskModel::GetAllEntriesResult::GetAllEntriesResult(
+    GetAllEntriesStatus status,
+    std::vector<const ash::DeskTemplate*> entries)
+    : status(status), entries(std::move(entries)) {}
+DeskModel::GetAllEntriesResult::GetAllEntriesResult(
+    GetAllEntriesResult& other) = default;
+DeskModel::GetAllEntriesResult::~GetAllEntriesResult() = default;
+
+DeskModel::GetEntryByUuidResult::GetEntryByUuidResult(
+    GetEntryByUuidStatus status,
+    std::unique_ptr<ash::DeskTemplate> entry)
+    : status(status), entry(std::move(entry)) {}
+DeskModel::GetEntryByUuidResult::~GetEntryByUuidResult() = default;
+
 DeskModel::DeskModel() = default;
 
 DeskModel::~DeskModel() {
@@ -48,32 +62,31 @@ void DeskModel::RemoveObserver(DeskModelObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void DeskModel::GetTemplateJson(const std::string& uuid,
+void DeskModel::GetTemplateJson(const base::GUID& uuid,
                                 apps::AppRegistryCache* app_cache,
                                 GetTemplateJsonCallback callback) {
-  GetEntryByUUID(
-      uuid,
-      base::BindOnce(&DeskModel::HandleTemplateConversionToPolicyJson,
-                     base::Unretained(this), std::move(callback), app_cache));
+  auto result = GetEntryByUUID(uuid);
+  HandleTemplateConversionToPolicyJson(std::move(callback), app_cache,
+                                       result.status, std::move(result.entry));
 }
 
 void DeskModel::SetPolicyDeskTemplates(const std::string& policy_json) {
   policy_entries_.clear();
 
   base::StringPiece raw_json = base::StringPiece(policy_json);
-  base::JSONReader::ValueWithError parsed_list =
-      base::JSONReader::ReadAndReturnValueWithError(raw_json);
-  if (!parsed_list.value)
+  auto parsed_list = base::JSONReader::ReadAndReturnValueWithError(raw_json);
+  if (!parsed_list.has_value())
     return;
 
-  if (!parsed_list.value->is_list()) {
+  if (!parsed_list->is_list()) {
     LOG(WARNING) << "Expected JSON list in admin templates policy.";
     return;
   }
 
-  for (auto& desk_template : parsed_list.value->GetListDeprecated()) {
+  for (auto& desk_template : parsed_list->GetList()) {
     std::unique_ptr<ash::DeskTemplate> dt =
-        desk_template_conversion::ParseDeskTemplateFromPolicy(desk_template);
+        desk_template_conversion::ParseDeskTemplateFromSource(
+            desk_template, ash::DeskTemplateSource::kPolicy);
     if (dt) {
       policy_entries_.push_back(std::move(dt));
     } else {
@@ -88,9 +101,7 @@ void DeskModel::RemovePolicyDeskTemplates() {
 }
 
 std::unique_ptr<ash::DeskTemplate> DeskModel::GetAdminDeskTemplateByUUID(
-    const std::string& uuid_str) const {
-  const base::GUID uuid = base::GUID::ParseCaseInsensitive(uuid_str);
-
+    const base::GUID& uuid) const {
   for (const std::unique_ptr<ash::DeskTemplate>& policy_entry :
        policy_entries_) {
     if (policy_entry->uuid() == uuid)

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,13 +65,13 @@ class TextPaintTimingDetectorTest : public testing::Test {
   }
 
   TextPaintTimingDetector* GetTextPaintTimingDetector() {
-    return GetPaintTimingDetector().GetTextPaintTimingDetector();
+    return &GetPaintTimingDetector().GetTextPaintTimingDetector();
   }
 
   TextPaintTimingDetector* GetChildFrameTextPaintTimingDetector() {
-    return GetChildFrameView()
-        .GetPaintTimingDetector()
-        .GetTextPaintTimingDetector();
+    return &GetChildFrameView()
+                .GetPaintTimingDetector()
+                .GetTextPaintTimingDetector();
   }
 
   LargestTextPaintManager* GetLargestTextPaintManager() {
@@ -86,7 +86,7 @@ class TextPaintTimingDetectorTest : public testing::Test {
   wtf_size_t TextQueuedForPaintTimeSize(const LocalFrameView& view) {
     return view.GetPaintTimingDetector()
         .GetTextPaintTimingDetector()
-        ->texts_queued_for_paint_time_.size();
+        .texts_queued_for_paint_time_.size();
   }
 
   wtf_size_t ContainerTotalSize() {
@@ -125,11 +125,11 @@ class TextPaintTimingDetectorTest : public testing::Test {
   }
 
   base::TimeTicks LargestPaintTime() {
-    return GetPaintTimingDetector().largest_text_paint_time_;
+    return GetPaintTimingDetector().lcp_details_.largest_text_paint_time_;
   }
 
   uint64_t LargestPaintSize() {
-    return GetPaintTimingDetector().largest_text_paint_size_;
+    return GetPaintTimingDetector().lcp_details_.largest_text_paint_size_;
   }
 
   void SetBodyInnerHTML(const std::string& content) {
@@ -196,7 +196,7 @@ class TextPaintTimingDetectorTest : public testing::Test {
     return GetChildFrameView()
         .GetPaintTimingDetector()
         .GetTextPaintTimingDetector()
-        ->ltp_manager_->LargestText();
+        .ltp_manager_->LargestText();
   }
 
   void SetFontSize(Element* font_element, uint16_t font_size) {
@@ -305,9 +305,13 @@ TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_TraceEvent_Candidate) {
   absl::optional<bool> is_main_frame = arg_dict.FindBool("isMainFrame");
   EXPECT_TRUE(is_main_frame.has_value());
   EXPECT_EQ(true, is_main_frame.value());
-  absl::optional<bool> is_oopif = arg_dict.FindBool("isOOPIF");
-  EXPECT_TRUE(is_oopif.has_value());
-  EXPECT_EQ(false, is_oopif.value());
+  absl::optional<bool> is_outermost_main_frame =
+      arg_dict.FindBool("isOutermostMainFrame");
+  EXPECT_TRUE(is_outermost_main_frame.has_value());
+  EXPECT_EQ(true, is_outermost_main_frame.value());
+  absl::optional<bool> is_embedded_frame = arg_dict.FindBool("isEmbeddedFrame");
+  EXPECT_TRUE(is_embedded_frame.has_value());
+  EXPECT_EQ(false, is_embedded_frame.value());
   EXPECT_GT(arg_dict.FindInt("frame_x").value_or(-1), 0);
   EXPECT_GT(arg_dict.FindInt("frame_y").value_or(-1), 0);
   EXPECT_GT(arg_dict.FindInt("frame_width").value_or(-1), 0);
@@ -353,9 +357,13 @@ TEST_F(TextPaintTimingDetectorTest,
   absl::optional<bool> is_main_frame = arg_dict.FindBool("isMainFrame");
   EXPECT_TRUE(is_main_frame.has_value());
   EXPECT_EQ(false, is_main_frame.value());
-  absl::optional<bool> is_oopif = arg_dict.FindBool("isOOPIF");
-  EXPECT_TRUE(is_oopif.has_value());
-  EXPECT_EQ(false, is_oopif.value());
+  absl::optional<bool> is_outermost_main_frame =
+      arg_dict.FindBool("isOutermostMainFrame");
+  EXPECT_TRUE(is_outermost_main_frame.has_value());
+  EXPECT_EQ(false, is_outermost_main_frame.value());
+  absl::optional<bool> is_embedded_frame = arg_dict.FindBool("isEmbeddedFrame");
+  EXPECT_TRUE(is_embedded_frame.has_value());
+  EXPECT_EQ(false, is_embedded_frame.value());
   // There's sometimes a 1 pixel offset for the y dimensions.
   EXPECT_EQ(arg_dict.FindInt("frame_x").value_or(-1), 10);
   EXPECT_GE(arg_dict.FindInt("frame_y").value_or(-1), 9);
@@ -564,27 +572,28 @@ TEST_F(TextPaintTimingDetectorTest,
   EXPECT_EQ(ContainerTotalSize(), 0u);
 }
 
-TEST_F(TextPaintTimingDetectorTest,
-       DestroyLargestTextPaintMangerAfterUserInput) {
+TEST_F(TextPaintTimingDetectorTest, StopRecordingLCPAfterUserInput) {
   SetBodyInnerHTML(R"HTML(
   )HTML");
   AppendDivElementToBody("text");
   UpdateAllLifecyclePhasesAndSimulatePresentationTime();
-  EXPECT_TRUE(GetLargestTextPaintManager());
+  EXPECT_TRUE(GetTextPaintTimingDetector()->IsRecordingLargestTextPaint());
 
   SimulateInputEvent();
-  EXPECT_FALSE(GetLargestTextPaintManager());
+  EXPECT_TRUE(GetLargestTextPaintManager());
+  EXPECT_FALSE(GetTextPaintTimingDetector()->IsRecordingLargestTextPaint());
 }
 
-TEST_F(TextPaintTimingDetectorTest, KeepLargestTextPaintMangerAfterUserInput) {
+TEST_F(TextPaintTimingDetectorTest, DoNotStopRecordingLCPAfterKeyUp) {
   SetBodyInnerHTML(R"HTML(
   )HTML");
   AppendDivElementToBody("text");
   UpdateAllLifecyclePhasesAndSimulatePresentationTime();
-  EXPECT_TRUE(GetLargestTextPaintManager());
+  EXPECT_TRUE(GetTextPaintTimingDetector()->IsRecordingLargestTextPaint());
 
   SimulateKeyUp();
   EXPECT_TRUE(GetLargestTextPaintManager());
+  EXPECT_TRUE(GetTextPaintTimingDetector()->IsRecordingLargestTextPaint());
 }
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_TextRecordAfterRemoval) {

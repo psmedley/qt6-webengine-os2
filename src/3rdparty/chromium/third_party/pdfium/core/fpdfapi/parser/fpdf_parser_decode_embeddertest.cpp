@@ -4,7 +4,6 @@
 
 #include "build/build_config.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
 #include "public/cpp/fpdf_scopers.h"
 #include "testing/embedder_test.h"
 #include "testing/embedder_test_constants.h"
@@ -44,6 +43,6 @@ TEST_F(FPDFParserDecodeEmbedderTest, Bug455199) {
   ASSERT_TRUE(page);
   ScopedFPDFBitmap bitmap = RenderLoadedPage(page);
 
-  CompareBitmap(bitmap.get(), 200, 200, pdfium::kHelloWorldChecksum);
+  CompareBitmap(bitmap.get(), 200, 200, pdfium::HelloWorldChecksum());
   UnloadPage(page);
 }

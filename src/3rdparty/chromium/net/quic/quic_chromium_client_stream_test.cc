@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,8 +34,7 @@
 using testing::_;
 using testing::Return;
 
-namespace net {
-namespace test {
+namespace net::test {
 namespace {
 
 class MockQuicClientSessionBase : public quic::QuicSpdyClientSessionBase {
@@ -158,7 +157,7 @@ MockQuicClientSessionBase::MockQuicClientSessionBase(
       .WillByDefault(testing::Return(quic::QuicConsumedData(0, false)));
 }
 
-MockQuicClientSessionBase::~MockQuicClientSessionBase() {}
+MockQuicClientSessionBase::~MockQuicClientSessionBase() = default;
 
 class QuicChromiumClientStreamTest
     : public ::testing::TestWithParam<quic::ParsedQuicVersion>,
@@ -1179,5 +1178,4 @@ TEST_P(QuicChromiumClientStreamTest, TrailersAfterEarlyHintsWithoutRead) {
 }
 
 }  // namespace
-}  // namespace test
-}  // namespace net
+}  // namespace net::test

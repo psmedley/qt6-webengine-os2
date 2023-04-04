@@ -58,7 +58,7 @@ const AtomicString& FrameTree::GetName() const {
     if (frame) {
       UseCounter::Count(frame->GetDocument(),
                         WebFeature::kCrossOriginMainFrameNulledNameAccessed);
-      if (!name_.IsEmpty()) {
+      if (!name_.empty()) {
         UseCounter::Count(
             frame->GetDocument(),
             WebFeature::kCrossOriginMainFrameNulledNonEmptyNameAccessed);
@@ -68,7 +68,7 @@ const AtomicString& FrameTree::GetName() const {
 
   if (cross_site_cross_browsing_context_group_set_nulled_name_) {
     auto* frame = DynamicTo<LocalFrame>(this_frame_.Get());
-    if (frame && frame->IsMainFrame() && !name_.IsEmpty()) {
+    if (frame && frame->IsOutermostMainFrame() && !name_.empty()) {
       UseCounter::Count(
           frame->GetDocument(),
           WebFeature::
@@ -109,7 +109,7 @@ void FrameTree::SetName(const AtomicString& name,
   experimental_set_nulled_name_ = false;
 
   auto* frame = DynamicTo<LocalFrame>(this_frame_.Get());
-  if (frame && frame->IsMainFrame() && !name.IsEmpty()) {
+  if (frame && frame->IsOutermostMainFrame() && !name.empty()) {
     // TODO(shuuran): remove this once we have gathered the data
     cross_site_cross_browsing_context_group_set_nulled_name_ = false;
   }
@@ -148,7 +148,7 @@ Frame* FrameTree::ScopedChild(unsigned index) const {
 }
 
 Frame* FrameTree::ScopedChild(const AtomicString& name) const {
-  if (name.IsEmpty())
+  if (name.empty())
     return nullptr;
 
   for (Frame* child = FirstChild(); child;
@@ -245,7 +245,7 @@ Frame* FrameTree::FindFrameForNavigationInternal(
   }
 
   if (EqualIgnoringASCIICase(name, "_self") ||
-      EqualIgnoringASCIICase(name, "_current") || name.IsEmpty()) {
+      EqualIgnoringASCIICase(name, "_current") || name.empty()) {
     return this_frame_;
   }
 
@@ -254,20 +254,13 @@ Frame* FrameTree::FindFrameForNavigationInternal(
 
   // The target _unfencedTop should only be treated as a special name in
   // opaque-ads mode fenced frames.
-  // TODO(crbug.com/1262022): Simplify check when ShadowDOM fenced frames are
-  // eventually removed.
   if (EqualIgnoringASCIICase(name, "_unfencedTop")) {
-    // In ShadowDOM, we can just return the unfenced top frame, because it
-    // exists in the renderer process.
-    if (this_frame_.Get()->IsInShadowDOMOpaqueAdsFencedFrameTree()) {
-      return &Top();
-    }
-    // In MPArch, because the fenced frame tree is isolated in the renderer
-    // process, we instead set a flag that will later indicate to the browser
+    // In fenced frames, we set a flag that will later indicate to the browser
     // that this is an _unfencedTop navigation, and return the current frame
     // so that the renderer-side checks will succeed.
     // TODO(crbug.com/1315802): Refactor MPArch _unfencedTop handling.
-    if (this_frame_.Get()->IsInMPArchOpaqueAdsFencedFrameTree() &&
+    if (this_frame_.Get()->GetFencedFrameMode() ==
+            mojom::blink::FencedFrameMode::kOpaqueAds &&
         request != nullptr) {
       request->SetIsUnfencedTopNavigation(true);
       return this_frame_;

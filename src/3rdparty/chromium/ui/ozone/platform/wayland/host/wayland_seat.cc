@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,8 @@ void WaylandSeat::Instantiate(WaylandConnection* connection,
                               uint32_t name,
                               const std::string& interface,
                               uint32_t version) {
-  DCHECK_EQ(interface, kInterfaceName);
+  CHECK_EQ(interface, kInterfaceName) << "Expected \"" << kInterfaceName
+                                      << "\" but got \"" << interface << "\"";
 
   if (connection->seat_ ||
       !wl::CanBind(interface, version, kMinVersion, kMaxVersion)) {
@@ -84,51 +85,55 @@ bool WaylandSeat::RefreshKeyboard() {
 void WaylandSeat::Capabilities(void* data,
                                wl_seat* seat,
                                uint32_t capabilities) {
-  WaylandSeat* self = static_cast<WaylandSeat*>(data);
-  DCHECK(self);
-  DCHECK(self->connection_->event_source());
-
-  if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
-    if (!self->keyboard_ && !self->RefreshKeyboard())
-      LOG(ERROR) << "Failed to get wl_keyboard from seat";
-  } else {
-    self->keyboard_.reset();
-  }
-
-  if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
-    if (!self->pointer_) {
-      if (wl_pointer* pointer = wl_seat_get_pointer(seat)) {
-        self->pointer_ = std::make_unique<WaylandPointer>(
-            pointer, self->connection_, self->connection_->event_source());
-      } else {
-        LOG(ERROR) << "Failed to get wl_pointer from seat";
-      }
-    }
-  } else {
-    self->pointer_.reset();
-  }
-
-  if (capabilities & WL_SEAT_CAPABILITY_TOUCH) {
-    if (!self->touch_) {
-      if (wl_touch* touch = wl_seat_get_touch(seat)) {
-        self->touch_ = std::make_unique<WaylandTouch>(
-            touch, self->connection_, self->connection_->event_source());
-      } else {
-        LOG(ERROR) << "Failed to get wl_touch from seat";
-      }
-    }
-  } else {
-    self->touch_.reset();
-  }
-
-  self->connection_->UpdateInputDevices();
-
-  self->connection_->ScheduleFlush();
+  auto* self = static_cast<WaylandSeat*>(data);
+  self->OnCapabilities(data, seat, capabilities);
 }
 
 // static
 void WaylandSeat::Name(void* data, wl_seat* seat, const char* name) {
   NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WaylandSeat::OnCapabilities(void* data,
+                                 wl_seat* seat,
+                                 uint32_t capabilities) {
+  DCHECK(connection_->event_source());
+
+  if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
+    if (!keyboard_ && !RefreshKeyboard())
+      LOG(ERROR) << "Failed to get wl_keyboard from seat";
+  } else {
+    keyboard_.reset();
+  }
+
+  if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
+    if (!pointer_) {
+      if (wl_pointer* pointer = wl_seat_get_pointer(seat)) {
+        pointer_ = std::make_unique<WaylandPointer>(
+            pointer, connection_, connection_->event_source());
+      } else {
+        LOG(ERROR) << "Failed to get wl_pointer from seat";
+      }
+    }
+  } else {
+    pointer_.reset();
+  }
+
+  if (capabilities & WL_SEAT_CAPABILITY_TOUCH) {
+    if (!touch_) {
+      if (wl_touch* touch = wl_seat_get_touch(seat)) {
+        touch_ = std::make_unique<WaylandTouch>(touch, connection_,
+                                                connection_->event_source());
+      } else {
+        LOG(ERROR) << "Failed to get wl_touch from seat";
+      }
+    }
+  } else {
+    touch_.reset();
+  }
+
+  connection_->UpdateInputDevices();
+  connection_->Flush();
 }
 
 }  // namespace ui

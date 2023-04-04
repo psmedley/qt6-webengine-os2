@@ -5,9 +5,7 @@
  * found in the LICENSE file.
  */
 
-#include <cstddef>
-#include <cstring>
-#include <type_traits>
+#include "src/image/SkImage_GpuYUVA.h"
 
 #include "include/core/SkBitmap.h"
 #include "include/core/SkYUVAPixmaps.h"
@@ -16,6 +14,7 @@
 #include "include/gpu/GrYUVABackendTextures.h"
 #include "src/core/SkAutoPixmapStorage.h"
 #include "src/core/SkMipmap.h"
+#include "src/core/SkSamplingPriv.h"
 #include "src/core/SkScopeExit.h"
 #include "src/gpu/ganesh/GrClip.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
@@ -28,7 +27,10 @@
 #include "src/gpu/ganesh/effects/GrBicubicEffect.h"
 #include "src/gpu/ganesh/effects/GrYUVtoRGBEffect.h"
 #include "src/image/SkImage_Gpu.h"
-#include "src/image/SkImage_GpuYUVA.h"
+
+#ifdef SK_GRAPHITE_ENABLED
+#include "src/gpu/graphite/Log.h"
+#endif
 
 static constexpr auto kAssumedColorType = kRGBA_8888_SkColorType;
 
@@ -159,6 +161,7 @@ std::tuple<GrSurfaceProxyView, GrColorType> SkImage_GpuYUVA::onAsView(
         return {};
     }
     auto sfc = rContext->priv().makeSFC(this->imageInfo(),
+                                        "Image_GpuYUVA_ReinterpretColorSpace",
                                         SkBackingFit::kExact,
                                         /*sample count*/ 1,
                                         mipmapped,
@@ -191,6 +194,11 @@ std::unique_ptr<GrFragmentProcessor> SkImage_GpuYUVA::onAsFragmentProcessor(
     if (!fContext->priv().matches(context)) {
         return {};
     }
+    // At least for now we do not attempt aniso filtering on YUVA images.
+    if (sampling.isAniso()) {
+        sampling = SkSamplingPriv::AnisoFallback(fYUVAProxies.mipmapped() == GrMipmapped::kYes);
+    }
+
     auto wmx = SkTileModeToWrapMode(tileModes[0]);
     auto wmy = SkTileModeToWrapMode(tileModes[1]);
     GrSamplerState sampler(wmx, wmy, sampling.filter, sampling.mipmap);
@@ -222,6 +230,15 @@ std::unique_ptr<GrFragmentProcessor> SkImage_GpuYUVA::onAsFragmentProcessor(
     }
     return fp;
 }
+
+
+#ifdef SK_GRAPHITE_ENABLED
+sk_sp<SkImage> SkImage_GpuYUVA::onMakeTextureImage(skgpu::graphite::Recorder*,
+                                                   RequiredImageProperties) const {
+    SKGPU_LOG_W("Cannot convert Ganesh-backed YUVA image to Graphite");
+    return nullptr;
+}
+#endif
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -273,7 +290,7 @@ sk_sp<SkImage> SkImage::MakeFromYUVAPixmaps(GrRecordingContext* context,
     }
 
     if (!context->priv().caps()->mipmapSupport()) {
-        buildMips = GrMipMapped::kNo;
+        buildMips = GrMipmapped::kNo;
     }
 
     // Resize the pixmaps if necessary.

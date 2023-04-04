@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "components/media_router/browser/media_router.h"
 #include "components/media_router/browser/media_router_dialog_controller.h"
@@ -32,6 +34,7 @@
 #include "components/media_router/common/media_sink.h"
 #include "components/media_router/common/media_source.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/presentation_observer.h"
 #include "content/public/browser/presentation_request.h"
 #include "content/public/browser/presentation_screen_availability_listener.h"
 #include "content/public/browser/render_frame_host.h"
@@ -465,8 +468,7 @@ void PresentationServiceDelegateImpl::StartPresentation(
         PresentationErrorType::UNKNOWN, "Invalid presentation arguments."));
     return;
   }
-  if (std::find_if_not(presentation_urls.begin(), presentation_urls.end(),
-                       IsValidPresentationUrl) != presentation_urls.end()) {
+  if (!base::ranges::all_of(presentation_urls, IsValidPresentationUrl)) {
     std::move(error_cb).Run(
         PresentationError(PresentationErrorType::NO_PRESENTATION_FOUND,
                           "Invalid presentation URL."));
@@ -605,12 +607,12 @@ void PresentationServiceDelegateImpl::ListenForConnectionStateChange(
 }
 
 void PresentationServiceDelegateImpl::AddObserver(
-    WebContentsPresentationManager::Observer* observer) {
+    content::PresentationObserver* observer) {
   presentation_observers_.AddObserver(observer);
 }
 
 void PresentationServiceDelegateImpl::RemoveObserver(
-    WebContentsPresentationManager::Observer* observer) {
+    content::PresentationObserver* observer) {
   presentation_observers_.RemoveObserver(observer);
 }
 
@@ -713,11 +715,10 @@ MediaRoute::Id PresentationServiceDelegateImpl::GetRouteId(
 #if !BUILDFLAG(IS_ANDROID)
 bool PresentationServiceDelegateImpl::ShouldCancelAutoJoinForOrigin(
     const url::Origin& origin) {
-  const base::Value* origins =
+  const base::Value::List& origins =
       user_prefs::UserPrefs::Get(GetWebContents().GetBrowserContext())
           ->GetList(prefs::kMediaRouterTabMirroringSources);
-  return origins && base::Contains(origins->GetListDeprecated(),
-                                   base::Value(origin.Serialize()));
+  return base::Contains(origins, base::Value(origin.Serialize()));
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
@@ -751,7 +752,7 @@ void PresentationServiceDelegateImpl::NotifyDefaultPresentationChanged(
 void PresentationServiceDelegateImpl::NotifyMediaRoutesChanged() {
   auto routes = GetMediaRoutes();
   for (auto& presentation_observer : presentation_observers_)
-    presentation_observer.OnMediaRoutesChanged(routes);
+    presentation_observer.OnPresentationsChanged(!routes.empty());
 }
 
 void PresentationServiceDelegateImpl::OnConnectionStateChanged(

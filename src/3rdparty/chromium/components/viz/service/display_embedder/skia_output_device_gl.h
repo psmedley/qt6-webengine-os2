@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "components/viz/service/display_embedder/skia_output_device.h"
-#include "gpu/command_buffer/service/shared_image_representation.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 
 namespace gl {
-class GLImage;
 class GLSurface;
 }  // namespace gl
 
@@ -86,7 +85,8 @@ class SkiaOutputDeviceGL final : public SkiaOutputDevice {
                                 OutputSurfaceFrame frame,
                                 gfx::SwapCompletionResult result);
 
-  scoped_refptr<gl::GLImage> GetGLImageForMailbox(const gpu::Mailbox& mailbox);
+  gpu::OverlayImageRepresentation::ScopedReadAccess* BeginOverlayAccess(
+      const gpu::Mailbox& mailbox);
 
   void CreateSkSurface();
 
@@ -107,7 +107,6 @@ class SkiaOutputDeviceGL final : public SkiaOutputDevice {
 
   uint64_t backbuffer_estimated_size_ = 0;
 
-  int alpha_bits_ = 0;
   gfx::Size size_;
   SkColorType color_type_;
   gfx::ColorSpace color_space_;

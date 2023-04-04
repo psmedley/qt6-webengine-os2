@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include <limits>
 
 #include "base/compiler_specific.h"
+#include "net/base/net_export.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_encrypter.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_types.h"
-#include "net/third_party/quiche/src/quiche/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -25,7 +25,7 @@ class MockEncrypter : public quic::QuicEncrypter {
   MockEncrypter(const MockEncrypter&) = delete;
   MockEncrypter& operator=(const MockEncrypter&) = delete;
 
-  ~MockEncrypter() override {}
+  ~MockEncrypter() override = default;
 
   // QuicEncrypter implementation
   bool SetKey(absl::string_view key) override;

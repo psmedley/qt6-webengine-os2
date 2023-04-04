@@ -235,7 +235,7 @@ void SkPath::swap(SkPath& that) {
 
 bool SkPath::isInterpolatable(const SkPath& compare) const {
     // need the same structure (verbs, conicweights) and same point-count
-    return fPathRef->fPoints.count() == compare.fPathRef->fPoints.count() &&
+    return fPathRef->fPoints.size() == compare.fPathRef->fPoints.size() &&
            fPathRef->fVerbs == compare.fPathRef->fVerbs &&
            fPathRef->fConicWeights == compare.fPathRef->fConicWeights;
 }
@@ -1145,6 +1145,8 @@ SkPath& SkPath::arcTo(const SkRect& oval, SkScalar startAngle, SkScalar sweepAng
         return *this;
     }
 
+    startAngle = SkScalarMod(startAngle, 360.0f);
+
     if (fPathRef->countVerbs() == 0) {
         forceMoveTo = true;
     }
@@ -1256,7 +1258,7 @@ SkPath& SkPath::arcTo(SkScalar rx, SkScalar ry, SkScalar angle, SkPath::ArcSize 
     pointTransform.preRotate(-angle);
 
     SkPoint unitPts[2];
-    pointTransform.mapPoints(unitPts, srcPts, (int) SK_ARRAY_COUNT(unitPts));
+    pointTransform.mapPoints(unitPts, srcPts, (int) std::size(unitPts));
     SkVector delta = unitPts[1] - unitPts[0];
 
     SkScalar d = delta.fX * delta.fX + delta.fY * delta.fY;
@@ -1318,7 +1320,7 @@ SkPath& SkPath::arcTo(SkScalar rx, SkScalar ry, SkScalar angle, SkPath::ArcSize 
         unitPts[0] = unitPts[1];
         unitPts[0].offset(t * sinEndTheta, -t * cosEndTheta);
         SkPoint mapped[2];
-        pointTransform.mapPoints(mapped, unitPts, (int) SK_ARRAY_COUNT(unitPts));
+        pointTransform.mapPoints(mapped, unitPts, (int) std::size(unitPts));
         /*
         Computing the arc width introduces rounding errors that cause arcs to start
         outside their marks. A round rect may lose convexity as a result. If the input
@@ -1497,7 +1499,7 @@ SkPath& SkPath::addPath(const SkPath& srcPath, const SkMatrix& matrix, AddPathMo
 
 // ignore the last point of the 1st contour
 SkPath& SkPath::reversePathTo(const SkPath& path) {
-    if (path.fPathRef->fVerbs.count() == 0) {
+    if (path.fPathRef->fVerbs.empty()) {
         return *this;
     }
 
@@ -3081,7 +3083,7 @@ bool SkPath::contains(SkScalar x, SkScalar y) const {
     SkTDArray<SkVector> tangents;
     do {
         SkPoint pts[4];
-        int oldCount = tangents.count();
+        int oldCount = tangents.size();
         switch (iter.next(pts)) {
             case SkPath::kMove_Verb:
             case SkPath::kClose_Verb:
@@ -3102,8 +3104,8 @@ bool SkPath::contains(SkScalar x, SkScalar y) const {
                 done = true;
                 break;
        }
-       if (tangents.count() > oldCount) {
-            int last = tangents.count() - 1;
+       if (tangents.size() > oldCount) {
+            int last = tangents.size() - 1;
             const SkVector& tangent = tangents[last];
             if (SkScalarNearlyZero(SkPointPriv::LengthSqd(tangent))) {
                 tangents.remove(last);
@@ -3121,7 +3123,7 @@ bool SkPath::contains(SkScalar x, SkScalar y) const {
             }
         }
     } while (!done);
-    return SkToBool(tangents.count()) ^ isInverse;
+    return SkToBool(tangents.size()) ^ isInverse;
 }
 
 int SkPath::ConvertConicToQuads(const SkPoint& p0, const SkPoint& p1, const SkPoint& p2,
@@ -3290,7 +3292,6 @@ void SkPathPriv::CreateDrawArcPath(SkPath* path, const SkRect& oval, SkScalar st
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-#include "include/private/SkNx.h"
 
 static int compute_quad_extremas(const SkPoint src[3], SkPoint extremas[3]) {
     SkScalar ts[2];
@@ -3341,7 +3342,7 @@ SkRect SkPath::computeTightBounds() const {
     SkPoint extremas[5]; // big enough to hold worst-case curve type (cubic) extremas + 1
 
     // initial with the first MoveTo, so we don't have to check inside the switch
-    Sk2s min, max;
+    skvx::float2 min, max;
     min = max = from_point(this->getPoint(0));
     for (auto [verb, pts, w] : SkPathPriv::Iterate(*this)) {
         int count = 0;
@@ -3367,9 +3368,9 @@ SkRect SkPath::computeTightBounds() const {
                 break;
         }
         for (int i = 0; i < count; ++i) {
-            Sk2s tmp = from_point(extremas[i]);
-            min = Sk2s::Min(min, tmp);
-            max = Sk2s::Max(max, tmp);
+            skvx::float2 tmp = from_point(extremas[i]);
+            min = skvx::min(min, tmp);
+            max = skvx::max(max, tmp);
         }
     }
     SkRect bounds;

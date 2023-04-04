@@ -9,8 +9,7 @@ import * as SDK from '../../core/sdk/sdk.js';
 import * as Bindings from '../bindings/bindings.js';
 import * as Workspace from '../workspace/workspace.js';
 
-import type {FileSystem} from './FileSystemWorkspaceBinding.js';
-import {FileSystemWorkspaceBinding} from './FileSystemWorkspaceBinding.js';
+import {FileSystemWorkspaceBinding, type FileSystem} from './FileSystemWorkspaceBinding.js';
 import {PathEncoder, PersistenceImpl} from './PersistenceImpl.js';
 
 export class Automapping {
@@ -88,7 +87,7 @@ export class Automapping {
       const networkProjects = this.workspace.projectsForType(Workspace.Workspace.projectTypes.Network);
       for (const networkProject of networkProjects) {
         for (const uiSourceCode of networkProject.uiSourceCodes()) {
-          this.computeNetworkStatus(uiSourceCode);
+          void this.computeNetworkStatus(uiSourceCode);
         }
       }
       this.onSweepHappenedForTest();
@@ -137,7 +136,7 @@ export class Automapping {
       this.fileSystemUISourceCodes.add(uiSourceCode);
       this.scheduleSweep();
     } else if (project.type() === Workspace.Workspace.projectTypes.Network) {
-      this.computeNetworkStatus(uiSourceCode);
+      void this.computeNetworkStatus(uiSourceCode);
     }
   }
 
@@ -173,20 +172,24 @@ export class Automapping {
     this.scheduleSweep();
   }
 
-  private computeNetworkStatus(networkSourceCode: Workspace.UISourceCode.UISourceCode): void {
-    if (this.sourceCodeToProcessingPromiseMap.has(networkSourceCode) ||
-        this.sourceCodeToAutoMappingStatusMap.has(networkSourceCode)) {
-      return;
+  computeNetworkStatus(networkSourceCode: Workspace.UISourceCode.UISourceCode): Promise<void> {
+    const processingPromise = this.sourceCodeToProcessingPromiseMap.get(networkSourceCode);
+    if (processingPromise) {
+      return processingPromise;
+    }
+    if (this.sourceCodeToAutoMappingStatusMap.has(networkSourceCode)) {
+      return Promise.resolve();
     }
     if (this.interceptors.some(interceptor => interceptor(networkSourceCode))) {
-      return;
+      return Promise.resolve();
     }
     if (networkSourceCode.url().startsWith('wasm://')) {
-      return;
+      return Promise.resolve();
     }
     const createBindingPromise =
         this.createBinding(networkSourceCode).then(validateStatus.bind(this)).then(onStatus.bind(this));
     this.sourceCodeToProcessingPromiseMap.set(networkSourceCode, createBindingPromise);
+    return createBindingPromise;
 
     async function validateStatus(this: Automapping, status: AutomappingStatus|null): Promise<AutomappingStatus|null> {
       if (!status) {
@@ -242,7 +245,7 @@ export class Automapping {
       } else {
         if (networkContent.content) {
           // Trim trailing whitespaces because V8 adds trailing newline.
-          isValid = fileContent.trimRight() === networkContent.content.trimRight();
+          isValid = fileContent.trimEnd() === networkContent.content.trimEnd();
         }
       }
       if (!isValid) {
@@ -252,18 +255,19 @@ export class Automapping {
       return status;
     }
 
-    function onStatus(this: Automapping, status: AutomappingStatus|null): void {
+    async function onStatus(this: Automapping, status: AutomappingStatus|null): Promise<void> {
       if (this.sourceCodeToProcessingPromiseMap.get(networkSourceCode) !== createBindingPromise) {
         return;
       }
-      this.sourceCodeToProcessingPromiseMap.delete(networkSourceCode);
       if (!status) {
         this.onBindingFailedForTest();
+        this.sourceCodeToProcessingPromiseMap.delete(networkSourceCode);
         return;
       }
       // TODO(lushnikov): remove this check once there's a single uiSourceCode per url. @see crbug.com/670180
       if (this.sourceCodeToAutoMappingStatusMap.has(status.network) ||
           this.sourceCodeToAutoMappingStatusMap.has(status.fileSystem)) {
+        this.sourceCodeToProcessingPromiseMap.delete(networkSourceCode);
         return;
       }
 
@@ -277,7 +281,8 @@ export class Automapping {
           this.scheduleSweep();
         }
       }
-      void this.onStatusAdded.call(null, status);
+      await this.onStatusAdded.call(null, status);
+      this.sourceCodeToProcessingPromiseMap.delete(networkSourceCode);
     }
   }
 

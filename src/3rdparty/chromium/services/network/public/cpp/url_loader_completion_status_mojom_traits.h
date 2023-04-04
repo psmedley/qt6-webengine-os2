@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,6 +50,11 @@ class COMPONENT_EXPORT(NETWORK_CPP_BASE)
   static bool exists_in_cache(
       const network::URLLoaderCompletionStatus& status) {
     return status.exists_in_cache;
+  }
+
+  static bool exists_in_memory_cache(
+      const network::URLLoaderCompletionStatus& status) {
+    return status.exists_in_memory_cache;
   }
 
   static const base::TimeTicks& completion_time(
@@ -110,6 +115,11 @@ class COMPONENT_EXPORT(NETWORK_CPP_BASE)
   static bool should_collapse_initiator(
       const network::URLLoaderCompletionStatus& status) {
     return status.should_collapse_initiator;
+  }
+
+  static bool pervasive_payload_requested(
+      const network::URLLoaderCompletionStatus& status) {
+    return status.pervasive_payload_requested;
   }
 
   static bool Read(network::mojom::URLLoaderCompletionStatusDataView data,

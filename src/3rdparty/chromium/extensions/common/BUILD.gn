@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -73,12 +73,14 @@ mojom("mojom") {
     "mojom/activation_sequence.mojom",
     "mojom/api_permission_id.mojom",
     "mojom/app_window.mojom",
+    "mojom/automation_query.mojom",
     "mojom/channel.mojom",
     "mojom/code_injection.mojom",
     "mojom/css_origin.mojom",
     "mojom/event_dispatcher.mojom",
     "mojom/event_router.mojom",
     "mojom/execution_world.mojom",
+    "mojom/extra_response_data.mojom",
     "mojom/feature_session_type.mojom",
     "mojom/frame.mojom",
     "mojom/guest_view.mojom",
@@ -89,6 +91,7 @@ mojom("mojom") {
     "mojom/permission_set.mojom",
     "mojom/renderer.mojom",
     "mojom/run_location.mojom",
+    "mojom/stack_frame.mojom",
     "mojom/url_pattern_set.mojom",
     "mojom/view_type.mojom",
   ]
@@ -174,6 +177,18 @@ mojom("mojom") {
       traits_sources =
           [ "//extensions/common/mojom/activation_sequence_mojom_traits.cc" ]
     },
+    {
+      types = [
+        {
+          mojom = "extensions.mojom.StackFrame"
+          cpp = "::extensions::StackFrame"
+        },
+      ]
+      traits_headers =
+          [ "//extensions/common/mojom/stack_frame_mojom_traits.h" ]
+      traits_sources =
+          [ "//extensions/common/mojom/stack_frame_mojom_traits.cc" ]
+    },
   ]
   overridden_deps = [ "//content/public/common:interfaces" ]
 
@@ -193,6 +208,8 @@ jumbo_static_library("common") {
     "api/bluetooth/bluetooth_manifest_handler.h",
     "api/bluetooth/bluetooth_manifest_permission.cc",
     "api/bluetooth/bluetooth_manifest_permission.h",
+    "api/commands/commands_handler.cc",
+    "api/commands/commands_handler.h",
     "api/declarative/declarative_constants.cc",
     "api/declarative/declarative_constants.h",
     "api/declarative/declarative_manifest_data.cc",
@@ -224,6 +241,8 @@ jumbo_static_library("common") {
     "api/sockets/sockets_manifest_handler.h",
     "api/sockets/sockets_manifest_permission.cc",
     "api/sockets/sockets_manifest_permission.h",
+    "command.cc",
+    "command.h",
     "common_manifest_handlers.cc",
     "common_manifest_handlers.h",
     "common_param_traits.h",
@@ -256,6 +275,8 @@ jumbo_static_library("common") {
     "extension_message_generator.cc",
     "extension_message_generator.h",
     "extension_messages.h",
+    "extension_param_traits.cc",
+    "extension_param_traits.h",
     "extension_paths.cc",
     "extension_paths.h",
     "extension_resource.cc",
@@ -487,7 +508,7 @@ jumbo_static_library("common") {
     "//url",
   ]
 
-  if (use_qt) {
+  if (is_qtwebengine) {
     deps -= [
       "//components/crx_file"
     ]
@@ -508,7 +529,7 @@ jumbo_static_library("common") {
     ]
   }
 
-  if (is_chromeos_ash) {
+  if (is_chromeos) {
     sources += [
       "manifest_handlers/action_handlers_handler.cc",
       "manifest_handlers/action_handlers_handler.h",
@@ -557,10 +578,12 @@ source_set("test_support") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "api/commands/commands_manifest_unittest.cc",
     "api/declarative/declarative_manifest_unittest.cc",
     "api/declarative_net_request/dnr_manifest_unittest.cc",
     "api/printer_provider/usb_printer_manifest_unittest.cc",
     "api/sockets/sockets_manifest_permission_unittest.cc",
+    "command_unittest.cc",
     "component_extension_url_pattern_unittest.cc",
     "csp_validator_unittest.cc",
     "error_utils_unittest.cc",
@@ -591,6 +614,7 @@ source_set("unit_tests") {
     "manifest_handlers/incognito_manifest_unittest.cc",
     "manifest_handlers/kiosk_mode_info_unittest.cc",
     "manifest_handlers/manifest_v3_permissions_unittest.cc",
+    "manifest_handlers/mime_types_handler_unittest.cc",
     "manifest_handlers/oauth2_manifest_unittest.cc",
     "manifest_handlers/replacement_apps_unittest.cc",
     "manifest_handlers/shared_module_manifest_unittest.cc",

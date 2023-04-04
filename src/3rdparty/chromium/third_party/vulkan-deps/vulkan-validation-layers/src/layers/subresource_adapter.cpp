@@ -1,7 +1,7 @@
-/* Copyright (c) 2019-2021 The Khronos Group Inc.
- * Copyright (c) 2019-2021 Valve Corporation
- * Copyright (c) 2019-2021 LunarG, Inc.
- * Copyright (C) 2019-2021 Google Inc.
+/* Copyright (c) 2019-2022 The Khronos Group Inc.
+ * Copyright (c) 2019-2022 Valve Corporation
+ * Copyright (c) 2019-2022 LunarG, Inc.
+ * Copyright (C) 2019-2022 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -273,9 +273,9 @@ ImageRangeEncoder::ImageRangeEncoder(const IMAGE_STATE& image)
     : ImageRangeEncoder(image, AspectParameters::Get(image.full_range.aspectMask)) {}
 
 ImageRangeEncoder::ImageRangeEncoder(const IMAGE_STATE& image, const AspectParameters* param)
-    : RangeEncoder(image.full_range, param), image_(&image), total_size_(0U) {
-    if (image_->createInfo.extent.depth > 1) {
-        limits_.arrayLayer = image_->createInfo.extent.depth;
+    : RangeEncoder(image.full_range, param), total_size_(0U) {
+    if (image.createInfo.extent.depth > 1) {
+        limits_.arrayLayer = image.createInfo.extent.depth;
     }
     VkSubresourceLayout layout = {};
     VkImageSubresource subres = {};
@@ -283,9 +283,9 @@ ImageRangeEncoder::ImageRangeEncoder(const IMAGE_STATE& image, const AspectParam
     linear_image_ = false;
 
     // WORKAROUND for dev_sim and mock_icd not containing valid VkSubresourceLayout yet. Treat it as optimal image.
-    if (image_->createInfo.tiling == VK_IMAGE_TILING_LINEAR) {
+    if (image.createInfo.tiling == VK_IMAGE_TILING_LINEAR) {
         subres = {static_cast<VkImageAspectFlags>(AspectBit(0)), 0, 0};
-        DispatchGetImageSubresourceLayout(image_->store_device_as_workaround, image_->image(), &subres, &layout);
+        DispatchGetImageSubresourceLayout(image.store_device_as_workaround, image.image(), &subres, &layout);
         if (layout.size > 0) {
             linear_image_ = true;
         }
@@ -294,7 +294,7 @@ ImageRangeEncoder::ImageRangeEncoder(const IMAGE_STATE& image, const AspectParam
     is_compressed_ = FormatIsCompressed(image.createInfo.format);
     texel_extent_ = FormatTexelBlockExtent(image.createInfo.format);
 
-    is_3_d_ = image_->createInfo.imageType == VK_IMAGE_TYPE_3D;
+    is_3_d_ = image.createInfo.imageType == VK_IMAGE_TYPE_3D;
     y_interleave_ = false;
     for (uint32_t aspect_index = 0; aspect_index < limits_.aspect_index; ++aspect_index) {
         subres.aspectMask = static_cast<VkImageAspectFlags>(AspectBit(aspect_index));
@@ -304,10 +304,10 @@ ImageRangeEncoder::ImageRangeEncoder(const IMAGE_STATE& image, const AspectParam
         for (uint32_t mip_index = 0; mip_index < limits_.mipLevel; ++mip_index) {
             subres_layers.mipLevel = mip_index;
             subres.mipLevel = mip_index;
-            auto subres_extent = image_->GetSubresourceExtent(subres_layers);
+            auto subres_extent = image.GetSubresourceExtent(subres_layers);
 
             if (linear_image_) {
-                DispatchGetImageSubresourceLayout(image_->store_device_as_workaround, image_->image(), &subres, &layout);
+                DispatchGetImageSubresourceLayout(image.store_device_as_workaround, image.image(), &subres, &layout);
                 if (is_3_d_) {
                     if ((layout.depthPitch == 0) && (subres_extent.depth == 1)) {
                         layout.depthPitch = layout.size;  // Certain implmentations don't supply pitches when size is 1
@@ -498,26 +498,25 @@ void ImageRangeGenerator::SetInitialPosAllSubres(uint32_t layer, uint32_t aspect
 }
 
 bool ImageRangeGenerator::Convert2DCompatibleTo3D() {
-    if (encoder_->Is3D()) {
-        if ((subres_range_.levelCount == 1) && ((subres_range_.baseArrayLayer > 0) || (subres_range_.layerCount > 1))) {
-            // This only valid for 2D compatible 3D images
-            // Touch up the extent and the subres to make this look like a depth extent
-            offset_.z = subres_range_.baseArrayLayer;
-            subres_range_.baseArrayLayer = 0;
-            extent_.depth = subres_range_.layerCount;
-            subres_range_.layerCount = 1;
-            return true;
-        }
+    if (encoder_->Is3D() && is_depth_sliced_) {
+        // This only valid for 2D compatible 3D images
+        // Touch up the extent and the subres to make this look like a depth extent
+        offset_.z = subres_range_.baseArrayLayer;
+        subres_range_.baseArrayLayer = 0;
+        extent_.depth = subres_range_.layerCount;
+        subres_range_.layerCount = 1;
+        return true;
     }
     return false;
 }
 ImageRangeGenerator::ImageRangeGenerator(const ImageRangeEncoder& encoder, const VkImageSubresourceRange& subres_range,
-                                         VkDeviceSize base_address)
+                                         VkDeviceSize base_address, bool is_depth_sliced)
     : encoder_(&encoder),
       subres_range_(GetRemaining(encoder.FullRange(), subres_range)),
       offset_(),
       extent_(),
-      base_address_(base_address) {
+      base_address_(base_address),
+      is_depth_sliced_(is_depth_sliced) {
 #ifndef NDEBUG
     assert(IsValid(*encoder_, subres_range_));
 #endif
@@ -541,12 +540,14 @@ ImageRangeGenerator::ImageRangeGenerator(const ImageRangeEncoder& encoder, const
 }
 
 ImageRangeGenerator::ImageRangeGenerator(const ImageRangeEncoder& encoder, const VkImageSubresourceRange& subres_range,
-                                         const VkOffset3D& offset, const VkExtent3D& extent, VkDeviceSize base_address)
+                                         const VkOffset3D& offset, const VkExtent3D& extent, VkDeviceSize base_address,
+                                         bool is_depth_sliced)
     : encoder_(&encoder),
       subres_range_(GetRemaining(encoder.FullRange(), subres_range)),
       offset_(offset),
       extent_(extent),
-      base_address_(base_address) {
+      base_address_(base_address),
+      is_depth_sliced_(is_depth_sliced) {
 #ifndef NDEBUG
     assert(IsValid(*encoder_, subres_range_));
 #endif

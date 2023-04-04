@@ -1,9 +1,9 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "storage/browser/file_system/sandbox_file_stream_writer.h"
-#include "base/test/bind.h"
+#include "base/test/test_future.h"
 #include "storage/browser/file_system/file_stream_writer_test.h"
 
 #include <stdint.h>
@@ -61,9 +61,10 @@ class SandboxFileStreamWriterTest : public FileStreamWriterTest {
 
     file_system_context_->OpenFileSystem(
         blink::StorageKey::CreateFromStringForTesting(kURLOrigin),
-        kFileSystemTypeTemporary, OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
-        base::BindOnce([](const GURL& root_url, const std::string& name,
-                          base::File::Error result) {
+        /*bucket=*/absl::nullopt, kFileSystemTypeTemporary,
+        OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
+        base::BindOnce([](const FileSystemURL& root_url,
+                          const std::string& name, base::File::Error result) {
           ASSERT_EQ(base::File::FILE_OK, result);
         }));
 
@@ -156,16 +157,16 @@ class SandboxFileStreamWriterTest : public FileStreamWriterTest {
   }
 
   quota_usage_and_info GetUsageAndQuotaSync() {
-    quota_usage_and_info info;
+    base::test::TestFuture<blink::mojom::QuotaStatusCode, int64_t, int64_t>
+        future;
     quota_manager_->GetUsageAndQuota(
         blink::StorageKey::CreateFromStringForTesting(kURLOrigin),
-        blink::mojom::StorageType::kTemporary,
-        base::BindLambdaForTesting([&](blink::mojom::QuotaStatusCode status,
-                                       int64_t usage, int64_t quota) {
-          info.status = status;
-          info.usage = usage;
-          info.quota = quota;
-        }));
+        blink::mojom::StorageType::kTemporary, future.GetCallback());
+
+    quota_usage_and_info info;
+    info.status = future.Get<0>();
+    info.usage = future.Get<1>();
+    info.quota = future.Get<2>();
     return info;
   }
 

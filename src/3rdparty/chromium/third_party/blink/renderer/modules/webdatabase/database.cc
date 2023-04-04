@@ -98,14 +98,14 @@ class DatabaseVersionCache {
   USING_FAST_MALLOC(DatabaseVersionCache);
 
  public:
-  Mutex& GetMutex() const LOCK_RETURNED(mutex_) { return mutex_; }
+  base::Lock& GetLock() const LOCK_RETURNED(lock_) { return lock_; }
 
   // Registers a globally-unique integer using the string key (reusing it if it
   // already exists), and returns the integer. Currently, these IDs live for the
   // lifetime of the process.
   DatabaseGuid RegisterOriginAndName(const String& origin, const String& name)
-      EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    mutex_.AssertAcquired();
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+    lock_.AssertAcquired();
     String string_id = origin + "/" + name;
 
     DatabaseGuid guid;
@@ -125,16 +125,16 @@ class DatabaseVersionCache {
   // Releases one use of this identifier (corresponding to a call to
   // RegisterOriginAndName). If all uses are released, the cached version will
   // be erased from memory.
-  void ReleaseGuid(DatabaseGuid guid) EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    mutex_.AssertAcquired();
+  void ReleaseGuid(DatabaseGuid guid) EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+    lock_.AssertAcquired();
     DCHECK(count_.Contains(guid));
     if (count_.erase(guid))
       guid_to_version_.erase(guid);
   }
 
   // The null string is returned only if the cached version has not been set.
-  String GetVersion(DatabaseGuid guid) const EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    mutex_.AssertAcquired();
+  String GetVersion(DatabaseGuid guid) const EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+    lock_.AssertAcquired();
 
     String version;
     auto guid_to_version_it = guid_to_version_.find(guid);
@@ -142,25 +142,24 @@ class DatabaseVersionCache {
       version = guid_to_version_it->value;
       DCHECK(version);
     }
-    return version.IsolatedCopy();
+    return version;
   }
 
   // Updates the cached version of a database.
   // The null string is treated as the empty string.
   void SetVersion(DatabaseGuid guid, const String& new_version)
-      EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    mutex_.AssertAcquired();
-    guid_to_version_.Set(guid, new_version.IsNull()
-                                   ? g_empty_string
-                                   : new_version.IsolatedCopy());
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+    lock_.AssertAcquired();
+    guid_to_version_.Set(guid,
+                         new_version.IsNull() ? g_empty_string : new_version);
   }
 
  private:
-  mutable Mutex mutex_;
-  HashMap<String, DatabaseGuid> origin_name_to_guid_ GUARDED_BY(mutex_);
-  HashCountedSet<DatabaseGuid> count_ GUARDED_BY(mutex_);
-  HashMap<DatabaseGuid, String> guid_to_version_ GUARDED_BY(mutex_);
-  DatabaseGuid next_guid_ GUARDED_BY(mutex_) = 1;
+  mutable base::Lock lock_;
+  HashMap<String, DatabaseGuid> origin_name_to_guid_ GUARDED_BY(lock_);
+  HashCountedSet<DatabaseGuid> count_ GUARDED_BY(lock_);
+  HashMap<DatabaseGuid, String> guid_to_version_ GUARDED_BY(lock_);
+  DatabaseGuid next_guid_ GUARDED_BY(lock_) = 1;
 };
 
 DatabaseVersionCache& GetDatabaseVersionCache() {
@@ -237,9 +236,9 @@ Database::Database(DatabaseContext* database_context,
                    const String& expected_version,
                    const String& display_name)
     : database_context_(database_context),
-      name_(name.IsolatedCopy()),
-      expected_version_(expected_version.IsolatedCopy()),
-      display_name_(display_name.IsolatedCopy()),
+      name_(name),
+      expected_version_(expected_version),
+      display_name_(display_name),
       guid_(0),
       opened_(false),
       new_(false),
@@ -262,7 +261,7 @@ Database::Database(DatabaseContext* database_context,
 
   {
     auto& cache = GetDatabaseVersionCache();
-    MutexLocker locker(cache.GetMutex());
+    base::AutoLock locker(cache.GetLock());
     guid_ = cache.RegisterOriginAndName(GetSecurityOrigin()->ToString(), name);
   }
 
@@ -317,10 +316,10 @@ bool Database::OpenAndVerifyVersion(bool set_version_in_new_database,
       async_task_context->Schedule(GetExecutionContext(), "openDatabase");
       GetExecutionContext()
           ->GetTaskRunner(TaskType::kDatabaseAccess)
-          ->PostTask(FROM_HERE, WTF::Bind(&Database::RunCreationCallback,
-                                          WrapPersistent(this),
-                                          WrapPersistent(creation_callback),
-                                          std::move(async_task_context)));
+          ->PostTask(FROM_HERE, WTF::BindOnce(&Database::RunCreationCallback,
+                                              WrapPersistent(this),
+                                              WrapPersistent(creation_callback),
+                                              std::move(async_task_context)));
     }
   }
 
@@ -339,13 +338,13 @@ void Database::Close() {
   DCHECK(GetDatabaseContext()->GetDatabaseThread()->IsDatabaseThread());
 
   {
-    MutexLocker locker(transaction_in_progress_mutex_);
+    base::AutoLock locker(transaction_in_progress_lock_);
 
     // Clean up transactions that have not been scheduled yet:
     // Transaction phase 1 cleanup. See comment on "What happens if a
     // transaction is interrupted?" at the top of SQLTransactionBackend.cpp.
     SQLTransactionBackend* transaction = nullptr;
-    while (!transaction_queue_.IsEmpty()) {
+    while (!transaction_queue_.empty()) {
       transaction = transaction_queue_.TakeFirst();
       transaction->NotifyDatabaseThreadIsShuttingDown();
     }
@@ -361,7 +360,7 @@ void Database::Close() {
 SQLTransactionBackend* Database::RunTransaction(SQLTransaction* transaction,
                                                 bool read_only,
                                                 const ChangeVersionData* data) {
-  MutexLocker locker(transaction_in_progress_mutex_);
+  base::AutoLock locker(transaction_in_progress_lock_);
   if (!is_transaction_queue_enabled_)
     return nullptr;
 
@@ -381,16 +380,15 @@ SQLTransactionBackend* Database::RunTransaction(SQLTransaction* transaction,
 }
 
 void Database::InProgressTransactionCompleted() {
-  MutexLocker locker(transaction_in_progress_mutex_);
+  base::AutoLock locker(transaction_in_progress_lock_);
   transaction_in_progress_ = false;
   ScheduleTransaction();
 }
 
 void Database::ScheduleTransaction() {
-  transaction_in_progress_mutex_.AssertAcquired();
   SQLTransactionBackend* transaction = nullptr;
 
-  if (is_transaction_queue_enabled_ && !transaction_queue_.IsEmpty())
+  if (is_transaction_queue_enabled_ && !transaction_queue_.empty())
     transaction = transaction_queue_.TakeFirst();
 
   if (transaction && GetDatabaseContext()->DatabaseThreadAvailable()) {
@@ -437,7 +435,7 @@ void Database::CloseDatabase() {
   DatabaseTracker::Tracker().RemoveOpenDatabase(this);
   {
     auto& cache = GetDatabaseVersionCache();
-    MutexLocker locker(cache.GetMutex());
+    base::AutoLock locker(cache.GetLock());
     cache.ReleaseGuid(guid_);
   }
 }
@@ -472,7 +470,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
                                     DatabaseError& error,
                                     String& error_message) {
   DoneCreatingDatabaseOnExitCaller on_exit_caller(this);
-  DCHECK(error_message.IsEmpty());
+  DCHECK(error_message.empty());
   DCHECK_EQ(error,
             DatabaseError::kNone);  // Better not have any errors already.
   // Presumed failure. We'll clear it if we succeed below.
@@ -497,7 +495,7 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
   String current_version;
   {
     auto& cache = GetDatabaseVersionCache();
-    MutexLocker locker(cache.GetMutex());
+    base::AutoLock locker(cache.GetLock());
 
     current_version = cache.GetVersion(guid_);
     if (!current_version.IsNull()) {
@@ -624,18 +622,15 @@ bool Database::PerformOpenAndVerify(bool should_set_version_in_new_database,
 }
 
 String Database::StringIdentifier() const {
-  // Return a deep copy for ref counting thread safety
-  return name_.IsolatedCopy();
+  return name_;
 }
 
 String Database::DisplayName() const {
-  // Return a deep copy for ref counting thread safety
-  return display_name_.IsolatedCopy();
+  return display_name_;
 }
 
 String Database::FileName() const {
-  // Return a deep copy for ref counting thread safety
-  return filename_.IsolatedCopy();
+  return filename_;
 }
 
 bool Database::GetVersionFromDatabase(String& version,
@@ -685,18 +680,18 @@ bool Database::SetVersionInDatabase(const String& version,
 }
 
 void Database::SetExpectedVersion(const String& version) {
-  expected_version_ = version.IsolatedCopy();
+  expected_version_ = version;
 }
 
 String Database::GetCachedVersion() const {
   auto& cache = GetDatabaseVersionCache();
-  MutexLocker locker(cache.GetMutex());
+  base::AutoLock locker(cache.GetLock());
   return cache.GetVersion(guid_);
 }
 
 void Database::SetCachedVersion(const String& actual_version) {
   auto& cache = GetDatabaseVersionCache();
-  MutexLocker locker(cache.GetMutex());
+  base::AutoLock locker(cache.GetLock());
   cache.SetVersion(guid_, actual_version);
 }
 
@@ -860,9 +855,9 @@ void Database::RunTransaction(
       auto error = std::make_unique<SQLErrorData>(SQLError::kUnknownErr,
                                                   "database has been closed");
       GetDatabaseTaskRunner()->PostTask(
-          FROM_HERE, WTF::Bind(&CallTransactionErrorCallback,
-                               WrapPersistent(transaction_error_callback),
-                               std::move(error)));
+          FROM_HERE, WTF::BindOnce(&CallTransactionErrorCallback,
+                                   WrapPersistent(transaction_error_callback),
+                                   std::move(error)));
     }
   }
 }
@@ -907,9 +902,6 @@ Vector<String> Database::PerformGetTableNames() {
 }
 
 Vector<String> Database::TableNames() {
-  // FIXME: Not using isolatedCopy on these strings looks ok since threads
-  // take strict turns in dealing with them. However, if the code changes,
-  // this may not be true anymore.
   Vector<String> result;
   base::WaitableEvent event;
   if (!GetDatabaseContext()->DatabaseThreadAvailable())

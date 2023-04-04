@@ -49,19 +49,18 @@ struct GlslangSourceOptions
     bool supportsTransformFeedbackExtension = false;
     bool supportsTransformFeedbackEmulation = false;
     bool enableTransformFeedbackEmulation   = false;
-    bool emulateBresenhamLines              = false;
 };
 
 struct GlslangSpirvOptions
 {
-    gl::ShaderType shaderType                 = gl::ShaderType::InvalidEnum;
-    SurfaceRotation preRotation               = SurfaceRotation::Identity;
-    bool negativeViewportSupported            = false;
-    bool transformPositionToVulkanClipSpace   = false;
-    bool removeEarlyFragmentTestsOptimization = false;
-    bool removeDebugInfo                      = false;
-    bool isTransformFeedbackStage             = false;
-    bool isTransformFeedbackEmulated          = false;
+    gl::ShaderType shaderType           = gl::ShaderType::InvalidEnum;
+    bool negativeViewportSupported      = false;
+    bool removeDebugInfo                = false;
+    bool isLastPreFragmentStage         = false;
+    bool isTransformFeedbackStage       = false;
+    bool isTransformFeedbackEmulated    = false;
+    bool isMultisampledFramebufferFetch = false;
+    bool validate                       = true;
 };
 
 struct UniformBindingInfo final
@@ -120,15 +119,10 @@ struct ShaderInterfaceVariableInfo
     // Used for transform feedback extension to decorate vertex shader output.
     ShaderInterfaceVariableXfbInfo xfb;
     std::vector<ShaderInterfaceVariableXfbInfo> fieldXfb;
-    // Indicates that the precision needs to be modified in the generated SPIR-V
-    // to support only transferring medium precision data when there's a precision
-    // mismatch between the shaders. For example, either the VS casts highp->mediump
-    // or the FS casts mediump->highp.
-    bool useRelaxedPrecision = false;
     // Indicate if varying is input or output, or both (in case of for example gl_Position in a
     // geometry shader)
-    bool varyingIsInput  = false;
-    bool varyingIsOutput = false;
+    bool builtinIsInput  = false;
+    bool builtinIsOutput = false;
     // For vertex attributes, this is the number of components / locations.  These are used by the
     // vertex attribute aliasing transformation only.
     uint8_t attributeComponentCount = 0;
@@ -144,7 +138,7 @@ std::string GlslangGetMappedSamplerName(const std::string &originalName);
 std::string GetXfbBufferName(const uint32_t bufferIndex);
 
 void GlslangAssignLocations(const GlslangSourceOptions &options,
-                            const gl::ProgramState &programState,
+                            const gl::ProgramExecutable &programExecutable,
                             const gl::ProgramVaryingPacking &varyingPacking,
                             const gl::ShaderType shaderType,
                             const gl::ShaderType frontShaderType,
@@ -154,13 +148,14 @@ void GlslangAssignLocations(const GlslangSourceOptions &options,
                             ShaderInterfaceVariableInfoMap *variableInfoMapOut);
 
 void GlslangAssignTransformFeedbackLocations(gl::ShaderType shaderType,
-                                             const gl::ProgramState &programState,
+                                             const gl::ProgramExecutable &programExecutable,
                                              bool isTransformFeedbackStage,
                                              GlslangProgramInterfaceInfo *programInterfaceInfo,
                                              ShaderInterfaceVariableInfoMap *variableInfoMapOut);
 
 // Retrieves the compiled SPIR-V code for each shader stage, and calls |GlslangAssignLocations|.
-void GlslangGetShaderSpirvCode(const GlslangSourceOptions &options,
+void GlslangGetShaderSpirvCode(const gl::Context *context,
+                               const GlslangSourceOptions &options,
                                const gl::ProgramState &programState,
                                const gl::ProgramLinkedResources &resources,
                                GlslangProgramInterfaceInfo *programInterfaceInfo,

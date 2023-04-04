@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,26 +110,6 @@ class GPU_EXPORT SharedImageInterface {
                             GrSurfaceOrigin surface_origin,
                             SkAlphaType alpha_type,
                             uint32_t usage);
-
-  // Similar to above, but creates backings for all planes in one shot. Needed
-  // on platforms where the planes need to share some state on initialization.
-  // Only implemented on Windows.
-  virtual std::vector<Mailbox> CreateSharedImageVideoPlanes(
-      gfx::GpuMemoryBuffer* gpu_memory_buffer,
-      GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      uint32_t usage);
-
-  // The primary purpose of this is API to use an AHB from media/AImageReader in
-  // a thread-safe way. The source mailbox passed to this API must be backed by
-  // a SharedImageVideo. The current AHB associated with the video is wrapped in
-  // a new shared image, associated with the returned mailbox. This shared image
-  // can then be used on any thread in the GPU service. So this API is meant to
-  // pull a buffer for the compositor from ImageReader on the GPU thread, before
-  // sharing it with the compositor. Its also wrapped in a new backing to ensure
-  // there is no cross-thread ImageReader usage.
-  virtual Mailbox CreateSharedImageWithAHB(const Mailbox& mailbox,
-                                           uint32_t usage,
-                                           const SyncToken& sync_token);
 
   // Updates a shared image after its GpuMemoryBuffer (if any) was modified on
   // the CPU or through external devices, after |sync_token| has been released.

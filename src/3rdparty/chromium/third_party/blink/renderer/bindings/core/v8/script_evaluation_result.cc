@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
 
 namespace blink {
 
@@ -55,9 +56,17 @@ ScriptEvaluationResult ScriptEvaluationResult::FromModuleSuccess(
 }
 
 // static
-ScriptEvaluationResult ScriptEvaluationResult::FromClassicException() {
+ScriptEvaluationResult ScriptEvaluationResult::FromClassicExceptionRethrown() {
   return ScriptEvaluationResult(mojom::blink::ScriptType::kClassic,
                                 ResultType::kException, {});
+}
+
+// static
+ScriptEvaluationResult ScriptEvaluationResult::FromClassicException(
+    v8::Local<v8::Value> exception) {
+  DCHECK(!exception.IsEmpty());
+  return ScriptEvaluationResult(mojom::blink::ScriptType::kClassic,
+                                ResultType::kException, exception);
 }
 
 // static
@@ -96,6 +105,14 @@ v8::Local<v8::Value> ScriptEvaluationResult::GetExceptionForModule() const {
 #if DCHECK_IS_ON()
   DCHECK_EQ(script_type_, mojom::blink::ScriptType::kModule);
 #endif
+  DCHECK_EQ(result_type_, ResultType::kException);
+  DCHECK(!value_.IsEmpty());
+
+  return value_;
+}
+
+v8::Local<v8::Value> ScriptEvaluationResult::GetExceptionForClassicForTesting()
+    const {
   DCHECK_EQ(result_type_, ResultType::kException);
   DCHECK(!value_.IsEmpty());
 

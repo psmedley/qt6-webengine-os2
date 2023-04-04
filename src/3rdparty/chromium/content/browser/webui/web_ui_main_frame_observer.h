@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,6 @@ class CONTENT_EXPORT WebUIMainFrameObserver : public WebContentsObserver {
   friend class WebUIMainFrameObserverTest;
 
   // Override from WebContentsObserver
-  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
   void PrimaryPageChanged(Page& page) override;
 
 // TODO(crbug.com/1129544) This is currently disabled due to Windows DLL

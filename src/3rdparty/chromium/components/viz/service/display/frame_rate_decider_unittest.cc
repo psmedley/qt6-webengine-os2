@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,9 @@ class FrameRateDeciderTest : public testing::Test,
   ~FrameRateDeciderTest() override = default;
 
   void SetUp() override {
-    surface_manager_ = std::make_unique<SurfaceManager>(this, absl::nullopt);
+    surface_manager_ = std::make_unique<SurfaceManager>(
+        this, /*activation_deadline_in_frames=*/absl::nullopt,
+        /*max_uncommitted_frames=*/0);
     bool hw_support_for_multiple_refresh_rates = true;
     frame_rate_decider_ = std::make_unique<FrameRateDecider>(
         surface_manager_.get(), this, hw_support_for_multiple_refresh_rates,

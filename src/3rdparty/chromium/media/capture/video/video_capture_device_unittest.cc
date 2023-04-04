@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
@@ -236,16 +237,16 @@ class MockImageCaptureClient
   mojom::PhotoStatePtr state_;
 };
 
-base::test::SingleThreadTaskEnvironment::MainThreadType kMainThreadType =
+constexpr auto kMainThreadType =
 #if BUILDFLAG(IS_MAC)
     // Video capture code on MacOSX must run on a CFRunLoop enabled thread
     // for interaction with AVFoundation.
-    base::test::SingleThreadTaskEnvironment::MainThreadType::UI;
+    base::test::TaskEnvironment::MainThreadType::UI;
 #elif BUILDFLAG(IS_FUCHSIA)
     // FIDL APIs on Fuchsia requires IO thread.
-    base::test::SingleThreadTaskEnvironment::MainThreadType::IO;
+    base::test::TaskEnvironment::MainThreadType::IO;
 #else
-    base::test::SingleThreadTaskEnvironment::MainThreadType::DEFAULT;
+    base::test::TaskEnvironment::MainThreadType::DEFAULT;
 #endif
 
 }  // namespace
@@ -289,6 +290,15 @@ class VideoCaptureDeviceTest
         !CameraHalDispatcherImpl::GetInstance()->IsStarted()) {
       CameraHalDispatcherImpl::GetInstance()->Start(base::DoNothing(),
                                                     base::DoNothing());
+      // Since the callback is posted to the main task, it might introduce
+      // issues when destroying the main task runner while the callback hasn't
+      // been triggered. Since we don't do sensor related check in video capture
+      // tests, it should be okay to simply disable sensor code path for
+      // testing.
+      // If the sensor initialization becomes a part of the camera
+      // initialization in the future, we should include the check for sensors
+      // in the test codes instead of simply disabling it.
+      CameraHalDispatcherImpl::GetInstance()->DisableSensorForTesting();
     }
 #endif
     video_capture_device_factory_ =
@@ -311,6 +321,7 @@ class VideoCaptureDeviceTest
   }
 
   void TearDown() override {
+    task_environment_.RunUntilIdle();
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     chromeos::PowerManagerClient::Shutdown();
 #endif
@@ -426,10 +437,8 @@ class VideoCaptureDeviceTest
   bool IsCaptureSizeSupported(const VideoCaptureDeviceInfo& device_info,
                               const gfx::Size& size) {
     auto& supported_formats = device_info.supported_formats;
-    const auto it = std::find_if(
-        supported_formats.begin(), supported_formats.end(),
-        [&size](VideoCaptureFormat const& f) { return f.frame_size == size; });
-    if (it == supported_formats.end()) {
+    if (!base::Contains(supported_formats, size,
+                        &VideoCaptureFormat::frame_size)) {
       DVLOG(1) << "Size " << size.ToString() << " is not supported.";
       return false;
     }
@@ -460,7 +469,7 @@ class VideoCaptureDeviceTest
 #if BUILDFLAG(IS_WIN)
   base::win::ScopedCOMInitializer initialize_com_;
 #endif
-  base::test::SingleThreadTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::vector<VideoCaptureDeviceInfo> devices_info_;
   std::unique_ptr<base::RunLoop> run_loop_;
   scoped_refptr<base::TaskRunner> main_thread_task_runner_;

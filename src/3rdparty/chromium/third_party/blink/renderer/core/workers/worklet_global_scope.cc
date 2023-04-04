@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include "services/metrics/public/cpp/mojo_ukm_recorder.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_tree_client.h"
 #include "third_party/blink/renderer/core/workers/worklet_pending_tasks.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 
 namespace blink {
@@ -52,14 +53,15 @@ WorkletGlobalScope::WorkletGlobalScope(
 WorkletGlobalScope::WorkletGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
     WorkerReportingProxy& reporting_proxy,
-    WorkerThread* worker_thread)
+    WorkerThread* worker_thread,
+    bool create_microtask_queue)
     : WorkletGlobalScope(std::move(creation_params),
                          reporting_proxy,
                          worker_thread->GetIsolate(),
                          ThreadType::kOffMainThread,
                          nullptr /* frame */,
                          worker_thread,
-                         false /* create_microtask_queue */) {}
+                         create_microtask_queue) {}
 
 // Partial implementation of the "set up a worklet environment settings object"
 // algorithm:
@@ -104,8 +106,8 @@ WorkletGlobalScope::WorkletGlobalScope(
           creation_params->parent_context_token->GetAs<LocalFrameToken>()),
       parent_cross_origin_isolated_capability_(
           creation_params->parent_cross_origin_isolated_capability),
-      parent_direct_socket_capability_(
-          creation_params->parent_direct_socket_capability) {
+      parent_isolated_application_capability_(
+          creation_params->parent_isolated_application_capability) {
   DCHECK((thread_type_ == ThreadType::kMainThread && frame_) ||
          (thread_type_ == ThreadType::kOffMainThread && worker_thread_));
 
@@ -307,8 +309,8 @@ bool WorkletGlobalScope::CrossOriginIsolatedCapability() const {
   return parent_cross_origin_isolated_capability_;
 }
 
-bool WorkletGlobalScope::DirectSocketCapability() const {
-  return parent_direct_socket_capability_;
+bool WorkletGlobalScope::IsolatedApplicationCapability() const {
+  return parent_isolated_application_capability_;
 }
 
 ukm::UkmRecorder* WorkletGlobalScope::UkmRecorder() {
@@ -321,6 +323,10 @@ ukm::UkmRecorder* WorkletGlobalScope::UkmRecorder() {
   ukm_recorder_ = std::make_unique<ukm::MojoUkmRecorder>(std::move(recorder));
 
   return ukm_recorder_.get();
+}
+
+ukm::SourceId WorkletGlobalScope::UkmSourceID() const {
+  return ukm::kInvalidSourceId;
 }
 
 void WorkletGlobalScope::Trace(Visitor* visitor) const {

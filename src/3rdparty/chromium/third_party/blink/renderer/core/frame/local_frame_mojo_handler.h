@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -191,9 +191,14 @@ class LocalFrameMojoHandler
   void HandleRendererDebugURL(const KURL& url) final;
   void GetCanonicalUrlForSharing(
       GetCanonicalUrlForSharingCallback callback) final;
+  void GetOpenGraphMetadata(GetOpenGraphMetadataCallback callback) final;
 
   void SetNavigationApiHistoryEntriesForRestore(
       mojom::blink::NavigationApiHistoryEntryArraysPtr) final;
+  void NotifyNavigationApiOfDisposedEntries(
+      const WTF::Vector<WTF::String>&) final;
+  void TraverseCancelled(const String& navigation_api_key,
+                         mojom::blink::TraverseCancelledReason reason) final;
 
   // blink::mojom::LocalMainFrame overrides:
   void AnimateDoubleTapZoom(const gfx::Point& point,
@@ -201,6 +206,8 @@ class LocalFrameMojoHandler
   void SetScaleFactor(float scale) override;
   void ClosePage(
       mojom::blink::LocalMainFrame::ClosePageCallback callback) override;
+  void GetFullPageSize(
+      mojom::blink::LocalMainFrame::GetFullPageSizeCallback callback) override;
   void PluginActionAt(const gfx::Point& location,
                       mojom::blink::PluginActionType action) override;
   void SetInitialFocus(bool reverse) override;

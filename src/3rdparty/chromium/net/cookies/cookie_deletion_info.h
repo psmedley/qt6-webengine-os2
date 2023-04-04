@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,9 +141,9 @@ struct NET_EXPORT CookieDeletionInfo {
   // Used only for testing purposes.
   absl::optional<std::string> value_for_testing;
 
-  // Cookie partition keychain. Partitioned cookies are not deleted if their
-  // partition key is not in the keychain. By default, it clears cookies in all
-  // partitions.
+  // Cookie partition collection. Partitioned cookies are not deleted if their
+  // partition key is not in the collection. By default, it clears cookies in
+  // all partitions.
   CookiePartitionKeyCollection cookie_partition_key_collection =
       CookiePartitionKeyCollection::ContainsAll();
 };

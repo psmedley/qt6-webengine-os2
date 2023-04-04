@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/feature_list.h"
 #include "base/time/time.h"
-#include "net/base/features.h"
 #include "net/http/http_response_headers.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "third_party/blink/public/common/features.h"
@@ -30,25 +29,23 @@ bool IsDisabledByFeature(const WebClientHintsType type) {
     case WebClientHintsType::kUAModel:
     case WebClientHintsType::kUAMobile:
     case WebClientHintsType::kUAFullVersion:
+    case WebClientHintsType::kUAFullVersionList:
     case WebClientHintsType::kUABitness:
     case WebClientHintsType::kUAWoW64:
       if (!base::FeatureList::IsEnabled(features::kUserAgentClientHint))
         return true;
       break;
-    case WebClientHintsType::kUAFullVersionList:
-      if (!base::FeatureList::IsEnabled(
-              features::kUserAgentClientHintFullVersionList))
-        return true;
-      break;
     case WebClientHintsType::kPrefersColorScheme:
       if (!base::FeatureList::IsEnabled(
-              features::kPrefersColorSchemeClientHintHeader))
+              features::kPrefersColorSchemeClientHintHeader)) {
         return true;
+      }
       break;
     case WebClientHintsType::kViewportHeight:
       if (!base::FeatureList::IsEnabled(
-              features::kViewportHeightClientHintHeader))
+              features::kViewportHeightClientHintHeader)) {
         return true;
+      }
       break;
     case WebClientHintsType::kDeviceMemory:
       if (!base::FeatureList::IsEnabled(features::kClientHintsDeviceMemory))
@@ -68,8 +65,9 @@ bool IsDisabledByFeature(const WebClientHintsType type) {
       break;
     case WebClientHintsType::kDeviceMemory_DEPRECATED:
       if (!base::FeatureList::IsEnabled(
-              features::kClientHintsDeviceMemory_DEPRECATED))
+              features::kClientHintsDeviceMemory_DEPRECATED)) {
         return true;
+      }
       break;
     case WebClientHintsType::kDpr_DEPRECATED:
       if (!base::FeatureList::IsEnabled(features::kClientHintsDPR_DEPRECATED))
@@ -77,21 +75,25 @@ bool IsDisabledByFeature(const WebClientHintsType type) {
       break;
     case WebClientHintsType::kResourceWidth_DEPRECATED:
       if (!base::FeatureList::IsEnabled(
-              features::kClientHintsResourceWidth_DEPRECATED))
+              features::kClientHintsResourceWidth_DEPRECATED)) {
         return true;
+      }
       break;
     case WebClientHintsType::kViewportWidth_DEPRECATED:
       if (!base::FeatureList::IsEnabled(
-              features::kClientHintsViewportWidth_DEPRECATED))
+              features::kClientHintsViewportWidth_DEPRECATED)) {
         return true;
-      break;
-    case WebClientHintsType::kPartitionedCookies:
-      if (!base::FeatureList::IsEnabled(net::features::kPartitionedCookies))
-        return true;
+      }
       break;
     case WebClientHintsType::kSaveData:
       if (!base::FeatureList::IsEnabled(features::kClientHintsSaveData))
         return true;
+      break;
+    case WebClientHintsType::kPrefersReducedMotion:
+      if (!base::FeatureList::IsEnabled(
+              features::kPrefersReducedMotionClientHintHeader)) {
+        return true;
+      }
       break;
     default:
       break;
@@ -159,10 +161,6 @@ void EnabledClientHints::SetIsEnabled(
   if (enabled && type == WebClientHintsType::kFullUserAgent) {
     enabled = IsOriginTrialEnabled(url, third_party_url, response_headers,
                                    "SendFullUserAgentAfterReduction");
-  }
-  if (enabled && type == WebClientHintsType::kPartitionedCookies) {
-    enabled = IsOriginTrialEnabled(url, third_party_url, response_headers,
-                                   "PartitionedCookies");
   }
   SetIsEnabled(type, enabled);
 }

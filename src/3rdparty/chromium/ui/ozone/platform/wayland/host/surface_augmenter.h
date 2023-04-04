@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,12 +35,15 @@ class SurfaceAugmenter : public wl::GlobalObjectRegistrar<SurfaceAugmenter> {
   ~SurfaceAugmenter();
 
   bool SupportsSubpixelAccuratePosition() const;
+  bool SupportsClipRect() const;
+
+  uint32_t GetSurfaceAugmentorVersion() const;
 
   wl::Object<augmented_surface> CreateAugmentedSurface(wl_surface* surface);
   wl::Object<augmented_sub_surface> CreateAugmentedSubSurface(
       wl_subsurface* subsurface);
 
-  wl::Object<wl_buffer> CreateSolidColorBuffer(SkColor color,
+  wl::Object<wl_buffer> CreateSolidColorBuffer(const SkColor4f& color,
                                                const gfx::Size& size);
 
  private:

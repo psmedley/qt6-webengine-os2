@@ -29,6 +29,7 @@
 
 #include "base/callback.h"
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/dtoa.h"
@@ -71,10 +72,10 @@ String::String(const char* characters, unsigned length)
 
 #if defined(ARCH_CPU_64_BITS)
 String::String(const UChar* characters, size_t length)
-    : String(characters, SafeCast<unsigned>(length)) {}
+    : String(characters, base::checked_cast<unsigned>(length)) {}
 
 String::String(const char* characters, size_t length)
-    : String(characters, SafeCast<unsigned>(length)) {}
+    : String(characters, base::checked_cast<unsigned>(length)) {}
 #endif  // defined(ARCH_CPU_64_BITS)
 
 int CodeUnitCompare(const String& a, const String& b) {
@@ -291,7 +292,7 @@ int String::ToIntStrict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToInt(NumberParsingOptions::kStrict, ok);
+  return impl_->ToInt(NumberParsingOptions::Strict(), ok);
 }
 
 unsigned String::ToUIntStrict(bool* ok) const {
@@ -300,7 +301,7 @@ unsigned String::ToUIntStrict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToUInt(NumberParsingOptions::kStrict, ok);
+  return impl_->ToUInt(NumberParsingOptions::Strict(), ok);
 }
 
 unsigned String::HexToUIntStrict(bool* ok) const {
@@ -327,7 +328,7 @@ int64_t String::ToInt64Strict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToInt64(NumberParsingOptions::kStrict, ok);
+  return impl_->ToInt64(NumberParsingOptions::Strict(), ok);
 }
 
 uint64_t String::ToUInt64Strict(bool* ok) const {
@@ -336,7 +337,7 @@ uint64_t String::ToUInt64Strict(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToUInt64(NumberParsingOptions::kStrict, ok);
+  return impl_->ToUInt64(NumberParsingOptions::Strict(), ok);
 }
 
 int String::ToInt(bool* ok) const {
@@ -345,7 +346,7 @@ int String::ToInt(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToInt(NumberParsingOptions::kLoose, ok);
+  return impl_->ToInt(NumberParsingOptions::Loose(), ok);
 }
 
 unsigned String::ToUInt(bool* ok) const {
@@ -354,7 +355,7 @@ unsigned String::ToUInt(bool* ok) const {
       *ok = false;
     return 0;
   }
-  return impl_->ToUInt(NumberParsingOptions::kLoose, ok);
+  return impl_->ToUInt(NumberParsingOptions::Loose(), ok);
 }
 
 double String::ToDouble(bool* ok) const {
@@ -373,12 +374,6 @@ float String::ToFloat(bool* ok) const {
     return 0.0f;
   }
   return impl_->ToFloat(ok);
-}
-
-String String::IsolatedCopy() const {
-  if (!impl_)
-    return String();
-  return impl_->IsolatedCopy();
 }
 
 void String::Split(const StringView& separator,
@@ -488,7 +483,7 @@ String String::Make16BitFrom8BitSource(const LChar* source, wtf_size_t length) {
 }
 
 String String::FromUTF8(const LChar* string_start, size_t string_length) {
-  wtf_size_t length = SafeCast<wtf_size_t>(string_length);
+  wtf_size_t length = base::checked_cast<wtf_size_t>(string_length);
 
   if (!string_start)
     return String();
@@ -530,7 +525,7 @@ String String::FromUTF8(base::StringPiece s) {
 String String::FromUTF8WithLatin1Fallback(const LChar* string, size_t size) {
   String utf8 = FromUTF8(string, size);
   if (!utf8)
-    return String(string, SafeCast<wtf_size_t>(size));
+    return String(string, base::checked_cast<wtf_size_t>(size));
   return utf8;
 }
 

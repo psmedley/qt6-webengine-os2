@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "components/segmentation_platform/internal/proto/signal.pb.h"
 #include "components/segmentation_platform/internal/proto/signal_storage_config.pb.h"
 #include "components/segmentation_platform/internal/ukm_data_manager.h"
+#include "components/segmentation_platform/public/features.h"
 
 namespace segmentation_platform {
 namespace {
@@ -31,9 +32,9 @@ StorageService::StorageService(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
     base::Clock* clock,
     UkmDataManager* ukm_data_manager,
-    base::flat_set<optimization_guide::proto::OptimizationTarget>
-        all_segment_ids,
-    ModelProviderFactory* model_provider_factory)
+    const base::flat_set<proto::SegmentId>& all_segment_ids,
+    ModelProviderFactory* model_provider_factory,
+    PrefService* profile_prefs)
     : StorageService(
           db_provider->GetDB<proto::SegmentInfo>(
               leveldb_proto::ProtoDbType::SEGMENT_INFO_DATABASE,
@@ -50,7 +51,8 @@ StorageService::StorageService(
           clock,
           ukm_data_manager,
           all_segment_ids,
-          model_provider_factory) {}
+          model_provider_factory,
+          profile_prefs) {}
 
 StorageService::StorageService(
     std::unique_ptr<leveldb_proto::ProtoDatabase<proto::SegmentInfo>>
@@ -60,15 +62,16 @@ StorageService::StorageService(
         signal_storage_config_db,
     base::Clock* clock,
     UkmDataManager* ukm_data_manager,
-    base::flat_set<optimization_guide::proto::OptimizationTarget>
-        all_segment_ids,
-    ModelProviderFactory* model_provider_factory)
-    : default_model_manager_(std::make_unique<DefaultModelManager>(
-          model_provider_factory,
-          std::vector<OptimizationTarget>(all_segment_ids.begin(),
-                                          all_segment_ids.end()))),
-      segment_info_database_(
-          std::make_unique<SegmentInfoDatabase>(std::move(segment_db))),
+    const base::flat_set<proto::SegmentId>& all_segment_ids,
+    ModelProviderFactory* model_provider_factory,
+    PrefService* profile_prefs)
+    : default_model_manager_(
+          std::make_unique<DefaultModelManager>(model_provider_factory,
+                                                all_segment_ids)),
+      segment_info_database_(std::make_unique<SegmentInfoDatabase>(
+          std::move(segment_db),
+          std::make_unique<SegmentInfoCache>(base::FeatureList::IsEnabled(
+              features::kSegmentationPlatformSegmentInfoCache)))),
       signal_database_(
           std::make_unique<SignalDatabaseImpl>(std::move(signal_db), clock)),
       signal_storage_config_(std::make_unique<SignalStorageConfig>(
@@ -81,9 +84,22 @@ StorageService::StorageService(
           segment_info_database_.get(),
           signal_database_.get(),
           signal_storage_config_.get(),
-          default_model_manager_.get())) {
+          default_model_manager_.get(),
+          profile_prefs)) {
   ukm_data_manager_->AddRef();
 }
+
+StorageService::StorageService(
+    std::unique_ptr<SegmentInfoDatabase> segment_info_database,
+    std::unique_ptr<SignalDatabase> signal_database,
+    std::unique_ptr<SignalStorageConfig> signal_storage_config,
+    std::unique_ptr<DefaultModelManager> default_model_manager,
+    UkmDataManager* ukm_data_manager)
+    : default_model_manager_(std::move(default_model_manager)),
+      segment_info_database_(std::move(segment_info_database)),
+      signal_database_(std::move(signal_database)),
+      signal_storage_config_(std::move(signal_storage_config)),
+      ukm_data_manager_(ukm_data_manager) {}
 
 StorageService::~StorageService() {
   ukm_data_manager_->RemoveRef();
@@ -131,13 +147,6 @@ void StorageService::MaybeFinishInitialization() {
       .Run(*segment_info_database_initialized_ &&
            *signal_database_initialized_ &&
            *signal_storage_config_initialized_);
-
-  // Initiate database maintenance tasks with a small delay.
-  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&StorageService::OnExecuteDatabaseMaintenanceTasks,
-                     weak_ptr_factory_.GetWeakPtr()),
-      kDatabaseMaintenanceDelay);
 }
 
 int StorageService::GetServiceStatus() const {
@@ -152,7 +161,19 @@ int StorageService::GetServiceStatus() const {
   return status;
 }
 
-void StorageService::OnExecuteDatabaseMaintenanceTasks() {
+void StorageService::ExecuteDatabaseMaintenanceTasks(bool is_startup) {
+  if (is_startup) {
+    // Initiate database maintenance tasks with a small delay at startup.
+    base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&StorageService::ExecuteDatabaseMaintenanceTasks,
+                       weak_ptr_factory_.GetWeakPtr(), false),
+        kDatabaseMaintenanceDelay);
+    return;
+  }
+
+  // This should be invoked at least after a short amount of time has passed
+  // since initialization happened.
   database_maintenance_->ExecuteMaintenanceTasks();
 }
 

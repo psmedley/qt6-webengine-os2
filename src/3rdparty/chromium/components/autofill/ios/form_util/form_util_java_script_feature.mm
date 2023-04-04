@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #endif
 
 namespace {
-const char kFillScriptName[] = "fill_js";
-const char kFormScriptName[] = "form_js";
+const char kFillScriptName[] = "fill";
+const char kFormScriptName[] = "form";
 }  // namespace
 
 namespace autofill {

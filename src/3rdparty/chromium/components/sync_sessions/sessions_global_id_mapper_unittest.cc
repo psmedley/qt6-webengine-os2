@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,6 @@
 
 namespace sync_sessions {
 namespace {
-
-using testing::_;
 
 const base::Time kTime1 = base::Time::FromInternalValue(110);
 const base::Time kTime2 = base::Time::FromInternalValue(120);

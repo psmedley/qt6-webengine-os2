@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,6 +127,9 @@ class PLATFORM_EXPORT ResponseBodyLoader final
 
   // ResponseBodyLoaderClient implementation.
   void DidReceiveData(base::span<const char> data) override;
+  void DidReceiveDecodedData(
+      const String& data,
+      std::unique_ptr<Resource::DecodedDataInfo> info) override;
   void DidFinishLoadingBody() override;
   void DidFailLoadingBody() override;
   void DidCancelLoadingBody() override;
@@ -138,12 +141,12 @@ class PLATFORM_EXPORT ResponseBodyLoader final
   void OnStateChange() override;
   String DebugName() const override { return "ResponseBodyLoader"; }
 
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   Member<Buffer> body_buffer_;
   Member<BytesConsumer> bytes_consumer_;
   Member<DelegatingBytesConsumer> delegating_bytes_consumer_;
   const Member<ResponseBodyLoaderClient> client_;
   WeakMember<BackForwardCacheLoaderHelper> back_forward_cache_loader_helper_;
-  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   LoaderFreezeMode suspended_state_ = LoaderFreezeMode::kNone;
   bool started_ = false;
   bool aborted_ = false;

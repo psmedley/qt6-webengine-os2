@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,18 +43,12 @@ TestUkmRecorder::TestUkmRecorder() {
 
 TestUkmRecorder::~TestUkmRecorder() {}
 
-bool TestUkmRecorder::ShouldRestrictToWhitelistedSourceIds() const {
-  // In tests, we want to record all source ids (not just those that are
-  // whitelisted).
-  return false;
-}
-
 void TestUkmRecorder::AddEntry(mojom::UkmEntryPtr entry) {
   const bool should_run_callback =
       on_add_entry_ && entry && entry_hash_to_wait_for_ == entry->event_hash;
   UkmRecorderImpl::AddEntry(std::move(entry));
   if (should_run_callback)
-    std::move(on_add_entry_).Run();
+    on_add_entry_.Run();
 }
 
 const UkmSource* TestUkmRecorder::GetSourceForSourceId(
@@ -79,8 +73,9 @@ const ukm::mojom::UkmEntry* TestUkmRecorder::GetDocumentCreatedEntryForSourceId(
   return nullptr;
 }
 
-void TestUkmRecorder::SetOnAddEntryCallback(base::StringPiece entry_name,
-                                            base::OnceClosure on_add_entry) {
+void TestUkmRecorder::SetOnAddEntryCallback(
+    base::StringPiece entry_name,
+    base::RepeatingClosure on_add_entry) {
   on_add_entry_ = std::move(on_add_entry);
   entry_hash_to_wait_for_ = base::HashMetricName(entry_name);
 }

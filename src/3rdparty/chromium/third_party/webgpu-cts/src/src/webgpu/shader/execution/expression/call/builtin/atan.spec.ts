@@ -1,77 +1,70 @@
 export const description = `
-Execution Tests for the 'atan' builtin function
+Execution tests for the 'atan' builtin function
+
+S is AbstractFloat, f32, f16
+T is S or vecN<S>
+@const fn atan(e: T ) -> T
+Returns the arc tangent of e. Component-wise when T is a vector.
+
 `;
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { ulpThreshold } from '../../../../../util/compare.js';
-import { kBit, kValue } from '../../../../../util/constants.js';
-import { f32, f32Bits, TypeF32 } from '../../../../../util/conversion.js';
-import { biasedRange, linearRange } from '../../../../../util/math.js';
-import { Case, Config, run } from '../../expression.js';
+import { TypeF32 } from '../../../../../util/conversion.js';
+import { atanInterval } from '../../../../../util/f32_interval.js';
+import { fullF32Range } from '../../../../../util/math.js';
+import { allInputSources, Case, makeUnaryToF32IntervalCase, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
 
 export const g = makeTestGroup(GPUTest);
 
+g.test('abstract_float')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`abstract float tests`)
+  .params(u =>
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+  )
+  .unimplemented();
+
 g.test('f32')
-  .uniqueId('b13828d6243d13dd')
-  .specURL('https://www.w3.org/TR/2021/WD-WGSL-20210929/#float-builtin-functions')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
   .desc(
     `
-atan:
-T is f32 or vecN<f32> atan(e: T ) -> T Returns the arc tangent of e. Component-wise when T is a vector. (GLSLstd450Atan)
+f32 tests
 
 TODO(#792): Decide what the ground-truth is for these tests. [1]
 `
   )
   .params(u =>
-    u
-      .combine('storageClass', ['uniform', 'storage_r', 'storage_rw'] as const)
-      .combine('vectorize', [undefined, 2, 3, 4] as const)
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    // [1]: Need to decide what the ground-truth is.
     const makeCase = (x: number): Case => {
-      return { input: f32(x), expected: f32(Math.atan(x)) };
+      return makeUnaryToF32IntervalCase(x, atanInterval);
     };
-
-    // Well defined/border cases
     const cases: Array<Case> = [
-      { input: f32Bits(kBit.f32.infinity.negative), expected: f32(-Math.PI / 2) },
-      { input: f32(-Math.sqrt(3)), expected: f32(-Math.PI / 3) },
-      { input: f32(-1), expected: f32(-Math.PI / 4) },
-      { input: f32(-Math.sqrt(3) / 3), expected: f32(-Math.PI / 6) },
-      { input: f32(Math.sqrt(3) / 3), expected: f32(Math.PI / 6) },
-      { input: f32(1), expected: f32(Math.PI / 4) },
-      { input: f32(Math.sqrt(3)), expected: f32(Math.PI / 3) },
-      { input: f32Bits(kBit.f32.infinity.positive), expected: f32(Math.PI / 2) },
+      // Known values
+      Number.NEGATIVE_INFINITY,
+      -Math.sqrt(3),
+      -1,
+      -1 / Math.sqrt(3),
+      0,
+      1,
+      1 / Math.sqrt(3),
+      Math.sqrt(3),
+      Number.POSITIVE_INFINITY,
 
-      // Zero-like cases
-      { input: f32(0), expected: f32(0) },
-      { input: f32Bits(kBit.f32.positive.min), expected: f32(0) },
-      { input: f32Bits(kBit.f32.negative.max), expected: f32(0) },
-      { input: f32Bits(kBit.f32.positive.zero), expected: f32(0) },
-      { input: f32Bits(kBit.f32.negative.zero), expected: f32(0) },
-      { input: f32Bits(kBit.f32.positive.min), expected: f32Bits(kBit.f32.positive.min) },
-      { input: f32Bits(kBit.f32.negative.max), expected: f32Bits(kBit.f32.negative.max) },
-      { input: f32Bits(kBit.f32.positive.min), expected: f32Bits(kBit.f32.negative.max) },
-      { input: f32Bits(kBit.f32.negative.max), expected: f32Bits(kBit.f32.positive.min) },
-      { input: f32Bits(kBit.f32.positive.zero), expected: f32Bits(kBit.f32.positive.zero) },
-      { input: f32Bits(kBit.f32.negative.zero), expected: f32Bits(kBit.f32.negative.zero) },
-      { input: f32Bits(kBit.f32.positive.zero), expected: f32Bits(kBit.f32.negative.zero) },
-      { input: f32Bits(kBit.f32.negative.zero), expected: f32Bits(kBit.f32.positive.zero) },
-      //  -2^32 < x <= -1, biased towards -1
-      ...biasedRange(-1, -(2 ** 32), 1000).map(x => makeCase(x)),
-      // -1 <= x < 0, linearly spread
-      ...linearRange(-1, kValue.f32.negative.max, 100).map(x => makeCase(x)),
-      // 0 < x <= 1, linearly spread
-      ...linearRange(kValue.f32.positive.min, 1, 100).map(x => makeCase(x)),
-      // 1 <= x < 2^32, biased towards 1
-      ...biasedRange(1, 2 ** 32, 1000).map(x => makeCase(x)),
-    ];
+      ...fullF32Range(),
+    ].map(x => makeCase(x));
 
-    const cfg: Config = t.params;
-    cfg.cmpFloats = ulpThreshold(4096);
-    run(t, builtin('atan'), [TypeF32], TypeF32, cfg, cases);
+    await run(t, builtin('atan'), [TypeF32], TypeF32, t.params, cases);
   });
+
+g.test('f16')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`f16 tests`)
+  .params(u =>
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+  )
+  .unimplemented();

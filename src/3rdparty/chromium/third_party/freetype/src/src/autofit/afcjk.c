@@ -650,7 +650,7 @@
       af_cjk_metrics_check_digits( metrics, face );
     }
 
-    FT_Set_Charmap( face, oldmap );
+    face->charmap = oldmap;
     return FT_Err_Ok;
   }
 
@@ -1044,7 +1044,7 @@
     {
       AF_Edge  found = NULL;
       FT_Pos   best  = 0xFFFFU;
-      FT_Int   ee;
+      FT_UInt  ee;
 
 
       /* look for an edge corresponding to the segment */

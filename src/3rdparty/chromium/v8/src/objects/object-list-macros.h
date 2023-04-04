@@ -77,6 +77,7 @@ class ZoneForwardList;
 #define HEAP_OBJECT_ORDINARY_TYPE_LIST_BASE(V)  \
   V(AbstractCode)                               \
   V(AccessCheckNeeded)                          \
+  V(AccessorInfo)                               \
   V(AllocationSite)                             \
   V(ArrayList)                                  \
   V(BigInt)                                     \
@@ -131,6 +132,8 @@ class ZoneForwardList;
   V(JSAsyncFromSyncIterator)                    \
   V(JSAsyncFunctionObject)                      \
   V(JSAsyncGeneratorObject)                     \
+  V(JSAtomicsCondition)                         \
+  V(JSAtomicsMutex)                             \
   V(JSBoundFunction)                            \
   V(JSCollection)                               \
   V(JSCollectionIterator)                       \
@@ -155,15 +158,18 @@ class ZoneForwardList;
   V(JSPrimitiveWrapper)                         \
   V(JSPromise)                                  \
   V(JSProxy)                                    \
+  V(JSRawJson)                                  \
   V(JSReceiver)                                 \
   V(JSRegExp)                                   \
   V(JSRegExpStringIterator)                     \
   V(JSSet)                                      \
   V(JSSetIterator)                              \
   V(JSShadowRealm)                              \
+  V(JSSharedArray)                              \
   V(JSSharedStruct)                             \
   V(JSSpecialObject)                            \
   V(JSStringIterator)                           \
+  V(JSSynchronizationPrimitive)                 \
   V(JSTemporalCalendar)                         \
   V(JSTemporalDuration)                         \
   V(JSTemporalInstant)                          \
@@ -255,12 +261,13 @@ class ZoneForwardList;
   IF_WASM(V, WasmMemoryObject)                  \
   IF_WASM(V, WasmModuleObject)                  \
   IF_WASM(V, WasmObject)                        \
-  IF_WASM(V, WasmOnFulfilledData)               \
+  IF_WASM(V, WasmResumeData)                    \
   IF_WASM(V, WasmStruct)                        \
   IF_WASM(V, WasmTypeInfo)                      \
   IF_WASM(V, WasmTableObject)                   \
   IF_WASM(V, WasmValueObject)                   \
   IF_WASM(V, WasmSuspenderObject)               \
+  IF_WASM(V, WasmContinuationObject)            \
   V(WeakFixedArray)                             \
   V(WeakArrayList)                              \
   V(WeakCell)                                   \
@@ -273,6 +280,7 @@ class ZoneForwardList;
   V(JSCollator)                           \
   V(JSDateTimeFormat)                     \
   V(JSDisplayNames)                       \
+  V(JSDurationFormat)                     \
   V(JSListFormat)                         \
   V(JSLocale)                             \
   V(JSNumberFormat)                       \

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,9 @@
 #include "base/bind.h"
 #include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/syslog_logging.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -160,6 +162,23 @@ void ServiceWorkerTaskQueue::DidStartWorkerForScope(
     return;
   }
 
+  // HACK: The service worker layer might invoke this callback with an ID for a
+  // RenderProcessHost that has already terminated. This isn't the right fix for
+  // this, because it results in the internal state here stalling out - we'll
+  // wait on the browser side to be ready, which will never happen. This should
+  // be cleaned up on the next activation sequence, but this still isn't good.
+  // The proper fix here is that the service worker layer shouldn't be invoking
+  // this callback with stale processes.
+  // https://crbug.com/1335821.
+  if (!content::RenderProcessHost::FromID(process_id)) {
+    // NOTE: The following is an antipattern [1]. We have this as a temporary
+    // hack to avoid crashing for stable users while the bug is addressed.
+    // [1]
+    // https://chromium.googlesource.com/chromium/src/+/HEAD/styleguide/c++/c++-dos-and-donts.md#guarding-with-dcheck_is_on
+    NOTREACHED();
+    return;
+  }
+
   UMA_HISTOGRAM_BOOLEAN("Extensions.ServiceWorkerBackground.StartWorkerStatus",
                         true);
   UMA_HISTOGRAM_TIMES("Extensions.ServiceWorkerBackground.StartWorkerTime",
@@ -222,21 +241,27 @@ void ServiceWorkerTaskQueue::DidInitializeServiceWorkerContext(
     int64_t service_worker_version_id,
     int thread_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  util::InitializeFileSchemeAccessForExtension(render_process_id, extension_id,
-                                               browser_context_);
-  ProcessManager::Get(browser_context_)
-      ->RegisterServiceWorker({extension_id, render_process_id,
-                               service_worker_version_id, thread_id});
 
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context_);
   DCHECK(registry);
   const Extension* extension =
       registry->enabled_extensions().GetByID(extension_id);
-  DCHECK(extension);
+  // The caller should have validated that the extension is still enabled.
+  CHECK(extension);
 
+  content::RenderProcessHost* process_host =
+      content::RenderProcessHost::FromID(render_process_id);
+  // The caller should have validated that the RenderProcessHost is still
+  // active.
+  CHECK(process_host);
+
+  util::InitializeFileSchemeAccessForExtension(render_process_id, extension_id,
+                                               browser_context_);
+  ProcessManager::Get(browser_context_)
+      ->RegisterServiceWorker({extension_id, render_process_id,
+                               service_worker_version_id, thread_id});
   RendererStartupHelperFactory::GetForBrowserContext(browser_context_)
-      ->ActivateExtensionInProcess(
-          *extension, content::RenderProcessHost::FromID(render_process_id));
+      ->ActivateExtensionInProcess(*extension, process_host);
 }
 
 void ServiceWorkerTaskQueue::DidStartServiceWorkerContext(
@@ -509,8 +534,11 @@ void ServiceWorkerTaskQueue::DidRegisterServiceWorker(
   }
 
   if (!success) {
+    std::string msg = base::StringPrintf(
+        "Service worker registration failed. Status code: %d",
+        static_cast<int>(status_code));
     auto error = std::make_unique<ManifestError>(
-        extension_id, u"Service worker registration failed",
+        extension_id, base::UTF8ToUTF16(msg),
         base::UTF8ToUTF16(manifest_keys::kBackground),
         base::UTF8ToUTF16(
             BackgroundInfo::GetBackgroundServiceWorkerScript(extension)));

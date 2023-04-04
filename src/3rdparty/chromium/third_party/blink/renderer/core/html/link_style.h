@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ class LinkStyle final : public LinkResource, ResourceClient {
   ~LinkStyle() override;
 
   LinkResourceType GetType() const override { return kStyle; }
-  void Process() override;
+  void Process(LinkLoadParameters::Reason reason) override;
   void OwnerRemoved() override;
   bool HasLoaded() const override { return loaded_sheet_; }
   void Trace(Visitor*) const override;
@@ -55,6 +55,8 @@ class LinkStyle final : public LinkResource, ResourceClient {
   bool IsExplicitlyEnabled() const { return explicitly_enabled_; }
 
   CSSStyleSheet* Sheet() const { return sheet_.Get(); }
+
+  void UnblockRenderingForPendingSheet();
 
  private:
   // From ResourceClient

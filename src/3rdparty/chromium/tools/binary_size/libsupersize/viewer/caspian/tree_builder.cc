@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,10 @@ namespace {
 /** Name used by a directory created to hold symbols with no name. */
 constexpr const char kComponentSep = '>';
 constexpr const char kPathSep = '/';
-constexpr const char* kNoName = "(No path)";
+constexpr const char kNoPath[] = "(No path)";
 }  // namespace
 
-TreeBuilder::TreeBuilder(SizeInfo* size_info) {
+TreeBuilder::TreeBuilder(SizeInfo* size_info) : diff_mode_(false) {
   symbols_.reserve(size_info->raw_symbols.size());
   for (const Symbol& sym : size_info->raw_symbols) {
     symbols_.push_back(&sym);
@@ -26,7 +26,7 @@ TreeBuilder::TreeBuilder(SizeInfo* size_info) {
   size_info_ = size_info;
 }
 
-TreeBuilder::TreeBuilder(DeltaSizeInfo* size_info) {
+TreeBuilder::TreeBuilder(DeltaSizeInfo* size_info) : diff_mode_(true) {
   symbols_.reserve(size_info->delta_symbols.size());
   for (const DeltaSymbol& sym : size_info->delta_symbols) {
     symbols_.push_back(&sym);
@@ -53,9 +53,10 @@ void TreeBuilder::Build(std::unique_ptr<BaseLens> lens,
   std::unordered_map<GroupedPath, std::vector<const BaseSymbol*>>
       symbols_by_grouped_path;
   for (const BaseSymbol* sym : symbols_) {
-    GroupedPath key =
-        GroupedPath{lens_->ParentName(*sym),
-                    sym->SourcePath() ? sym->SourcePath() : sym->ObjectPath()};
+    const char* path = *sym->SourcePath()   ? sym->SourcePath()
+                       : *sym->ObjectPath() ? sym->ObjectPath()
+                                            : kNoPath;
+    GroupedPath key = GroupedPath{lens_->ParentName(*sym), path};
     if (ShouldIncludeSymbol(key, *sym)) {
       symbols_by_grouped_path[key].push_back(sym);
     }
@@ -71,8 +72,7 @@ bool CompareAbsSize(const TreeNode* const& l, const TreeNode* const& r) {
   // Sort nodes with same size in alphabetically ascending order.
   float l_size = abs(l->size);
   float r_size = abs(r->size);
-  return (l_size != r_size) ? abs(l->size) > abs(r->size)
-                            : l->id_path < r->id_path;
+  return (l_size != r_size) ? l_size > r_size : l->id_path < r->id_path;
 }
 
 bool CompareCount(const TreeNode* const& l, const TreeNode* const& r) {
@@ -129,9 +129,14 @@ Json::Value TreeBuilder::Open(const char* path) {
               << std::endl;
     exit(1);
   }
+
+  JsonWriteOptions opts = {
+      .is_sparse = size_info_->IsSparse(),
+      .diff_mode = diff_mode_,
+      .method_count_mode = method_count_mode_,
+  };
   Json::Value v;
-  node->WriteIntoJson(1, node_sort_func, size_info_->IsSparse(),
-                      method_count_mode_, &v);
+  node->WriteIntoJson(opts, node_sort_func, 1, &v);
   return v;
 }
 
@@ -162,8 +167,13 @@ void TreeBuilder::AddFileEntry(GroupedPath grouped_path,
     symbol_node->id_path =
         GroupedPath{"", sym->IsDex() ? sym->TemplateName() : sym->FullName()};
     symbol_node->size = sym->Pss();
+    symbol_node->padding = sym->PaddingPss();
+    symbol_node->address = sym->Address();
     symbol_node->node_stats = NodeStats(*sym);
     symbol_node->symbol = sym;
+    if (diff_mode_) {
+      symbol_node->before_size = sym->BeforePss();
+    }
     symbol_nodes.push_back(symbol_node);
   }
 
@@ -175,12 +185,7 @@ void TreeBuilder::AddFileEntry(GroupedPath grouped_path,
   if (file_node == nullptr || grouped_path.path.empty()) {
     file_node = new TreeNode();
     file_node->artifact_type = ArtifactType::kFile;
-
     file_node->id_path = grouped_path;
-    if (file_node->id_path.path.empty()) {
-      file_node->id_path.path = kNoName;
-    }
-
     file_node->short_name_index =
         file_node->id_path.size() - file_node->id_path.ShortName(sep_).size();
     _parents[file_node->id_path] = file_node;
@@ -232,6 +237,10 @@ void TreeBuilder::AttachToParent(TreeNode* child, TreeNode* parent) {
   TreeNode* node = child;
   while (node->parent) {
     node->parent->size += child->size;
+    if (diff_mode_) {
+      node->parent->before_size += child->before_size;
+    }
+    node->parent->padding += child->padding;
     node->parent->node_stats += child->node_stats;
     node = node->parent;
   }
@@ -242,7 +251,7 @@ ArtifactType TreeBuilder::ArtifactTypeFromChild(GroupedPath child_path) const {
   // '/' separators for the file tree - e.g. Blink>third_party/blink/common...
   // We know that Blink is a component because its children have the form
   // Blink>third_party rather than Blink/third_party.
-  return child_path.IsTopLevelPath() ? ArtifactType::kComponent
+  return child_path.IsTopLevelPath() ? ArtifactType::kGroup
                                      : ArtifactType::kDirectory;
 }
 

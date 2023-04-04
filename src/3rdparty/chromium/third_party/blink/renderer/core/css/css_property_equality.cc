@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -173,6 +173,10 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
                                     b.GetFontDescription().VariationSettings());
     case CSSPropertyID::kFontWeight:
       return a.GetFontWeight() == b.GetFontWeight();
+    case CSSPropertyID::kGridTemplateColumns:
+      return a.GridTemplateColumns() == b.GridTemplateColumns();
+    case CSSPropertyID::kGridTemplateRows:
+      return a.GridTemplateRows() == b.GridTemplateRows();
     case CSSPropertyID::kHeight:
       return a.Height() == b.Height();
     case CSSPropertyID::kLeft:
@@ -203,12 +207,10 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return a.MinHeight() == b.MinHeight();
     case CSSPropertyID::kMinWidth:
       return a.MinWidth() == b.MinWidth();
-    case CSSPropertyID::kObjectOverflow:
-      return a.GetObjectOverflow() == b.GetObjectOverflow();
     case CSSPropertyID::kObjectPosition:
       return a.ObjectPosition() == b.ObjectPosition();
     case CSSPropertyID::kObjectViewBox:
-      return a.ObjectViewBox() == b.ObjectViewBox();
+      return base::ValuesEquivalent(a.ObjectViewBox(), b.ObjectViewBox());
     case CSSPropertyID::kOffsetAnchor:
       return a.OffsetAnchor() == b.OffsetAnchor();
     case CSSPropertyID::kOffsetDistance:

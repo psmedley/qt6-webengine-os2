@@ -167,6 +167,13 @@ config("default") {
     ]
   }
 
+  if (is_clang && is_win) {
+    # clang-cl from version 16 does not like out-of-line definition of static
+    # constexpr, even in C++14 mode. Disable the deprecated warnings to work
+    # around the problem.
+    cflags += [ "-Wno-deprecated" ]
+  }
+
   if (is_win) {
     cflags += [
       "/bigobj",  # Some of our files are bigger than the regular limits.
@@ -247,7 +254,9 @@ config("default") {
       # When updating these flags, the CheckCpuOptimizations() in utils.cc must
       # be updated accordingly.
       cflags += [
-        "-mavx",
+        "-mbmi",
+        "-mbmi2",
+        "-mavx2",
         "-mpopcnt",
         "-msse4.2",
       ]
@@ -255,6 +264,12 @@ config("default") {
   }
 
   if (is_linux) {
+    # Enable LFS (large file support) for stat() and other syscalls.
+    cflags += [
+      "-D_FILE_OFFSET_BITS=64",
+      "-D_LARGEFILE_SOURCE",
+      "-D_LARGEFILE64_SOURCE",
+    ]
     libs += [
       "pthread",
       "rt",
@@ -285,21 +300,28 @@ config("default") {
     asmflags += [ "--target=$android_abi_target" ]
     cflags += [
       "--sysroot=$android_compile_sysroot",
-      "-isystem$android_compile_sysroot/$android_compile_sysroot_subdir",
-      "-isystem$android_compile_sysroot",
       "-DANDROID",
       "-D__ANDROID_API__=${android_api_level}",
       "--target=$android_abi_target",
     ]
     cflags_cc += [
-      "-I$android_ndk_root/sources/cxx-stl/llvm-libc++/include",
-      "-I$android_ndk_root/sources/android/support/include",
-      "-I$android_ndk_root/sources/cxx-stl/llvm-libc++abi/include",
-
-      # This is needed for NDK libc++. Using -isystem instead of -I above
-      # results in build breakage related to cmath.h.
-      "-Wno-format-nonliteral",
+      "-isystem$android_ndk_root/sources/cxx-stl/llvm-libc++/include",
+      "-isystem$android_ndk_root/sources/android/support/include",
+      "-isystem$android_ndk_root/sources/cxx-stl/llvm-libc++abi/include",
     ]
+
+    # Keep these include paths *after* the above to prevent the wrong include
+    # being used for some headers (e.g. math.h).
+    # We need to add to each language (cflags_c, cflags_cc etc.) separately as
+    # we added to cflags directly, these inludes would end up before the
+    # languge and thus the above includes.
+    sysroot_cflags = [
+      "-isystem$android_compile_sysroot/$android_compile_sysroot_subdir",
+      "-isystem$android_compile_sysroot",
+    ]
+    cflags_c += sysroot_cflags
+    cflags_cc += sysroot_cflags
+
     ldflags += [
       "-Wl,-z,nocopyreloc",
       "-gcc-toolchain",

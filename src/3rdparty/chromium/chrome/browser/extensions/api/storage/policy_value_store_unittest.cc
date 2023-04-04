@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ class MutablePolicyValueStore : public PolicyValueStore {
   }
 
   WriteResult Set(WriteOptions options,
-                  const base::DictionaryValue& values) override {
+                  const base::Value::Dict& values) override {
     return delegate()->Set(options, values);
   }
 
@@ -166,10 +166,11 @@ TEST_F(PolicyValueStoreTest, DontProvideRecommendedPolicies) {
 
   ValueStore::ReadResult result = store_->Get();
   ASSERT_TRUE(result.status().ok());
-  EXPECT_EQ(1u, result.settings().DictSize());
-  base::Value* value = NULL;
-  EXPECT_FALSE(result.settings().Get("may", &value));
-  EXPECT_TRUE(result.settings().Get("must", &value));
+  EXPECT_EQ(1u, result.settings().size());
+  base::Value* value = result.settings().Find("may");
+  EXPECT_FALSE(value);
+  value = result.settings().Find("must");
+  ASSERT_TRUE(value);
   EXPECT_EQ(expected, *value);
 }
 
@@ -179,8 +180,8 @@ TEST_F(PolicyValueStoreTest, ReadOnly) {
   base::Value string_value("value");
   EXPECT_FALSE(store_->Set(options, "key", string_value).status().ok());
 
-  base::DictionaryValue dict;
-  dict.SetStringKey("key", "value");
+  base::Value::Dict dict;
+  dict.Set("key", "value");
   EXPECT_FALSE(store_->Set(options, dict).status().ok());
 
   EXPECT_FALSE(store_->Remove("key").status().ok());

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,6 +110,12 @@ PageOutputQualityAttribute::~PageOutputQualityAttribute() = default;
 bool PageOutputQualityAttribute::operator==(
     const PageOutputQualityAttribute& other) const {
   return display_name == other.display_name && name == other.name;
+}
+
+bool PageOutputQualityAttribute::operator<(
+    const ::printing::PageOutputQualityAttribute& other) const {
+  return std::tie(name, display_name) <
+         std::tie(other.name, other.display_name);
 }
 
 PageOutputQuality::PageOutputQuality() = default;

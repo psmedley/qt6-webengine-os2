@@ -8,18 +8,13 @@
 #include "tools/skqp/src/skqp.h"
 
 #include "gm/gm.h"
-#include "include/core/SkBitmap.h"
-#include "include/core/SkFontStyle.h"
 #include "include/core/SkGraphics.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkSurface.h"
-#include "include/encode/SkPngEncoder.h"
 #include "include/gpu/GrContextOptions.h"
 #include "include/gpu/GrDirectContext.h"
-#include "include/private/SkImageInfoPriv.h"
 #include "src/core/SkFontMgrPriv.h"
 #include "src/core/SkOSFile.h"
-#include "src/core/SkStreamPriv.h"
 #include "src/utils/SkOSPath.h"
 #include "tests/Test.h"
 #include "tests/TestHarness.h"
@@ -32,13 +27,14 @@
 #include "tools/gpu/vk/VkTestContext.h"
 #endif
 
-#include <limits.h>
+#ifdef SK_BUILD_FOR_ANDROID
+#include <sys/system_properties.h>
+#endif
+
 #include <algorithm>
-#include <cinttypes>
 #include <regex>
 
 static constexpr char kUnitTestReportPath[] = "unit_tests.txt";
-static constexpr char kUnitTestsPath[]   = "skqp/unittests.txt";
 
 // Kind of like Python's readlines(), but without any allocation.
 // Calls `lineFn` on each line.
@@ -56,71 +52,47 @@ static void read_lines(const void* data,
     }
 }
 
-namespace {
-
-// Parses the contents of the `skqp/unittests.txt` file.
-// Each line in the exclusion list is a regular expression that matches against test names.
-// Matches indicate tests that should be excluded. Lines may start with # to indicate a comment.
-class ExclusionList {
-public:
-    ExclusionList() {}
-
-    void initialize(sk_sp<SkData> dat) {
-        fPatterns = {};
-        read_lines(dat->data(), dat->size(), [this](std::string_view line) {
-            if (!line.empty() && line.back() == '\n') {
-                // Strip line endings.
-                line.remove_suffix(1);
-            }
-            if (!line.empty() && line.front() != '#') {
-                // Only add non-empty strings, and ignore comments.
-                fPatterns.emplace_back(std::string(line));
-            }
-        });
-    }
-
-    bool isExcluded(const std::string& name) const {
-        for (const auto& pat : fPatterns) {
-            if (std::regex_match(name, pat)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-private:
-    std::vector<std::regex> fPatterns;
-};
-}
-
 // Returns a list of every unit test to be run.
-static std::vector<SkQP::UnitTest> get_unit_tests(const ExclusionList& exclusionList) {
+static std::vector<SkQP::UnitTest> get_unit_tests(int enforcedAndroidAPILevel) {
     std::vector<SkQP::UnitTest> unitTests;
     for (const skiatest::Test& test : skiatest::TestRegistry::Range()) {
-        if (!test.fNeedsGpu) {
-            continue;
+        const auto ctsMode = test.fCTSEnforcement.eval(enforcedAndroidAPILevel);
+        if (ctsMode != CtsEnforcement::RunMode::kSkip) {
+            SkASSERTF(test.fTestType != skiatest::TestType::kCPU,
+                      "Non-GPU test was included in SkQP: %s\n", test.fName);
+            unitTests.push_back(&test);
         }
-        if (exclusionList.isExcluded(test.fName)) {
-            continue;
-        }
-        unitTests.push_back(&test);
     }
     auto lt = [](SkQP::UnitTest u, SkQP::UnitTest v) { return strcmp(u->fName, v->fName) < 0; };
     std::sort(unitTests.begin(), unitTests.end(), lt);
     return unitTests;
 }
 
+/**
+ * SkSL error tests are used by CTS to verify that Android's RuntimeShader API fails when certain
+ * shader programs are compiled.  Unlike unit tests these error tests are defined in resource files
+ * not source code.  As such, we are unable to mark each test with a CtsEnforcement value.  This
+ * list of exclusion rules excludes tests based on their file name so that we can have some form of
+ * control for which Android version an SkSL error test is expected to run.
+ */
+static const std::pair<std::regex, CtsEnforcement> sExclusionRulesForSkSLTests[] = {
+        // disable all ES3 tests until AGSL supports it.
+        {std::regex(".*ES3.*"), CtsEnforcement::kNever}};
+
 // Returns a list of every SkSL error test to be run.
 static std::vector<SkQP::SkSLErrorTest> get_sksl_error_tests(SkQPAssetManager* assetManager,
-                                                             const ExclusionList& exclusionList) {
+                                                             int enforcedAndroidAPILevel) {
     std::vector<SkQP::SkSLErrorTest> skslErrorTests;
-
     auto iterateFn = [&](const char* directory, const char* extension) {
         std::vector<std::string> paths = assetManager->iterateDir(directory, extension);
         for (const std::string& path : paths) {
             SkString name = SkOSPath::Basename(path.c_str());
-            if (exclusionList.isExcluded(name.c_str())) {
-                continue;
+            for (auto& exclusionEntry : sExclusionRulesForSkSLTests) {
+                if (std::regex_match(name.c_str(), exclusionEntry.first) &&
+                    exclusionEntry.second.eval(enforcedAndroidAPILevel) ==
+                            CtsEnforcement::RunMode::kSkip) {
+                    continue;
+                }
             }
             sk_sp<SkData> shaderText = GetResourceAsData(path.c_str());
             if (!shaderText) {
@@ -144,81 +116,6 @@ static std::vector<SkQP::SkSLErrorTest> get_sksl_error_tests(SkQPAssetManager* a
     return skslErrorTests;
 }
 
-static std::unique_ptr<sk_gpu_test::TestContext> make_test_context(SkQP::SkiaBackend backend) {
-    using U = std::unique_ptr<sk_gpu_test::TestContext>;
-    switch (backend) {
-// TODO(halcanary): Fuchsia will have SK_SUPPORT_GPU and SK_VULKAN, but *not* SK_GL.
-#ifdef SK_GL
-        case SkQP::SkiaBackend::kGL:
-            return U(sk_gpu_test::CreatePlatformGLTestContext(kGL_GrGLStandard, nullptr));
-        case SkQP::SkiaBackend::kGLES:
-            return U(sk_gpu_test::CreatePlatformGLTestContext(kGLES_GrGLStandard, nullptr));
-#endif
-#ifdef SK_VULKAN
-        case SkQP::SkiaBackend::kVulkan:
-            return U(sk_gpu_test::CreatePlatformVkTestContext(nullptr));
-#endif
-        default:
-            return nullptr;
-    }
-}
-
-static GrContextOptions context_options(skiagm::GM* gm = nullptr) {
-    GrContextOptions grContextOptions;
-    grContextOptions.fAllowPathMaskCaching = true;
-    grContextOptions.fDisableDriverCorrectnessWorkarounds = true;
-    if (gm) {
-        gm->modifyGrContextOptions(&grContextOptions);
-    }
-    return grContextOptions;
-}
-
-static std::vector<SkQP::SkiaBackend> get_backends() {
-    std::vector<SkQP::SkiaBackend> result;
-    SkQP::SkiaBackend backends[] = {
-        #ifdef SK_GL
-        #ifndef SK_BUILD_FOR_ANDROID
-        SkQP::SkiaBackend::kGL,  // Used for testing on desktop machines.
-        #endif
-        SkQP::SkiaBackend::kGLES,
-        #endif  // SK_GL
-        #ifdef SK_VULKAN
-        SkQP::SkiaBackend::kVulkan,
-        #endif
-    };
-    for (SkQP::SkiaBackend backend : backends) {
-        std::unique_ptr<sk_gpu_test::TestContext> testCtx = make_test_context(backend);
-        if (testCtx) {
-            testCtx->makeCurrent();
-            if (nullptr != testCtx->makeContext(context_options())) {
-                result.push_back(backend);
-            }
-        }
-    }
-    SkASSERT_RELEASE(result.size() > 0);
-    return result;
-}
-
-static void print_backend_info(const char* dstPath,
-                               const std::vector<SkQP::SkiaBackend>& backends) {
-#ifdef SK_ENABLE_DUMP_GPU
-    SkFILEWStream out(dstPath);
-    out.writeText("[\n");
-    for (SkQP::SkiaBackend backend : backends) {
-        if (std::unique_ptr<sk_gpu_test::TestContext> testCtx = make_test_context(backend)) {
-            testCtx->makeCurrent();
-            if (sk_sp<GrDirectContext> ctx = testCtx->makeContext(context_options())) {
-                SkString info = ctx->dump();
-                // remove null
-                out.write(info.c_str(), info.size());
-                out.writeText(",\n");
-            }
-        }
-    }
-    out.writeText("]\n");
-#endif
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 TestHarness CurrentTestHarness() {
@@ -240,18 +137,24 @@ void SkQP::init(SkQPAssetManager* assetManager, const char* reportDirectory) {
     SkGraphics::Init();
     gSkFontMgr_DefaultFactory = &ToolUtils::MakePortableFontMgr;
 
-    // Load the exclusion list `skqp/unittests.txt`, if it exists.
-    // The list is checked in at platform_tools/android/apps/skqp/src/main/assets/skqp/unittests.txt
-    ExclusionList exclusionList;
-    if (sk_sp<SkData> dat = assetManager->open(kUnitTestsPath)) {
-        exclusionList.initialize(dat);
+#ifdef SK_BUILD_FOR_ANDROID
+    // ro.vendor.api_level contains the minAPI level based on the order defined in
+    // docs.partner.android.com/gms/building/integrating/extending-os-upgrade-support-windows
+    //  1. board's current api level (for boards that have been upgraded by the SoC vendor)
+    //  2. board's first api level (for devices that initially shipped with an older version)
+    //  3. product's first api level
+    //  4. product's current api level
+    char minAPIVersionStr[PROP_VALUE_MAX];
+    int strLength = __system_property_get("ro.vendor.api_level", minAPIVersionStr);
+    if (strLength != 0) {
+        fEnforcedAndroidAPILevel = atoi(minAPIVersionStr);
     }
+#endif
 
-    fUnitTests = get_unit_tests(exclusionList);
-    fSkSLErrorTests = get_sksl_error_tests(assetManager, exclusionList);
-    fSupportedBackends = get_backends();
+    fUnitTests = get_unit_tests(fEnforcedAndroidAPILevel);
+    fSkSLErrorTests = get_sksl_error_tests(assetManager, fEnforcedAndroidAPILevel);
 
-    print_backend_info((fReportDirectory + "/grdump.txt").c_str(), fSupportedBackends);
+    printBackendInfo((fReportDirectory + "/grdump.txt").c_str());
 }
 
 std::vector<std::string> SkQP::executeTest(SkQP::UnitTest test) {
@@ -263,11 +166,14 @@ std::vector<std::string> SkQP::executeTest(SkQP::UnitTest test) {
         }
     } r;
     GrContextOptions options;
-    options.fDisableDriverCorrectnessWorkarounds = true;
+    if (test->fCTSEnforcement.eval(fEnforcedAndroidAPILevel) ==
+        CtsEnforcement::RunMode::kRunStrict) {
+        options.fDisableDriverCorrectnessWorkarounds = true;
+    }
     if (test->fContextOptionsProc) {
         test->fContextOptionsProc(&options);
     }
-    test->fProc(&r, options);
+    test->ganesh(&r, options);
     fTestResults.push_back(TestResult{test->fName, r.fErrors});
     return r.fErrors;
 }

@@ -221,18 +221,6 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(
     const RegistrationOptions* options) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-
-  // TODO(crbug.com/824647): Remove this check after module loading for
-  // ServiceWorker is enabled by default.
-  if (options->type() == script_type_names::kModule &&
-      !RuntimeEnabledFeatures::ModuleServiceWorkerEnabled()) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
-        DOMExceptionCode::kNotSupportedError,
-        "type 'module' in RegistrationOptions is not implemented yet."
-        "See https://crbug.com/824647 for details."));
-    return promise;
-  }
-
   auto callbacks = std::make_unique<CallbackPromiseAdapter<
       ServiceWorkerRegistration, ServiceWorkerErrorForUpdate>>(resolver);
 
@@ -359,7 +347,7 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(
   if (GetExecutionContext()->IsWindow()) {
     Document* document = To<LocalDOMWindow>(GetExecutionContext())->document();
     if (document->IsPrerendering()) {
-      document->AddPostPrerenderingActivationStep(WTF::Bind(
+      document->AddPostPrerenderingActivationStep(WTF::BindOnce(
           &ServiceWorkerContainer::RegisterServiceWorkerInternal,
           WrapWeakPersistent(this), scope_url, script_url,
           std::move(script_type), update_via_cache,
@@ -507,8 +495,8 @@ ScriptPromise ServiceWorkerContainer::ready(ScriptState* caller_state,
     ready_ = CreateReadyProperty();
     if (provider_) {
       provider_->GetRegistrationForReady(
-          WTF::Bind(&ServiceWorkerContainer::OnGetRegistrationForReady,
-                    WrapPersistent(this)));
+          WTF::BindOnce(&ServiceWorkerContainer::OnGetRegistrationForReady,
+                        WrapPersistent(this)));
     }
   }
 
@@ -573,7 +561,7 @@ void ServiceWorkerContainer::ReceiveMessage(WebServiceWorkerObjectInfo source,
 void ServiceWorkerContainer::CountFeature(mojom::WebFeature feature) {
   if (!GetExecutionContext())
     return;
-  if (Deprecation::DeprecationMessage(feature).IsEmpty())
+  if (!Deprecation::IsDeprecated(feature))
     UseCounter::Count(GetExecutionContext(), feature);
   else
     Deprecation::CountDeprecation(GetExecutionContext(), feature);
@@ -648,7 +636,7 @@ ServiceWorkerContainer::CreateReadyProperty() {
 void ServiceWorkerContainer::EnableClientMessageQueue() {
   dom_content_loaded_observer_ = nullptr;
   if (is_client_message_queue_enabled_) {
-    DCHECK(queued_messages_.IsEmpty());
+    DCHECK(queued_messages_.empty());
     return;
   }
   is_client_message_queue_enabled_ = true;
@@ -685,9 +673,9 @@ void ServiceWorkerContainer::DispatchMessageEvent(
     }
   }
   if (!event) {
-    if (!msg.locked_agent_cluster_id ||
+    if (!msg.locked_to_sender_agent_cluster ||
         GetExecutionContext()->IsSameAgentCluster(
-            *msg.locked_agent_cluster_id)) {
+            msg.sender_agent_cluster_id)) {
       event = MessageEvent::Create(
           ports, std::move(msg.message),
           GetExecutionContext()->GetSecurityOrigin()->ToString(),

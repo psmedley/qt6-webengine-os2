@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/base_export.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/trace_event/trace_arguments.h"
 
@@ -100,7 +101,7 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
    private:
     explicit ArrayScope(TracedValue* value);
 
-    TracedValue* value_;
+    raw_ptr<TracedValue> value_;
 
     friend class TracedValue;
   };
@@ -143,7 +144,7 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
    private:
     explicit DictionaryScope(TracedValue* value);
 
-    TracedValue* value_;
+    raw_ptr<TracedValue> value_;
 
     friend class TracedValue;
   };

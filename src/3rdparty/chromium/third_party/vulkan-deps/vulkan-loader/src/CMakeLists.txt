@@ -33,7 +33,9 @@ if (UPDATE_DEPS)
     if (CMAKE_GENERATOR_PLATFORM)
         set(_target_arch ${CMAKE_GENERATOR_PLATFORM})
     else()
-        message(WARNING "CMAKE_GENERATOR_PLATFORM not set. Using x64 as target architecture.")
+        if (MSVC_IDE)
+            message(WARNING "CMAKE_GENERATOR_PLATFORM not set. Using x64 as target architecture.")
+        endif()
         set(_target_arch x64)
     endif()
 
@@ -148,15 +150,17 @@ if(APPLE)
     set(CMAKE_MACOSX_RPATH 1)
 endif()
 
+set(GIT_BRANCH_NAME "--unknown--")
+set(GIT_TAG_INFO "--unknown--")
 find_package (Git)
-if (GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git/HEAD")
+if (GIT_FOUND AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/.git/HEAD")
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --tags --always
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_TAG_INFO)
     string(REGEX REPLACE "\n$" "" GIT_TAG_INFO "${GIT_TAG_INFO}")
 
-    file(READ ".git/HEAD" GIT_HEAD_REF_INFO)
+    file(READ "${CMAKE_CURRENT_LIST_DIR}/.git/HEAD" GIT_HEAD_REF_INFO)
     if (GIT_HEAD_REF_INFO)
         string(REGEX MATCH "ref: refs/heads/(.*)" _ ${GIT_HEAD_REF_INFO})
         if (CMAKE_MATCH_1)
@@ -165,12 +169,7 @@ if (GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git/HEAD")
             set(GIT_BRANCH_NAME ${GIT_HEAD_REF_INFO})
         endif()
         string(REGEX REPLACE "\n$" "" GIT_BRANCH_NAME "${GIT_BRANCH_NAME}")
-    else()
-        set(GIT_BRANCH_NAME "--unknown--")
     endif()
-else()
-    set(GIT_BRANCH_NAME "--unknown--")
-    set(GIT_TAG_INFO "--unknown--")
 endif()
 
 if(WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -211,15 +210,11 @@ if(UNIX AND NOT APPLE) # i.e.: Linux
 
     if(BUILD_WSI_XCB_SUPPORT)
         find_package(XCB REQUIRED)
+        include_directories(SYSTEM ${XCB_INCLUDE_DIR})
     endif()
 
     if(BUILD_WSI_XLIB_SUPPORT)
         find_package(X11 REQUIRED)
-    endif()
-
-    if(BUILD_WSI_WAYLAND_SUPPORT)
-        find_package(Wayland REQUIRED)
-        include_directories(SYSTEM ${WAYLAND_CLIENT_INCLUDE_DIR})
     endif()
 
     if(BUILD_WSI_DIRECTFB_SUPPORT)
@@ -341,7 +336,7 @@ endif()
 
 # DEBUG enables runtime loader ICD verification
 # Add git branch and tag info in debug mode
-target_compile_definitions(loader_common_options INTERFACE $<$<CONFIG:DEBUG>:DEBUG;GIT_BRANCH_NAME=${GIT_BRANCH_NAME};GIT_TAG_INFO=${GIT_TAG_INFO}>)
+target_compile_definitions(loader_common_options INTERFACE $<$<CONFIG:DEBUG>:DEBUG;GIT_BRANCH_NAME="${GIT_BRANCH_NAME}";GIT_TAG_INFO="${GIT_TAG_INFO}">)
 
 # Check for the existance of the secure_getenv or __secure_getenv commands
 include(CheckFunctionExists)

@@ -235,6 +235,14 @@ float FontDescription::EffectiveFontSize() const {
          FontCacheKey::PrecisionMultiplier();
 }
 
+float FontDescription::AdjustedSpecifiedSize() const {
+  if (HasSizeAdjust() || fields_.has_size_adjust_descriptor_) {
+    return SpecifiedSize() * (AdjustedSize() / ComputedSize());
+  } else {
+    return SpecifiedSize();
+  }
+}
+
 FontDescription FontDescription::SizeAdjustedFontDescription(
     float size_adjust) const {
   // TODO(crbug.com/451346): The font-size-adjust property and size-adjust
@@ -394,7 +402,7 @@ unsigned FontDescription::GetHash() const {
   unsigned hash = StyleHashWithoutFamilyList();
   for (const FontFamily* family = &family_list_; family;
        family = family->Next()) {
-    if (family->FamilyName().IsEmpty())
+    if (family->FamilyName().empty())
       continue;
     WTF::AddIntToHash(hash, family->FamilyIsGeneric());
     WTF::AddIntToHash(hash,

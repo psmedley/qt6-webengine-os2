@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,7 @@ class WebTestWebFrameWidgetImpl : public WebFrameWidgetImpl,
       bool never_composited,
       bool is_for_child_local_root,
       bool is_for_nested_main_frame,
+      bool is_for_scalable_page,
       content::TestRunner* test_runner);
 
   ~WebTestWebFrameWidgetImpl() override;
@@ -67,12 +68,15 @@ class WebTestWebFrameWidgetImpl : public WebFrameWidgetImpl,
   void StartDragging(const WebDragData& drag_data,
                      DragOperationsMask operations_allowed,
                      const SkBitmap& drag_image,
-                     const gfx::Point& drag_image_offset) override;
+                     const gfx::Vector2d& cursor_offset,
+                     const gfx::Rect& drag_obj_rect) override;
+  void DidAutoResize(const gfx::Size& size) override;
 
   // WidgetBaseClient overrides:
   void ScheduleAnimation() override;
   void WillBeginMainFrame() override;
   void ScheduleAnimationForWebTests() override;
+  bool AllowsScrollResampling() override { return false; }
 
   content::TestRunner* GetTestRunner();
 

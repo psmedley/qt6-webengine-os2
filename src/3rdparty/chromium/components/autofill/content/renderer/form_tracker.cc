@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,8 @@ namespace autofill {
 using mojom::SubmissionSource;
 
 FormTracker::FormTracker(content::RenderFrame* render_frame)
-    : content::RenderFrameObserver(render_frame) {
+    : content::RenderFrameObserver(render_frame),
+      blink::WebLocalFrameObserver(render_frame->GetWebFrame()) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(form_tracker_sequence_checker_);
 }
 
@@ -130,8 +131,11 @@ void FormTracker::FormControlDidChangeImpl(
     const WebFormControlElement& element,
     Observer::ElementChangeSource change_source) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(form_tracker_sequence_checker_);
-  // Render frame could be gone as this is the post task.
-  if (!render_frame()) return;
+  // The frame or document could be null because this function is called
+  // asynchronously.
+  const blink::WebDocument& doc = element.GetDocument();
+  if (!render_frame() || doc.IsNull() || !doc.GetFrame())
+    return;
 
   if (element.Form().IsNull()) {
     last_interacted_formless_element_ = element;
@@ -159,8 +163,8 @@ void FormTracker::DidStartNavigation(
     absl::optional<blink::WebNavigationType> navigation_type) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(form_tracker_sequence_checker_);
   blink::WebLocalFrame* navigated_frame = render_frame()->GetWebFrame();
-  // Ony handle main frame.
-  if (navigated_frame->Parent())
+  // Ony handle primary main frame.
+  if (!navigated_frame->IsOutermostMainFrame())
     return;
 
   // Bug fix for crbug.com/368690. isProcessingUserGesture() is false when
@@ -211,6 +215,11 @@ void FormTracker::OnDestruct() {
   ResetLastInteractedElements();
 }
 
+void FormTracker::OnFrameDetached() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(form_tracker_sequence_checker_);
+  ResetLastInteractedElements();
+}
+
 void FormTracker::FireFormSubmitted(const blink::WebFormElement& form) {
   for (auto& observer : observers_)
     observer.OnFormSubmitted(form);
@@ -250,9 +259,9 @@ bool FormTracker::CanInferFormSubmitted() {
   // user has interacted with are gone, to decide if submission has occurred.
   if (!last_interacted_form_.IsNull()) {
     return !base::ranges::any_of(last_interacted_form_.GetFormControlElements(),
-                                 &form_util::IsWebElementVisible);
+                                 &form_util::IsWebElementFocusable);
   } else if (!last_interacted_formless_element_.IsNull())
-    return !form_util::IsWebElementVisible(last_interacted_formless_element_);
+    return !form_util::IsWebElementFocusable(last_interacted_formless_element_);
 
   return false;
 }

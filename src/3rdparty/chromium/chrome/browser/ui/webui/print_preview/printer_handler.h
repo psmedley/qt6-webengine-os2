@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,26 +35,25 @@ class PrinterHandler {
   using DefaultPrinterCallback =
       base::OnceCallback<void(const std::string& printer_name)>;
   using AddedPrintersCallback =
-      base::RepeatingCallback<void(const base::ListValue& printers)>;
+      base::RepeatingCallback<void(base::Value::List printers)>;
   using GetPrintersDoneCallback = base::OnceClosure;
-  // |capability| should contain a CDD with key |kSettingCapabilities|.
+  // `capability` should contain a CDD with key `kSettingCapabilities`.
   // It may also contain other information about the printer in a dictionary
-  // with key |kPrinter|.
-  // If |capability| is null, empty, or does not contain a dictionary with key
-  // |kSettingCapabilities|, this indicates a failure to retrieve capabilities.
-  // If the dictionary with key |kSettingCapabilities| is
-  // empty, this indicates capabilities were retrieved but the printer does
-  // not support any of the capability fields in a CDD.
+  // with key `kPrinter`.
+  // If `capability` does not contain a `kSettingCapabilities` key, this
+  // indicates a failure to retrieve capabilities. If the dictionary with key
+  // `kSettingCapabilities` is empty, this indicates capabilities were retrieved
+  // but the printer does not support any of the capability fields in a CDD.
   using GetCapabilityCallback =
-      base::OnceCallback<void(base::Value capability)>;
+      base::OnceCallback<void(base::Value::Dict capability)>;
   using PrintCallback = base::OnceCallback<void(const base::Value& error)>;
   using GetPrinterInfoCallback =
       base::OnceCallback<void(const base::DictionaryValue& printer_info)>;
 #if BUILDFLAG(IS_CHROMEOS)
   using GetEulaUrlCallback =
       base::OnceCallback<void(const std::string& license)>;
-  using PrinterStatusRequestCallback =
-      base::OnceCallback<void(const base::Value& cups_printer_status)>;
+  using PrinterStatusRequestCallback = base::OnceCallback<void(
+      absl::optional<base::Value::Dict> cups_printer_status)>;
 #endif
 
   // Creates an instance of a PrinterHandler for extension printers.
@@ -71,7 +70,7 @@ class PrinterHandler {
       content::WebContents* preview_web_contents,
       Profile* profile);
 
-  virtual ~PrinterHandler() {}
+  virtual ~PrinterHandler() = default;
 
   // Cancels all pending requests.
   virtual void Reset() = 0;

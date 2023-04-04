@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,8 +67,8 @@ std::string GetHeaderIntegrityString(const net::SHA256HashValue& hash) {
 }
 
 PrefetchedSignedExchangeCache::EntryMap GetCachedExchanges(Shell* shell) {
-  RenderFrameHostImpl* rfh =
-      static_cast<RenderFrameHostImpl*>(shell->web_contents()->GetMainFrame());
+  RenderFrameHostImpl* rfh = static_cast<RenderFrameHostImpl*>(
+      shell->web_contents()->GetPrimaryMainFrame());
   scoped_refptr<PrefetchedSignedExchangeCache> cache =
       rfh->EnsurePrefetchedSignedExchangeCache();
   PrefetchedSignedExchangeCache::EntryMap results;
@@ -92,7 +92,8 @@ PrefetchBrowserTestBase::ResponseEntry CreateSignedExchangeResponseEntry(
   // We mock the SignedExchangeHandler, so just return the content as
   // "application/signed-exchange;v=b3".
   return PrefetchBrowserTestBase::ResponseEntry(
-      content, "application/signed-exchange;v=b3", headers);
+      MockSignedExchangeHandler::kMockSxgPrefix + content,
+      "application/signed-exchange;v=b3", headers);
 }
 
 std::string CreateAlternateLinkHeader(const GURL& sxg_url,
@@ -196,10 +197,7 @@ class NavigationHandleSXGAttributeObserver : public WebContentsObserver {
 
 }  // namespace
 
-class SignedExchangePrefetchBrowserTest
-    : public testing::WithParamInterface<
-          bool /* sxg_subresource_prefetch_enabled */>,
-      public PrefetchBrowserTestBase {
+class SignedExchangePrefetchBrowserTest : public PrefetchBrowserTestBase {
  public:
   SignedExchangePrefetchBrowserTest() {
     // Call MockClock::Get() here to initialize ScopedMockClockOverride which
@@ -212,22 +210,15 @@ class SignedExchangePrefetchBrowserTest
   SignedExchangePrefetchBrowserTest& operator=(
       const SignedExchangePrefetchBrowserTest&) = delete;
 
-  ~SignedExchangePrefetchBrowserTest() = default;
+  ~SignedExchangePrefetchBrowserTest() override = default;
 
   void SetUp() override {
-    bool sxg_subresource_prefetch_enabled = GetParam();
-
-    std::vector<base::Feature> enable_features;
-    std::vector<base::Feature> disabled_features;
+    std::vector<base::test::FeatureRef> enable_features;
+    std::vector<base::test::FeatureRef> disabled_features;
     enable_features.push_back(features::kSignedHTTPExchange);
     // Need to run the network service in process for testing cache expirity
     // (PrefetchMainResourceSXG_ExceedPrefetchReuseMins) using MockClock.
     enable_features.push_back(features::kNetworkServiceInProcess);
-    if (sxg_subresource_prefetch_enabled) {
-      enable_features.push_back(features::kSignedExchangeSubresourcePrefetch);
-    } else {
-      disabled_features.push_back(features::kSignedExchangeSubresourcePrefetch);
-    }
     feature_list_.InitWithFeatures(enable_features, disabled_features);
     PrefetchBrowserTestBase::SetUp();
   }
@@ -250,8 +241,6 @@ class SignedExchangePrefetchBrowserTest
 
   std::unique_ptr<InactiveRenderFrameHostDeletionObserver>
       inactive_rfh_deletion_observer_;
-
-  bool IsSignedExchangeSubresourcePrefetchEnabled() { return GetParam(); }
 
   void SetBlobLimits() {
     scoped_refptr<ChromeBlobStorageContext> blob_context =
@@ -286,50 +275,6 @@ class SignedExchangePrefetchBrowserTest
     const GURL inner_url =
         embedded_test_server()->GetURL(inner_url_hostname, inner_url_path);
 
-    if (!IsSignedExchangeSubresourcePrefetchEnabled()) {
-      EXPECT_TRUE(GetCachedExchanges(shell()).empty());
-
-      // Shutdown the server.
-      EXPECT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
-
-      // The HTTP Cache does not currently support cross-origin prefetching if
-      // the split cache is enabled, so skip the rest of the tests.
-      // TODO(crbug.com/939317): Remove this early return when cross-origin
-      // prefetching with split cache works.
-      if (base::FeatureList::IsEnabled(
-              net::features::kSplitCacheByNetworkIsolationKey) &&
-          !url::Origin::Create(sxg_url).IsSameOriginWith(
-              url::Origin::Create(inner_url))) {
-        return;
-      }
-
-      // Need to setup MockSignedExchangeHandlerFactory because the SXG is
-      // loaded from HTTPCache.
-      MockSignedExchangeHandlerFactory factory({MockSignedExchangeHandlerParams(
-          sxg_url, SignedExchangeLoadResult::kSuccess, net::OK, inner_url,
-          "text/html", {}, header_integrity,
-          base::Time() /* signature_expire_time */)});
-      ScopedSignedExchangeHandlerFactory scoped_factory(&factory);
-
-      base::HistogramTester histograms;
-      // Subsequent navigation to the target URL wouldn't hit the network for
-      // the target URL. The target content should still be read correctly.
-      // The content is loaded from HTTPCache.
-      NavigateToURLAndWaitTitle(sxg_url, "Prefetch Target (SXG)");
-      // Wait for the previous page's RFH to be deleted (if it changed) so that
-      // the histograms will get updated.
-      inactive_rfh_deletion_observer_->Wait();
-
-      EXPECT_EQ(1, sxg_request_counter->GetRequestCount());
-      histograms.ExpectTotalCount("PrefetchedSignedExchangeCache.Count", 0);
-      histograms.ExpectTotalCount("PrefetchedSignedExchangeCache.BodySize", 0);
-      histograms.ExpectTotalCount("PrefetchedSignedExchangeCache.BodySizeTotal",
-                                  0);
-      histograms.ExpectTotalCount(
-          "PrefetchedSignedExchangeCache.HeadersSizeTotal", 0);
-      return;
-    }
-
     const auto cached_exchanges = GetCachedExchanges(shell());
     EXPECT_EQ(1u, cached_exchanges.size());
     const auto it = cached_exchanges.find(sxg_url);
@@ -339,9 +284,6 @@ class SignedExchangePrefetchBrowserTest
     EXPECT_EQ(sxg_url, exchange->outer_url());
     EXPECT_EQ(inner_url, exchange->inner_url());
     EXPECT_EQ(header_integrity, *exchange->header_integrity());
-    const int64_t headers_size_total =
-        exchange->outer_response()->headers->raw_headers().size() +
-        exchange->inner_response()->headers->raw_headers().size();
 
     // Shutdown the server.
     EXPECT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
@@ -357,13 +299,6 @@ class SignedExchangePrefetchBrowserTest
 
     EXPECT_EQ(1, sxg_request_counter->GetRequestCount());
     histograms.ExpectBucketCount("PrefetchedSignedExchangeCache.Count", 1, 1);
-    histograms.ExpectBucketCount("PrefetchedSignedExchangeCache.BodySize",
-                                 content.size(), 1);
-    histograms.ExpectBucketCount("PrefetchedSignedExchangeCache.BodySizeTotal",
-                                 content.size(), 1);
-    histograms.ExpectBucketCount(
-        "PrefetchedSignedExchangeCache.HeadersSizeTotal", headers_size_total,
-        1);
   }
 
   void LoadPrefetchMainResourceSXGTestPage(
@@ -429,7 +364,7 @@ class SignedExchangePrefetchBrowserTest
   base::test::ScopedFeatureList feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_SameOrigin) {
   RunPrefetchMainResourceSXGTest("example.com" /* prefetch_page_hostname */,
                                  "/prefetch.html" /* prefetch_page_path */,
@@ -439,7 +374,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
                                  "/target.html" /* inner_url_path */);
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_CrossOrigin) {
   RunPrefetchMainResourceSXGTest(
       "aggregator.example.com" /* prefetch_page_hostname */,
@@ -450,7 +385,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
       "/target.html" /* inner_url_path */);
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_SameURL) {
   RunPrefetchMainResourceSXGTest("example.com" /* prefetch_page_hostname */,
                                  "/prefetch.html" /* prefetch_page_path */,
@@ -460,7 +395,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
                                  "/target.html" /* inner_url_path */);
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_BlobStorageLimit) {
   SetBlobLimits();
 
@@ -482,7 +417,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   EXPECT_EQ(0u, cached_exchanges.size());
 }
 
-IN_PROC_BROWSER_TEST_P(
+IN_PROC_BROWSER_TEST_F(
     SignedExchangePrefetchBrowserTest,
     PrefetchMainResourceSXG_BlobStorageLimitWithContentLength) {
   // BlobBuilderFromStream's behavior is different when "content-length"
@@ -509,7 +444,7 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_EQ(0u, cached_exchanges.size());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_CacheControlNoStore) {
   const std::string content =
       "<head><title>Prefetch Target (SXG)</title></head>";
@@ -529,7 +464,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   EXPECT_EQ(0u, cached_exchanges.size());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_VaryAsteriskHeader) {
   const std::string content =
       "<head><title>Prefetch Target (SXG)</title></head>";
@@ -548,7 +483,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   EXPECT_EQ(0u, cached_exchanges.size());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_VaryAcceptEncodingHeader) {
   const std::string content =
       "<head><title>Prefetch Target (SXG)</title></head>";
@@ -565,11 +500,10 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   // The signed exchange which response header has "vary: accept-encoding"
   // header should be stored to the cache.
   const auto cached_exchanges = GetCachedExchanges(shell());
-  EXPECT_EQ(IsSignedExchangeSubresourcePrefetchEnabled() ? 1u : 0u,
-            cached_exchanges.size());
+  EXPECT_EQ(1u, cached_exchanges.size());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_ExceedPrefetchReuseMins) {
   const char* hostname = "example.com";
   const char* sxg_path = "/target.sxg";
@@ -590,8 +524,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   const GURL inner_url =
       embedded_test_server()->GetURL(hostname, inner_url_path);
 
-  EXPECT_EQ(IsSignedExchangeSubresourcePrefetchEnabled() ? 1u : 0u,
-            GetCachedExchanges(shell()).size());
+  EXPECT_EQ(1u, GetCachedExchanges(shell()).size());
 
   MockClock::Get().Advance(
       base::Seconds(net::HttpCache::kPrefetchReuseMins * 60 + 1));
@@ -610,7 +543,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   EXPECT_EQ(2, sxg_request_counter->GetRequestCount());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_CacheControlPublic) {
   const char* hostname = "example.com";
   const char* sxg_path = "/target.sxg";
@@ -635,30 +568,18 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   const GURL inner_url =
       embedded_test_server()->GetURL(hostname, inner_url_path);
 
-  EXPECT_EQ(IsSignedExchangeSubresourcePrefetchEnabled() ? 1u : 0u,
-            GetCachedExchanges(shell()).size());
+  EXPECT_EQ(1u, GetCachedExchanges(shell()).size());
 
   MockClock::Get().Advance(
       base::Seconds(net::HttpCache::kPrefetchReuseMins * 2 * 60));
 
-  if (IsSignedExchangeSubresourcePrefetchEnabled()) {
-    NavigateToURLAndWaitTitle(sxg_url, "Prefetch Target (SXG)");
-  } else {
-    // Need to setup MockSignedExchangeHandlerFactory because the SXG is loaded
-    // from HTTPCache.
-    MockSignedExchangeHandlerFactory factory({MockSignedExchangeHandlerParams(
-        sxg_url, SignedExchangeLoadResult::kSuccess, net::OK, inner_url,
-        "text/html", {}, header_integrity,
-        base::Time() /* signature_expire_time */)});
-    ScopedSignedExchangeHandlerFactory scoped_factory(&factory);
-    NavigateToURLAndWaitTitle(sxg_url, "Prefetch Target (SXG)");
-  }
+  NavigateToURLAndWaitTitle(sxg_url, "Prefetch Target (SXG)");
 
   // SXG must Not be fetched again.
   EXPECT_EQ(1, sxg_request_counter->GetRequestCount());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        PrefetchMainResourceSXG_CacheControlPublicExpire) {
   const char* hostname = "example.com";
   const char* sxg_path = "/target.sxg";
@@ -683,8 +604,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   const GURL inner_url =
       embedded_test_server()->GetURL(hostname, inner_url_path);
 
-  EXPECT_EQ(IsSignedExchangeSubresourcePrefetchEnabled() ? 1u : 0u,
-            GetCachedExchanges(shell()).size());
+  EXPECT_EQ(1u, GetCachedExchanges(shell()).size());
 
   MockClock::Get().Advance(
       base::Seconds(net::HttpCache::kPrefetchReuseMins * 3 * 60 + 1));
@@ -711,7 +631,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
 #define MAYBE_PrefetchMainResourceSXG_SignatureExpire \
   PrefetchMainResourceSXG_SignatureExpire
 #endif
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest,
                        MAYBE_PrefetchMainResourceSXG_SignatureExpire) {
   const char* hostname = "example.com";
   const char* sxg_path = "/target.sxg";
@@ -734,8 +654,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   const GURL inner_url =
       embedded_test_server()->GetURL(hostname, inner_url_path);
 
-  EXPECT_EQ(IsSignedExchangeSubresourcePrefetchEnabled() ? 1u : 0u,
-            GetCachedExchanges(shell()).size());
+  EXPECT_EQ(1u, GetCachedExchanges(shell()).size());
 
   MockClock::Get().Advance(
       base::Minutes(net::HttpCache::kPrefetchReuseMins * 3));
@@ -762,7 +681,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest,
   EXPECT_EQ(2, sxg_request_counter->GetRequestCount());
 }
 
-IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest, ClearAll) {
+IN_PROC_BROWSER_TEST_F(SignedExchangePrefetchBrowserTest, ClearAll) {
   const char* hostname = "example.com";
   const char* sxg_path = "/target.sxg";
   const char* inner_url_path = "/target.html";
@@ -782,8 +701,7 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest, ClearAll) {
   const GURL inner_url =
       embedded_test_server()->GetURL(hostname, inner_url_path);
 
-  EXPECT_EQ(IsSignedExchangeSubresourcePrefetchEnabled() ? 1u : 0u,
-            GetCachedExchanges(shell()).size());
+  EXPECT_EQ(1u, GetCachedExchanges(shell()).size());
 
   BrowsingDataRemover* remover =
       shell()->web_contents()->GetBrowserContext()->GetBrowsingDataRemover();
@@ -807,10 +725,6 @@ IN_PROC_BROWSER_TEST_P(SignedExchangePrefetchBrowserTest, ClearAll) {
   // SXG must be fetched again.
   EXPECT_EQ(2, sxg_request_counter->GetRequestCount());
 }
-
-INSTANTIATE_TEST_SUITE_P(SignedExchangePrefetchBrowserTest,
-                         SignedExchangePrefetchBrowserTest,
-                         ::testing::Bool());
 
 class SignedExchangeSubresourcePrefetchBrowserTest
     : public PrefetchBrowserTestBase {
@@ -836,10 +750,9 @@ class SignedExchangeSubresourcePrefetchBrowserTest
   }
 
   void SetUp() override {
-    std::vector<base::Feature> enable_features;
-    std::vector<base::Feature> disabled_features;
+    std::vector<base::test::FeatureRef> enable_features;
+    std::vector<base::test::FeatureRef> disabled_features;
     enable_features.push_back(features::kSignedHTTPExchange);
-    enable_features.push_back(features::kSignedExchangeSubresourcePrefetch);
     // Need to run the network service in process for testing cache expirity
     // (PrefetchMainResourceSXG_ExceedPrefetchReuseMins) using MockClock.
     enable_features.push_back(features::kNetworkServiceInProcess);
@@ -1173,7 +1086,7 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
       "publisher.example.com" /* inner_url_hostname */,
       "/target.html" /* page_inner_url_path */,
       "/script.js" /* script_inner_url_path */,
-      {} /* script_sxg_outer_headers */,
+      {{"Access-Control-Allow-Origin", "*"}} /* script_sxg_outer_headers */,
       "" /* additional_link_element_attributes */,
       0 /* elapsed_time_after_prefetch */, "done" /* expected_title */,
       true /* script_sxg_should_be_stored */,
@@ -1181,16 +1094,10 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
-                       MainResourceSXGAndScriptSXG_CrossOrigin_AsDocument) {
-  // This test is almost same as MainResourceSXGAndScriptSXG_CrossOrigin. The
-  // only difference is that the <link rel=prefetch> element has "as=document"
-  // attribute which was introduced to support cross origin prefetch with
-  // SplitCacheByNetworkIsolationKey feature. Note that even if
-  // SplitCacheByNetworkIsolationKey feature is enabled, current Chromium
-  // implementation doesn't require as=document for prefetching main resource
-  // signed exchanges when SignedExchangePrefetchCacheForNavigations feature is
-  // enabled, and for prefetching main resource and subresource signed exchanges
-  // when SignedExchangeSubresourcePrefetch is enabled.
+                       MainResourceSXGAndScriptSXG_CrossOrigin_CorsError) {
+  // This test is similar to MainResourceSXGAndScriptSXG_CrossOrigin, but the
+  // script SXG is served without Access-Control-Allow-Origin. Prefetch of the
+  // script SXG should fail with CORS error.
   RunPrefetchMainResourceSXGAndScriptSXGTest(
       "aggregator.example.com" /* prefetch_page_hostname */,
       "/prefetch.html" /* prefetch_page_path */,
@@ -1202,6 +1109,32 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
       "/target.html" /* page_inner_url_path */,
       "/script.js" /* script_inner_url_path */,
       {} /* script_sxg_outer_headers */,
+      "" /* additional_link_element_attributes */,
+      0 /* elapsed_time_after_prefetch */, "from server" /* expected_title */,
+      false /* script_sxg_should_be_stored */,
+      1 /* expected_script_fetch_count */);
+}
+
+IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
+                       MainResourceSXGAndScriptSXG_CrossOrigin_AsDocument) {
+  // This test is almost same as MainResourceSXGAndScriptSXG_CrossOrigin. The
+  // only difference is that the <link rel=prefetch> element has "as=document"
+  // attribute which was introduced to support cross origin prefetch with
+  // SplitCacheByNetworkIsolationKey feature. Note that even if
+  // SplitCacheByNetworkIsolationKey feature is enabled, current Chromium
+  // implementation doesn't require as=document for prefetching main resource
+  // and subresource signed exchanges.
+  RunPrefetchMainResourceSXGAndScriptSXGTest(
+      "aggregator.example.com" /* prefetch_page_hostname */,
+      "/prefetch.html" /* prefetch_page_path */,
+      "distoributor.example.com" /* page_sxg_hostname */,
+      "/target.sxg" /* page_sxg_path */,
+      "distoributor.example.com" /* script_sxg_hostname */,
+      "/script.sxg" /* script_sxg_path */,
+      "publisher.example.com" /* inner_url_hostname */,
+      "/target.html" /* page_inner_url_path */,
+      "/script.js" /* script_inner_url_path */,
+      {{"Access-Control-Allow-Origin", "*"}} /* script_sxg_outer_headers */,
       "as='document'" /* additional_link_element_attributes */,
       0 /* elapsed_time_after_prefetch */, "done" /* expected_title */,
       true /* script_sxg_should_be_stored */,
@@ -1222,7 +1155,7 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
       "publisher.example.com" /* inner_url_hostname */,
       "/target.html" /* page_inner_url_path */,
       "/script.js" /* script_inner_url_path */,
-      {} /* script_sxg_outer_headers */,
+      {{"Access-Control-Allow-Origin", "*"}} /* script_sxg_outer_headers */,
       "" /* additional_link_element_attributes */,
       0 /* elapsed_time_after_prefetch */, "from server" /* expected_title */,
       true /* script_sxg_should_be_stored */,
@@ -1348,10 +1281,8 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
       1 /* expected_script_fetch_count */);
 }
 
-// TODO(crbug.com/1258886): Fails flakily on all platforms with Synchronous HTML
-// Parsing enabled.
 IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
-                       DISABLED_ImageSrcsetAndSizes) {
+                       ImageSrcsetAndSizes) {
   const char* prefetch_path = "/prefetch.html";
   const char* target_sxg_path = "/target.sxg";
   const char* target_path = "/target.html";
@@ -1696,7 +1627,7 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest,
   const GURL report_url = ssl_server.GetURL(report_path);
 
   // Get Report-To and NEL information for the server that serves the signed
-  // exchange. The same site is also used for the NetworkIsolationKey. This
+  // exchange. The same site is also used for the NetworkAnonymizationKey. This
   // should result in sending a report to that server a request for that signed
   // exchange fails with a certificate error.
   {
@@ -1897,16 +1828,16 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest, CORS) {
   RegisterRequestHandler(embedded_test_server());
   RegisterRequestHandler(data_server.get());
 
-  // Prefetch requests for alternate SXG should be made with no-cors,
-  // regardless of the crossorigin attribute of Link:rel=preload header that
-  // triggered the prefetch.
+  // Prefetch requests for alternate SXG should be made with cors, regardless of
+  // the crossorigin attribute of Link:rel=preload header that triggered the
+  // prefetch.
   embedded_test_server()->RegisterRequestMonitor(
       base::BindRepeating([](const net::test_server::HttpRequest& request) {
         if (!base::EndsWith(request.relative_url, "_data.sxg"))
           return;
         auto it = request.headers.find("Sec-Fetch-Mode");
         ASSERT_TRUE(it != request.headers.end());
-        EXPECT_EQ(it->second, "no-cors");
+        EXPECT_EQ(it->second, "cors");
       }));
 
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -2073,18 +2004,26 @@ IN_PROC_BROWSER_TEST_F(SignedExchangeSubresourcePrefetchBrowserTest, CORS) {
                    CreateSignedExchangeResponseEntry(
                        base::StringPrintf(R"(
 <head><title>Prefetch Target (SXG)</title><script>
-let results = [];
-(async function(requests) {
-  for (let i = 0; i < requests.length; ++i) {
-    try {
-      const res = await fetch(requests[i]);
-      results.push(await res.text());
-    } catch (err) {
-      results.push('failed');
-    }
+  const requests = [%s];
+  const promises = [];
+  for (const request of requests) {
+    promises.push((async (request) => {
+      try {
+        const res = await fetch(request);
+        const result = await res.text();
+        console.log(request.url + ': ' + result);
+        return result;
+      } catch (err) {
+        console.log(request.url + ': failed');
+        return 'failed';
+      }
+    })(request));
   }
-  document.title = 'done';
-})([%s]);
+  let results = null;
+  Promise.all(promises).then((values) => {
+    results = values;
+    document.title = 'done';
+  });
 </script></head>)",
                                           requests_list_string.c_str()),
                        {{"link", target_sxg_outer_link_header}}));

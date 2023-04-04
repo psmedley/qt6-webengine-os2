@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,6 +8,8 @@ import("//tools/grit/preprocess_if_expr.gni")
 import("//tools/polymer/html_to_wrapper.gni")
 import("//tools/typescript/ts_library.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
+
+assert(!is_android)
 
 preprocess_folder = "preprocessed"
 tsc_folder = "tsc"
@@ -43,7 +45,6 @@ html_to_wrapper("html_wrapper_files") {
 }
 
 preprocess_if_expr("preprocess") {
-  in_folder = "."
   in_files = ts_files
   out_folder = "$target_gen_dir/$preprocess_folder"
 }
@@ -77,14 +78,6 @@ action("generate_graph_tab") {
   deps = [ ":build_ts" ]
 }
 
-# Action with a transparent name.
-group("discards_resources_gen") {
-  public_deps = [
-    ":build_ts",
-    ":generate_graph_tab",
-  ]
-}
-
 copy("copy_mojo") {
   deps = [
     "//chrome/browser/resource_coordinator:mojo_bindings_webui_js",
@@ -101,6 +94,7 @@ copy("copy_mojo") {
 ts_library("build_ts") {
   root_dir = "$target_gen_dir/$preprocess_folder"
   out_dir = "$target_gen_dir/$tsc_folder"
+  composite = true
   tsconfig_base = "tsconfig_base.json"
   manifest_excludes = [
     "graph_doc.ts",
@@ -140,7 +134,8 @@ generate_grd("build_grd") {
     ":build_graph_tab_grdp",
     ":build_ts",
   ]
-  manifest_files = [ "$target_gen_dir/tsconfig.manifest" ]
+  manifest_files =
+      filter_include(get_target_outputs(":build_ts"), [ "*.manifest" ])
   grdp_files = [ "$target_gen_dir/discards_graph_tab.grdp" ]
   grd_prefix = "discards"
   out_grd = "$target_gen_dir/${grd_prefix}_resources.grd"

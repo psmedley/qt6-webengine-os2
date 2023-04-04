@@ -76,7 +76,7 @@ AXObject* ColorChooserUIController::RootAXObject() {
 }
 
 void ColorChooserUIController::DidChooseColor(uint32_t color) {
-  client_->DidChooseColor(color);
+  client_->DidChooseColor(Color::FromRGBA32(color));
 }
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC) || defined(TOOLKIT_QT)
@@ -90,7 +90,7 @@ void ColorChooserUIController::OpenColorChooser() {
           frame_->DomWindow()->GetExecutionContext()->GetTaskRunner(
               TaskType::kUserInteraction)),
       client_->CurrentColor().Rgb(), client_->Suggestions());
-  receiver_.set_disconnect_handler(WTF::Bind(
+  receiver_.set_disconnect_handler(WTF::BindOnce(
       &ColorChooserUIController::EndChooser, WrapWeakPersistent(this)));
 }
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)

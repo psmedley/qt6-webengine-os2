@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "net/base/address_list.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
-#include "net/socket/connection_attempts.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/socket/stream_socket.h"
 #include "net/socket/tcp_socket.h"
@@ -63,13 +62,18 @@ class NET_EXPORT TCPClientSocket : public TransportClientSocket,
       NetworkQualityEstimator* network_quality_estimator,
       net::NetLog* net_log,
       const net::NetLogSource& source,
-      NetworkChangeNotifier::NetworkHandle network =
-          NetworkChangeNotifier::kInvalidNetworkHandle);
+      handles::NetworkHandle network = handles::kInvalidNetworkHandle);
 
   // Adopts the given, connected socket and then acts as if Connect() had been
   // called. This function is used by TCPServerSocket and for testing.
   TCPClientSocket(std::unique_ptr<TCPSocket> connected_socket,
                   const IPEndPoint& peer_address);
+
+  // Adopts an unconnected TCPSocket. This function is used by
+  // TCPClientSocketBrokered.
+  TCPClientSocket(std::unique_ptr<TCPSocket> unconnected_socket,
+                  const AddressList& addresses,
+                  NetworkQualityEstimator* network_quality_estimator);
 
   // Creates a TCPClientSocket from a bound-but-not-connected socket.
   static std::unique_ptr<TCPClientSocket> CreateFromBoundSocket(
@@ -102,9 +106,6 @@ class NET_EXPORT TCPClientSocket : public TransportClientSocket,
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override;
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override;
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const SocketTag& tag) override;
 
@@ -144,13 +145,13 @@ class NET_EXPORT TCPClientSocket : public TransportClientSocket,
   // address index in `addresses` of the server `socket` is connected to, or -1
   // if not connected. `bind_address`, if present, is the address `socket` is
   // bound to. `network` is the network the socket is required to be bound to,
-  // or NetworkChangeNotifier::kInvalidNetworkHandle if no binding is required.
+  // or handles::kInvalidNetworkHandle if no binding is required.
   TCPClientSocket(std::unique_ptr<TCPSocket> socket,
                   const AddressList& addresses,
                   int current_address_index,
                   std::unique_ptr<IPEndPoint> bind_address,
                   NetworkQualityEstimator* network_quality_estimator,
-                  NetworkChangeNotifier::NetworkHandle network);
+                  handles::NetworkHandle network);
 
   // A helper method shared by Read() and ReadIfReady(). If |read_if_ready| is
   // set to true, ReadIfReady() will be used instead of Read().
@@ -214,25 +215,22 @@ class NET_EXPORT TCPClientSocket : public TransportClientSocket,
   CompletionOnceCallback write_callback_;
 
   // The next state for the Connect() state machine.
-  ConnectState next_connect_state_;
+  ConnectState next_connect_state_ = CONNECT_STATE_NONE;
 
   // This socket was previously disconnected and has not been re-connected.
-  bool previously_disconnected_;
-
-  // Failed connection attempts made while trying to connect this socket.
-  ConnectionAttempts connection_attempts_;
+  bool previously_disconnected_ = false;
 
   // Total number of bytes received by the socket.
-  int64_t total_received_bytes_;
+  int64_t total_received_bytes_ = 0;
 
   BeforeConnectCallback before_connect_callback_;
 
-  bool was_ever_used_;
+  bool was_ever_used_ = false;
 
   // Set to true if the socket was disconnected due to entering suspend mode.
   // Once set, read/write operations return ERR_NETWORK_IO_SUSPENDED, until
   // Connect() or Disconnect() is called.
-  bool was_disconnected_on_suspend_;
+  bool was_disconnected_on_suspend_ = false;
 
   // The time when the latest connect attempt was started.
   absl::optional<base::TimeTicks> start_connect_attempt_;
@@ -243,7 +241,7 @@ class NET_EXPORT TCPClientSocket : public TransportClientSocket,
 
   base::OneShotTimer connect_attempt_timer_;
 
-  NetworkChangeNotifier::NetworkHandle network_;
+  handles::NetworkHandle network_;
 
   base::WeakPtrFactory<TCPClientSocket> weak_ptr_factory_{this};
 };

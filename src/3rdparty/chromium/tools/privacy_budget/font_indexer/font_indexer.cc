@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,13 +97,12 @@ void FontIndexer::PrintAllFonts() {
   WaitForFontListToLoad();
 }
 
-void FontIndexer::FontListHasLoaded(std::unique_ptr<base::ListValue> list) {
+void FontIndexer::FontListHasLoaded(base::Value::List list) {
   std::cout << kOutputHeader << std::endl;
 
-  base::Value::ConstListView list_view = list->GetListDeprecated();
-  for (const auto& i : list_view) {
+  for (const auto& i : list) {
     DCHECK(i.is_list());
-    base::Value::ConstListView font = i.GetListDeprecated();
+    const base::Value::List& font = i.GetList();
 
     std::string non_localized_name = font[0].GetString();
     PrintAllFontsWithName(non_localized_name.c_str());

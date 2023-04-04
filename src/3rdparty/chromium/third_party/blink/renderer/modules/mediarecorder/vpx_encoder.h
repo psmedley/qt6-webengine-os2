@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,12 +25,12 @@ class VpxEncoder final : public VideoTrackRecorder::Encoder {
   typedef std::unique_ptr<vpx_codec_ctx_t, VpxCodecDeleter>
       ScopedVpxCodecCtxPtr;
 
-  static void ShutdownEncoder(std::unique_ptr<Thread> encoding_thread,
+  static void ShutdownEncoder(std::unique_ptr<NonMainThread> encoding_thread,
                               ScopedVpxCodecCtxPtr encoder);
 
   VpxEncoder(bool use_vp9,
              const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
-             int32_t bits_per_second,
+             uint32_t bits_per_second,
              scoped_refptr<base::SequencedTaskRunner> main_task_runner);
 
   VpxEncoder(const VpxEncoder&) = delete;
@@ -50,12 +50,12 @@ class VpxEncoder final : public VideoTrackRecorder::Encoder {
 
   void DoEncode(vpx_codec_ctx_t* const encoder,
                 const gfx::Size& frame_size,
-                uint8_t* const data,
-                uint8_t* const y_plane,
+                const uint8_t* data,
+                const uint8_t* y_plane,
                 int y_stride,
-                uint8_t* const u_plane,
+                const uint8_t* u_plane,
                 int u_stride,
-                uint8_t* const v_plane,
+                const uint8_t* v_plane,
                 int v_stride,
                 const base::TimeDelta& duration,
                 bool force_keyframe,

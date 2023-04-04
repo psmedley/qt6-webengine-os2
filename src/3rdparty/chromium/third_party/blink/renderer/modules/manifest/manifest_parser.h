@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/types/strong_alias.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -216,16 +217,28 @@ class MODULES_EXPORT ManifestParser {
       const JSONObject* object);
 
   // Parses the 'screenshots' field of a Manifest, as defined in:
-  // https://w3c.github.io/manifest/#screenshots-member
+  // https://www.w3.org/TR/manifest-app-info/#screenshots-member
   // Returns a vector of ManifestImageResourcePtr with the successfully parsed
   // screenshots, if any. An empty vector if the field was not present or empty.
-  Vector<mojom::blink::ManifestImageResourcePtr> ParseScreenshots(
+  Vector<mojom::blink::ManifestScreenshotPtr> ParseScreenshots(
       const JSONObject* object);
 
+  // Parse the 'form_factor' field of 'screenshots' as defined in:
+  // https://www.w3.org/TR/manifest-app-info/#form_factor-member
+  mojom::blink::ManifestScreenshot::FormFactor ParseScreenshotFormFactor(
+      const JSONObject* screenshot);
+
+  // Parse the 'label' field of 'screenshots' as defined in:
+  // https://www.w3.org/TR/manifest-app-info/#label-member
+  String ParseScreenshotLabel(const JSONObject* object);
+
   // A helper function for parsing ImageResources under |key| in the manifest.
-  Vector<mojom::blink::ManifestImageResourcePtr> ParseImageResource(
+  Vector<mojom::blink::ManifestImageResourcePtr> ParseImageResourceArray(
       const String& key,
       const JSONObject* object);
+
+  absl::optional<mojom::blink::ManifestImageResourcePtr> ParseImageResource(
+      const JSONValue* object);
 
   // Parses the 'name' field of a shortcut, as defined in:
   // https://w3c.github.io/manifest/#shortcuts-member
@@ -365,6 +378,19 @@ class MODULES_EXPORT ManifestParser {
   absl::optional<mojom::blink::ManifestProtocolHandlerPtr> ParseProtocolHandler(
       const JSONObject* protocol_dictionary);
 
+  // Parses the 'start_url' field of the 'lock_screen' field of a Manifest,
+  // as defined in:
+  // https://github.com/WICG/lock-screen/
+  // Returns the parsed KURL if any, or an empty KURL if parsing failed.
+  KURL ParseLockScreenStartUrl(const JSONObject* lock_screen);
+
+  // Parses the 'lock_screen' field of a Manifest, as defined in:
+  // https://github.com/WICG/lock-screen/
+  // Returns a parsed ManifestLockScreenPtr, or nullptr if not present or
+  // parsing failed.
+  mojom::blink::ManifestLockScreenPtr ParseLockScreen(
+      const JSONObject* manifest);
+
   // Parses the 'new_note_url' field of the 'note_taking' field of a Manifest,
   // as defined in:
   // https://wicg.github.io/manifest-incubations/#dfn-new_note_url
@@ -456,14 +482,17 @@ class MODULES_EXPORT ManifestParser {
       const String& preference);
 
   // Parse the 'user_preferences' field of the manifest as defined in:
-  // https://github.com/w3c/manifest/issues/975#issuecomment-960222756
+  // https://github.com/WICG/manifest-incubations/blob/gh-pages/user-preferences-explainer.md
   // Returns nullptr if parsing fails.
   mojom::blink::ManifestUserPreferencesPtr ParseUserPreferences(
       const JSONObject* object);
 
-  // Parse the `handle_links` field of the manifest as defined in:
-  // https://github.com/WICG/pwa-url-handler/blob/main/handle_links/explainer.md
-  mojom::blink::HandleLinks ParseHandleLinks(const JSONObject* object);
+  // Parses the 'tab_strip' field of the manifest as defined in:
+  // https://github.com/WICG/manifest-incubations/blob/gh-pages/tabbed-mode-explainer.md
+  mojom::blink::ManifestTabStripPtr ParseTabStrip(const JSONObject* object);
+
+  mojom::blink::TabStripMemberVisibility ParseTabStripMemberVisibility(
+      const JSONValue* json_value);
 
   void AddErrorInfo(const String& error_msg,
                     bool critical = false,

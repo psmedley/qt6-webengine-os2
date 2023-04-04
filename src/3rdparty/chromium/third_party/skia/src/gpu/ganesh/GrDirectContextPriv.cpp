@@ -25,9 +25,11 @@
 #include "src/gpu/ganesh/effects/GrSkSLFP.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/text/GrAtlasManager.h"
-#include "src/gpu/ganesh/text/GrTextBlobRedrawCoordinator.h"
 #include "src/image/SkImage_Base.h"
 #include "src/image/SkImage_Gpu.h"
+#include "src/text/gpu/TextBlobRedrawCoordinator.h"
+
+using MaskFormat = skgpu::MaskFormat;
 
 #define ASSERT_OWNED_PROXY(P) \
     SkASSERT(!(P) || !((P)->peekTexture()) || (P)->peekTexture()->getContext() == this->context())
@@ -38,7 +40,7 @@ GrSemaphoresSubmitted GrDirectContextPriv::flushSurfaces(
                                                     SkSpan<GrSurfaceProxy*> proxies,
                                                     SkSurface::BackendSurfaceAccess access,
                                                     const GrFlushInfo& info,
-                                                    const GrBackendSurfaceMutableState* newState) {
+                                                    const skgpu::MutableTextureState* newState) {
     ASSERT_SINGLE_OWNER
     GR_CREATE_TRACE_MARKER_CONTEXT("GrDirectContextPriv", "flushSurfaces", this->context());
 
@@ -158,7 +160,7 @@ void GrDirectContextPriv::printContextStats() const {
 }
 
 /////////////////////////////////////////////////
-sk_sp<SkImage> GrDirectContextPriv::testingOnly_getFontAtlasImage(GrMaskFormat format,
+sk_sp<SkImage> GrDirectContextPriv::testingOnly_getFontAtlasImage(MaskFormat format,
                                                                   unsigned int index) {
     auto atlasManager = this->getAtlasManager();
     if (!atlasManager) {
@@ -171,7 +173,7 @@ sk_sp<SkImage> GrDirectContextPriv::testingOnly_getFontAtlasImage(GrMaskFormat f
         return nullptr;
     }
 
-    SkColorType colorType = GrColorTypeToSkColorType(GrMaskFormatToColorType(format));
+    SkColorType colorType = skgpu::MaskFormatToColorType(format);
     SkASSERT(views[index].proxy()->priv().isExact());
     return sk_make_sp<SkImage_Gpu>(sk_ref_sp(this->context()),
                                    kNeedNewImageUniqueID,
@@ -194,14 +196,14 @@ static std::unique_ptr<GrFragmentProcessor> make_premul_effect(
         return nullptr;
     }
 
-    static auto effect = SkMakeRuntimeEffect(SkRuntimeEffect::MakeForColorFilter, R"(
-        half4 main(half4 halfColor) {
-            float4 color = float4(halfColor);
-            color = floor(color * 255 + 0.5) / 255;
-            color.rgb = floor(color.rgb * color.a * 255 + 0.5) / 255;
-            return color;
-        }
-    )");
+    static const SkRuntimeEffect* effect = SkMakeRuntimeEffect(SkRuntimeEffect::MakeForColorFilter,
+        "half4 main(half4 halfColor) {"
+            "float4 color = float4(halfColor);"
+            "color = floor(color * 255 + 0.5) / 255;"
+            "color.rgb = floor(color.rgb * color.a * 255 + 0.5) / 255;"
+            "return color;"
+        "}"
+    );
 
     fp = GrSkSLFP::Make(effect, "ToPremul", std::move(fp), GrSkSLFP::OptFlags::kNone);
     return GrFragmentProcessor::HighPrecision(std::move(fp));
@@ -213,14 +215,14 @@ static std::unique_ptr<GrFragmentProcessor> make_unpremul_effect(
         return nullptr;
     }
 
-    static auto effect = SkMakeRuntimeEffect(SkRuntimeEffect::MakeForColorFilter, R"(
-        half4 main(half4 halfColor) {
-            float4 color = float4(halfColor);
-            color = floor(color * 255 + 0.5) / 255;
-            color.rgb = color.a <= 0 ? half3(0) : floor(color.rgb / color.a * 255 + 0.5) / 255;
-            return color;
-        }
-    )");
+    static const SkRuntimeEffect* effect = SkMakeRuntimeEffect(SkRuntimeEffect::MakeForColorFilter,
+        "half4 main(half4 halfColor) {"
+            "float4 color = float4(halfColor);"
+            "color = floor(color * 255 + 0.5) / 255;"
+            "color.rgb = color.a <= 0 ? half3(0) : floor(color.rgb / color.a * 255 + 0.5) / 255;"
+            "return color;"
+        "}"
+    );
 
     fp = GrSkSLFP::Make(effect, "ToUnpremul", std::move(fp), GrSkSLFP::OptFlags::kNone);
     return GrFragmentProcessor::HighPrecision(std::move(fp));
@@ -247,8 +249,10 @@ static bool test_for_preserving_PM_conversions(GrDirectContext* dContext) {
             SkImageInfo::Make(kSize, kSize, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     const SkImageInfo upmII = pmII.makeAlphaType(kUnpremul_SkAlphaType);
 
-    auto readSFC = dContext->priv().makeSFC(upmII, SkBackingFit::kExact);
-    auto tempSFC = dContext->priv().makeSFC(pmII,  SkBackingFit::kExact);
+    auto readSFC =
+            dContext->priv().makeSFC(upmII, "ReadSfcForPMUPMConversion", SkBackingFit::kExact);
+    auto tempSFC =
+            dContext->priv().makeSFC(pmII, "TempSfcForPMUPMConversion", SkBackingFit::kExact);
     if (!readSFC || !tempSFC) {
         return false;
     }

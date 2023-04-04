@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 
 #include "base/base_export.h"
 #include "base/cancelable_callback.h"
+#include "base/dcheck_is_on.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/task/common/task_annotator.h"
-#include "base/task/sequence_manager/associated_thread_id.h"
 #include "base/task/sequence_manager/thread_controller.h"
 #include "base/task/sequence_manager/work_deduplicator.h"
 #include "base/task/single_thread_task_runner.h"
@@ -45,8 +45,7 @@ class BASE_EXPORT ThreadControllerImpl : public ThreadController,
 
   // ThreadController:
   void SetWorkBatchSize(int work_batch_size) override;
-  void WillQueueTask(PendingTask* pending_task,
-                     const char* task_queue_name) override;
+  void WillQueueTask(PendingTask* pending_task) override;
   void ScheduleWork() override;
   void BindToCurrentThread(std::unique_ptr<MessagePump> message_pump) override;
   void SetNextDelayedDoWork(LazyNow* lazy_now,
@@ -54,13 +53,11 @@ class BASE_EXPORT ThreadControllerImpl : public ThreadController,
   void SetSequencedTaskSource(SequencedTaskSource* sequence) override;
   void SetTimerSlack(TimerSlack timer_slack) override;
   bool RunsTasksInCurrentSequence() override;
-  void SetTickClock(const TickClock* clock) override;
   void SetDefaultTaskRunner(scoped_refptr<SingleThreadTaskRunner>) override;
   scoped_refptr<SingleThreadTaskRunner> GetDefaultTaskRunner() override;
   void RestoreDefaultTaskRunner() override;
   void AddNestingObserver(RunLoop::NestingObserver* observer) override;
   void RemoveNestingObserver(RunLoop::NestingObserver* observer) override;
-  const scoped_refptr<AssociatedThreadId>& GetAssociatedThread() const override;
   void SetTaskExecutionAllowed(bool allowed) override;
   bool IsTaskExecutionAllowed() const override;
   MessagePump* GetBoundMessagePump() const override;
@@ -71,6 +68,7 @@ class BASE_EXPORT ThreadControllerImpl : public ThreadController,
   void DetachFromMessagePump() override;
 #endif
   void PrioritizeYieldingToNative(base::TimeTicks prioritize_until) override;
+  void EnablePeriodicYieldingToNative(base::TimeDelta delta) override;
   bool ShouldQuitRunLoopWhenIdle() override;
 
   // RunLoop::NestingObserver:
@@ -103,12 +101,7 @@ class BASE_EXPORT ThreadControllerImpl : public ThreadController,
     int work_batch_size_ = 1;
 
     TimeTicks next_delayed_do_work = TimeTicks::Max();
-
-    // Tracks the number and state of each run-level managed by this instance.
-    RunLevelTracker run_level_tracker;
   };
-
-  scoped_refptr<AssociatedThreadId> associated_thread_;
 
   MainSequenceOnly main_sequence_only_;
   MainSequenceOnly& main_sequence_only() {
@@ -121,7 +114,6 @@ class BASE_EXPORT ThreadControllerImpl : public ThreadController,
   }
 
   scoped_refptr<SingleThreadTaskRunner> message_loop_task_runner_;
-  raw_ptr<const TickClock> time_source_;
   RepeatingClosure immediate_do_work_closure_;
   RepeatingClosure delayed_do_work_closure_;
   CancelableRepeatingClosure cancelable_delayed_do_work_closure_;

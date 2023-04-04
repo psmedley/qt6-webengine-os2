@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ struct ParamTraits<gfx::NativeWindow> {
     return iter->ReadUInt32(reinterpret_cast<uint32_t*>(r));
 #else
     const char *data;
-    int data_size = 0;
+    size_t data_size = 0;
     bool result = iter->ReadData(&data, &data_size);
     if (result && data_size == sizeof(gfx::NativeWindow)) {
       memcpy(r, data, sizeof(gfx::NativeWindow));

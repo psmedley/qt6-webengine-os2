@@ -95,6 +95,10 @@ else()
     if(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
         target_compile_definitions(loader_specific_options INTERFACE __BSD_VISIBLE=1)
     endif()
+    check_include_file("alloca.h" HAVE_ALLOCA_H)
+    if(HAVE_ALLOCA_H)
+        target_compile_definitions(loader_specific_options INTERFACE HAVE_ALLOCA_H)
+    endif()
 endif()
 
 set(NORMAL_LOADER_SRCS
@@ -162,7 +166,7 @@ if(WIN32)
         target_include_directories(loader-unknown-chain PUBLIC $<TARGET_PROPERTY:loader_asm_gen_files,BINARY_DIR>)
         add_dependencies(loader-unknown-chain loader_asm_gen_files)
     else()
-        message(WARNING "Could not find working MASM assebler\n${ASM_FAILURE_MSG}")
+        message(WARNING "Could not find working MASM assembler\n${ASM_FAILURE_MSG}")
         add_custom_target(loader_asm_gen_files)
         add_library(loader-unknown-chain OBJECT unknown_ext_chain.c)
         target_link_libraries(loader-unknown-chain loader_specific_options)
@@ -186,7 +190,7 @@ else() # i.e.: Linux
             if(ASSEMBLER_WORKS)
                 set(OPT_LOADER_SRCS ${OPT_LOADER_SRCS} unknown_ext_chain_gas_aarch64.S)
             endif()
-        elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86" OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^i.86$")
+        elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "amd64" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86" OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^i.86$")
             check_include_file("cet.h" HAVE_CET_H)
             if(HAVE_CET_H)
                 target_compile_definitions(loader_specific_options INTERFACE HAVE_CET_H)
@@ -228,24 +232,30 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/vulkan-1.def
                 ${CMAKE_CURRENT_LIST_DIR}/loader.rc)
 
-    target_link_libraries(vulkan loader_specific_options loader-opt)
+    target_link_libraries(vulkan PRIVATE loader_specific_options loader-opt)
 
     if (UPDATE_DEPS)
         add_dependencies(vulkan vl_update_deps)
     endif()
 
     # when adding the suffix the import and runtime library names must be consistent
-    # mingw: libvulkan-1.dll.a / libvulkan-1.dll
+    # mingw: libvulkan-1.dll.a / vulkan-1.dll
     # msvc: vulkan-1.lib / vulkan-1.dll
     set_target_properties(vulkan
                           PROPERTIES
                           OUTPUT_NAME vulkan-1)
+    if(MINGW)
+        # generate the same DLL with mingw
+        set_target_properties(vulkan
+                              PROPERTIES
+                              PREFIX "")
+    endif()
 
     if(MSVC AND ENABLE_WIN10_ONECORE)
-        target_link_libraries(vulkan OneCoreUAP.lib LIBCMT.LIB LIBCMTD.LIB LIBVCRUNTIME.LIB LIBUCRT.LIB)
+        target_link_libraries(vulkan PRIVATE OneCoreUAP.lib LIBCMT.LIB LIBCMTD.LIB LIBVCRUNTIME.LIB LIBUCRT.LIB)
         set_target_properties(vulkan PROPERTIES LINK_FLAGS "/NODEFAULTLIB")
     else()
-        target_link_libraries(vulkan cfgmgr32)
+       target_link_libraries(vulkan PRIVATE cfgmgr32)
     endif()
 
     add_dependencies(vulkan loader_asm_gen_files)
@@ -253,6 +263,7 @@ if(WIN32)
 else()
     if(APPLE AND BUILD_STATIC_LOADER)
         add_library(vulkan STATIC ${NORMAL_LOADER_SRCS} ${OPT_LOADER_SRCS})
+        target_compile_definitions(vulkan PRIVATE BUILD_STATIC_LOADER)
     else()
         add_library(vulkan SHARED ${NORMAL_LOADER_SRCS} ${OPT_LOADER_SRCS})
     endif()
@@ -261,14 +272,14 @@ else()
     set_target_properties(vulkan
                           PROPERTIES SOVERSION "1"
                           VERSION ${LOADER_GENERATED_HEADER_VERSION})
-    target_link_libraries(vulkan ${CMAKE_DL_LIBS} m)
+    target_link_libraries(vulkan PRIVATE ${CMAKE_DL_LIBS} m)
     if (NOT ANDROID)
-        target_link_libraries(vulkan Threads::Threads)
+        target_link_libraries(vulkan PRIVATE Threads::Threads)
     endif()
 
     if(APPLE)
         find_library(COREFOUNDATION_LIBRARY NAMES CoreFoundation)
-        target_link_libraries(vulkan "-framework CoreFoundation")
+        target_link_libraries(vulkan PRIVATE "-framework CoreFoundation")
 
         # Build vulkan.framework
         # Use GLOB_RECURSE to find all the header files and populate the vulkan.framework headers with them
@@ -312,7 +323,7 @@ else()
 endif()
 
 # common attributes of the vulkan library
-target_link_libraries(vulkan loader_specific_options)
+target_link_libraries(vulkan PRIVATE loader_specific_options)
 
 set_target_properties(vulkan ${LOADER_STANDARD_C_PROPERTIES})
 if (TARGET asm_offset)
@@ -327,7 +338,11 @@ if(PKG_CONFIG_FOUND)
         set(PRIVATE_LIBS "${PRIVATE_LIBS} -l${LIB}")
     endforeach()
     if(WIN32)
-        set(VULKAN_LIB_SUFFIX "-1")
+        if(MINGW)
+            set(VULKAN_LIB_SUFFIX "-1.dll")
+        else()
+            set(VULKAN_LIB_SUFFIX "-1")
+        endif()
         # Set libdir path as in cmake's FindVulkan.cmake
         # https://github.com/KhronosGroup/Vulkan-Loader/issues/668
         if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -342,7 +357,7 @@ if(PKG_CONFIG_FOUND)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vulkan.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 endif()
 
-target_link_libraries(vulkan Vulkan::Headers)
+target_link_libraries(vulkan PRIVATE Vulkan::Headers)
 add_library(Vulkan::Vulkan ALIAS vulkan)
 
 install(TARGETS vulkan

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -289,7 +289,8 @@ void LayerAnimator::StartTogether(
 
   bool wait_for_group_start = false;
   for (iter = animations.begin(); iter != animations.end(); ++iter)
-    wait_for_group_start |= (*iter)->IsFirstElementThreaded(delegate_);
+    wait_for_group_start |=
+        delegate_ && (*iter)->IsFirstElementThreaded(delegate_);
   int group_id = cc::AnimationIdProvider::NextGroupId();
 
   // These animations (provided they don't animate any common properties) will
@@ -326,7 +327,8 @@ void LayerAnimator::ScheduleTogether(
 
   bool wait_for_group_start = false;
   for (iter = animations.begin(); iter != animations.end(); ++iter)
-    wait_for_group_start |= (*iter)->IsFirstElementThreaded(delegate_);
+    wait_for_group_start |=
+        delegate_ && (*iter)->IsFirstElementThreaded(delegate_);
 
   int group_id = cc::AnimationIdProvider::NextGroupId();
 
@@ -450,6 +452,7 @@ void LayerAnimator::OnThreadedAnimationStarted(
 }
 
 void LayerAnimator::AddToCollection(LayerAnimatorCollection* collection) {
+  DCHECK_EQ(collection, GetLayerAnimatorCollection());
   if (is_animating() && !is_started_) {
     collection->StartAnimator(this);
     is_started_ = true;
@@ -457,10 +460,13 @@ void LayerAnimator::AddToCollection(LayerAnimatorCollection* collection) {
 }
 
 void LayerAnimator::RemoveFromCollection(LayerAnimatorCollection* collection) {
+  DCHECK_EQ(collection, GetLayerAnimatorCollection());
   if (is_started_) {
     collection->StopAnimator(this);
     is_started_ = false;
   }
+  DCHECK(!animation_->element_animations() ||
+         !animation_->element_animations()->HasTickingKeyframeEffect());
 }
 
 // LayerAnimator protected -----------------------------------------------------

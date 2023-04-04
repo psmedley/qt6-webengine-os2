@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -318,15 +318,6 @@ bool PaintInvalidator::InvalidatePaint(
        // Delay invalidation if the client has never been painted.
        reason == PaintInvalidationReason::kJustCreated))
     pending_delayed_paint_invalidations_.push_back(&object);
-
-  if (auto* local_frame = DynamicTo<LocalFrame>(object.GetFrame()->Top())) {
-    if (auto* mf_checker =
-            local_frame->View()->GetMobileFriendlinessChecker()) {
-      if (tree_builder_context &&
-          (!pre_paint_info || pre_paint_info->is_last_for_node))
-        mf_checker->NotifyInvalidatePaint(object);
-    }
-  }
 
   return reason != PaintInvalidationReason::kNone;
 }

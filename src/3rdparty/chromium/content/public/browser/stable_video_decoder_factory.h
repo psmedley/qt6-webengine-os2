@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,15 @@
 
 #include "content/common/content_export.h"
 #include "media/mojo/mojom/stable/stable_video_decoder.mojom-forward.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace content {
 
-// Returns the browser's remote interface to the global
-// StableVideoDecoderFactory which runs out-of-process.
-CONTENT_EXPORT media::stable::mojom::StableVideoDecoderFactory&
-GetStableVideoDecoderFactory();
+// Binds a StableVideoDecoderFactory PendingReceiver by either using the
+// crosapi (on LaCrOS) or starting a new utility process (on non-LaCrOS).
+CONTENT_EXPORT void LaunchStableVideoDecoderFactory(
+    mojo::PendingReceiver<media::stable::mojom::StableVideoDecoderFactory>
+        receiver);
 
 }  // namespace content
 

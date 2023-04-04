@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,9 +26,7 @@ import android.util.Base64;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
@@ -36,7 +34,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.base.metrics.test.ShadowRecordHistogram;
+import org.chromium.base.metrics.UmaRecorderHolder;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.components.variations.VariationsCompressionUtils;
@@ -57,7 +55,7 @@ import java.util.List;
  * Tests for VariationsSeedFetcher
  */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowRecordHistogram.class})
+@Config(manifest = Config.NONE)
 public class VariationsSeedFetcherTest {
     private HttpURLConnection mConnection;
     private VariationsSeedFetcher mFetcher;
@@ -67,9 +65,6 @@ public class VariationsSeedFetcherTest {
     private static final String sRestrict = "restricted";
     private static final String sMilestone = "64";
     private static final String sChannel = "dev";
-
-    @Rule
-    public TestRule mCommandLineFlagsRule = CommandLineFlags.getTestRule();
 
     @Before
     public void setUp() throws IOException {
@@ -87,7 +82,7 @@ public class VariationsSeedFetcherTest {
                 .getServerConnection(VariationsSeedFetcher.VariationsPlatform.ANDROID, sRestrict,
                         sMilestone, sChannel);
         mPrefs = ContextUtils.getAppSharedPreferences();
-        ShadowRecordHistogram.reset();
+        UmaRecorderHolder.resetForTesting();
     }
 
     @After
@@ -534,6 +529,20 @@ public class VariationsSeedFetcherTest {
 
         // The channel param should be overridden by commandline.
         assertTrue(urlString, urlString.contains("stable"));
+    }
+
+    /**
+     * Test method to make sure {@link VariationsSeedFetcher#getConnectionString()} honors the
+     * "--variations-server-url" switch.
+     */
+    @Test
+    @CommandLineFlags.Add(VariationsSwitches.VARIATIONS_SERVER_URL + "=http://localhost:8080/seed")
+    public void testGetConnectionString_HonorsServerUrlCommandlineSwitch() {
+        String urlString = mFetcher.getConnectionString(
+                VariationsSeedFetcher.VariationsPlatform.ANDROID, sRestrict, sMilestone, sChannel);
+
+        // The URL should start with the variations server URL passed as a switch.
+        assertTrue(urlString, urlString.startsWith("http://localhost:8080/seed"));
     }
 
     /**

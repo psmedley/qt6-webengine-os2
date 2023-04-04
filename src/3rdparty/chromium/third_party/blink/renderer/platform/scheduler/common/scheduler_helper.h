@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -116,6 +116,10 @@ class PLATFORM_EXPORT SchedulerHelper
   bool ShouldRecordTaskUkm(bool task_has_thread_time) {
     return ukm_task_sampler_.ShouldRecordTaskUkm(task_has_thread_time);
   }
+  bool IsInNestedRunloop() const {
+    CheckOnValidThread();
+    return nested_runloop_depth_ > 0;
+  }
 
   // Test helpers.
   void SetWorkBatchSizeForTesting(int work_batch_size);
@@ -138,6 +142,8 @@ class PLATFORM_EXPORT SchedulerHelper
 
   UkmTaskSampler ukm_task_sampler_;
   absl::optional<base::SimpleTaskExecutor> simple_task_executor_;
+  // Depth of nested_runloop.
+  int nested_runloop_depth_ = 0;
 };
 
 }  // namespace scheduler

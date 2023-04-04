@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,9 +38,6 @@ ASSERT_SIZE(NGConstraintSpace, SameSizeAsNGConstraintSpace);
 
 NGConstraintSpace NGConstraintSpace::CreateFromLayoutObject(
     const LayoutBlock& block) {
-  // We should only ever create a constraint space from legacy layout if the
-  // object is a new formatting context.
-  DCHECK(block.CreatesNewFormattingContext());
   DCHECK(!block.IsTableCell());
 
   const LayoutBlock* cb = block.ContainingBlock();
@@ -79,13 +76,23 @@ NGConstraintSpace NGConstraintSpace::CreateFromLayoutObject(
         block.HasDefiniteLogicalHeight();
   }
 
+  // We cannot enter NG layout at an object that isn't a formatting context
+  // root. However, even though we're creating a constraint space for an object
+  // here, that doesn't have to mean that we're going to lay it out. For
+  // instance, if we're laying out an out-of-flow positioned NG object contained
+  // by a legacy object, |block| here will be the container of the OOF, not the
+  // OOF itself. It's perfectly fine if that one isn't a formatting context
+  // root, since it's being laid out by the legacy engine anyway. As for the OOF
+  // that we're actually going to lay out, it will always establish a new
+  // formatting context, since it's out-of-flow.
+  bool is_new_fc = block.CreatesNewFormattingContext();
+
   const ComputedStyle& style = block.StyleRef();
   const auto writing_mode = style.GetWritingMode();
   bool parallel_containing_block = IsParallelWritingMode(
       cb ? cb->StyleRef().GetWritingMode() : writing_mode, writing_mode);
   NGConstraintSpaceBuilder builder(writing_mode, style.GetWritingDirection(),
-                                   /* is_new_fc */ true,
-                                   !parallel_containing_block);
+                                   is_new_fc, !parallel_containing_block);
 
   if (!block.IsWritingModeRoot() || block.IsGridItem()) {
     // We don't know if the parent layout will require our baseline, so always
@@ -93,7 +100,7 @@ NGConstraintSpace NGConstraintSpace::CreateFromLayoutObject(
     builder.SetBaselineAlgorithmType(block.IsInline() &&
                                              block.IsAtomicInlineLevel()
                                          ? NGBaselineAlgorithmType::kInlineBlock
-                                         : NGBaselineAlgorithmType::kFirstLine);
+                                         : NGBaselineAlgorithmType::kDefault);
   }
 
   if (block.IsAtomicInlineLevel() || block.IsFlexItem() || block.IsGridItem() ||

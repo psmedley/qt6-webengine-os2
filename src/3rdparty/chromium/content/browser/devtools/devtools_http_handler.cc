@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_pump_type.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -38,11 +40,11 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/user_agent.h"
-#include "net/base/escape.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
+#include "net/http/http_request_headers.h"
 #include "net/server/http_server.h"
 #include "net/server/http_server_request_info.h"
 #include "net/server/http_server_response_info.h"
@@ -545,6 +547,15 @@ static bool ParseJsonPath(
   return true;
 }
 
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class DevToolsMutatingHttpActionVerb {
+  kGet = 0,
+  kPost = 1,
+  kOther = 2,
+  kMaxValue = kOther,
+};
+
 void DevToolsHttpHandler::OnJsonRequest(
     int connection_id,
     const net::HttpServerRequestInfo& info) {
@@ -609,7 +620,25 @@ void DevToolsHttpHandler::OnJsonRequest(
   }
 
   if (command == "new") {
-    GURL url(net::UnescapeBinaryURLComponent(query));
+    DevToolsMutatingHttpActionVerb verb;
+    if (base::EqualsCaseInsensitiveASCII(info.method,
+                                         net::HttpRequestHeaders::kGetMethod)) {
+      verb = DevToolsMutatingHttpActionVerb::kGet;
+    } else if (base::EqualsCaseInsensitiveASCII(
+                   info.method, net::HttpRequestHeaders::kPostMethod)) {
+      verb = DevToolsMutatingHttpActionVerb::kPost;
+    } else {
+      verb = DevToolsMutatingHttpActionVerb::kOther;
+    }
+
+    UMA_HISTOGRAM_ENUMERATION("DevTools.MutatingHttpAction", verb);
+    if (verb != DevToolsMutatingHttpActionVerb::kOther) {
+      LOG(ERROR) << "Using unsafe HTTP verb " << info.method
+                 << " to invoke /json/new. This action will stop supporting "
+                    "GET and POST verbs in future versions.";
+    }
+
+    GURL url(base::UnescapeBinaryURLComponent(query));
     if (!url.is_valid())
       url = GURL(url::kAboutBlankURL);
     scoped_refptr<DevToolsAgentHost> agent_host =
@@ -685,8 +714,12 @@ void DevToolsHttpHandler::RespondToJsonList(
   DevToolsAgentHost::List agent_hosts = std::move(hosts);
   std::sort(agent_hosts.begin(), agent_hosts.end(), TimeComparator);
   base::ListValue list_value;
-  for (auto& agent_host : agent_hosts)
-    list_value.Append(SerializeDescriptor(agent_host, host));
+  for (auto& agent_host : agent_hosts) {
+    // TODO(caseq): figure out if it makes sense exposing tab target to
+    // HTTP clients and potentially compatibility risks involved.
+    if (agent_host->GetType() != DevToolsAgentHost::kTypeTab)
+      list_value.Append(SerializeDescriptor(agent_host, host));
+  }
   SendJson(connection_id, net::HTTP_OK, &list_value, std::string());
 }
 
@@ -881,7 +914,7 @@ base::Value DevToolsHttpHandler::SerializeDescriptor(
     dictionary.SetStringKey(kTargetParentIdField, parent_id);
   dictionary.SetStringKey(kTargetTypeField, agent_host->GetType());
   dictionary.SetStringKey(kTargetTitleField,
-                          net::EscapeForHTML(agent_host->GetTitle()));
+                          base::EscapeForHTML(agent_host->GetTitle()));
   dictionary.SetStringKey(kTargetDescriptionField,
                           agent_host->GetDescription());
 

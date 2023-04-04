@@ -20,19 +20,19 @@ TINT_INSTANTIATE_TYPEINFO(tint::ast::Void);
 
 namespace tint::ast {
 
-Void::Void(ProgramID pid, const Source& src) : Base(pid, src) {}
+Void::Void(ProgramID pid, NodeID nid, const Source& src) : Base(pid, nid, src) {}
 
 Void::Void(Void&&) = default;
 
 Void::~Void() = default;
 
 std::string Void::FriendlyName(const SymbolTable&) const {
-  return "void";
+    return "void";
 }
 
 const Void* Void::Clone(CloneContext* ctx) const {
-  auto src = ctx->Clone(source);
-  return ctx->dst->create<Void>(src);
+    auto src = ctx->Clone(source);
+    return ctx->dst->create<Void>(src);
 }
 
 }  // namespace tint::ast

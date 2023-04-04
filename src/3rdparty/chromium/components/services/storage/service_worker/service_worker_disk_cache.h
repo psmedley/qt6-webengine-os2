@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -108,7 +108,7 @@ class ServiceWorkerDiskCache {
                   int64_t cache_size,
                   base::OnceClosure post_cleanup_callback,
                   net::CompletionOnceCallback callback);
-  void OnCreateBackendComplete(int return_value);
+  void OnCreateBackendComplete(disk_cache::BackendResult result);
 
   uint64_t GetNextCallId();
 

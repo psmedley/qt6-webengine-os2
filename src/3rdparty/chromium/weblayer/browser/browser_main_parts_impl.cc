@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,7 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "weblayer/browser/accept_languages_service_factory.h"
 #include "weblayer/browser/browser_process.h"
 #include "weblayer/browser/cookie_settings_factory.h"
 #include "weblayer/browser/feature_list_creator.h"
@@ -40,10 +41,10 @@
 #include "weblayer/browser/i18n_util.h"
 #include "weblayer/browser/no_state_prefetch/no_state_prefetch_link_manager_factory.h"
 #include "weblayer/browser/no_state_prefetch/no_state_prefetch_manager_factory.h"
+#include "weblayer/browser/origin_trials_factory.h"
 #include "weblayer/browser/permissions/weblayer_permissions_client.h"
 #include "weblayer/browser/stateful_ssl_host_state_delegate_factory.h"
 #include "weblayer/browser/subresource_filter_profile_context_factory.h"
-#include "weblayer/browser/translate_accept_languages_factory.h"
 #include "weblayer/browser/translate_ranker_factory.h"
 #include "weblayer/browser/web_data_service_factory.h"
 #include "weblayer/browser/webui/web_ui_controller_factory.h"
@@ -123,11 +124,12 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   HostContentSettingsMapFactory::GetInstance();
   StatefulSSLHostStateDelegateFactory::GetInstance();
   CookieSettingsFactory::GetInstance();
-  TranslateAcceptLanguagesFactory::GetInstance();
+  AcceptLanguagesServiceFactory::GetInstance();
   TranslateRankerFactory::GetInstance();
   NoStatePrefetchLinkManagerFactory::GetInstance();
   NoStatePrefetchManagerFactory::GetInstance();
   SubresourceFilterProfileContextFactory::GetInstance();
+  OriginTrialsFactory::GetInstance();
 #if BUILDFLAG(IS_ANDROID)
   SiteEngagementServiceFactory::GetInstance();
   SafeBrowsingMetricsCollectorFactory::GetInstance();
@@ -153,11 +155,8 @@ void StopMessageLoop(base::OnceClosure quit_closure) {
 
 BrowserMainPartsImpl::BrowserMainPartsImpl(
     MainParams* params,
-    content::MainFunctionParams main_function_params,
     std::unique_ptr<PrefService> local_state)
-    : params_(params),
-      main_function_params_(std::move(main_function_params)),
-      local_state_(std::move(local_state)) {}
+    : params_(params), local_state_(std::move(local_state)) {}
 
 BrowserMainPartsImpl::~BrowserMainPartsImpl() = default;
 

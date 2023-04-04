@@ -284,6 +284,8 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
 
   Element* GetElementUnderMouse();
 
+  Element* CurrentTouchDownElement();
+
  private:
   WebInputEventResult HandleMouseMoveOrLeaveEvent(
       const WebMouseEvent&,
@@ -348,12 +350,6 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
 
   bool PassMousePressEventToScrollbar(MouseEventWithHitTestResults&);
 
-  void DefaultSpaceEventHandler(KeyboardEvent*);
-  void DefaultBackspaceEventHandler(KeyboardEvent*);
-  void DefaultTabEventHandler(KeyboardEvent*);
-  void DefaultEscapeEventHandler(KeyboardEvent*);
-  void DefaultArrowEventHandler(mojom::blink::FocusType, KeyboardEvent*);
-
   // |last_scrollbar_under_mouse_| is set when the mouse moves off of a
   // scrollbar, and used to notify it of MouseUp events to release mouse
   // capture.
@@ -372,6 +368,7 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
       const HitTestRequest& request,
       const WebMouseEvent& mev);
 
+  // Returned rect is in local root frame coordinates.
   gfx::Rect GetFocusedElementRectForNonLocatedContextMenu(
       Element* focused_element);
 

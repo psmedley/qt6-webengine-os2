@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "content/browser/android/render_widget_host_connector.h"
 #include "content/common/content_export.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-forward.h"
 
 namespace blink {
 class WebGestureEvent;
@@ -55,7 +56,8 @@ class CONTENT_EXPORT GestureListenerManager : public RenderWidgetHostConnector {
   bool has_listeners_attached() const { return has_listeners_attached_; }
   void SetHasListenersAttached(JNIEnv* env, jboolean enabled);
   void GestureEventAck(const blink::WebGestureEvent& event,
-                       blink::mojom::InputEventResultState ack_result);
+                       blink::mojom::InputEventResultState ack_result,
+                       blink::mojom::ScrollResultDataPtr scroll_result_data);
   void DidStopFlinging();
   bool FilterInputEvent(const blink::WebInputEvent& event);
   void DidOverscroll(const ui::DidOverscrollParams& params);

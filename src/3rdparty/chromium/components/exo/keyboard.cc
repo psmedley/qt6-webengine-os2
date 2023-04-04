@@ -1,9 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/exo/keyboard.h"
 
+#include "ash/accelerators/accelerator_table.h"
 #include "ash/constants/app_types.h"
 #include "ash/constants/ash_features.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
@@ -13,6 +14,8 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/containers/span.h"
+#include "base/no_destructor.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "components/exo/input_trace.h"
@@ -126,14 +129,10 @@ bool CanConsumeAshAccelerators(Surface* surface) {
   for (; window; window = window->parent()) {
     const auto app_type =
         static_cast<ash::AppType>(window->GetProperty(aura::client::kAppType));
-    // TODO(fukino): Always returning false for Lacros window is a short-term
-    // solution. In reality, Lacros can consume ash accelerator's key
-    // combination when it is a deprecated ash accelerator or the window is
-    // running PWA. We need to let the wayland client dynamically decrlare
-    // whether it want to consume ash accelerators' key combinations.
-    // crbug.com/1174025.
+    // TOOD(hidehiko): get rid of this if check, after introducing capability,
+    // followed by ARC/Crostini migration.
     if (app_type == ash::AppType::LACROS)
-      return false;
+      return surface->is_keyboard_shortcuts_inhibited();
   }
   return true;
 }
@@ -146,25 +145,27 @@ bool ProcessAshAcceleratorIfPossible(Surface* surface, ui::KeyEvent* event) {
   if (CanConsumeAshAccelerators(surface))
     return false;
 
-  // TODO(crbug.com/1301977): Remove this workaround on fixing acceleartor
-  // handling for lacros.
-  const ui::Accelerator kAppHandlingAccelerators[] = {
-      // Ctrl-N (new window), Shift-Ctrl-N (new incognite window), Ctrl-T (new
-      // tab), and Shit-Ctrl-T (restore tab) need to be sent to the active
-      // client even when the active window is lacros-chrome, since the
-      // ash-chrome does not handle these new-window requests properly at this
-      // moment.
-      {ui::VKEY_N, ui::EF_CONTROL_DOWN},
-      {ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN},
-      {ui::VKEY_T, ui::EF_CONTROL_DOWN},
-      {ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN},
-      // Also forward Ctrl-/ and Shift-Ctrl-/ so Lacros processes the help app
-      // opening while it can be intercepted.
-      {ui::VKEY_OEM_2, ui::EF_CONTROL_DOWN},
-      {ui::VKEY_OEM_2, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN},
-  };
+  // If accelerators can be processed by browser, send it to the app.
+  static const base::NoDestructor<std::vector<ui::Accelerator>>
+      kAppHandlingAccelerators([] {
+        std::vector<ui::Accelerator> result;
+        for (size_t i = 0; i < ash::kAcceleratorDataLength; ++i) {
+          const auto& ash_entry = ash::kAcceleratorData[i];
+          if (base::Contains(base::span<const ash::AcceleratorAction>(
+                                 ash::kActionsInterceptableByBrowser,
+                                 ash::kActionsInterceptableByBrowserLength),
+                             ash_entry.action) ||
+              base::Contains(base::span<const ash::AcceleratorAction>(
+                                 ash::kActionsDuplicatedWithBrowser,
+                                 ash::kActionsDuplicatedWithBrowserLength),
+                             ash_entry.action)) {
+            result.emplace_back(ash_entry.keycode, ash_entry.modifiers);
+          }
+        }
+        return result;
+      }());
   ui::Accelerator accelerator(*event);
-  if (base::Contains(kAppHandlingAccelerators, accelerator))
+  if (base::Contains(*kAppHandlingAccelerators, accelerator))
     return false;
 
   return ash::AcceleratorController::Get()->Process(accelerator);
@@ -245,8 +246,9 @@ void Keyboard::AckKeyboardKey(uint32_t serial, bool handled) {
   if (it == pending_key_acks_.end())
     return;
 
-  if (!handled && focus_)
-    ProcessAccelerator(focus_, &it->second.first);
+  auto* key_event = &it->second.first;
+  if (!handled && !key_event->handled() && focus_)
+    ProcessAccelerator(focus_, key_event);
   pending_key_acks_.erase(serial);
 }
 
@@ -292,11 +294,6 @@ void Keyboard::OnKeyEvent(ui::KeyEvent* event) {
   const bool consumed_by_ime =
       !focus_->window()->GetProperty(aura::client::kSkipImeProcessing) &&
       ConsumedByIme(focus_->window(), *event);
-
-  // Always update modifiers.
-  // XkbTracker must be updated in the Seat, before calling this method.
-  // Ensured by the observer registration order.
-  delegate_->OnKeyboardModifiers(seat_->xkb_tracker()->GetModifiers());
 
   // Currently, physical keycode is tracked in Seat, assuming that the
   // Keyboard::OnKeyEvent is called between Seat::WillProcessEvent and
@@ -366,10 +363,17 @@ void Keyboard::OnKeyEvent(ui::KeyEvent* event) {
           uint32_t serial = delegate_->OnKeyboardKey(event->time_stamp(),
                                                      it->second.code, false);
           if (AreKeyboardKeyAcksNeeded()) {
-            pending_key_acks_.insert(
-                {serial,
-                 {*event, base::TimeTicks::Now() +
-                              expiration_delay_for_pending_key_acks_}});
+            auto ack_it =
+                pending_key_acks_
+                    .insert(
+                        {serial,
+                         {*event, base::TimeTicks::Now() +
+                                      expiration_delay_for_pending_key_acks_}})
+                    .first;
+            // Handled is not copied with Event's copy ctor, so explicitly copy
+            // here.
+            if (event->handled())
+              ack_it->second.first.SetHandled();
             event->SetHandled();
           }
         }
@@ -409,6 +413,12 @@ void Keyboard::OnSurfaceFocused(Surface* gained_focus,
           : nullptr;
   if (gained_focus_surface != focus_)
     SetFocus(gained_focus_surface);
+}
+
+void Keyboard::OnKeyboardModifierUpdated() {
+  // XkbTracker must be updated in the Seat, before calling this method.
+  if (focus_)
+    delegate_->OnKeyboardModifiers(seat_->xkb_tracker()->GetModifiers());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

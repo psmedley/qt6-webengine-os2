@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,11 @@
 
 #include <mfapi.h>
 #include <stdint.h>
+#include <vector>
 #include <wrl/client.h>
 
 #include "base/logging.h"
+#include "media/base/channel_layout.h"
 #include "media/base/win/mf_util_export.h"
 
 struct ID3D11DeviceChild;
@@ -91,6 +93,24 @@ MF_UTIL_EXPORT HRESULT SetDebugName(ID3D11Device* d3d11_device,
                                     const char* debug_string);
 MF_UTIL_EXPORT HRESULT SetDebugName(IDXGIObject* dxgi_object,
                                     const char* debug_string);
+
+// Represents audio channel configuration constants as understood by Windows.
+// E.g. KSAUDIO_SPEAKER_MONO.  For a list of possible values see:
+// http://msdn.microsoft.com/en-us/library/windows/hardware/ff537083(v=vs.85).aspx
+using ChannelConfig = uint32_t;
+
+// Converts Microsoft's channel configuration to ChannelLayout.
+// This mapping is not perfect but the best we can do given the current
+// ChannelLayout enumerator and the Windows-specific speaker configurations
+// defined in ksmedia.h. Don't assume that the channel ordering in
+// ChannelLayout is exactly the same as the Windows specific configuration.
+// As an example: KSAUDIO_SPEAKER_7POINT1_SURROUND is mapped to
+// CHANNEL_LAYOUT_7_1 but the positions of Back L, Back R and Side L, Side R
+// speakers are different in these two definitions.
+MF_UTIL_EXPORT ChannelLayout ChannelConfigToChannelLayout(ChannelConfig config);
+
+// Converts a GUID (little endian) to a bytes array (big endian).
+MF_UTIL_EXPORT std::vector<uint8_t> ByteArrayFromGUID(REFGUID guid);
 
 }  // namespace media
 

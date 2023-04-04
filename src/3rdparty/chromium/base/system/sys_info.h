@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,19 @@
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
+
+#if BUILDFLAG(IS_MAC)
+#include "base/feature_list.h"
+#endif
 
 namespace base {
+
+#if BUILDFLAG(IS_MAC)
+// When enabled, NumberOfProcessors() returns the number of physical processors
+// instead of the number of logical processors if CPU security mitigations are
+// enabled for the current process.
+BASE_EXPORT BASE_DECLARE_FEATURE(kNumberOfCoresWithCpuSecurityMitigation);
+#endif
 
 namespace debug {
 FORWARD_DECLARE_TEST(SystemMetricsTest, ParseMeminfo);
@@ -29,25 +39,29 @@ struct SystemMemoryInfoKB;
 
 class BASE_EXPORT SysInfo {
  public:
-  // Return the number of logical processors/cores on the current machine.
+  // Returns the number of processors/cores available for the current
+  // application. This is typically the number of logical cores installed on the
+  // system, but could instead be the number of physical cores when
+  // SetIsCpuSecurityMitigationsEnabled() has been invoked to indicate that CPU
+  // security mitigations are enabled on Mac.
   static int NumberOfProcessors();
 
   // Return the number of bytes of physical memory on the current machine.
   // If low-end device mode is manually enabled via command line flag, this
   // will return the lesser of the actual physical memory, or 512MB.
-  static int64_t AmountOfPhysicalMemory();
+  static uint64_t AmountOfPhysicalMemory();
 
   // Return the number of bytes of current available physical memory on the
   // machine.
   // (The amount of memory that can be allocated without any significant
   // impact on the system. It can lead to freeing inactive file-backed
   // and/or speculative file-backed memory).
-  static int64_t AmountOfAvailablePhysicalMemory();
+  static uint64_t AmountOfAvailablePhysicalMemory();
 
   // Return the number of bytes of virtual memory of this process. A return
   // value of zero means that there is no limit on the available virtual
   // memory.
-  static int64_t AmountOfVirtualMemory();
+  static uint64_t AmountOfVirtualMemory();
 
   // Return the number of megabytes of physical memory on the current machine.
   static int AmountOfPhysicalMemoryMB() {
@@ -133,7 +147,7 @@ class BASE_EXPORT SysInfo {
   // allocate.
   static size_t VMAllocationGranularity();
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Set |value| and return true if LsbRelease contains information about |key|.
   static bool GetLsbReleaseValue(const std::string& key, std::string* value);
 
@@ -175,7 +189,7 @@ class BASE_EXPORT SysInfo {
   // Crashes if running on Chrome OS non-test image. Use only for really
   // sensitive and risky use cases.
   static void CrashIfChromeOSNonTestImage();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_ANDROID)
   // Returns the Android build's codename.
@@ -212,18 +226,25 @@ class BASE_EXPORT SysInfo {
   // On Desktop this returns true when memory <= 2GB.
   static bool IsLowEndDevice();
 
+#if BUILDFLAG(IS_MAC)
+  // Sets whether CPU security mitigations are enabled for the current process.
+  // This is used to control the behavior of NumberOfProcessors(), see comment
+  // on that method.
+  static void SetIsCpuSecurityMitigationsEnabled(bool is_enabled);
+#endif
+
  private:
   FRIEND_TEST_ALL_PREFIXES(SysInfoTest, AmountOfAvailablePhysicalMemory);
   FRIEND_TEST_ALL_PREFIXES(debug::SystemMetricsTest, ParseMeminfo);
 
-  static int64_t AmountOfPhysicalMemoryImpl();
-  static int64_t AmountOfAvailablePhysicalMemoryImpl();
+  static uint64_t AmountOfPhysicalMemoryImpl();
+  static uint64_t AmountOfAvailablePhysicalMemoryImpl();
   static bool IsLowEndDeviceImpl();
   static HardwareInfo GetHardwareInfoSync();
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
     BUILDFLAG(IS_AIX)
-  static int64_t AmountOfAvailablePhysicalMemory(
+  static uint64_t AmountOfAvailablePhysicalMemory(
       const SystemMemoryInfoKB& meminfo);
 #endif
 };

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,6 +105,7 @@ class AuctionV8DevToolsAgent : public blink::mojom::DevToolsAgent,
       mojo::PendingReceiver<blink::mojom::DevToolsSession> io_session_receiver,
       blink::mojom::DevToolsSessionStatePtr reattach_session_state,
       bool client_expects_binary_responses,
+      bool client_is_trusted,
       const std::string& session_id) override;
   void InspectElement(const ::gfx::Point& point) override;
   void ReportChildTargets(bool report,

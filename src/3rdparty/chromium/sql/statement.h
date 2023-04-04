@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,9 @@ class COMPONENT_EXPORT(SQL) Statement {
 
   Statement(const Statement&) = delete;
   Statement& operator=(const Statement&) = delete;
+
+  Statement(Statement&&) = delete;
+  Statement& operator=(Statement&&) = delete;
 
   ~Statement();
 
@@ -199,8 +202,9 @@ class COMPONENT_EXPORT(SQL) Statement {
 
   // Diagnostics --------------------------------------------------------------
 
-  // Returns the original text of a SQL statement. Intended for logging in case
-  // of failures.
+  // Returns the original text of a SQL statement WITHOUT any bound values.
+  // Intended for logging in case of failures. Note that DOES NOT return any
+  // bound values, because that would cause a privacy / PII issue for logging.
   std::string GetSQLStatement();
 
  private:

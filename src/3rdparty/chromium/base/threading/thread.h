@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,6 +76,7 @@ class BASE_EXPORT Thread : PlatformThread::Delegate {
 
     Options();
     Options(MessagePumpType type, size_t size);
+    explicit Options(ThreadType thread_type);
     Options(Options&& other);
     Options& operator=(Options&& other);
     ~Options();
@@ -103,8 +104,8 @@ class BASE_EXPORT Thread : PlatformThread::Delegate {
     // A value of 0 indicates that the default maximum should be used.
     size_t stack_size = 0;
 
-    // Specifies the initial thread priority.
-    ThreadPriority priority = ThreadPriority::NORMAL;
+    // Specifies the initial thread type.
+    ThreadType thread_type = ThreadType::kDefault;
 
     // If false, the thread will not be joined on destruction. This is intended
     // for threads that want TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN

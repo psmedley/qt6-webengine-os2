@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 
-// TODO: Move implementation to internal/.
+// TODO: Move implementation to internal/. When that is done, the public
+// dependency on content for the build target autofill_assistant/browser:public
+// can be removed.
 namespace autofill_assistant {
 class RuntimeManagerImpl
     : public RuntimeManager,

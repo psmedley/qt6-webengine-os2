@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,8 @@ PoseFrameData MojoToDevicePoseFrameData(
     device_test::mojom::PoseFrameDataPtr& pose) {
   PoseFrameData ret = {};
   ret.is_valid = !!pose->device_to_origin;
-  if (ret.is_valid) {
-    pose->device_to_origin->matrix().getColMajor(ret.device_to_origin);
-  }
+  if (ret.is_valid)
+    pose->device_to_origin->GetColMajorF(ret.device_to_origin);
 
   return ret;
 }
@@ -187,6 +186,19 @@ device_test::mojom::EventData XRTestHookWrapper::WaitGetEventData() {
     }
   }
   return ret;
+}
+
+bool XRTestHookWrapper::WaitGetCanCreateSession() {
+  if (hook_) {
+    bool can_create_session;
+    hook_->WaitGetCanCreateSession(&can_create_session);
+    return can_create_session;
+  }
+
+  // In the absence of a test hook telling us that we can't create a session;
+  // assume that we can, there's often enough default behavior to do so, and
+  // some tests expect to be able to get a session without creating a test hook.
+  return true;
 }
 
 void XRTestHookWrapper::AttachCurrentThread() {

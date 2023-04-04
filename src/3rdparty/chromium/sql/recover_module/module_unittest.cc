@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -952,8 +952,8 @@ TEST_F(RecoverModuleTest, TextEncodings) {
   ASSERT_TRUE(db_.Execute("CREATE TABLE encodings(t TEXT)"));
 
   const std::vector<std::string> values = {
-      "",          "a",         u8"ö",       u8"Mjollnir", u8"Mjölnir",
-      u8"Mjǫlnir", u8"Mjölner", u8"Mjølner", u8"ハンマー",
+      "",        "a",       "ö",       "Mjollnir", "Mjölnir", "Mjǫlnir",
+      "Mjölner", "Mjølner", "ハンマー",
   };
 
   sql::Statement insert(

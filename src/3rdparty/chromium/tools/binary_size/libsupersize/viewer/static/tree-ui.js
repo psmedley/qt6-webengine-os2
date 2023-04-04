@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,6 +128,16 @@ const newTreeElement = (() => {
         group.appendChild(newElementsFragment);
       });
     }
+  }
+
+  /**
+   * Decides whether a given element is a leaf UI node in the tree view.
+   * @param {!HTMLElement} elt
+   * @return {boolean}
+   */
+  function _isLeafNode(elt) {
+    return elt.classList.contains('node') &&
+        elt.getAttribute('aria-expanded') === null;
   }
 
   /**
@@ -310,33 +320,71 @@ const newTreeElement = (() => {
   }
 
   /**
+   * Mousedown handler for an already-focused leaf node, to toggle it off.
+   * @param {!Event} event
+   */
+  function _handleRefocus(event) {
+    // Prevent click that would cause another focus event.
+    event.preventDefault();
+    const node = /** @type {!HTMLElement} */ (event.currentTarget);
+    node.blur();  // focusout handler will handle cleanup.
+  }
+
+  /**
+   * Focusin handler for a node.
+   * @param {!Event} event
+   */
+  function _handleFocusIn(event) {
+    const node = /** @type {!HTMLElement} */ (event.target);
+    if (_isLeafNode(node)) {
+      node.addEventListener('mousedown', _handleRefocus);
+    }
+    displayInfocard(_uiNodeData.get(node));
+    /** @type {HTMLElement} */ (event.currentTarget)
+        .parentElement.classList.add('focused');
+  }
+
+  /**
+   * Focusout handler for a node.
+   * @param {!Event} event
+   */
+  function _handleFocusOut(event) {
+    const node = /** @type {!HTMLElement} */ (event.target);
+    if (_isLeafNode(node)) {
+      node.removeEventListener('mousedown', _handleRefocus);
+    }
+    /** @type {HTMLElement} */ (event.currentTarget)
+        .parentElement.classList.remove('focused');
+  }
+
+  /**
    * Inflates a template to create an element that represents one tree node.
    * The element will represent a tree or a leaf, depending on if the tree node
    * object has any children. Trees use a slightly different template and have
    * click event listeners attached.
-   * @param {TreeNode} data Data to use for the UI.
+   * @param {TreeNode} node Data to use for the UI.
    * @returns {DocumentFragment}
    */
-  function makeTreeElement(data) {
-    const isLeaf = data.children && data.children.length === 0;
+  function makeTreeElement(node) {
+    const isLeaf = node.children && node.children.length === 0;
     const template = isLeaf ? _leafTemplate : _treeTemplate;
     const element = document.importNode(template.content, true);
     const listItemEl = element.firstElementChild;
     const link = /** @type {HTMLElement} */ (listItemEl.firstElementChild);
 
     // Associate clickable node & tree data.
-    _uiNodeData.set(link, Object.freeze(data));
+    _uiNodeData.set(link, Object.freeze(node));
 
     // Icons are predefined in the HTML through hidden SVG elements.
-    const type = data.type[0];
+    const type = node.type[0];
     const icon = getIconTemplate(type);
     if (!isLeaf) {
-      const symbolStyle = getIconStyle(data.type[1]);
+      const symbolStyle = getIconStyle(node.type[1]);
       icon.setAttribute('fill', symbolStyle.color);
     }
 
     // Insert an SVG icon at the start of the link to represent adds/removals.
-    const diffStatusIcon = getDiffStatusTemplate(data);
+    const diffStatusIcon = getDiffStatusTemplate(node);
     if (diffStatusIcon) {
       listItemEl.insertBefore(diffStatusIcon, listItemEl.firstElementChild);
     }
@@ -347,14 +395,12 @@ const newTreeElement = (() => {
     // Set the symbol name and hover text.
     /** @type {HTMLSpanElement} */
     const symbolName = element.querySelector('.symbol-name');
-    symbolName.textContent = shortName(data).replace(
-      _SPECIAL_CHAR_REGEX,
-      _ZERO_WIDTH_SPACE
-    );
-    symbolName.title = data.idPath;
+    symbolName.textContent =
+        shortName(node).replace(_SPECIAL_CHAR_REGEX, _ZERO_WIDTH_SPACE);
+    symbolName.title = node.idPath;
 
     // Set the byte size and hover text.
-    _setSize(element.querySelector('.size'), data);
+    _setSize(element.querySelector('.size'), node);
 
     link.addEventListener('mouseover', _handleMouseOver);
     if (!isLeaf) {
@@ -369,15 +415,9 @@ const newTreeElement = (() => {
       .addEventListener('change', _handleDynamicInputChange('.size', _setSize));
 
   _symbolTree.addEventListener('keydown', _handleKeyNavigation);
-  _symbolTree.addEventListener('focusin', event => {
-    displayInfocard(_uiNodeData.get(
-        /** @type {HTMLElement} */ (event.target)));
-    /** @type {HTMLElement} */ (event.currentTarget).parentElement
-        .classList.add('focused');
-  });
-  _symbolTree.addEventListener('focusout', event =>
-    /** @type {HTMLElement} */ (event.currentTarget).parentElement
-        .classList.remove('focused'));
+  _symbolTree.addEventListener('focusin', _handleFocusIn);
+  _symbolTree.addEventListener('focusout', _handleFocusOut);
+
   window.addEventListener('keydown', event => {
     if (event.key === '?' &&
         /** @type {HTMLElement} */ (event.target).tagName !== 'INPUT') {
@@ -481,7 +521,8 @@ const newTreeElement = (() => {
    */
   function setReviewInfo(metadata) {
     const processReviewInfo = (field) => {
-      const reviewTextElement = document.getElementById('review-text');
+      const reviewTextElement = /** @type {HTMLAnchorElement} */ (
+          document.getElementById('review-text'));
       const reviewInfoElement = document.getElementById('review-info');
       const urlExists = Boolean(
           field?.hasOwnProperty('url') && field?.hasOwnProperty('title'));

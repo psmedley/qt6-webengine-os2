@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,9 @@ std::unique_ptr<MediaService> CreateMediaService(
 #if BUILDFLAG(IS_ANDROID)
   return std::make_unique<MediaService>(
       std::make_unique<AndroidMojoMediaClient>(), std::move(receiver));
+#elif BUILDFLAG(IS_WIN)
+  return std::make_unique<MediaService>(
+      std::make_unique<MediaFoundationMojoMediaClient>(), std::move(receiver));
 #else
   NOTREACHED() << "No MediaService implementation available.";
   return nullptr;

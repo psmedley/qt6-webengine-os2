@@ -9,13 +9,15 @@
 #define skgpu_graphite_ContextPriv_DEFINED
 
 #include "include/gpu/graphite/Context.h"
+#include "src/gpu/graphite/QueueManager.h"
+#include "src/gpu/graphite/SharedContext.h"
 
 class SkShaderCodeDictionary;
 
 namespace skgpu::graphite {
 
+class Caps;
 class GlobalCache;
-class Gpu;
 class ResourceProvider;
 
 /** Class that adds methods to Context that are only intended for use internal to Skia.
@@ -23,10 +25,23 @@ class ResourceProvider;
     data members or virtual methods. */
 class ContextPriv {
 public:
-    Gpu* gpu();
-    const Gpu* gpu() const;
+#if GRAPHITE_TEST_UTILS
+    const Caps* caps() const { return fContext->fSharedContext->caps(); }
 
-    SkShaderCodeDictionary* shaderCodeDictionary();
+    const SkShaderCodeDictionary* shaderCodeDictionary() const {
+        return fContext->fSharedContext->shaderCodeDictionary();
+    }
+    SkShaderCodeDictionary* shaderCodeDictionary() {
+        return fContext->fSharedContext->shaderCodeDictionary();
+    }
+
+    void startCapture() {
+        fContext->fQueueManager->startCapture();
+    }
+    void stopCapture() {
+        fContext->fQueueManager->stopCapture();
+    }
+#endif
 
 private:
     friend class Context; // to construct/copy this type.

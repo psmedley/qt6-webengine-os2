@@ -13,24 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import("//build_overrides/build.gni")
 import("//build_overrides/vulkan_tools.gni")
 
 # Vulkan-tools isn't ported to Fuchsia yet.
 # TODO(spang): Port mock ICD to Fuchsia.
 assert(!is_fuchsia)
-
-vulkan_undefine_configs = []
-if (is_win) {
-  vulkan_undefine_configs += [
-    "//build/config/win:nominmax",
-    "//build/config/win:unicode",
-  ]
-}
-
-raw_vulkan_icd_dir = rebase_path("icd", root_build_dir)
-
-vulkan_data_dir = "$root_out_dir/$vulkan_data_subdir"
-raw_vulkan_data_dir = rebase_path(vulkan_data_dir, root_build_dir)
 
 config("vulkan_internal_config") {
   defines = [ "VULKAN_NON_CMAKE_BUILD" ]
@@ -55,6 +43,19 @@ source_set("vulkan_tools_headers") {
 }
 
 if (!is_android) {
+  vulkan_undefine_configs = []
+  if (is_win && build_with_chromium) {
+    vulkan_undefine_configs += [
+      "//build/config/win:nominmax",
+      "//build/config/win:unicode",
+    ]
+  }
+
+  raw_vulkan_icd_dir = rebase_path("icd", root_build_dir)
+
+  vulkan_data_dir = "$root_out_dir/$vulkan_data_subdir"
+  raw_vulkan_data_dir = rebase_path(vulkan_data_dir, root_build_dir)
+
   # Vulkan Mock ICD
   # ---------------
   shared_library("VkICD_mock_icd") {
@@ -69,8 +70,10 @@ if (!is_android) {
     if (is_win) {
       sources += [ "icd/VkICD_mock_icd.def" ]
     }
-    configs -= [ "//build/config/compiler:chromium_code" ]
-    configs += [ "//build/config/compiler:no_chromium_code" ]
+    if (build_with_chromium) {
+      configs -= [ "//build/config/compiler:chromium_code" ]
+      configs += [ "//build/config/compiler:no_chromium_code" ]
+    }
   }
 
   action("vulkan_gen_icd_json_file") {

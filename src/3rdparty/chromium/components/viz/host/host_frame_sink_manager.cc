@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -292,6 +292,15 @@ void HostFrameSinkManager::Throttle(const std::vector<FrameSinkId>& ids,
   frame_sink_manager_->Throttle(ids, interval);
 }
 
+void HostFrameSinkManager::StartThrottlingAllFrameSinks(
+    base::TimeDelta interval) {
+  frame_sink_manager_->StartThrottlingAllFrameSinks(interval);
+}
+
+void HostFrameSinkManager::StopThrottlingAllFrameSinks() {
+  frame_sink_manager_->StopThrottlingAllFrameSinks();
+}
+
 void HostFrameSinkManager::AddHitTestRegionObserver(
     HitTestRegionObserver* observer) {
   observers_.AddObserver(observer);
@@ -306,8 +315,11 @@ void HostFrameSinkManager::OnConnectionLost() {
   connection_was_lost_ = true;
 
   receiver_.reset();
-  frame_sink_manager_remote_.reset();
+  // frame_sink_manager_ points to |frame_sink_manager_remote_| if using mojo.
+  // Set frame_sink_manager_ to nullptr before
+  // frame_sink_manager_remote_.reset() to avoid dangling ptr.
   frame_sink_manager_ = nullptr;
+  frame_sink_manager_remote_.reset();
 
   // Any cached back buffers are invalid once the connection to the
   // FrameSinkManager is lost.

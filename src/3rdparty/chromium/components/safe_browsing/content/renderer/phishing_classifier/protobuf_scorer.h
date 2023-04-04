@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -41,8 +41,9 @@ class ProtobufModelScorer : public Scorer {
   // Factory method which creates a new Scorer object by parsing the given
   // model. If parsing fails this method returns NULL.
   // Can use this if model_str is empty.
-  static ProtobufModelScorer* Create(const base::StringPiece& model_str,
-                                     base::File visual_tflite_model);
+  static std::unique_ptr<ProtobufModelScorer> Create(
+      const base::StringPiece& model_str,
+      base::File visual_tflite_model);
 
   double ComputeScore(const FeatureMap& features) const override;
 
@@ -53,6 +54,7 @@ class ProtobufModelScorer : public Scorer {
 #endif
 
   int model_version() const override;
+  int dom_model_version() const override;
   base::RepeatingCallback<bool(uint32_t)> find_page_word_callback()
       const override;
   base::RepeatingCallback<bool(const std::string&)> find_page_term_callback()

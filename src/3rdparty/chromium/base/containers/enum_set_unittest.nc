@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 namespace base {
 namespace {
 
-#if defined(NCTEST_ALL_METHOD_DISALLOWED_ON_LARGE_SPARSE_ENUM) // [r"fatal error: static_assert failed due to requirement 'kValueCount <= 64' \"Max number of enum values is 64 for constexpr constructor\""]
+#if defined(NCTEST_ALL_METHOD_DISALLOWED_ON_LARGE_SPARSE_ENUM) // [r"fatal error: static assertion failed due to requirement 'kValueCount <= 64': Max number of enum values is 64 for constexpr constructor"]
 
 void WontCompile() {
   enum class TestEnumSparse {

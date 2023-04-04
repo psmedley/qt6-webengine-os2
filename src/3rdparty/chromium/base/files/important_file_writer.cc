@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,8 @@
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/task_runner.h"
-#include "base/task/task_runner_util.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/scoped_thread_priority.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
@@ -147,6 +147,7 @@ bool ImportantFileWriter::WriteFileAtomicallyImpl(const FilePath& path,
                                                   StringPiece data,
                                                   StringPiece histogram_suffix,
                                                   bool from_instance) {
+  const TimeTicks write_start = TimeTicks::Now();
   if (!from_instance)
     ImportantFileWriterCleaner::AddDirectory(path.DirName());
 
@@ -192,7 +193,8 @@ bool ImportantFileWriter::WriteFileAtomicallyImpl(const FilePath& path,
   int bytes_written = 0;
   for (const char *scan = data.data(), *const end = scan + data.length();
        scan < end; scan += bytes_written) {
-    const int write_amount = std::min(kMaxWriteAmount, end - scan);
+    const int write_amount =
+        static_cast<int>(std::min(kMaxWriteAmount, end - scan));
     bytes_written = tmp_file.WriteAtCurrentPos(scan, write_amount);
     if (bytes_written != write_amount) {
       DPLOG(WARNING) << "Failed to write " << write_amount << " bytes to temp "
@@ -210,6 +212,7 @@ bool ImportantFileWriter::WriteFileAtomicallyImpl(const FilePath& path,
   }
 
   File::Error replace_file_error = File::FILE_OK;
+  bool result;
 
   // The file must be closed for ReplaceFile to do its job, which opens up a
   // race with other software that may open the temp file (e.g., an A/V scanner
@@ -217,28 +220,24 @@ bool ImportantFileWriter::WriteFileAtomicallyImpl(const FilePath& path,
   // Windows and close as late as possible to improve the chances that the other
   // software will lose the race.
 #if BUILDFLAG(IS_WIN)
-  const auto previous_priority = PlatformThread::GetCurrentThreadPriority();
-  const bool reset_priority = previous_priority <= ThreadPriority::NORMAL;
-  if (reset_priority)
-    PlatformThread::SetCurrentThreadPriority(ThreadPriority::DISPLAY);
-#endif  // BUILDFLAG(IS_WIN)
-  tmp_file.Close();
-  bool result = ReplaceFile(tmp_file_path, path, &replace_file_error);
-#if BUILDFLAG(IS_WIN)
-  // Save and restore the last error code so that it's not polluted by the
-  // thread priority change.
-  auto last_error = ::GetLastError();
+  DWORD last_error;
   int retry_count = 0;
-  for (/**/; !result && retry_count < kReplaceRetries; ++retry_count) {
-    // The race condition between closing the temporary file and moving it gets
-    // hit on a regular basis on some systems (https://crbug.com/1099284), so
-    // we retry a few times before giving up.
-    PlatformThread::Sleep(kReplacePauseInterval);
+  {
+    ScopedBoostPriority scoped_boost_priority(ThreadType::kDisplayCritical);
+    tmp_file.Close();
     result = ReplaceFile(tmp_file_path, path, &replace_file_error);
+    // Save and restore the last error code so that it's not polluted by the
+    // thread priority change.
     last_error = ::GetLastError();
+    for (/**/; !result && retry_count < kReplaceRetries; ++retry_count) {
+      // The race condition between closing the temporary file and moving it
+      // gets hit on a regular basis on some systems
+      // (https://crbug.com/1099284), so we retry a few times before giving up.
+      PlatformThread::Sleep(kReplacePauseInterval);
+      result = ReplaceFile(tmp_file_path, path, &replace_file_error);
+      last_error = ::GetLastError();
+    }
   }
-  if (reset_priority)
-    PlatformThread::SetCurrentThreadPriority(previous_priority);
 
   // Log how many times we had to retry the ReplaceFile operation before it
   // succeeded. If we never succeeded then return a special value.
@@ -246,18 +245,25 @@ bool ImportantFileWriter::WriteFileAtomicallyImpl(const FilePath& path,
     retry_count = kReplaceRetryFailure;
   UmaHistogramExactLinear("ImportantFile.FileReplaceRetryCount", retry_count,
                           kReplaceRetryFailure);
+#else
+  tmp_file.Close();
+  result = ReplaceFile(tmp_file_path, path, &replace_file_error);
 #endif  // BUILDFLAG(IS_WIN)
 
   if (!result) {
 #if BUILDFLAG(IS_WIN)
     // Restore the error code from ReplaceFile so that it will be available for
-    // the log message, otherwise failures in SetCurrentThreadPriority may be
+    // the log message, otherwise failures in SetCurrentThreadType may be
     // reported instead.
     ::SetLastError(last_error);
 #endif
     DPLOG(WARNING) << "Failed to replace " << path << " with " << tmp_file_path;
     DeleteTmpFileWithRetry(File(), tmp_file_path);
   }
+
+  const TimeDelta write_duration = TimeTicks::Now() - write_start;
+  UmaHistogramTimesWithSuffix("ImportantFile.WriteDuration", histogram_suffix,
+                              write_duration);
 
   return result;
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,11 +40,16 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
     kFirstInputDelayAfterBackForwardCacheRestore = 1 << 10,
     kLayoutShift = 1 << 11,
     kRequestAnimationFrameAfterBackForwardCacheRestore = 1 << 12,
+    kFirstScrollDelay = 1 << 13,
+    kSoftNavigationCountUpdated = 1 << 14,
+    kTotalInputDelay = 1 << 15,
   };
   using FrameTreeNodeId =
       page_load_metrics::PageLoadMetricsObserver::FrameTreeNodeId;
 
   explicit PageLoadMetricsTestWaiter(content::WebContents* web_contents);
+  explicit PageLoadMetricsTestWaiter(content::WebContents* web_contents,
+                                     const char* observer_name_);
 
   ~PageLoadMetricsTestWaiter() override;
 
@@ -67,6 +72,11 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
   // any rect allowed.
   // TODO(skobes): Unify this API with AddMainFrameIntersectionExpectation.
   void SetMainFrameIntersectionExpectation();
+
+  // Add a main frame viewport intersection expectation. Expects that the
+  // mainframe receives its viewport rectangle in the main frame document's
+  // coornidate. Subsequent calls overwrite unmet expectations.
+  void AddMainFrameViewportRectExpectation(const gfx::Rect& rect);
 
   // Add a single WebFeature expectation.
   void AddWebFeatureExpectation(blink::mojom::WebFeature web_feature);
@@ -115,6 +125,11 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
     return current_network_body_bytes_;
   }
 
+  // Add the number of input events count expectation.
+  void AddNumInputEventsExpectation(uint64_t expected_num_input_events) {
+    expected_num_input_events_ = expected_num_input_events;
+  }
+
  protected:
   virtual bool ExpectationsSatisfied() const;
 
@@ -127,6 +142,8 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
   virtual void ResetExpectations();
 
  private:
+  const char* observer_name_;
+
   // Manages a bitset of TimingFields.
   class TimingFieldBitSet {
    public:
@@ -178,6 +195,13 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
   void OnTimingUpdated(content::RenderFrameHost* subframe_rfh,
                        const page_load_metrics::mojom::PageLoadTiming& timing);
 
+  void OnSoftNavigationCountUpdated();
+
+  // Updates observed page fields when a input timing update is received by the
+  // MetricsWebContentsObserver. Stops waiting if expectations are satsfied
+  // after update.
+  void OnPageInputTimingUpdated(uint64_t num_input_events);
+
   // Updates observed page fields when a timing update is received by the
   // MetricsWebContentsObserver. Stops waiting if expectations are satsfied
   // after update.
@@ -211,10 +235,12 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
   void FrameSizeChanged(content::RenderFrameHost* render_frame_host,
                         const gfx::Size& frame_size);
 
-  void OnFrameIntersectionUpdate(
+  void OnMainFrameIntersectionRectChanged(
       content::RenderFrameHost* rfh,
-      const page_load_metrics::mojom::FrameIntersectionUpdate&
-          frame_intersection_update);
+      const gfx::Rect& main_frame_intersection_rect);
+
+  void OnMainFrameViewportRectChanged(
+      const gfx::Rect& main_frame_viewport_rect);
 
   void OnDidFinishSubFrameNavigation(
       content::NavigationHandle* navigation_handle);
@@ -237,7 +263,9 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
   bool SubframeNavigationExpectationsSatisfied() const;
   bool SubframeDataExpectationsSatisfied() const;
   bool MainFrameIntersectionExpectationsSatisfied() const;
+  bool MainFrameViewportRectExpectationsSatisfied() const;
   bool MemoryUpdateExpectationsSatisfied() const;
+  bool TotalInputDelayExpectationsSatisfied() const;
 
   void AddObserver(page_load_metrics::PageLoadTracker* tracker);
 
@@ -258,6 +286,7 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
     std::set<gfx::Size, FrameSizeComparator> frame_sizes_;
     bool did_set_main_frame_intersection_ = false;
     std::vector<gfx::Rect> main_frame_intersections_;
+    absl::optional<gfx::Rect> main_frame_viewport_rect_;
     std::unordered_set<content::GlobalRenderFrameHostId,
                        content::GlobalRenderFrameHostIdHasher>
         memory_update_frame_ids_;
@@ -281,8 +310,12 @@ class PageLoadMetricsTestWaiter : public MetricsLifecycleObserver {
 
   bool attach_on_tracker_creation_ = false;
   bool did_add_observer_ = false;
+  bool soft_navigation_count_updated_ = false;
 
   double last_main_frame_layout_shift_score_ = 0;
+
+  uint64_t current_num_input_events_ = 0;
+  uint64_t expected_num_input_events_ = 0;
 
   base::WeakPtrFactory<PageLoadMetricsTestWaiter> weak_factory_{this};
 

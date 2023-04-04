@@ -1,7 +1,18 @@
 import { assert } from '../../common/util/util.js';
+import { Float16Array } from '../../external/petamoriken/float16/float16.js';
 
-import { kBit } from './constants.js';
-import { f32, f32Bits, i32, Scalar } from './conversion.js';
+import { kBit, kValue } from './constants.js';
+import {
+  f16,
+  f16Bits,
+  f32,
+  f32Bits,
+  floatBitsToNumber,
+  i32,
+  kFloat16Format,
+  kFloat32Format,
+  Scalar,
+} from './conversion.js';
 
 /**
  * A multiple of 8 guaranteed to be way too large to allocate (just under 8 pebibytes).
@@ -33,71 +44,21 @@ export function clamp(n: number, { min, max }: { min: number; max: number }): nu
   return Math.min(Math.max(n, min), max);
 }
 
-/**
- * @returns the (absolute) Units of Last Place difference between the float32 numbers a and b, taken
- * as JS doubles. If either `a` or `b` are not finite numbers, then diffULP() returns Infinity.
- *
- * Subnormal numbers are skipped, so 0 is one ULP from the minimum normal number.
- * Subnormal values are rounded to 0.
- */
-export function diffULP(a: number, b: number): number {
-  if (!Number.isFinite(a) || !Number.isFinite(b)) {
-    return Infinity;
-  }
-
-  const arr = new Uint32Array(new Float32Array([a, b]).buffer);
-  const u32_a = arr[0];
-  const u32_b = arr[1];
-
-  const sign_a = (u32_a & 0x80000000) !== 0;
-  const sign_b = (u32_b & 0x80000000) !== 0;
-  const masked_a = u32_a & 0x7fffffff;
-  const masked_b = u32_b & 0x7fffffff;
-  const subnormal_or_zero_a = (u32_a & 0x7f800000) === 0;
-  const subnormal_or_zero_b = (u32_b & 0x7f800000) === 0;
-
-  // If the number is subnormal, then reduce it to 0 for ULP comparison.
-  // If the number is normal then reduce its bits-representation so to that we
-  // can pretend that the subnormal numbers don't exist, for the purposes of
-  // counting ULP steps from zero (or any subnormal) to any of the normal numbers.
-  const bits_a = subnormal_or_zero_a ? 0 : masked_a - 0x7fffff;
-  const bits_b = subnormal_or_zero_b ? 0 : masked_b - 0x7fffff;
-
-  if (sign_a === sign_b) {
-    return Math.max(bits_a, bits_b) - Math.min(bits_a, bits_b);
-  }
-  return bits_a + bits_b;
+/** @returns 0 if |val| is a subnormal f32 number, otherwise returns |val| */
+export function flushSubnormalNumberF32(val: number): number {
+  return isSubnormalNumberF32(val) ? 0 : val;
 }
 
-/**
- * @returns 0 if |val| is a subnormal f32 number, otherwise returns |val|
- */
-function flushSubnormalNumber(val: number): number {
-  const u32_val = new Uint32Array(new Float32Array([val]).buffer)[0];
-  return (u32_val & 0x7f800000) === 0 ? 0 : val;
-}
-
-/**
- * @returns 0 if |val| is a bit field for a subnormal f32 number, otherwise
- * returns |val|
- * |val| is assumed to be a u32 value representing a f32
- */
-function flushSubnormalBits(val: number): number {
-  return (val & 0x7f800000) === 0 ? 0 : val;
-}
-
-/**
- * @returns 0 if |val| is a subnormal f32 number, otherwise returns |val|
- */
-export function flushSubnormalScalar(val: Scalar): Scalar {
-  return isSubnormalScalar(val) ? f32(0) : val;
+/** @returns 0 if |val| is a subnormal f32 number, otherwise returns |val| */
+export function flushSubnormalScalarF32(val: Scalar): Scalar {
+  return isSubnormalScalarF32(val) ? f32(0) : val;
 }
 
 /**
  * @returns true if |val| is a subnormal f32 number, otherwise returns false
  * 0 is considered a non-subnormal number by this function.
  */
-export function isSubnormalScalar(val: Scalar): boolean {
+export function isSubnormalScalarF32(val: Scalar): boolean {
   if (val.type.kind !== 'f32') {
     return false;
   }
@@ -110,22 +71,64 @@ export function isSubnormalScalar(val: Scalar): boolean {
   return (u32_val & 0x7f800000) === 0;
 }
 
-/** Utility to pass TS numbers into |isSubnormalNumber| */
-export function isSubnormalNumber(val: number): boolean {
-  return isSubnormalScalar(f32(val));
+/** U/** @returns if number is within subnormal range of f32 */
+export function isSubnormalNumberF32(n: number): boolean {
+  return n > kValue.f32.negative.max && n < kValue.f32.positive.min;
+}
+
+/** @returns if number is in the finite range of f32 */
+export function isFiniteF32(n: number) {
+  return n >= kValue.f32.negative.min && n <= kValue.f32.positive.max;
+}
+
+/** @returns 0 if |val| is a subnormal f16 number, otherwise returns |val| */
+export function flushSubnormalNumberF16(val: number): number {
+  return isSubnormalNumberF16(val) ? 0 : val;
+}
+
+/** @returns 0 if |val| is a subnormal f16 number, otherwise returns |val| */
+export function flushSubnormalScalarF16(val: Scalar): Scalar {
+  return isSubnormalScalarF16(val) ? f16(0) : val;
 }
 
 /**
- * @returns the next single precision floating point value after |val|,
+ * @returns true if |val| is a subnormal f16 number, otherwise returns false
+ * 0 is considered a non-subnormal number by this function.
+ */
+export function isSubnormalScalarF16(val: Scalar): boolean {
+  if (val.type.kind !== 'f16') {
+    return false;
+  }
+
+  if (val === f16(0)) {
+    return false;
+  }
+
+  const u16_val = new Uint16Array(new Float16Array([val.value.valueOf() as number]).buffer)[0];
+  return (u16_val & 0x7f800000) === 0;
+}
+
+/** @returns if number is within subnormal range of f16 */
+export function isSubnormalNumberF16(n: number): boolean {
+  return n > kValue.f16.negative.max && n < kValue.f16.positive.min;
+}
+
+/** @returns if number is in the finite range of f16 */
+export function isFiniteF16(n: number) {
+  return n >= kValue.f16.negative.min && n <= kValue.f16.positive.max;
+}
+
+/**
+ * @returns the next f32 value after |val|,
  * towards +inf if |dir| is true, otherwise towards -inf.
  * If |flush| is true, all subnormal values will be flushed to 0,
  * before processing.
  * If |flush| is false, the next subnormal will be calculated when appropriate,
- * and for -/+0 the nextAfter will be the closest subnormal in the correct
+ * and for -/+0 the nextAfterF32 will be the closest subnormal in the correct
  * direction.
- * |val| must be expressible as a f32.
+ * val needs to be in [min f32, max f32]
  */
-export function nextAfter(val: number, dir: boolean = true, flush: boolean): Scalar {
+export function nextAfterF32(val: number, dir: boolean = true, flush: boolean): Scalar {
   if (Number.isNaN(val)) {
     return f32Bits(kBit.f32.nan.positive.s);
   }
@@ -138,7 +141,12 @@ export function nextAfter(val: number, dir: boolean = true, flush: boolean): Sca
     return f32Bits(kBit.f32.infinity.negative);
   }
 
-  val = flush ? flushSubnormalNumber(val) : val;
+  assert(
+    val <= kValue.f32.positive.max && val >= kValue.f32.negative.min,
+    `${val} is not in the range of float32`
+  );
+
+  val = flush ? flushSubnormalNumberF32(val) : val;
 
   // -/+0 === 0 returns true
   if (val === 0) {
@@ -149,104 +157,301 @@ export function nextAfter(val: number, dir: boolean = true, flush: boolean): Sca
     }
   }
 
-  // number is float64 internally, so need to test if value is expressible as a float32.
   const converted: number = new Float32Array([val])[0];
-  assert(val === converted, `${val} is not expressible as a f32.`);
-
-  const u32_val = new Uint32Array(new Float32Array([val]).buffer)[0];
-  const is_positive = (u32_val & 0x80000000) === 0;
-  let result = u32_val;
-  if (dir === is_positive) {
-    result += 1;
+  let u32_result: number;
+  if (val === converted) {
+    // val is expressible precisely as a float32
+    u32_result = new Uint32Array(new Float32Array([val]).buffer)[0];
+    const is_positive = (u32_result & 0x80000000) === 0;
+    if (dir === is_positive) {
+      u32_result += 1;
+    } else {
+      u32_result -= 1;
+    }
   } else {
-    result -= 1;
+    // val had to be rounded to be expressed as a float32
+    if (dir === converted > val) {
+      // Rounding was in the direction requested
+      u32_result = new Uint32Array(new Float32Array([converted]).buffer)[0];
+    } else {
+      // Round was opposite of the direction requested, so need nextAfterF32 in the requested direction.
+      // This will not recurse since converted is guaranteed to be a float32 due to the conversion above.
+      const next = nextAfterF32(converted, dir, flush).value.valueOf() as number;
+      u32_result = new Uint32Array(new Float32Array([next]).buffer)[0];
+    }
   }
-  result = flush ? flushSubnormalBits(result) : result;
 
   // Checking for overflow
-  if ((result & 0x7f800000) === 0x7f800000) {
+  if ((u32_result & 0x7f800000) === 0x7f800000) {
     if (dir) {
       return f32Bits(kBit.f32.infinity.positive);
     } else {
       return f32Bits(kBit.f32.infinity.negative);
     }
   }
-  return f32Bits(result);
+
+  const f32_result = f32Bits(u32_result);
+  return flush ? flushSubnormalScalarF32(f32_result) : f32_result;
 }
 
 /**
- * @returns if a test value is correctly rounded to an target value. Only
- * defined for |test_values| being a float32. target values may be any number.
- *
- * Correctly rounded means that if the target value is precisely expressible
- * as a float32, then |test_value| === |target|.
- * Otherwise |test_value| needs to be either the closest expressible number
- * greater or less than |target|.
- *
- * By default internally tests with both subnormals being flushed to 0 and not
- * being flushed, but |accept_to_zero| and |accept_no_flush| can be used to
- * control that behaviour. At least one accept flag must be true.
+ * @returns the next f16 value after |val|,
+ * towards +inf if |dir| is true, otherwise towards -inf.
+ * If |flush| is true, all subnormal values will be flushed to 0,
+ * before processing.
+ * If |flush| is false, the next subnormal will be calculated when appropriate,
+ * and for -/+0 the nextAfterF16 will be the closest subnormal in the correct
+ * direction.
+ * val needs to be in [min f16, max f16]
  */
-export function correctlyRounded(
-  test_value: Scalar,
-  target: number,
-  accept_to_zero: boolean = true,
-  accept_no_flush: boolean = true
-): boolean {
+export function nextAfterF16(val: number, dir: boolean = true, flush: boolean): Scalar {
+  if (Number.isNaN(val)) {
+    return f16Bits(kBit.f16.nan.positive.s);
+  }
+
+  if (val === Number.POSITIVE_INFINITY) {
+    return f16Bits(kBit.f16.infinity.positive);
+  }
+
+  if (val === Number.NEGATIVE_INFINITY) {
+    return f16Bits(kBit.f16.infinity.negative);
+  }
+
   assert(
-    accept_to_zero || accept_no_flush,
-    `At least one of |accept_to_zero| & |accept_no_flush| must be true`
+    val <= kValue.f16.positive.max && val >= kValue.f16.negative.min,
+    `${val} is not in the range of float16`
   );
 
-  let result: boolean = false;
-  if (accept_to_zero) {
-    result = result || correctlyRoundedImpl(test_value, target, true);
+  val = flush ? flushSubnormalNumberF16(val) : val;
+
+  // -/+0 === 0 returns true
+  if (val === 0) {
+    if (dir) {
+      return flush ? f16Bits(kBit.f16.positive.min) : f16Bits(kBit.f16.subnormal.positive.min);
+    } else {
+      return flush ? f16Bits(kBit.f16.negative.max) : f16Bits(kBit.f16.subnormal.negative.max);
+    }
   }
-  if (accept_no_flush) {
-    result = result || correctlyRoundedImpl(test_value, target, false);
+
+  const converted: number = new Float16Array([val])[0];
+  let u16_result: number;
+  if (val === converted) {
+    // val is expressible precisely as a float16
+    u16_result = new Uint16Array(new Float16Array([val]).buffer)[0];
+    const is_positive = (u16_result & 0x8000) === 0;
+    if (dir === is_positive) {
+      u16_result += 1;
+    } else {
+      u16_result -= 1;
+    }
+  } else {
+    // val had to be rounded to be expressed as a float16
+    if (dir === converted > val) {
+      // Rounding was in the direction requested
+      u16_result = new Uint16Array(new Float16Array([converted]).buffer)[0];
+    } else {
+      // Round was opposite of the direction requested, so need nextAfterF16 in the requested direction.
+      // This will not recurse since converted is guaranteed to be a float16 due to the conversion above.
+      const next = nextAfterF16(converted, dir, flush).value.valueOf() as number;
+      u16_result = new Uint16Array(new Float16Array([next]).buffer)[0];
+    }
   }
-  return result;
+
+  // Checking for overflow
+  if ((u16_result & 0x7f800000) === 0x7f800000) {
+    if (dir) {
+      return f16Bits(kBit.f16.infinity.positive);
+    } else {
+      return f16Bits(kBit.f16.infinity.negative);
+    }
+  }
+
+  const f16_result = f16Bits(u16_result);
+  return flush ? flushSubnormalScalarF16(f16_result) : f16_result;
 }
 
-function correctlyRoundedImpl(test_value: Scalar, target: number, flush: boolean): boolean {
-  assert(test_value.type.kind === 'f32', `${test_value} is expected to be a 'f32'`);
-
+/**
+ * @returns ulp(x) for a specific flushing mode
+ *
+ * This is the main implementation of oneULP, which is normally what should be
+ * used. This should only be called directly if a specific flushing mode is
+ * required.
+ *
+ * @param target number to calculate ULP for
+ * @param flush should subnormals be flushed to zero
+ */
+function oneULPImpl(target: number, flush: boolean): number {
   if (Number.isNaN(target)) {
-    return Number.isNaN(test_value.value.valueOf() as number);
+    return Number.NaN;
   }
 
-  if (target === Number.POSITIVE_INFINITY) {
-    return test_value.value === f32Bits(kBit.f32.infinity.positive).value;
+  target = flush ? flushSubnormalNumberF32(target) : target;
+
+  // For values at the edge of the range or beyond ulp(x) is defined as the distance between the two nearest
+  // f32 representable numbers to the appropriate edge.
+  if (target === Number.POSITIVE_INFINITY || target >= kValue.f32.positive.max) {
+    return kValue.f32.positive.max - kValue.f32.positive.nearest_max;
+  } else if (target === Number.NEGATIVE_INFINITY || target <= kValue.f32.negative.min) {
+    return kValue.f32.negative.nearest_min - kValue.f32.negative.min;
   }
 
-  if (target === Number.NEGATIVE_INFINITY) {
-    return test_value.value === f32Bits(kBit.f32.infinity.negative).value;
-  }
-
-  test_value = flush ? flushSubnormalScalar(test_value) : test_value;
-  target = flush ? flushSubnormalNumber(target) : target;
-
-  const target32 = new Float32Array([target])[0];
-  const converted: number = target32;
-  if (target === converted) {
-    // expected is precisely expressible in float32
-    return test_value.value === f32(target32).value;
-  }
-
-  let after_target: Scalar;
-  let before_target: Scalar;
-
-  if (converted > target) {
-    // target32 is rounded towards +inf, so is after_target
-    after_target = f32(target32);
-    before_target = nextAfter(target32, false, flush);
+  // ulp(x) is min(after - before), where
+  //     before <= x <= after
+  //     before =/= after
+  //     before and after are f32 representable
+  const before = nextAfterF32(target, false, flush).value.valueOf() as number;
+  const after = nextAfterF32(target, true, flush).value.valueOf() as number;
+  const converted: number = new Float32Array([target])[0];
+  if (converted === target) {
+    // |target| is f32 representable, so either before or after will be x
+    return Math.min(target - before, after - target);
   } else {
-    // target32 is rounded towards -inf, so is before_target
-    after_target = nextAfter(target32, true, flush);
-    before_target = f32(target32);
+    // |target| is not f32 representable so taking distance of neighbouring f32s.
+    return after - before;
+  }
+}
+
+/**
+ * @returns ulp(x), the unit of least precision for a specific number as a 32-bit float
+ *
+ * ulp(x) is the distance between the two floating point numbers nearest x.
+ * This value is also called unit of last place, ULP, and 1 ULP.
+ * See the WGSL spec and http://www.ens-lyon.fr/LIP/Pub/Rapports/RR/RR2005/RR2005-09.pdf
+ * for a more detailed/nuanced discussion of the definition of ulp(x).
+ *
+ * @param target number to calculate ULP for
+ * @param flush should subnormals be flushed to zero, if not set both flushed
+ *              and non-flush values are considered.
+ */
+export function oneULP(target: number, flush?: boolean): number {
+  if (flush === undefined) {
+    return Math.max(oneULPImpl(target, false), oneULPImpl(target, true));
   }
 
-  return test_value.value === before_target.value || test_value.value === after_target.value;
+  return oneULPImpl(target, flush);
+}
+
+/**
+ * @returns if a number is within N * ulp(x) of a target value
+ * @param val number to test
+ * @param target expected number
+ * @param n acceptance range
+ * @param flush should subnormals be flushed to zero
+ */
+export function withinULP(val: number, target: number, n: number = 1) {
+  if (Number.isNaN(val) || Number.isNaN(target)) {
+    return false;
+  }
+
+  const ulp = oneULP(target);
+  if (Number.isNaN(ulp)) {
+    return false;
+  }
+
+  if (val === target) {
+    return true;
+  }
+
+  const diff = val > target ? val - target : target - val;
+  return diff <= n * ulp;
+}
+
+/**
+ * Calculate the valid roundings when quantizing to 32-bit floats
+ *
+ * TS/JS's number type is internally a f64, so quantization needs to occur when
+ * converting to f32 for WGSL. WGSL does not specify a specific rounding mode,
+ * so if a number is not precisely representable in 32-bits, but in the
+ * range, there are two possible valid quantizations. If it is precisely
+ * representable, there is only one valid quantization. This function calculates
+ * the valid roundings and returns them in an array.
+ *
+ * This function does not consider flushing mode, so subnormals are maintained.
+ * The caller is responsible to flushing before and after as appropriate.
+ *
+ * Out of range values return the appropriate infinity and edge value.
+ *
+ * @param n number to be quantized
+ * @returns all of the acceptable roundings for quantizing to 32-bits in
+ *          ascending order.
+ */
+export function correctlyRoundedF32(n: number): number[] {
+  assert(!Number.isNaN(n), `correctlyRoundedF32 not defined for NaN`);
+  // Above f32 range
+  if (n === Number.POSITIVE_INFINITY || n > kValue.f32.positive.max) {
+    return [kValue.f32.positive.max, Number.POSITIVE_INFINITY];
+  }
+
+  // Below f32 range
+  if (n === Number.NEGATIVE_INFINITY || n < kValue.f32.negative.min) {
+    return [Number.NEGATIVE_INFINITY, kValue.f32.negative.min];
+  }
+
+  const n_32 = new Float32Array([n])[0];
+  const converted: number = n_32;
+  if (n === converted) {
+    // n is precisely expressible as a f32, so should not be rounded
+    return [n];
+  }
+
+  if (converted > n) {
+    // n_32 rounded towards +inf, so is after n
+    const other = nextAfterF32(n_32, false, false).value as number;
+    return [other, converted];
+  } else {
+    // n_32 rounded towards -inf, so is before n
+    const other = nextAfterF32(n_32, true, false).value as number;
+    return [converted, other];
+  }
+}
+
+/**
+ * Calculate the valid roundings when quantizing to 16-bit floats
+ *
+ * TS/JS's number type is internally a f64, so quantization needs to occur when
+ * converting to f16 for WGSL. WGSL does not specify a specific rounding mode,
+ * so if a number is not precisely representable in 16-bits, but in the
+ * range, there are two possible valid quantizations. If it is precisely
+ * representable, there is only one valid quantization. This function calculates
+ * the valid roundings and returns them in an array.
+ *
+ * This function does not consider flushing mode, so subnormals are maintained.
+ * The caller is responsible to flushing before and after as appropriate.
+ *
+ * Out of range values return the appropriate infinity and edge value.
+ *
+ * @param n number to be quantized
+ * @returns all of the acceptable roundings for quantizing to 16-bits in
+ *          ascending order.
+ */
+export function correctlyRoundedF16(n: number): number[] {
+  assert(!Number.isNaN(n), `correctlyRoundedF16 not defined for NaN`);
+  // Above f16 range
+  if (n === Number.POSITIVE_INFINITY || n > kValue.f16.positive.max) {
+    return [kValue.f16.positive.max, Number.POSITIVE_INFINITY];
+  }
+
+  // Below f16 range
+  if (n === Number.NEGATIVE_INFINITY || n < kValue.f16.negative.min) {
+    return [Number.NEGATIVE_INFINITY, kValue.f16.negative.min];
+  }
+
+  const n_16 = new Float16Array([n])[0];
+  const converted: number = n_16;
+  if (n === converted) {
+    // n is precisely expressible as a f16, so should not be rounded
+    return [n];
+  }
+
+  if (converted > n) {
+    // n_16 rounded towards +inf, so is after n
+    const other = nextAfterF16(n_16, false, false).value as number;
+    return [other, converted];
+  } else {
+    // n_16 rounded towards -inf, so is before n
+    const other = nextAfterF16(n_16, true, false).value as number;
+    return [converted, other];
+  }
 }
 
 /**
@@ -276,7 +481,14 @@ export function lerp(a: number, b: number, t: number): number {
 
 /** @returns a linear increasing range of numbers. */
 export function linearRange(a: number, b: number, num_steps: number): Array<number> {
-  assert(num_steps > 0, '|num_steps| must be greater than 0');
+  if (num_steps <= 0) {
+    return Array<number>();
+  }
+
+  // Avoid division by 0
+  if (num_steps === 1) {
+    return [a];
+  }
 
   return Array.from(Array(num_steps).keys()).map(i => lerp(a, b, i / (num_steps - 1)));
 }
@@ -288,15 +500,165 @@ export function linearRange(a: number, b: number, num_steps: number): Array<numb
  * thus biasing towards 0, but remaining on the [0, 1] range.
  * This biased range is then scaled to the desired range using lerp.
  * Different curves could be generated by changing c, where greater values of c will bias more towards 0.
- * */
+ */
 export function biasedRange(a: number, b: number, num_steps: number): Array<number> {
   const c = 2;
-  assert(num_steps > 0, '|num_steps| must be greater than 0');
+  if (num_steps <= 0) {
+    return Array<number>();
+  }
+
+  // Avoid division by 0
+  if (num_steps === 1) {
+    return [a];
+  }
 
   return Array.from(Array(num_steps).keys()).map(i =>
     lerp(a, b, Math.pow(lerp(0, 1, i / (num_steps - 1)), c))
   );
 }
+
+/**
+ * @returns an ascending sorted array of numbers spread over the entire range of 32-bit floats
+ *
+ * Numbers are divided into 4 regions: negative normals, negative subnormals, positive subnormals & positive normals.
+ * Zero is included.
+ *
+ * Numbers are generated via taking a linear spread of the bit field representations of the values in each region. This
+ * means that number of precise f32 values between each returned value in a region should be about the same. This allows
+ * for a wide range of magnitudes to be generated, instead of being extremely biased towards the edges of the f32 range.
+ *
+ * This function is intended to provide dense coverage of the f32 range, for a minimal list of values to use to cover
+ * f32 behaviour, use sparseF32Range instead.
+ *
+ * @param counts structure param with 4 entries indicating the number of entries to be generated each region, entries
+ *               must be 0 or greater.
+ */
+export function fullF32Range(
+  counts: {
+    neg_norm?: number;
+    neg_sub?: number;
+    pos_sub: number;
+    pos_norm: number;
+  } = { pos_sub: 10, pos_norm: 50 }
+): Array<number> {
+  counts.neg_norm = counts.neg_norm === undefined ? counts.pos_norm : counts.neg_norm;
+  counts.neg_sub = counts.neg_sub === undefined ? counts.pos_sub : counts.neg_sub;
+
+  // Generating bit fields first and then converting to f32, so that the spread across the possible f32 values is more
+  // even. Generating against the bounds of f32 values directly results in the values being extremely biased towards the
+  // extremes, since they are so much larger.
+  const bit_fields = [
+    ...linearRange(kBit.f32.negative.min, kBit.f32.negative.max, counts.neg_norm),
+    ...linearRange(
+      kBit.f32.subnormal.negative.min,
+      kBit.f32.subnormal.negative.max,
+      counts.neg_sub
+    ),
+    0,
+    ...linearRange(
+      kBit.f32.subnormal.positive.min,
+      kBit.f32.subnormal.positive.max,
+      counts.pos_sub
+    ),
+    ...linearRange(kBit.f32.positive.min, kBit.f32.positive.max, counts.pos_norm),
+  ].map(Math.trunc);
+  return bit_fields.map(hexToF32);
+}
+
+/**
+ * @returns an ascending sorted array of numbers spread over the entire range of 32-bit signed ints
+ *
+ * Numbers are divided into 2 regions: negatives, and positives, with their spreads biased towards 0
+ * Zero is included in range.
+ *
+ * @param counts structure param with 2 entries indicating the number of entries to be generated each region, values must be 0 or greater.
+ */
+export function fullI32Range(
+  counts: {
+    negative?: number;
+    positive: number;
+  } = { positive: 50 }
+): Array<number> {
+  counts.negative = counts.negative === undefined ? counts.positive : counts.negative;
+  return [
+    ...biasedRange(kValue.i32.negative.min, -1, counts.negative),
+    0,
+    ...biasedRange(1, kValue.i32.positive.max, counts.positive),
+  ].map(Math.trunc);
+}
+
+/** Short list of f32 values of interest to test against */
+const kInterestingF32Values: number[] = [
+  Number.NEGATIVE_INFINITY,
+  kValue.f32.negative.min,
+  -10.0,
+  -1.0,
+  kValue.f32.negative.max,
+  kValue.f32.subnormal.negative.min,
+  kValue.f32.subnormal.negative.max,
+  0.0,
+  kValue.f32.subnormal.positive.min,
+  kValue.f32.subnormal.positive.max,
+  kValue.f32.positive.min,
+  1.0,
+  10.0,
+  kValue.f32.positive.max,
+  Number.POSITIVE_INFINITY,
+];
+
+/** @returns minimal f32 values that cover the entire range of f32 behaviours
+ *
+ * Has specially selected values that cover edge cases, normals, and subnormals.
+ * This is used instead of fullF32Range when the number of test cases being
+ * generated is a super linear function of the length of f32 values which is
+ * leading to time outs.
+ *
+ * These values have been chosen to attempt to test the widest range of f32
+ * behaviours in the lowest number of entries, so may potentially miss function
+ * specific values of interest. If there are known values of interest they
+ * should be appended to this list in the test generation code.
+ */
+export function sparseF32Range(): Array<number> {
+  return kInterestingF32Values;
+}
+
+/**
+ * Set of vectors, indexed by dimension, that contain interesting float values
+ *
+ * The tests do not do the simple option for coverage of computing the cartesian
+ * product of all of the interesting float values N times for vecN tests,
+ * because that creates a huge number of tests for vec3 and vec4, leading to
+ * time outs.
+ * Instead they insert the interesting f32 values into each location of the
+ * vector to get a spread of testing over the entire range. This reduces the
+ * number of cases being run substantially, but maintains coverage.
+ */
+export const kVectorTestValues = {
+  2: sparseF32Range().flatMap(f => [
+    [f, 1.0],
+    [1.0, f],
+    [f, -1.0],
+    [-1.0, f],
+  ]),
+  3: sparseF32Range().flatMap(f => [
+    [f, 1.0, 2.0],
+    [1.0, f, 2.0],
+    [1.0, 2.0, f],
+    [f, -1.0, -2.0],
+    [-1.0, f, -2.0],
+    [-1.0, -2.0, f],
+  ]),
+  4: sparseF32Range().flatMap(f => [
+    [f, 1.0, 2.0, 3.0],
+    [1.0, f, 2.0, 3.0],
+    [1.0, 2.0, f, 3.0],
+    [1.0, 2.0, 3.0, f],
+    [f, -1.0, -2.0, -3.0],
+    [-1.0, f, -2.0, -3.0],
+    [-1.0, -2.0, f, -3.0],
+    [-1.0, -2.0, -3.0, f],
+  ]),
+};
 
 /**
  * @returns the result matrix in Array<Array<number>> type.
@@ -367,4 +729,63 @@ export function gcd(a: number, b: number): number {
 /** @returns the Least Common Multiplier (LCM) of the inputs */
 export function lcm(a: number, b: number): number {
   return (a * b) / gcd(a, b);
+}
+
+/** Converts a 32-bit hex value to a 32-bit float value */
+export function hexToF32(hex: number): number {
+  return floatBitsToNumber(hex, kFloat32Format);
+}
+
+/** Converts a 16-bit hex value to a 16-bit float value */
+export function hexToF16(hex: number): number {
+  return floatBitsToNumber(hex, kFloat16Format);
+}
+
+/** Converts two 32-bit hex values to a 64-bit float value */
+export function hexToF64(h32: number, l32: number): number {
+  const u32Arr = new Uint32Array(2);
+  u32Arr[0] = l32;
+  u32Arr[1] = h32;
+  const f64Arr = new Float64Array(u32Arr.buffer);
+  return f64Arr[0];
+}
+
+/** @returns the cross of an array with the intermediate result of cartesianProduct
+ *
+ * @param elements array of values to cross with the intermediate result of
+ *                 cartesianProduct
+ * @param intermediate arrays of values representing the partial result of
+ *                     cartesianProduct
+ */
+function cartesianProductImpl<T>(elements: T[], intermediate: T[][]): T[][] {
+  const result: T[][] = [];
+  elements.forEach(e => {
+    if (intermediate.length > 0) {
+      intermediate.forEach(a => {
+        result.push(a.concat(e));
+      });
+    } else {
+      result.push([e]);
+    }
+  });
+  return result;
+}
+
+/** @returns the cartesian product (NxMx...) of a set of arrays
+ *
+ * This is implemented by calculating the cross of a single input against an
+ * intermediate result for each input to build up the final array of arrays.
+ *
+ * There are examples of doing this more succinctly using map & reduce online,
+ * but they are a bit more opaque to read.
+ *
+ * @param inputs arrays of numbers to calculate cartesian product over
+ */
+export function cartesianProduct<T>(...inputs: T[][]): T[][] {
+  let result: T[][] = [];
+  inputs.forEach(i => {
+    result = cartesianProductImpl<T>(i, result);
+  });
+
+  return result;
 }

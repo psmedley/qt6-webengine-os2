@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "components/paint_preview/common/file_stream.h"
 #include "components/paint_preview/common/mojom/paint_preview_recorder.mojom.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/public/renderer/render_view.h"
 #include "content/public/test/render_view_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -59,7 +58,7 @@ class PaintPreviewRecorderRenderViewTest
       public ::testing::WithParamInterface<bool> {
  public:
   PaintPreviewRecorderRenderViewTest() {
-    std::vector<base::Feature> enabled;
+    std::vector<base::test::FeatureRef> enabled;
     // TODO(crbug/1022398): This is required to bypass a seemingly unrelated
     // DCHECK for |use_overlay_scrollbars_| in NativeThemeAura on ChromeOS when
     // painting scrollbars when first calling LoadHTML().

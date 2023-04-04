@@ -23,7 +23,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "libavutil/opt.h"
 
 typedef struct {
@@ -42,12 +42,11 @@ static av_cold int decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *pic,
+                        int *got_frame, AVPacket *avpkt)
 {
     FRWUContext *s = avctx->priv_data;
     int field, ret;
-    AVFrame *pic = data;
     const uint8_t *buf = avpkt->data;
     const uint8_t *buf_end = buf + avpkt->size;
 
@@ -118,13 +117,12 @@ static const AVClass frwu_class = {
 
 const FFCodec ff_frwu_decoder = {
     .p.name         = "frwu",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Forward Uncompressed"),
+    CODEC_LONG_NAME("Forward Uncompressed"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_FRWU,
     .priv_data_size = sizeof(FRWUContext),
     .init           = decode_init,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
     .p.priv_class   = &frwu_class,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

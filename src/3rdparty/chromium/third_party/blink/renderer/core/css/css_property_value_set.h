@@ -21,6 +21,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PROPERTY_VALUE_SET_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PROPERTY_VALUE_SET_H_
 
+#include "base/bits.h"
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_property_name.h"
@@ -109,6 +111,13 @@ class CORE_EXPORT CSSPropertyValueSet
   template <typename T>  // CSSPropertyID or AtomicString
   bool PropertyIsImportant(const T& property) const;
 
+  const CSSValue* GetPropertyCSSValueWithHint(const AtomicString& property_name,
+                                              unsigned index) const;
+  String GetPropertyValueWithHint(const AtomicString& property_name,
+                                  unsigned index) const;
+  bool PropertyIsImportantWithHint(const AtomicString& property_name,
+                                   unsigned index) const;
+
   bool ShorthandIsImportant(CSSPropertyID) const;
   bool ShorthandIsImportant(const AtomicString& custom_property_name) const {
     // Custom properties are never shorthands.
@@ -179,9 +188,9 @@ class CSSLazyPropertyParser : public GarbageCollected<CSSLazyPropertyParser> {
   virtual void Trace(Visitor*) const;
 };
 
-class CORE_EXPORT ALIGNAS(alignof(Member<const CSSValue>))
-    ALIGNAS(alignof(CSSPropertyValueMetadata)) ImmutableCSSPropertyValueSet
-    : public CSSPropertyValueSet {
+class CORE_EXPORT ALIGNAS(std::max(alignof(Member<const CSSValue>),
+                                   alignof(CSSPropertyValueMetadata)))
+    ImmutableCSSPropertyValueSet : public CSSPropertyValueSet {
  public:
   ImmutableCSSPropertyValueSet(const CSSPropertyValue*,
                                unsigned count,
@@ -212,14 +221,15 @@ inline const Member<const CSSValue>* ImmutableCSSPropertyValueSet::ValueArray()
 
 inline const CSSPropertyValueMetadata*
 ImmutableCSSPropertyValueSet::MetadataArray() const {
-  static_assert(
-      sizeof(ImmutableCSSPropertyValueSet) %
-                  alignof(CSSPropertyValueMetadata) ==
-              0 &&
-          sizeof(Member<CSSValue>) % alignof(CSSPropertyValueMetadata) == 0,
-      "MetadataArray may be improperly aligned");
-  return reinterpret_cast<const CSSPropertyValueMetadata*>(ValueArray() +
-                                                           array_size_);
+  static_assert(sizeof(ImmutableCSSPropertyValueSet) %
+                        alignof(CSSPropertyValueMetadata) ==
+                    0,
+                "MetadataArray may be improperly aligned");
+  // Size of Member<> can be smaller than that of CSSPropertyValueMetadata.
+  // Align it up.
+  return reinterpret_cast<const CSSPropertyValueMetadata*>(base::bits::AlignUp(
+      reinterpret_cast<const uint8_t*>(ValueArray() + array_size_),
+      alignof(CSSPropertyValueMetadata)));
 }
 
 template <>
@@ -257,7 +267,7 @@ class CORE_EXPORT MutableCSSPropertyValueSet : public CSSPropertyValueSet {
     kChangedPropertySet = 3,
   };
 
-  SetResult AddParsedProperties(const HeapVector<CSSPropertyValue, 256>&);
+  SetResult AddParsedProperties(const HeapVector<CSSPropertyValue, 64>&);
 
   // Returns whether this style set was changed.
   bool AddRespectingCascade(const CSSPropertyValue&);

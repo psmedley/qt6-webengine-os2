@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_manager_provider.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/public/base/signin_buildflags.h"
@@ -28,12 +27,15 @@
 #include "components/signin/public/webdata/token_web_data.h"
 #include "content/public/browser/network_service_instance.h"
 
-#if BUILDFLAG(ENABLE_DICE_SUPPORT) && !defined(TOOLKIT_QT)
+#if (BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)) && !defined(TOOLKIT_QT)
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
-#include "chrome/browser/web_data_service_factory.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
-#include "components/keyed_service/core/service_access_type.h"
 #include "components/signin/core/browser/cookie_settings_util.h"
+#endif
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT) && !defined(TOOLKIT_QT)
+#include "chrome/browser/web_data_service_factory.h"
+#include "components/keyed_service/core/service_access_type.h"
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -59,9 +61,7 @@ void IdentityManagerFactory::RegisterProfilePrefs(
 }
 
 IdentityManagerFactory::IdentityManagerFactory()
-    : BrowserContextKeyedServiceFactory(
-          "IdentityManager",
-          BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("IdentityManager") {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT) && !defined(TOOLKIT_QT)
   DependsOn(WebDataServiceFactory::GetInstance());
 #endif
@@ -131,16 +131,19 @@ KeyedService* IdentityManagerFactory::BuildServiceInstanceFor(
   params.profile_path = profile->GetPath();
   params.signin_client = ChromeSigninClientFactory::GetForProfile(profile);
 
-#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+#if BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #if !defined(TOOLKIT_QT)
   params.delete_signin_cookies_on_exit =
       signin::SettingsDeleteSigninCookiesOnExit(
           CookieSettingsFactory::GetForProfile(profile).get());
-  params.token_web_data = WebDataServiceFactory::GetTokenWebDataForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS);
 #else
   params.delete_signin_cookies_on_exit = true;
 #endif
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT) && !defined(TOOLKIT_QT)
+  params.token_web_data = WebDataServiceFactory::GetTokenWebDataForProfile(
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)

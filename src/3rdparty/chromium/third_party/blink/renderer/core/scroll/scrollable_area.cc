@@ -234,7 +234,7 @@ ScrollResult ScrollableArea::UserScroll(ui::ScrollGranularity granularity,
   if (on_finish)
     RegisterScrollCompleteCallback(std::move(on_finish));
 
-  base::ScopedClosureRunner run_on_return(WTF::Bind(
+  base::ScopedClosureRunner run_on_return(WTF::BindOnce(
       &ScrollableArea::RunScrollCompleteCallbacks, WrapWeakPersistent(this)));
 
   ScrollOffset pixel_delta = ResolveScrollDelta(granularity, delta);
@@ -277,7 +277,7 @@ void ScrollableArea::SetScrollOffset(const ScrollOffset& offset,
   if (on_finish)
     RegisterScrollCompleteCallback(std::move(on_finish));
 
-  base::ScopedClosureRunner run_on_return(WTF::Bind(
+  base::ScopedClosureRunner run_on_return(WTF::BindOnce(
       &ScrollableArea::RunScrollCompleteCallbacks, WrapWeakPersistent(this)));
 
   if (SmoothScrollSequencer* sequencer = GetSmoothScrollSequencer()) {
@@ -380,7 +380,7 @@ void ScrollableArea::ProgrammaticScrollHelper(
   }
 
   ScrollCallback callback = std::move(on_finish);
-  callback = ScrollCallback(WTF::Bind(
+  callback = ScrollCallback(WTF::BindOnce(
       [](ScrollCallback original_callback,
          WeakPersistent<ScrollableArea> area) {
         if (area)
@@ -959,7 +959,7 @@ CompositorElementId ScrollableArea::GetScrollbarElementId(
 
 void ScrollableArea::OnScrollFinished() {
   if (GetLayoutBox()) {
-    if (RuntimeEnabledFeatures::OverscrollCustomizationEnabled()) {
+    if (RuntimeEnabledFeatures::ScrollEndEventsEnabled()) {
       if (Node* node = EventTargetNode())
         node->GetDocument().EnqueueScrollEndEventForNode(node);
     }

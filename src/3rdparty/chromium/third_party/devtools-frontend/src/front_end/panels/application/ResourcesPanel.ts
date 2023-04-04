@@ -15,7 +15,7 @@ import {CookieItemsView} from './CookieItemsView.js';
 import {DatabaseQueryView} from './DatabaseQueryView.js';
 import {DatabaseTableView} from './DatabaseTableView.js';
 import {DOMStorageItemsView} from './DOMStorageItemsView.js';
-import type {DOMStorage} from './DOMStorageModel.js';
+import {type DOMStorage} from './DOMStorageModel.js';
 import {StorageItemsView} from './StorageItemsView.js';
 
 let resourcesPanelInstance: ResourcesPanel;
@@ -140,7 +140,7 @@ export class ResourcesPanel extends UI.Panel.PanelWithSidebar {
     return view;
   }
 
-  showCategoryView(categoryName: string, categoryLink: string|null): void {
+  showCategoryView(categoryName: string, categoryLink: Platform.DevToolsPath.UrlString|null): void {
     if (!this.categoryView) {
       this.categoryView = new StorageCategoryView();
     }

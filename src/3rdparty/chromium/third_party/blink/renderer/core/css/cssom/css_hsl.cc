@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -108,8 +108,8 @@ void CSSHSL::setAlpha(
 }
 
 Color CSSHSL::ToColor() const {
-  // MakeRGBAFromHSLA expects hue in the range [0, 6)
-  return MakeRGBAFromHSLA(
+  // FromHSLA expects hue in the range [0, 6)
+  return Color::FromHSLA(
       h_->to(CSSPrimitiveValue::UnitType::kDegrees)->value() / 60,
       ComponentToColorInput(s_), ComponentToColorInput(l_),
       ComponentToColorInput(alpha_));

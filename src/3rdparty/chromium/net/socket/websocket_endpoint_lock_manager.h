@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,7 +134,7 @@ class NET_EXPORT_PRIVATE WebSocketEndpointLockManager {
   base::TimeDelta unlock_delay_;
 
   // Number of sockets currently pending unlock.
-  size_t pending_unlock_count_;
+  size_t pending_unlock_count_ = 0;
 
   base::WeakPtrFactory<WebSocketEndpointLockManager> weak_factory_{this};
 };

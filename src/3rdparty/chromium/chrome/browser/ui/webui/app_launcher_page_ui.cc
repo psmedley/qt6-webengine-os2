@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -132,9 +132,9 @@ AppLauncherPageUI::AppLauncherPageUI(content::WebUI* web_ui)
 
   bool is_swipe_tracking_from_scroll_events_enabled = false;
 #if BUILDFLAG(IS_MAC)
-  // On Mac OS X 10.7+, horizontal scrolling can be treated as a back or
-  // forward gesture. Pass through a flag that indicates whether or not that
-  // feature is enabled.
+  // On the Mac, horizontal scrolling can be treated as a back or forward
+  // gesture. Pass through a flag that indicates whether or not that feature is
+  // enabled.
   is_swipe_tracking_from_scroll_events_enabled =
       platform_util::IsSwipeTrackingFromScrollEventsEnabled();
 #endif

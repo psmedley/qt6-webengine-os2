@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -196,6 +196,11 @@ class NATIVE_THEME_EXPORT NativeThemeWin : public NativeTheme,
 
   void RegisterThemeRegkeyObserver();
   void UpdateDarkModeStatus();
+
+  // True if Windows supports dark mode. This does NOT indicate whether the
+  // system is in dark mode, only that it is supported by this version of
+  // Windows.
+  const bool supports_windows_dark_mode_;
 
   // Dark Mode registry key.
   base::win::RegKey hkcu_themes_regkey_;

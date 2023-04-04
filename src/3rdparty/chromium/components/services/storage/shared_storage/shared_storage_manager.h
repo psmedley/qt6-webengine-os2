@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,11 +40,14 @@ class SharedStorageManager {
   using SetBehavior = SharedStorageDatabase::SetBehavior;
   using OperationResult = SharedStorageDatabase::OperationResult;
   using GetResult = SharedStorageDatabase::GetResult;
+  using BudgetResult = SharedStorageDatabase::BudgetResult;
+  using TimeResult = SharedStorageDatabase::TimeResult;
 
-  // A callback type to check if a given origin matches a storage policy.
-  // Can be passed empty/null where used, which means the origin will always
+  // A callback type to check if a given StorageKey matches a storage policy.
+  // Can be passed empty/null where used, which means the StorageKey will always
   // match.
-  using OriginMatcherFunction = SharedStorageDatabase::OriginMatcherFunction;
+  using StorageKeyPolicyMatcherFunction =
+      SharedStorageDatabase::StorageKeyPolicyMatcherFunction;
 
   // If only `db_path` and `special_storage_policy` are passed as parameters,
   // then the members that would have been initialized from `options` are given
@@ -190,34 +193,56 @@ class SharedStorageManager {
   void Clear(url::Origin context_origin,
              base::OnceCallback<void(OperationResult)> callback);
 
-  // Clears all origins that match `origin_matcher` run on the owning
+  // Clears all StorageKeys that match `storage_key_matcher` run on the owning
   // StoragePartition's `SpecialStoragePolicy` and have `last_used_time` between
   // the times `begin` and `end`. If `perform_storage_cleanup` is true, vacuums
   // the database afterwards. The parameter of `callback` reports whether the
   // transaction was successful. Called by
   // `content::StoragePartitionImpl::DataDeletionHelper::ClearDataOnUIThread()`.
   //
-  // Note that `origin_matcher` is accessed on a different sequence than where
-  // it was created.
-  void PurgeMatchingOrigins(OriginMatcherFunction origin_matcher,
+  // Note that `storage_key_matcher` is accessed on a different sequence than
+  // where it was created.
+  void PurgeMatchingOrigins(StorageKeyPolicyMatcherFunction storage_key_matcher,
                             base::Time begin,
                             base::Time end,
                             base::OnceCallback<void(OperationResult)> callback,
                             bool perform_storage_cleanup = false);
 
   // Fetches a vector of `mojom::StorageUsageInfoPtr`, with one
-  // `mojom::StorageUsageInfoPtr` for each origin currently using shared storage
-  // in this profile. Called by
-  // `browsing_data::SharedStorageHelper::StartFetching`.
-  void FetchOrigins(
-      base::OnceCallback<void(std::vector<mojom::StorageUsageInfoPtr>)>
-          callback);
+  // `mojom::StorageUsageInfoPtr` for each origin currently using shared
+  // storage in this profile. Called by
+  // `browsing_data::SharedStorageHelper::StartFetching`. If
+  // `exclude_empty_origins` is true, then only those with positive `length` are
+  // included in the vector.
+  void FetchOrigins(base::OnceCallback<
+                        void(std::vector<mojom::StorageUsageInfoPtr>)> callback,
+                    bool exclude_empty_origins = true);
+
+  // Makes a withdrawal of `bits_debit` stamped with the current time from the
+  // privacy budget of `context_origin`.
+  void MakeBudgetWithdrawal(url::Origin context_origin,
+                            double bits_debit,
+                            base::OnceCallback<void(OperationResult)> callback);
+
+  // Determines the number of bits remaining in the privacy budget of
+  // `context_origin`, where only withdrawals within the most recent
+  // `budget_interval_` are counted as still valid, and calls `callback` with
+  // this information bundled with an `OperationResult` value to indicate
+  // whether the database retrieval was successful.
+  void GetRemainingBudget(url::Origin context_origin,
+                          base::OnceCallback<void(BudgetResult)> callback);
+
+  // Calls `callback` with the most recent creation time (currently in the
+  // schema as `last_used_time`) for `context_origin` and an `OperationResult`
+  // to indicate whether or not there were errors.
+  void GetCreationTime(url::Origin context_origin,
+                       base::OnceCallback<void(TimeResult)> callback);
 
   void SetOnDBDestroyedCallbackForTesting(
       base::OnceCallback<void(bool)> callback);
 
-  void OverrideLastUsedTimeForTesting(url::Origin context_origin,
-                                      base::Time new_last_used_time,
+  void OverrideCreationTimeForTesting(url::Origin context_origin,
+                                      base::Time new_creation_time,
                                       base::OnceCallback<void(bool)> callback);
 
   void OverrideSpecialStoragePolicyForTesting(
@@ -225,6 +250,18 @@ class SharedStorageManager {
 
   void OverrideDatabaseForTesting(
       std::unique_ptr<AsyncSharedStorageDatabase> override_async_database);
+
+  // Calls `callback` with the number of entries (including stale entries) in
+  // the table `budget_mapping` for `context_origin`, or with -1 in case of
+  // database initialization failure or SQL error.
+  void GetNumBudgetEntriesForTesting(url::Origin context_origin,
+                                     base::OnceCallback<void(int)> callback);
+
+  // Calls `callback` with the total number of entries in the table for all
+  // origins, or with -1 in case of database initialization failure or SQL
+  // error.
+  void GetTotalNumBudgetEntriesForTesting(
+      base::OnceCallback<void(int)> callback);
 
  private:
   void DestroyAndRecreateDatabase();
@@ -235,8 +272,14 @@ class SharedStorageManager {
       base::OnceCallback<void(OperationResult)> callback);
 
   // Purges the data for any origins that haven't been written to or read from
-  // for more than the `origin_staleness_threshold_`.
+  // for more than the `origin_staleness_threshold_`. Also purges, for all
+  // origins, all privacy budget withdrawals that have `time_stamps` older than
+  // the current time minus `SharedStorageDatabase::budget_interval_`.
   void PurgeStaleOrigins();
+
+  // Processes the result of purging stale origins, then purges all privacy
+  // budget withdrawals that have `time_stamps` older than the current time
+  // minus `SharedStorageDatabase::budget_interval_`
 
   // Starts the `timer_` for the next call to `PurgeStaleOrigins()`.
   void OnStaleOriginsPurged(OperationResult result);

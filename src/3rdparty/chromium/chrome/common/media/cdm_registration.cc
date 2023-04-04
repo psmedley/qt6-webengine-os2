@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -207,7 +207,7 @@ void AddHardwareSecureWidevine(std::vector<content::CdmInfo>* cdms) {
   // We currently support VP9, H264 and HEVC video formats with
   // decrypt-and-decode. Not specifying any profiles to indicate that all
   // relevant profiles should be considered supported.
-  const std::vector<media::VideoCodecProfile> kAllProfiles = {};
+  const media::VideoCodecInfo kAllProfiles;
   capability.video_codecs.emplace(media::VideoCodec::kVP9, kAllProfiles);
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
   capability.video_codecs.emplace(media::VideoCodec::kH264, kAllProfiles);

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,8 +87,8 @@ NGInlineBoxState* NGInlineLayoutAlgorithm::HandleOpenTag(
     const NGInlineItemResult& item_result,
     NGLogicalLineItems* line_box,
     NGInlineLayoutStateStack* box_states) const {
-  NGInlineBoxState* box =
-      box_states->OnOpenTag(item, item_result, baseline_type_, line_box);
+  NGInlineBoxState* box = box_states->OnOpenTag(
+      ConstraintSpace(), item, item_result, baseline_type_, line_box);
   // Compute text metrics for all inline boxes since even empty inlines
   // influence the line height, except when quirks mode and the box is empty
   // for the purpose of empty block calculation.
@@ -160,31 +160,21 @@ static LayoutUnit AdjustLineOffsetForHanging(NGLineInfo* line_info,
   if (IsLtr(line_info->BaseDirection()))
     return LayoutUnit();
 
-  // If the hang_width cause overflow, we don't want to adjust the line_offset
-  // so that it becomes negative, which causes some difficulties for the
-  // NGLayoutOverflowCalculator to apply its own adjustements in the
-  // AdjustOverflowForHanging function. Instead, we'll shift the line items so
-  // that we ignore the hanging width when the NGInlineLayoutStateStack computes
-  // their positions in ComputeInlinePositions function.
+  // If !line_info->ShouldHangTrailingSpaces(), the hang width is not considered
+  // in ApplyTextAlign, and so line_offset points to where the left edge of the
+  // hanging spaces should be. Since the line box rect has to start at the left
+  // edge of the text instead (needed for caret positioning), we increase
+  // line_offset.
   LayoutUnit hang_width = line_info->HangWidth();
-  if (line_offset < hang_width) {
-    // If we haven't considered the hang_width in ApplyTextAlign, we might end
-    // up with a negative line_offset, so shift the offset to ignore hanging
-    // spaces.
-    if (!line_info->ShouldHangTrailingSpaces())
-      line_offset += hang_width;
-    return -hang_width;
+  if (!line_info->ShouldHangTrailingSpaces()) {
+    line_offset += hang_width;
   }
 
-  // At this point we have a RTL line with hanging spaces that shouldn't be
-  // ignored based on the text-align property. Hence the final line_offset value
-  // should consider the hang_width. Note that this line_offset will be used
-  // later to compute the caret position in ComputeLocalCaretRectAtTextOffset,
-  // that's why we need to adjust the offset. Once we adjust the line_offset, we
-  // can use 0 as initial position for the line items, as we do in the case of a
-  // LTR line.
-  line_offset -= hang_width;
-  return LayoutUnit();
+  // Now line_offset always points to where the left edge of the text should be.
+  // If there are any hanging spaces, the starting position of the line must be
+  // offset by the width of the hanging spaces so that the text starts at
+  // line_offset.
+  return -hang_width;
 }
 
 void NGInlineLayoutAlgorithm::RebuildBoxStates(
@@ -472,6 +462,9 @@ void NGInlineLayoutAlgorithm::CreateLine(
   context_->SetItemIndex(line_info->ItemsData().items,
                          line_info->EndItemIndex());
 
+  if (line_info->UseFirstLineStyle())
+    container_builder_.SetStyleVariant(NGStyleVariant::kFirstLine);
+
   // Even if we have something in-flow, it may just be empty items that
   // shouldn't trigger creation of a line. Exit now if that's the case.
   if (line_info->IsEmptyLine())
@@ -497,8 +490,6 @@ void NGInlineLayoutAlgorithm::CreateLine(
   if (LIKELY(!Node().IsSvgText() && !Node().IsTextCombine()))
     line_box->MoveInBlockDirection(line_box_metrics.ascent);
 
-  if (line_info->UseFirstLineStyle())
-    container_builder_.SetStyleVariant(NGStyleVariant::kFirstLine);
   if (UNLIKELY(Node().IsTextCombine())) {
     // The effective size of combined text is 1em square[1]
     // [1] https://drafts.csswg.org/css-writing-modes-3/#text-combine-layout
@@ -586,8 +577,8 @@ NGInlineBoxState* NGInlineLayoutAlgorithm::PlaceAtomicInline(
   layout_object->SetIsTruncated(false);
 
   item_result->has_edge = true;
-  NGInlineBoxState* box =
-      box_states_->OnOpenTag(item, *item_result, baseline_type_, *line_box);
+  NGInlineBoxState* box = box_states_->OnOpenTag(
+      ConstraintSpace(), item, *item_result, baseline_type_, *line_box);
 
   if (LIKELY(!IsA<LayoutNGTextCombine>(layout_object))) {
     PlaceLayoutResult(item_result, line_box, box, box->margin_inline_start);
@@ -924,7 +915,7 @@ absl::optional<LayoutUnit> NGInlineLayoutAlgorithm::ApplyJustify(
   // Append a hyphen if the last word is hyphenated. The hyphen is in
   // |ShapeResult|, but not in text. |ShapeResultSpacing| needs the text that
   // matches to the |ShapeResult|.
-  DCHECK(!line_info->Results().IsEmpty());
+  DCHECK(!line_info->Results().empty());
   const NGInlineItemResult& last_item_result = line_info->Results().back();
   if (last_item_result.hyphen_string)
     line_text_builder.Append(last_item_result.hyphen_string);
@@ -935,8 +926,7 @@ absl::optional<LayoutUnit> NGInlineLayoutAlgorithm::ApplyJustify(
   DCHECK_GT(line_text.length(), 0u);
 
   ShapeResultSpacing<String> spacing(line_text, Node().IsSvgText());
-  spacing.SetExpansion(space, line_info->BaseDirection(),
-                       line_info->LineStyle().GetTextJustify());
+  spacing.SetExpansion(space, line_info->BaseDirection());
   const LayoutObject* box = Node().GetLayoutBox();
   if (!spacing.HasExpansion()) {
     // See AdjustInlineDirectionLineBounds() of LayoutRubyBase and
@@ -960,8 +950,7 @@ absl::optional<LayoutUnit> NGInlineLayoutAlgorithm::ApplyJustify(
       inset =
           std::min(LayoutUnit(2 * line_info->LineStyle().FontSize()), inset);
     }
-    spacing.SetExpansion(space - inset, line_info->BaseDirection(),
-                         line_info->LineStyle().GetTextJustify());
+    spacing.SetExpansion(space - inset, line_info->BaseDirection());
   }
 
   for (NGInlineItemResult& item_result : *line_info->MutableResults()) {
@@ -1077,7 +1066,7 @@ LayoutUnit NGInlineLayoutAlgorithm::SetAnnotationOverflow(
 bool NGInlineLayoutAlgorithm::AddAnyClearanceAfterLine(
     const NGLineInfo& line_info) {
   const NGInlineItemResults& line_items = line_info.Results();
-  if (line_items.IsEmpty())
+  if (line_items.empty())
     return true;
 
   // If the last item was a <br> we need to adjust the content_size to clear

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ struct SubresourceLoaderParams;
 // NetworkService (PlzWorker):
 // This is an implementation of the URLLoaderClient for web worker's main script
 // fetch. The loader and client bounded with this class are to be unbound and
-// forwarded to the renderer process on OnStartLoadingResponseBody, and the
+// forwarded to the renderer process on OnReceiveResponse, and the
 // resource loader in the renderer process will take them over.
 //
 // WorkerScriptFetcher deletes itself when the ownership of the loader and
@@ -206,17 +206,16 @@ class WorkerScriptFetcher : public network::mojom::URLLoaderClient {
 
   // network::mojom::URLLoaderClient
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head,
-                         mojo::ScopedDataPipeConsumerHandle body) override;
+  void OnReceiveResponse(
+      network::mojom::URLResponseHeadPtr head,
+      mojo::ScopedDataPipeConsumerHandle body,
+      absl::optional<mojo_base::BigBuffer> cached_metadata) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          network::mojom::URLResponseHeadPtr head) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback callback) override;
-  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
-  void OnStartLoadingResponseBody(
-      mojo::ScopedDataPipeConsumerHandle body) override;
   void OnComplete(const network::URLLoaderCompletionStatus& status) override;
 
   void DidParseHeaders(network::mojom::ParsedHeadersPtr parsed_headers);

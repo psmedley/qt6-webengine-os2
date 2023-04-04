@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/escape.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/policy/proto/device_management_backend.pb.h"
-#include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
@@ -129,6 +129,7 @@ const int DeviceManagementService::kArcDisabled;
 const int DeviceManagementService::kInvalidDomainlessCustomer;
 const int DeviceManagementService::kTosHasNotBeenAccepted;
 const int DeviceManagementService::kIllegalAccountForPackagedEDULicense;
+const int DeviceManagementService::kInvalidPackagedDeviceForKiosk;
 
 // static
 std::string DeviceManagementService::JobConfiguration::GetJobTypeAsString(
@@ -326,7 +327,8 @@ JobConfigurationBase::GetResourceRequest(bool bypass_proxy, int last_error) {
   // avoid breaking the other platforms with unexpected issues.
   if (oauth_token_ && !oauth_token_->empty()) {
     rr->headers.SetHeader(dm_protocol::kAuthHeader,
-                          base::StrCat({"OAuth ", *oauth_token_}));
+                          base::StrCat({dm_protocol::kOAuthTokenHeaderPrefix,
+                                        " ", *oauth_token_}));
   }
 #endif
 
@@ -358,6 +360,10 @@ DeviceManagementService::Job::RetryMethod JobConfigurationBase::ShouldRetry(
     const std::string& response_body) {
   // By default, no need to retry based on the contents of the response.
   return DeviceManagementService::Job::NO_RETRY;
+}
+
+absl::optional<base::TimeDelta> JobConfigurationBase::GetTimeoutDuration() {
+  return timeout_;
 }
 
 // A device management service job implementation.
@@ -427,6 +433,8 @@ void DeviceManagementService::JobImpl::CreateUrlLoader() {
   url_loader_ = network::SimpleURLLoader::Create(std::move(rr), annotation);
   url_loader_->AttachStringForUpload(config_->GetPayload(), kPostContentType);
   url_loader_->SetAllowHttpErrorResults(true);
+  if (config_->GetTimeoutDuration())
+    url_loader_->SetTimeoutDuration(config_->GetTimeoutDuration().value());
 }
 
 void DeviceManagementService::JobImpl::OnURLLoaderComplete(

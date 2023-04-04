@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_service_factory.h"
-#include "chrome/browser/ui/webui/settings/chromeos/pref_names.h"
+#include "chrome/browser/ui/webui/settings/ash/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync/base/user_selectable_type.h"
@@ -36,19 +36,19 @@ OSSyncHandler::~OSSyncHandler() {
 }
 
 void OSSyncHandler::RegisterMessages() {
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "DidNavigateToOsSyncPage",
       base::BindRepeating(&OSSyncHandler::HandleDidNavigateToOsSyncPage,
                           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "DidNavigateAwayFromOsSyncPage",
       base::BindRepeating(&OSSyncHandler::HandleDidNavigateAwayFromOsSyncPage,
                           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "OsSyncPrefsDispatch",
       base::BindRepeating(&OSSyncHandler::HandleOsSyncPrefsDispatch,
                           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "SetOsSyncDatatypes",
       base::BindRepeating(&OSSyncHandler::HandleSetOsSyncDatatypes,
                           base::Unretained(this)));
@@ -63,28 +63,28 @@ void OSSyncHandler::OnJavascriptDisallowed() {
 }
 
 void OSSyncHandler::OnStateChanged(syncer::SyncService* service) {
-  if (!is_setting_prefs_)
-    PushSyncPrefs();
+  PushSyncPrefs();
 }
 
-void OSSyncHandler::HandleDidNavigateToOsSyncPage(const base::ListValue* args) {
+void OSSyncHandler::HandleDidNavigateToOsSyncPage(
+    const base::Value::List& args) {
   HandleOsSyncPrefsDispatch(args);
 }
 
-void OSSyncHandler::HandleOsSyncPrefsDispatch(const base::ListValue* args) {
+void OSSyncHandler::HandleOsSyncPrefsDispatch(const base::Value::List& args) {
   AllowJavascript();
 
   PushSyncPrefs();
 }
 
 void OSSyncHandler::HandleDidNavigateAwayFromOsSyncPage(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   // TODO(https://crbug.com/1278325): Remove this.
 }
 
-void OSSyncHandler::HandleSetOsSyncDatatypes(const base::ListValue* args) {
-  CHECK_EQ(1u, args->GetListDeprecated().size());
-  const base::Value& result_value = args->GetListDeprecated()[0];
+void OSSyncHandler::HandleSetOsSyncDatatypes(const base::Value::List& args) {
+  CHECK_EQ(1u, args.size());
+  const base::Value& result_value = args[0];
   CHECK(result_value.is_dict());
   const base::DictionaryValue& result =
       base::Value::AsDictionaryValue(result_value);
@@ -119,8 +119,6 @@ void OSSyncHandler::HandleSetOsSyncDatatypes(const base::ListValue* args) {
   SyncUserSettings* settings = service->GetUserSettings();
   selected_types.RetainAll(settings->GetRegisteredSelectableOsTypes());
 
-  // Don't send updates back to JS while processing values sent from JS.
-  base::AutoReset<bool> reset(&is_setting_prefs_, true);
   settings->SetSelectedOsTypes(sync_all_os_types, selected_types);
 
   // TODO(jamescook): Add metrics for selected types.
@@ -136,26 +134,26 @@ void OSSyncHandler::PushSyncPrefs() {
   if (!service || !service->IsEngineInitialized())
     return;
 
-  base::DictionaryValue args;
+  base::Value::Dict args;
   SyncUserSettings* user_settings = service->GetUserSettings();
   // Tell the UI layer which data types are registered/enabled by the user.
-  args.SetBoolKey("syncAllOsTypes", user_settings->IsSyncAllOsTypesEnabled());
+  args.Set("syncAllOsTypes", user_settings->IsSyncAllOsTypesEnabled());
   UserSelectableOsTypeSet registered_types =
       user_settings->GetRegisteredSelectableOsTypes();
   UserSelectableOsTypeSet selected_types = user_settings->GetSelectedOsTypes();
 
   for (UserSelectableOsType type : UserSelectableOsTypeSet::All()) {
     std::string type_name = syncer::GetUserSelectableOsTypeName(type);
-    args.SetBoolPath(type_name + "Registered", registered_types.Has(type));
-    args.SetBoolPath(type_name + "Synced", selected_types.Has(type));
+    args.SetByDottedPath(type_name + "Registered", registered_types.Has(type));
+    args.SetByDottedPath(type_name + "Synced", selected_types.Has(type));
   }
 
   // Wallpaper sync status is fetched from prefs and is considered enabled if
   // all OS types are enabled; this mimics behavior of GetSelectedOsTypes().
-  args.SetBoolKey(kWallpaperEnabledKey,
-                  user_settings->IsSyncAllOsTypesEnabled() ||
-                      profile_->GetPrefs()->GetBoolean(
-                          chromeos::settings::prefs::kSyncOsWallpaper));
+  args.Set(kWallpaperEnabledKey,
+           user_settings->IsSyncAllOsTypesEnabled() ||
+               profile_->GetPrefs()->GetBoolean(
+                   chromeos::settings::prefs::kSyncOsWallpaper));
 
   FireWebUIListener("os-sync-prefs-changed", args);
 }

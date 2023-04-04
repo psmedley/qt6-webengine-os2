@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 
 #include "base/base_export.h"
 #include "base/check.h"
-#include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
@@ -33,7 +33,6 @@
 
 namespace base {
 
-class HistogramBase;
 class WorkerThreadObserver;
 
 namespace internal {
@@ -53,33 +52,35 @@ class BASE_EXPORT ThreadGroupImpl : public ThreadGroup {
   // |histogram_label| is used to label the thread group's histograms as
   // "ThreadPool." + histogram_name + "." + |histogram_label| + extra suffixes.
   // It must not be empty. |thread group_label| is used to label the thread
-  // group's threads, it must not be empty. |priority_hint| is the preferred
-  // thread priority; the actual thread priority depends on shutdown state and
-  // platform capabilities. |task_tracker| keeps track of tasks.
+  // group's threads, it must not be empty. |thread_type_hint| is the preferred
+  // thread type; the actual thread type depends on shutdown state and platform
+  // capabilities. |task_tracker| keeps track of tasks.
   ThreadGroupImpl(StringPiece histogram_label,
                   StringPiece thread_group_label,
-                  ThreadPriority priority_hint,
+                  ThreadType thread_type_hint,
                   TrackedRef<TaskTracker> task_tracker,
                   TrackedRef<Delegate> delegate);
 
   // Creates threads, allowing existing and future tasks to run. The thread
-  // group runs at most |max_tasks| / |max_best_effort_tasks| unblocked task
+  // group runs at most |max_tasks| / `max_best_effort_tasks` unblocked task
   // with any / BEST_EFFORT priority concurrently. It reclaims unused threads
-  // after |suggested_reclaim_time|. It uses |service_thread_task_runner| to
-  // monitor for blocked tasks. If specified, it notifies
-  // |worker_thread_observer| when a worker enters and exits its main function
-  // (the observer must not be destroyed before JoinForTesting() has returned).
-  // |worker_environment| specifies the environment in which tasks are executed.
+  // after `suggested_reclaim_time`. It uses `service_thread_task_runner` to
+  // monitor for blocked tasks, `service_thread_task_runner` is used to setup
+  // FileDescriptorWatcher on worker threads. It must refer to a Thread with
+  // MessagePumpType::IO. If specified, it notifies |worker_thread_observer|
+  // when a worker enters and exits its main function (the observer must not be
+  // destroyed before JoinForTesting() has returned). |worker_environment|
+  // specifies the environment in which tasks are executed.
   // |may_block_threshold| is the timeout after which a task in a MAY_BLOCK
   // ScopedBlockingCall is considered blocked (the thread group will choose an
   // appropriate value if none is specified).
-  // |synchronous_thread_start_for_testing| is true if this ThreadGroupImpl
+  // `synchronous_thread_start_for_testing` is true if this ThreadGroupImpl
   // should synchronously wait for OnMainEntry() after starting each worker. Can
   // only be called once. CHECKs on failure.
-  void Start(int max_tasks,
-             int max_best_effort_tasks,
+  void Start(size_t max_tasks,
+             size_t max_best_effort_tasks,
              TimeDelta suggested_reclaim_time,
-             scoped_refptr<SequencedTaskRunner> service_thread_task_runner,
+             scoped_refptr<SingleThreadTaskRunner> service_thread_task_runner,
              WorkerThreadObserver* worker_thread_observer,
              WorkerEnvironment worker_environment,
              bool synchronous_thread_start_for_testing = false,
@@ -98,10 +99,6 @@ class BASE_EXPORT ThreadGroupImpl : public ThreadGroup {
   size_t GetMaxConcurrentNonBlockedTasksDeprecated() const override;
   void DidUpdateCanRunPolicy() override;
   void OnShutdownStarted() override;
-
-  const HistogramBase* num_tasks_before_detach_histogram() const {
-    return num_tasks_before_detach_histogram_;
-  }
 
   // Waits until at least |n| workers are idle. Note that while workers are
   // disallowed from cleaning up during this call: tests using a custom
@@ -211,6 +208,9 @@ class BASE_EXPORT ThreadGroupImpl : public ThreadGroup {
   // or when a new task is added to |priority_queue_|.
   void UpdateMinAllowedPriorityLockRequired() EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
+  bool IsOnIdleStackLockRequired(WorkerThread* worker) const
+      EXCLUSIVE_LOCKS_REQUIRED(lock_);
+
   // Increments/decrements the number of tasks of |priority| that are currently
   // running in this thread group. Must be invoked before/after running a task.
   void DecrementTasksRunningLockRequired(TaskPriority priority)
@@ -242,18 +242,15 @@ class BASE_EXPORT ThreadGroupImpl : public ThreadGroup {
 
     // Suggested reclaim time for workers.
     TimeDelta suggested_reclaim_time;
+    bool no_worker_reclaim = false;
 
     // Environment to be initialized per worker.
     WorkerEnvironment worker_environment = WorkerEnvironment::NONE;
 
-    scoped_refptr<SequencedTaskRunner> service_thread_task_runner;
+    scoped_refptr<SingleThreadTaskRunner> service_thread_task_runner;
 
     // Optional observer notified when a worker enters and exits its main.
     raw_ptr<WorkerThreadObserver> worker_thread_observer = nullptr;
-
-    WakeUpStrategy wakeup_strategy;
-    bool wakeup_after_getwork;
-    bool may_block_without_delay;
 
     // Threshold after which the max tasks is increased to compensate for a
     // worker that is within a MAY_BLOCK ScopedBlockingCall.
@@ -278,7 +275,7 @@ class BASE_EXPORT ThreadGroupImpl : public ThreadGroup {
   }
 
   const std::string thread_group_label_;
-  const ThreadPriority priority_hint_;
+  const ThreadType thread_type_hint_;
 
   // All workers owned by this thread group.
   std::vector<scoped_refptr<WorkerThread>> workers_ GUARDED_BY(lock_);
@@ -342,16 +339,6 @@ class BASE_EXPORT ThreadGroupImpl : public ThreadGroup {
   // construction. In that case, it's signaled each time
   // WorkerThreadDelegateImpl::OnMainEntry() completes.
   absl::optional<WaitableEvent> worker_started_for_testing_;
-
-  // Cached HistogramBase pointers, can be accessed without
-  // holding |lock_|. If |lock_| is held, add new samples using
-  // ThreadGroupImpl::ScopedCommandsExecutor (increase
-  // |scheduled_histogram_samples_| size as needed) to defer until after |lock_|
-  // release, due to metrics system callbacks which may schedule tasks.
-
-  // ThreadPool.NumTasksBeforeDetach.[thread group name] histogram.
-  // Intentionally leaked.
-  const raw_ptr<HistogramBase> num_tasks_before_detach_histogram_;
 
   // Ensures recently cleaned up workers (ref.
   // WorkerThreadDelegateImpl::CleanupLockRequired()) had time to exit as

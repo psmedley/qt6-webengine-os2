@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -39,6 +40,7 @@
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/style/platform_style.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/views_features.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -119,7 +121,7 @@ class BubbleWidget : public Widget {
     return bubble_delegate ? bubble_delegate->anchor_widget() : nullptr;
   }
   Widget* GetAnchorWidget() {
-    return const_cast<Widget*>(base::as_const(*this).GetAnchorWidget());
+    return const_cast<Widget*>(std::as_const(*this).GetAnchorWidget());
   }
 };
 
@@ -190,8 +192,10 @@ Widget* CreateBubbleWidget(BubbleDialogDelegate* bubble) {
   // On Mac, having a parent window creates a permanent stacking order, so
   // there's no need to do this. Also, calling StackAbove() on Mac shows the
   // bubble implicitly, for which the bubble is currently not ready.
-  if (bubble->has_parent() && parent)
-    bubble_widget->StackAbove(parent);
+  if (!base::FeatureList::IsEnabled(views::features::kWidgetLayering)) {
+    if (bubble->has_parent() && parent)
+      bubble_widget->StackAbove(parent);
+  }
 #endif
   return bubble_widget;
 }
@@ -533,7 +537,8 @@ BubbleDialogDelegate::CreateNonClientFrameView(Widget* widget) {
   frame->SetFootnoteView(DisownFootnoteView());
 
   std::unique_ptr<BubbleBorder> border =
-      std::make_unique<BubbleBorder>(arrow(), GetShadow(), color());
+      std::make_unique<BubbleBorder>(arrow(), GetShadow());
+  border->SetColor(color());
   if (CustomShadowsSupported() && GetParams().round_corners)
     border->SetCornerRadius(GetCornerRadius());
 
@@ -621,6 +626,17 @@ View* BubbleDialogDelegate::GetAnchorView() const {
   return anchor_view_observer_->anchor_view();
 }
 
+void BubbleDialogDelegate::SetMainImage(ui::ImageModel main_image) {
+  // Adding a main image while the bubble is showing is not supported (but
+  // changing it is). Adding an image while it's showing would require a jarring
+  // re-layout.
+  if (main_image_.IsEmpty())
+    DCHECK(!GetBubbleFrameView());
+  main_image_ = std::move(main_image);
+  if (GetBubbleFrameView())
+    GetBubbleFrameView()->UpdateMainImage();
+}
+
 bool BubbleDialogDelegate::ShouldCloseOnDeactivate() const {
   return close_on_deactivate_ && !close_on_deactivate_pins_->is_pinned();
 }
@@ -666,10 +682,11 @@ void BubbleDialogDelegate::SetArrowWithoutResizing(BubbleBorder::Arrow arrow) {
 gfx::Rect BubbleDialogDelegate::GetAnchorRect() const {
   // TODO(tluk) eliminate the need for GetAnchorRect() to return an empty rect
   // if neither an |anchor_rect_| or an anchor view have been set.
-  if (!GetAnchorView())
+  View* anchor_view = GetAnchorView();
+  if (!anchor_view)
     return anchor_rect_.value_or(gfx::Rect());
 
-  anchor_rect_ = GetAnchorView()->GetAnchorBoundsInScreen();
+  anchor_rect_ = anchor_view->GetAnchorBoundsInScreen();
 
 #if !BUILDFLAG(IS_MAC)
   // GetAnchorBoundsInScreen returns values that take anchor widget's
@@ -677,13 +694,25 @@ gfx::Rect BubbleDialogDelegate::GetAnchorRect() const {
   // apply transforms on windows such as ChromeOS overview mode will see bubbles
   // offset.
   // TODO(sammiequon): Investigate if we can remove |anchor_widget_| and just
-  // replace its calls with GetAnchorView()->GetWidget().
-  DCHECK_EQ(anchor_widget_, GetAnchorView()->GetWidget());
-  gfx::Transform transform =
-      anchor_widget_->GetNativeWindow()->layer()->GetTargetTransform();
-  if (!transform.IsIdentity())
-    anchor_rect_->Offset(-gfx::ToRoundedVector2d(transform.To2dTranslation()));
+  // replace its calls with anchor_view->GetWidget().
+  DCHECK_EQ(anchor_widget_, anchor_view->GetWidget());
+  if (anchor_widget_) {
+    gfx::Transform transform =
+        anchor_widget_->GetNativeWindow()->layer()->GetTargetTransform();
+    if (!transform.IsIdentity())
+      anchor_rect_->Offset(
+          -gfx::ToRoundedVector2d(transform.To2dTranslation()));
+  }
 #endif
+
+  // Remove additional whitespace padding that was added to the view
+  // so that anchor_rect centers on the anchor and not skewed by the whitespace
+  BubbleFrameView* frame_view = GetBubbleFrameView();
+  if (frame_view && frame_view->GetDisplayVisibleArrow()) {
+    gfx::Insets* padding = anchor_view->GetProperty(kInternalPaddingKey);
+    if (padding != nullptr)
+      anchor_rect_->Inset(*padding);
+  }
 
   return anchor_rect_.value();
 }
@@ -887,6 +916,19 @@ void BubbleDialogDelegate::SizeToContents() {
   GetWidget()->SetBounds(bubble_bounds);
 }
 
+std::u16string BubbleDialogDelegate::GetSubtitle() const {
+  return subtitle_;
+}
+
+void BubbleDialogDelegate::SetSubtitle(const std::u16string& subtitle) {
+  if (subtitle_ == subtitle)
+    return;
+  subtitle_ = subtitle;
+  BubbleFrameView* frame_view = GetBubbleFrameView();
+  if (frame_view)
+    frame_view->UpdateSubtitle();
+}
+
 void BubbleDialogDelegate::UpdateColorsFromTheme() {
   View* const contents_view = GetContentsView();
   DCHECK(contents_view);
@@ -900,10 +942,12 @@ void BubbleDialogDelegate::UpdateColorsFromTheme() {
 
   // When there's an opaque layer, the bubble border background won't show
   // through, so explicitly paint a background color.
-  contents_view->SetBackground(
-      contents_view->layer() && contents_view->layer()->fills_bounds_opaquely()
-          ? CreateSolidBackground(color())
-          : nullptr);
+  const bool contents_layer_opaque =
+      contents_view->layer() && contents_view->layer()->fills_bounds_opaquely();
+  contents_view->SetBackground(contents_layer_opaque ||
+                                       force_create_contents_background_
+                                   ? CreateSolidBackground(color())
+                                   : nullptr);
 }
 
 void BubbleDialogDelegate::OnBubbleWidgetVisibilityChanged(bool visible) {

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,7 +87,12 @@ TEST(CreateWebRtcAudioProcessingModuleTest, CheckDefaultAgcConfig) {
   // zero.
   EXPECT_EQ(agc1_analog_config.startup_min_volume, 0);
 #endif
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS)
+  EXPECT_TRUE(agc1_analog_config.clipping_predictor.enabled);
+#else
   EXPECT_FALSE(agc1_analog_config.clipping_predictor.enabled);
+#endif
   // TODO(bugs.webrtc.org/7909): Uncomment below once fixed.
   // #endif
 
@@ -112,7 +117,10 @@ TEST(CreateWebRtcAudioProcessingModuleTest,
   auto config = CreateApmGetConfig(
       /*settings=*/{.automatic_gain_control = false,
                     .experimental_automatic_gain_control = false});
-#if BUILDFLAG(IS_CHROMECAST)
+
+// TODO(crbug.com/1336055): Make this check non-conditional following the launch
+// of AGC2.
+#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
   // Override the default config since on Chromecast AGC1 is explicitly
   // disabled.
   auto expected_config = kDefaultApmConfig.gain_controller1;
@@ -120,7 +128,7 @@ TEST(CreateWebRtcAudioProcessingModuleTest,
   EXPECT_EQ(config.gain_controller1, expected_config);
 #else
   EXPECT_EQ(config.gain_controller1, kDefaultApmConfig.gain_controller1);
-#endif
+#endif  // BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
 }
 
 TEST(CreateWebRtcAudioProcessingModuleTest,
@@ -150,7 +158,7 @@ TEST(CreateWebRtcAudioProcessingModuleTest, DisableAgcEnableExperimentalAgc) {
 }
 
 // TODO(bugs.webrtc.org/7909): Remove #IF once fixed.
-#if BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
 TEST(CreateWebRtcAudioProcessingModuleTest, DisableAnalogAgc) {
   auto config = CreateApmGetConfig(
       /*settings=*/{.automatic_gain_control = true,
@@ -158,7 +166,7 @@ TEST(CreateWebRtcAudioProcessingModuleTest, DisableAnalogAgc) {
   EXPECT_TRUE(config.gain_controller1.enabled);
   EXPECT_FALSE(config.gain_controller1.analog_gain_controller.enabled);
 }
-#else  // !BUILDFLAG(IS_CHROMECAST)
+#else
 // Checks that setting `experimental_automatic_gain_control` to false does not
 // disable the analog controller.
 // TODO(bugs.webrtc.org/7909): Remove once fixed.
@@ -169,7 +177,7 @@ TEST(CreateWebRtcAudioProcessingModuleTest, CannotDisableAnalogAgc) {
   EXPECT_TRUE(config.gain_controller1.enabled);
   EXPECT_TRUE(config.gain_controller1.analog_gain_controller.enabled);
 }
-#endif  // !BUILDFLAG(IS_CHROMECAST)
+#endif  // BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 // Checks that on mobile the AGC1 Analog startup minimum volume cannot be

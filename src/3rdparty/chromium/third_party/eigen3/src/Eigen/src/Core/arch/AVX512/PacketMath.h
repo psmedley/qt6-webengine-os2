@@ -40,7 +40,9 @@ namespace internal {
 typedef __m512 Packet16f;
 typedef __m512i Packet16i;
 typedef __m512d Packet8d;
+#ifndef EIGEN_VECTORIZE_AVX512FP16
 typedef eigen_packet_wrapper<__m256i, 1> Packet16h;
+#endif
 typedef eigen_packet_wrapper<__m256i, 2> Packet16bf;
 
 template <>
@@ -56,6 +58,7 @@ struct is_arithmetic<__m512d> {
   enum { value = true };
 };
 
+#ifndef EIGEN_VECTORIZE_AVX512FP16
 template<> struct is_arithmetic<Packet16h> { enum { value = true }; };
 
 template <>
@@ -100,6 +103,7 @@ struct packet_traits<half> : default_packet_traits {
     HasRint   = 1
   };
 };
+#endif
 
 template<> struct packet_traits<float>  : default_packet_traits
 {
@@ -118,6 +122,9 @@ template<> struct packet_traits<float>  : default_packet_traits
     HasBlend = 0,
     HasSin = EIGEN_FAST_MATH,
     HasCos = EIGEN_FAST_MATH,
+    HasACos = 1,
+    HasASin = 1,
+    HasATan = 1,
 #if EIGEN_HAS_AVX512_MATH
     HasLog = 1,
     HasLog1p  = 1,
@@ -170,6 +177,8 @@ template<> struct packet_traits<int> : default_packet_traits
   enum {
     Vectorizable = 1,
     AlignedOnScalar = 1,
+    HasCmp = 1,
+    HasDiv = 1,
     size=16
   };
 };
@@ -180,13 +189,14 @@ struct unpacket_traits<Packet16f> {
   typedef Packet8f half;
   typedef Packet16i integer_packet;
   typedef uint16_t mask_t;
-  enum { size = 16, alignment=Aligned64, vectorizable=true, masked_load_available=true, masked_store_available=true };
+  enum { size = 16, alignment=Aligned64, vectorizable=true, masked_load_available=true, masked_store_available=true, masked_fpops_available=true };
 };
 template <>
 struct unpacket_traits<Packet8d> {
   typedef double type;
   typedef Packet4d half;
-  enum { size = 8, alignment=Aligned64, vectorizable=true, masked_load_available=false, masked_store_available=false };
+  typedef uint8_t mask_t;
+  enum { size = 8, alignment=Aligned64, vectorizable=true, masked_load_available=true, masked_store_available=true, masked_fpops_available=true };
 };
 template <>
 struct unpacket_traits<Packet16i> {
@@ -195,12 +205,14 @@ struct unpacket_traits<Packet16i> {
   enum { size = 16, alignment=Aligned64, vectorizable=true, masked_load_available=false, masked_store_available=false };
 };
 
+#ifndef EIGEN_VECTORIZE_AVX512FP16
 template<>
 struct unpacket_traits<Packet16h> {
   typedef Eigen::half type;
   typedef Packet8h half;
   enum {size=16, alignment=Aligned32, vectorizable=true, masked_load_available=false, masked_store_available=false};
 };
+#endif
 
 template <>
 EIGEN_STRONG_INLINE Packet16f pset1<Packet16f>(const float& from) {
@@ -244,11 +256,25 @@ template<> EIGEN_STRONG_INLINE Packet8d peven_mask(const Packet8d& /*a*/) {
 
 template <>
 EIGEN_STRONG_INLINE Packet16f pload1<Packet16f>(const float* from) {
+#if (EIGEN_COMP_GNUC != 0) || (EIGEN_COMP_CLANG != 0)
+  // Inline asm here helps reduce some register spilling in TRSM kernels.
+  // See note in unrolls::gemm::microKernel in TrsmKernel.h
+  Packet16f ret;
+  __asm__  ("vbroadcastss %[mem], %[dst]" : [dst] "=v" (ret) : [mem] "m" (*from));
+  return ret;
+#else
   return _mm512_broadcastss_ps(_mm_load_ps1(from));
+#endif
 }
 template <>
 EIGEN_STRONG_INLINE Packet8d pload1<Packet8d>(const double* from) {
+#if (EIGEN_COMP_GNUC != 0) || (EIGEN_COMP_CLANG != 0)
+  Packet8d ret;
+  __asm__  ("vbroadcastsd %[mem], %[dst]" : [dst] "=v" (ret) : [mem] "m" (*from));
+  return ret;
+#else
   return _mm512_set1_pd(*from);
+#endif
 }
 
 template <>
@@ -284,6 +310,21 @@ template <>
 EIGEN_STRONG_INLINE Packet16i padd<Packet16i>(const Packet16i& a,
                                               const Packet16i& b) {
   return _mm512_add_epi32(a, b);
+}
+
+template <>
+EIGEN_STRONG_INLINE Packet16f padd<Packet16f>(const Packet16f& a,
+                                              const Packet16f& b,
+                                              uint16_t umask) {
+  __mmask16 mask = static_cast<__mmask16>(umask);
+  return _mm512_maskz_add_ps(mask, a, b);
+}
+template <>
+EIGEN_STRONG_INLINE Packet8d padd<Packet8d>(const Packet8d& a,
+                                            const Packet8d& b,
+                                            uint8_t umask) {
+  __mmask8 mask = static_cast<__mmask8>(umask);
+  return _mm512_maskz_add_pd(mask, a, b);
 }
 
 template <>
@@ -349,10 +390,19 @@ EIGEN_STRONG_INLINE Packet16f pdiv<Packet16f>(const Packet16f& a,
                                               const Packet16f& b) {
   return _mm512_div_ps(a, b);
 }
+
 template <>
 EIGEN_STRONG_INLINE Packet8d pdiv<Packet8d>(const Packet8d& a,
                                             const Packet8d& b) {
   return _mm512_div_pd(a, b);
+}
+
+template <>
+EIGEN_STRONG_INLINE Packet16i pdiv<Packet16i>(const Packet16i& a,
+                                              const Packet16i& b) {
+  Packet8i q_lo = pdiv<Packet8i>(_mm512_extracti64x4_epi64(a, 0), _mm512_extracti64x4_epi64(b,0));
+  Packet8i q_hi = pdiv<Packet8i>(_mm512_extracti64x4_epi64(a, 1), _mm512_extracti64x4_epi64(b, 1));
+  return _mm512_inserti64x4(_mm512_castsi256_si512(q_lo), q_hi, 1);
 }
 
 #ifdef EIGEN_VECTORIZE_FMA
@@ -755,7 +805,7 @@ EIGEN_STRONG_INLINE Packet8d pload<Packet8d>(const double* from) {
 template <>
 EIGEN_STRONG_INLINE Packet16i pload<Packet16i>(const int* from) {
   EIGEN_DEBUG_ALIGNED_LOAD return _mm512_load_si512(
-      reinterpret_cast<const __m512i*>(from));
+    reinterpret_cast<const __m512i*>(from));
 }
 
 template <>
@@ -776,6 +826,11 @@ template <>
 EIGEN_STRONG_INLINE Packet16f ploadu<Packet16f>(const float* from, uint16_t umask) {
   __mmask16 mask = static_cast<__mmask16>(umask);
   EIGEN_DEBUG_UNALIGNED_LOAD return _mm512_maskz_loadu_ps(mask, from);
+}
+template <>
+EIGEN_STRONG_INLINE Packet8d ploadu<Packet8d>(const double* from, uint8_t umask) {
+  __mmask8 mask = static_cast<__mmask8>(umask);
+  EIGEN_DEBUG_UNALIGNED_LOAD return _mm512_maskz_loadu_pd(mask, from);
 }
 
 // Loads 8 floats from memory a returns the packet
@@ -886,6 +941,40 @@ EIGEN_STRONG_INLINE void pstoreu<float>(float* to, const Packet16f& from, uint16
   __mmask16 mask = static_cast<__mmask16>(umask);
   EIGEN_DEBUG_UNALIGNED_STORE return _mm512_mask_storeu_ps(to, mask, from);
 }
+template <>
+EIGEN_STRONG_INLINE void pstoreu<double>(double* to, const Packet8d& from, uint8_t umask) {
+  __mmask8 mask = static_cast<__mmask8>(umask);
+  EIGEN_DEBUG_UNALIGNED_STORE return _mm512_mask_storeu_pd(to, mask, from);
+}
+
+template <typename Scalar, typename Packet>
+EIGEN_DEVICE_FUNC inline Packet pgather(const Packet& src, const Scalar* from,
+    Index stride, typename unpacket_traits<Packet>::mask_t umask);
+template <>
+EIGEN_DEVICE_FUNC inline Packet16f pgather<float, Packet16f>(const Packet16f& src,
+                                                             const float* from,
+                                                             Index stride,
+                                                             uint16_t umask) {
+  Packet16i stride_vector = _mm512_set1_epi32(convert_index<int>(stride));
+  Packet16i stride_multiplier =
+      _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+  Packet16i indices = _mm512_mullo_epi32(stride_vector, stride_multiplier);
+  __mmask16 mask = static_cast<__mmask16>(umask);
+
+  return _mm512_mask_i32gather_ps(src, mask, indices, from, 4);
+}
+template <>
+EIGEN_DEVICE_FUNC inline Packet8d pgather<double, Packet8d>(const Packet8d& src,
+                                                            const double* from,
+                                                            Index stride,
+                                                            uint8_t umask) {
+  Packet8i stride_vector = _mm256_set1_epi32(convert_index<int>(stride));
+  Packet8i stride_multiplier = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+  Packet8i indices = _mm256_mullo_epi32(stride_vector, stride_multiplier);
+  __mmask8 mask = static_cast<__mmask8>(umask);
+
+  return _mm512_mask_i32gather_pd(src, mask, indices, from, 8);
+}
 
 template <>
 EIGEN_DEVICE_FUNC inline Packet16f pgather<float, Packet16f>(const float* from,
@@ -914,6 +1003,33 @@ EIGEN_DEVICE_FUNC inline Packet16i pgather<int, Packet16i>(const int* from,
       _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
   Packet16i indices = _mm512_mullo_epi32(stride_vector, stride_multiplier);
   return _mm512_i32gather_epi32(indices, from, 4);
+}
+
+template <typename Scalar, typename Packet>
+EIGEN_DEVICE_FUNC inline void pscatter(Scalar* to, const Packet& from,
+    Index stride, typename unpacket_traits<Packet>::mask_t umask);
+template <>
+EIGEN_DEVICE_FUNC inline void pscatter<float, Packet16f>(float* to,
+                                                         const Packet16f& from,
+                                                         Index stride,
+                                                         uint16_t umask) {
+  Packet16i stride_vector = _mm512_set1_epi32(convert_index<int>(stride));
+  Packet16i stride_multiplier =
+      _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+  Packet16i indices = _mm512_mullo_epi32(stride_vector, stride_multiplier);
+  __mmask16 mask = static_cast<__mmask16>(umask);
+  _mm512_mask_i32scatter_ps(to, mask, indices, from, 4);
+}
+template <>
+EIGEN_DEVICE_FUNC inline void pscatter<double, Packet8d>(double* to,
+                                                         const Packet8d& from,
+                                                         Index stride,
+                                                         uint8_t umask) {
+  Packet8i stride_vector = _mm256_set1_epi32(convert_index<int>(stride));
+  Packet8i stride_multiplier = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+  Packet8i indices = _mm256_mullo_epi32(stride_vector, stride_multiplier);
+  __mmask8 mask = static_cast<__mmask8>(umask);
+  _mm512_mask_i32scatter_pd(to, mask, indices, from, 8);
 }
 
 template <>
@@ -1017,7 +1133,7 @@ EIGEN_STRONG_INLINE Packet16f pfrexp<Packet16f>(const Packet16f& a, Packet16f& e
 
 // Extract exponent without existence of Packet8l.
 template<>
-EIGEN_STRONG_INLINE  
+EIGEN_STRONG_INLINE
 Packet8d pfrexp_generic_get_biased_exponent(const Packet8d& a) {
   const Packet8d cst_exp_mask  = pset1frombits<Packet8d>(static_cast<uint64_t>(0x7ff0000000000000ull));
   #ifdef EIGEN_VECTORIZE_AVX512DQ
@@ -1040,11 +1156,11 @@ template<> EIGEN_STRONG_INLINE Packet8d pldexp<Packet8d>(const Packet8d& a, cons
   // Clamp exponent to [-2099, 2099]
   const Packet8d max_exponent = pset1<Packet8d>(2099.0);
   const Packet8i e = _mm512_cvtpd_epi32(pmin(pmax(exponent, pnegate(max_exponent)), max_exponent));
-  
+
   // Split 2^e into four factors and multiply.
   const Packet8i bias = pset1<Packet8i>(1023);
   Packet8i b = parithmetic_shift_right<2>(e);  // floor(e/4)
-  
+
   // 2^b
   const Packet8i permute_idx = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
   Packet8i hi = _mm256_permutevar8x32_epi32(padd(b, bias), permute_idx);
@@ -1052,7 +1168,7 @@ template<> EIGEN_STRONG_INLINE Packet8d pldexp<Packet8d>(const Packet8d& a, cons
   hi = _mm256_slli_epi64(_mm256_srli_epi64(hi, 32), 52);
   Packet8d c = _mm512_castsi512_pd(_mm512_inserti64x4(_mm512_castsi256_si512(lo), hi, 1));
   Packet8d out = pmul(pmul(pmul(a, c), c), c);  // a * 2^(3b)
-  
+
   // 2^(e - 3b)
   b = psub(psub(psub(e, b), b), b);  // e - 3b
   hi = _mm256_permutevar8x32_epi32(padd(b, bias), permute_idx);
@@ -1072,7 +1188,7 @@ template<> EIGEN_STRONG_INLINE Packet8d pldexp<Packet8d>(const Packet8d& a, cons
 // AVX512F does not define _mm512_extracti32x8_epi32 to extract _m256i from _m512i
 #define EIGEN_EXTRACT_8i_FROM_16i(INPUT, OUTPUT)                           \
   __m256i OUTPUT##_0 = _mm512_extracti32x8_epi32(INPUT, 0);                \
-  __m256i OUTPUT##_1 = _mm512_extracti32x8_epi32(INPUT, 1) 
+  __m256i OUTPUT##_1 = _mm512_extracti32x8_epi32(INPUT, 1)
 #else
 #define EIGEN_EXTRACT_8f_FROM_16f(INPUT, OUTPUT)                \
   __m256 OUTPUT##_0 = _mm256_insertf128_ps(                     \
@@ -1272,7 +1388,11 @@ template<> EIGEN_STRONG_INLINE bool predux_any(const Packet16f& x)
   return !_mm512_kortestz(tmp,tmp);
 }
 
-
+template<> EIGEN_STRONG_INLINE bool predux_any(const Packet16i& x)
+{
+  __mmask16 tmp = _mm512_test_epi32_mask(x,x);
+  return !_mm512_kortestz(tmp,tmp);
+}
 
 #define PACK_OUTPUT(OUTPUT, INPUT, INDEX, STRIDE) \
   EIGEN_INSERT_8f_INTO_16f(OUTPUT[INDEX], INPUT[INDEX], INPUT[INDEX + STRIDE]);
@@ -1392,6 +1512,44 @@ EIGEN_DEVICE_FUNC inline void ptranspose(PacketBlock<Packet16f, 16>& kernel) {
   EIGEN_INSERT_8f_INTO_16f(OUTPUT[INDEX], INPUT[2 * INDEX], \
                            INPUT[2 * INDEX + STRIDE]);
 
+EIGEN_DEVICE_FUNC inline void ptranspose(PacketBlock<Packet16f, 8>& kernel) {
+  __m512 T0 = _mm512_unpacklo_ps(kernel.packet[0],kernel.packet[1]);
+  __m512 T1 = _mm512_unpackhi_ps(kernel.packet[0],kernel.packet[1]);
+  __m512 T2 = _mm512_unpacklo_ps(kernel.packet[2],kernel.packet[3]);
+  __m512 T3 = _mm512_unpackhi_ps(kernel.packet[2],kernel.packet[3]);
+  __m512 T4 = _mm512_unpacklo_ps(kernel.packet[4],kernel.packet[5]);
+  __m512 T5 = _mm512_unpackhi_ps(kernel.packet[4],kernel.packet[5]);
+  __m512 T6 = _mm512_unpacklo_ps(kernel.packet[6],kernel.packet[7]);
+  __m512 T7 = _mm512_unpackhi_ps(kernel.packet[6],kernel.packet[7]);
+
+  kernel.packet[0] = _mm512_castpd_ps(_mm512_unpacklo_pd(_mm512_castps_pd(T0),_mm512_castps_pd(T2)));
+  kernel.packet[1] = _mm512_castpd_ps(_mm512_unpackhi_pd(_mm512_castps_pd(T0),_mm512_castps_pd(T2)));
+  kernel.packet[2] = _mm512_castpd_ps(_mm512_unpacklo_pd(_mm512_castps_pd(T1),_mm512_castps_pd(T3)));
+  kernel.packet[3] = _mm512_castpd_ps(_mm512_unpackhi_pd(_mm512_castps_pd(T1),_mm512_castps_pd(T3)));
+  kernel.packet[4] = _mm512_castpd_ps(_mm512_unpacklo_pd(_mm512_castps_pd(T4),_mm512_castps_pd(T6)));
+  kernel.packet[5] = _mm512_castpd_ps(_mm512_unpackhi_pd(_mm512_castps_pd(T4),_mm512_castps_pd(T6)));
+  kernel.packet[6] = _mm512_castpd_ps(_mm512_unpacklo_pd(_mm512_castps_pd(T5),_mm512_castps_pd(T7)));
+  kernel.packet[7] = _mm512_castpd_ps(_mm512_unpackhi_pd(_mm512_castps_pd(T5),_mm512_castps_pd(T7)));
+
+  T0 = _mm512_shuffle_f32x4(kernel.packet[0], kernel.packet[4], 0x44);
+  T1 = _mm512_shuffle_f32x4(kernel.packet[0], kernel.packet[4], 0xee);
+  T2 = _mm512_shuffle_f32x4(kernel.packet[1], kernel.packet[5], 0x44);
+  T3 = _mm512_shuffle_f32x4(kernel.packet[1], kernel.packet[5], 0xee);
+  T4 = _mm512_shuffle_f32x4(kernel.packet[2], kernel.packet[6], 0x44);
+  T5 = _mm512_shuffle_f32x4(kernel.packet[2], kernel.packet[6], 0xee);
+  T6 = _mm512_shuffle_f32x4(kernel.packet[3], kernel.packet[7], 0x44);
+  T7 = _mm512_shuffle_f32x4(kernel.packet[3], kernel.packet[7], 0xee);
+
+  kernel.packet[0] = _mm512_shuffle_f32x4(T0, T2, 0x88);
+  kernel.packet[2] = _mm512_shuffle_f32x4(T0, T2, 0xdd);
+  kernel.packet[1] = _mm512_shuffle_f32x4(T4, T6, 0x88);
+  kernel.packet[3] = _mm512_shuffle_f32x4(T4, T6, 0xdd);
+  kernel.packet[4] = _mm512_shuffle_f32x4(T1, T3, 0x88);
+  kernel.packet[6] = _mm512_shuffle_f32x4(T1, T3, 0xdd);
+  kernel.packet[5] = _mm512_shuffle_f32x4(T5, T7, 0x88);
+  kernel.packet[7] = _mm512_shuffle_f32x4(T5, T7, 0xdd);
+}
+
 EIGEN_DEVICE_FUNC inline void ptranspose(PacketBlock<Packet16f, 4>& kernel) {
   __m512 T0 = _mm512_unpacklo_ps(kernel.packet[0], kernel.packet[1]);
   __m512 T1 = _mm512_unpackhi_ps(kernel.packet[0], kernel.packet[1]);
@@ -1468,62 +1626,53 @@ EIGEN_DEVICE_FUNC inline void ptranspose(PacketBlock<Packet8d, 4>& kernel) {
 }
 
 EIGEN_DEVICE_FUNC inline void ptranspose(PacketBlock<Packet8d, 8>& kernel) {
-  __m512d T0 = _mm512_unpacklo_pd(kernel.packet[0], kernel.packet[1]);
-  __m512d T1 = _mm512_unpackhi_pd(kernel.packet[0], kernel.packet[1]);
-  __m512d T2 = _mm512_unpacklo_pd(kernel.packet[2], kernel.packet[3]);
-  __m512d T3 = _mm512_unpackhi_pd(kernel.packet[2], kernel.packet[3]);
-  __m512d T4 = _mm512_unpacklo_pd(kernel.packet[4], kernel.packet[5]);
-  __m512d T5 = _mm512_unpackhi_pd(kernel.packet[4], kernel.packet[5]);
-  __m512d T6 = _mm512_unpacklo_pd(kernel.packet[6], kernel.packet[7]);
-  __m512d T7 = _mm512_unpackhi_pd(kernel.packet[6], kernel.packet[7]);
+    __m512d T0 = _mm512_unpacklo_pd(kernel.packet[0],kernel.packet[1]);
+    __m512d T1 = _mm512_unpackhi_pd(kernel.packet[0],kernel.packet[1]);
+    __m512d T2 = _mm512_unpacklo_pd(kernel.packet[2],kernel.packet[3]);
+    __m512d T3 = _mm512_unpackhi_pd(kernel.packet[2],kernel.packet[3]);
+    __m512d T4 = _mm512_unpacklo_pd(kernel.packet[4],kernel.packet[5]);
+    __m512d T5 = _mm512_unpackhi_pd(kernel.packet[4],kernel.packet[5]);
+    __m512d T6 = _mm512_unpacklo_pd(kernel.packet[6],kernel.packet[7]);
+    __m512d T7 = _mm512_unpackhi_pd(kernel.packet[6],kernel.packet[7]);
 
-  PacketBlock<Packet4d, 16> tmp;
+    kernel.packet[0] = _mm512_permutex_pd(T2, 0x4E);
+    kernel.packet[0] = _mm512_mask_blend_pd(0xCC, T0, kernel.packet[0]);
+    kernel.packet[2] = _mm512_permutex_pd(T0, 0x4E);
+    kernel.packet[2] = _mm512_mask_blend_pd(0xCC, kernel.packet[2], T2);
+    kernel.packet[1] = _mm512_permutex_pd(T3, 0x4E);
+    kernel.packet[1] = _mm512_mask_blend_pd(0xCC, T1, kernel.packet[1]);
+    kernel.packet[3] = _mm512_permutex_pd(T1, 0x4E);
+    kernel.packet[3] = _mm512_mask_blend_pd(0xCC, kernel.packet[3], T3);
+    kernel.packet[4] = _mm512_permutex_pd(T6, 0x4E);
+    kernel.packet[4] = _mm512_mask_blend_pd(0xCC, T4, kernel.packet[4]);
+    kernel.packet[6] = _mm512_permutex_pd(T4, 0x4E);
+    kernel.packet[6] = _mm512_mask_blend_pd(0xCC, kernel.packet[6], T6);
+    kernel.packet[5] = _mm512_permutex_pd(T7, 0x4E);
+    kernel.packet[5] = _mm512_mask_blend_pd(0xCC, T5, kernel.packet[5]);
+    kernel.packet[7] = _mm512_permutex_pd(T5, 0x4E);
+    kernel.packet[7] = _mm512_mask_blend_pd(0xCC, kernel.packet[7], T7);
 
-  tmp.packet[0] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T0, 0),
-                                         _mm512_extractf64x4_pd(T2, 0), 0x20);
-  tmp.packet[1] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T1, 0),
-                                         _mm512_extractf64x4_pd(T3, 0), 0x20);
-  tmp.packet[2] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T0, 0),
-                                         _mm512_extractf64x4_pd(T2, 0), 0x31);
-  tmp.packet[3] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T1, 0),
-                                         _mm512_extractf64x4_pd(T3, 0), 0x31);
+    T0 = _mm512_shuffle_f64x2(kernel.packet[4], kernel.packet[4], 0x4E);
+    T0 = _mm512_mask_blend_pd(0xF0, kernel.packet[0], T0);
+    T4 = _mm512_shuffle_f64x2(kernel.packet[0], kernel.packet[0], 0x4E);
+    T4 = _mm512_mask_blend_pd(0xF0, T4, kernel.packet[4]);
+    T1 = _mm512_shuffle_f64x2(kernel.packet[5], kernel.packet[5], 0x4E);
+    T1 = _mm512_mask_blend_pd(0xF0, kernel.packet[1], T1);
+    T5 = _mm512_shuffle_f64x2(kernel.packet[1], kernel.packet[1], 0x4E);
+    T5 = _mm512_mask_blend_pd(0xF0, T5, kernel.packet[5]);
+    T2 = _mm512_shuffle_f64x2(kernel.packet[6], kernel.packet[6], 0x4E);
+    T2 = _mm512_mask_blend_pd(0xF0, kernel.packet[2], T2);
+    T6 = _mm512_shuffle_f64x2(kernel.packet[2], kernel.packet[2], 0x4E);
+    T6 = _mm512_mask_blend_pd(0xF0, T6, kernel.packet[6]);
+    T3 = _mm512_shuffle_f64x2(kernel.packet[7], kernel.packet[7], 0x4E);
+    T3 = _mm512_mask_blend_pd(0xF0, kernel.packet[3], T3);
+    T7 = _mm512_shuffle_f64x2(kernel.packet[3], kernel.packet[3], 0x4E);
+    T7 = _mm512_mask_blend_pd(0xF0, T7, kernel.packet[7]);
 
-  tmp.packet[4] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T0, 1),
-                                         _mm512_extractf64x4_pd(T2, 1), 0x20);
-  tmp.packet[5] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T1, 1),
-                                         _mm512_extractf64x4_pd(T3, 1), 0x20);
-  tmp.packet[6] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T0, 1),
-                                         _mm512_extractf64x4_pd(T2, 1), 0x31);
-  tmp.packet[7] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T1, 1),
-                                         _mm512_extractf64x4_pd(T3, 1), 0x31);
-
-  tmp.packet[8] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T4, 0),
-                                         _mm512_extractf64x4_pd(T6, 0), 0x20);
-  tmp.packet[9] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T5, 0),
-                                         _mm512_extractf64x4_pd(T7, 0), 0x20);
-  tmp.packet[10] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T4, 0),
-                                          _mm512_extractf64x4_pd(T6, 0), 0x31);
-  tmp.packet[11] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T5, 0),
-                                          _mm512_extractf64x4_pd(T7, 0), 0x31);
-
-  tmp.packet[12] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T4, 1),
-                                          _mm512_extractf64x4_pd(T6, 1), 0x20);
-  tmp.packet[13] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T5, 1),
-                                          _mm512_extractf64x4_pd(T7, 1), 0x20);
-  tmp.packet[14] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T4, 1),
-                                          _mm512_extractf64x4_pd(T6, 1), 0x31);
-  tmp.packet[15] = _mm256_permute2f128_pd(_mm512_extractf64x4_pd(T5, 1),
-                                          _mm512_extractf64x4_pd(T7, 1), 0x31);
-
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 0, 8);
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 1, 8);
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 2, 8);
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 3, 8);
-
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 4, 8);
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 5, 8);
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 6, 8);
-  PACK_OUTPUT_SQ_D(kernel.packet, tmp.packet, 7, 8);
+    kernel.packet[0] = T0; kernel.packet[1] = T1;
+    kernel.packet[2] = T2; kernel.packet[3] = T3;
+    kernel.packet[4] = T4; kernel.packet[5] = T5;
+    kernel.packet[6] = T6; kernel.packet[7] = T7;
 }
 
 #define PACK_OUTPUT_I32(OUTPUT, INPUT, INDEX, STRIDE) \
@@ -1756,60 +1905,11 @@ ploadquad(const Eigen::half* from) {
 }
 
 EIGEN_STRONG_INLINE Packet16f half2float(const Packet16h& a) {
-#ifdef EIGEN_HAS_FP16_C
   return _mm512_cvtph_ps(a);
-#else
-  EIGEN_ALIGN64 half aux[16];
-  pstore(aux, a);
-  float f0(aux[0]);
-  float f1(aux[1]);
-  float f2(aux[2]);
-  float f3(aux[3]);
-  float f4(aux[4]);
-  float f5(aux[5]);
-  float f6(aux[6]);
-  float f7(aux[7]);
-  float f8(aux[8]);
-  float f9(aux[9]);
-  float fa(aux[10]);
-  float fb(aux[11]);
-  float fc(aux[12]);
-  float fd(aux[13]);
-  float fe(aux[14]);
-  float ff(aux[15]);
-
-  return _mm512_set_ps(
-      ff, fe, fd, fc, fb, fa, f9, f8, f7, f6, f5, f4, f3, f2, f1, f0);
-#endif
 }
 
 EIGEN_STRONG_INLINE Packet16h float2half(const Packet16f& a) {
-#ifdef EIGEN_HAS_FP16_C
   return _mm512_cvtps_ph(a, _MM_FROUND_TO_NEAREST_INT|_MM_FROUND_NO_EXC);
-#else
-  EIGEN_ALIGN64 float aux[16];
-  pstore(aux, a);
-  half h0(aux[0]);
-  half h1(aux[1]);
-  half h2(aux[2]);
-  half h3(aux[3]);
-  half h4(aux[4]);
-  half h5(aux[5]);
-  half h6(aux[6]);
-  half h7(aux[7]);
-  half h8(aux[8]);
-  half h9(aux[9]);
-  half ha(aux[10]);
-  half hb(aux[11]);
-  half hc(aux[12]);
-  half hd(aux[13]);
-  half he(aux[14]);
-  half hf(aux[15]);
-
-  return _mm256_set_epi16(
-      hf.x, he.x, hd.x, hc.x, hb.x, ha.x, h9.x, h8.x,
-      h7.x, h6.x, h5.x, h4.x, h3.x, h2.x, h1.x, h0.x);
-#endif
 }
 
 template<> EIGEN_STRONG_INLINE Packet16h ptrue(const Packet16h& a) {
@@ -1899,6 +1999,7 @@ template<> EIGEN_STRONG_INLINE Packet16h pnegate(const Packet16h& a) {
   return _mm256_xor_si256(a, sign_mask);
 }
 
+#ifndef EIGEN_VECTORIZE_AVX512FP16
 template<> EIGEN_STRONG_INLINE Packet16h padd<Packet16h>(const Packet16h& a, const Packet16h& b) {
   Packet16f af = half2float(a);
   Packet16f bf = half2float(b);
@@ -1931,6 +2032,8 @@ template<> EIGEN_STRONG_INLINE half predux<Packet16h>(const Packet16h& from) {
   Packet16f from_float = half2float(from);
   return half(predux(from_float));
 }
+
+#endif
 
 template <>
 EIGEN_STRONG_INLINE Packet8h predux_half_dowto4<Packet16h>(const Packet16h& a) {

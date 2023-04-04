@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,9 @@ class KEYED_SERVICE_EXPORT DependencyManager {
       void* context1,
       DependencyManager* dependency_manager2,
       void* context2);
+
+  // Returns the dependency graph for Keyed Services Factory testing purposes.
+  DependencyGraph& GetDependencyGraphForTesting();
 
  protected:
   DependencyManager();

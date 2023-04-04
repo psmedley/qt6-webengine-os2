@@ -64,13 +64,13 @@ SkPathBuilder& SkPathBuilder::operator=(const SkPath& src) {
 }
 
 void SkPathBuilder::incReserve(int extraPtCount, int extraVbCount) {
-    fPts.setReserve(  Sk32_sat_add(fPts.count(),   extraPtCount));
-    fVerbs.setReserve(Sk32_sat_add(fVerbs.count(), extraVbCount));
+    fPts.reserve(  Sk32_sat_add(fPts.size(),   extraPtCount));
+    fVerbs.reserve(Sk32_sat_add(fVerbs.size(), extraVbCount));
 }
 
 SkRect SkPathBuilder::computeBounds() const {
     SkRect bounds;
-    bounds.setBounds(fPts.begin(), fPts.count());
+    bounds.setBounds(fPts.begin(), fPts.size());
     return bounds;
 }
 
@@ -143,7 +143,7 @@ SkPathBuilder& SkPathBuilder::cubicTo(SkPoint pt1, SkPoint pt2, SkPoint pt3) {
 }
 
 SkPathBuilder& SkPathBuilder::close() {
-    if (fVerbs.count() > 0) {
+    if (!fVerbs.empty()) {
         this->ensureMove();
 
         fVerbs.push_back((uint8_t)SkPathVerb::kClose);
@@ -324,7 +324,7 @@ SkPathBuilder& SkPathBuilder::arcTo(const SkRect& oval, SkScalar startAngle, SkS
         return *this;
     }
 
-    if (fVerbs.count() == 0) {
+    if (fVerbs.empty()) {
         forceMoveTo = true;
     }
 
@@ -489,7 +489,7 @@ SkPathBuilder& SkPathBuilder::arcTo(SkPoint rad, SkScalar angle, SkPathBuilder::
     pointTransform.preRotate(-angle);
 
     SkPoint unitPts[2];
-    pointTransform.mapPoints(unitPts, srcPts, (int) SK_ARRAY_COUNT(unitPts));
+    pointTransform.mapPoints(unitPts, srcPts, (int) std::size(unitPts));
     SkVector delta = unitPts[1] - unitPts[0];
 
     SkScalar d = delta.fX * delta.fX + delta.fY * delta.fY;
@@ -551,7 +551,7 @@ SkPathBuilder& SkPathBuilder::arcTo(SkPoint rad, SkScalar angle, SkPathBuilder::
         unitPts[0] = unitPts[1];
         unitPts[0].offset(t * sinEndTheta, -t * cosEndTheta);
         SkPoint mapped[2];
-        pointTransform.mapPoints(mapped, unitPts, (int) SK_ARRAY_COUNT(unitPts));
+        pointTransform.mapPoints(mapped, unitPts, (int) std::size(unitPts));
         /*
         Computing the arc width introduces rounding errors that cause arcs to start
         outside their marks. A round rect may lose convexity as a result. If the input

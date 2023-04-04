@@ -8,15 +8,16 @@
 
 #include <ctype.h>
 
+#include <iterator>
+
 #include "core/fpdfapi/cmaps/fpdf_cmaps.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_simple_parser.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_safe_types.h"
-#include "core/fxge/fx_freetype.h"
+#include "core/fxge/freetype/fx_freetype.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -98,7 +99,7 @@ void CPDF_CMapParser::HandleCid(ByteStringView word) {
     EndCode = m_CodePoints[1];
     StartCID = static_cast<uint16_t>(m_CodePoints[2]);
   }
-  if (EndCode < 0x10000) {
+  if (EndCode < CPDF_CMap::kDirectMapTableSize) {
     for (uint32_t code = StartCode; code <= EndCode; code++) {
       m_pCMap->SetDirectCharcodeToCIDTable(
           code, static_cast<uint16_t>(StartCID + code - StartCode));
@@ -204,10 +205,10 @@ absl::optional<CPDF_CMap::CodeRange> CPDF_CMapParser::GetCodeRange(
 CIDSet CPDF_CMapParser::CharsetFromOrdering(ByteStringView ordering) {
   static const char* const kCharsetNames[CIDSET_NUM_SETS] = {
       nullptr, "GB1", "CNS1", "Japan1", "Korea1", "UCS"};
-  static_assert(pdfium::size(kCharsetNames) == CIDSET_NUM_SETS,
+  static_assert(std::size(kCharsetNames) == CIDSET_NUM_SETS,
                 "Too many CID sets");
 
-  for (size_t charset = 1; charset < pdfium::size(kCharsetNames); ++charset) {
+  for (size_t charset = 1; charset < std::size(kCharsetNames); ++charset) {
     if (ordering == kCharsetNames[charset])
       return static_cast<CIDSet>(charset);
   }

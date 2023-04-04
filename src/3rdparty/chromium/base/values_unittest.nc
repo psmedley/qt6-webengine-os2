@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ void F() {
   list.Append(ptr);
 }
 
-#elif defined(NCTEST_VALUE_CTOR_INT64_T)  // [r"fatal error: ambiguous conversion for functional-style cast from 'int64_t' \(aka '.+?'\) to 'base::Value'"]
+#elif defined(NCTEST_VALUE_CTOR_INT64_T)  // [r"fatal error: ambiguous conversion for functional-style cast from 'int64_t' \(aka '.+?'\) to 'Value'"]
 
 Value F(int64_t value) {
   return Value(value);
@@ -72,6 +72,22 @@ Value::List F(int64_t value) {
   Value::List list;
   list.Append(value);
   return list;
+}
+
+#elif defined(NCTEST_VALUEVIEW_FROM_CONST_NON_CHAR_POINTER)  // [r"fatal error: conversion function from 'const int \*' to 'ValueView' invokes a deleted function"]
+
+void F() {
+  const int* ptr = nullptr;
+  ValueView v = ptr;
+  G(v);
+}
+
+#elif defined(NCTEST_VALUEVIEW_FROM_NON_CHAR_POINTER)  // [r"fatal error: conversion function from 'int \*' to 'ValueView' invokes a deleted function"]
+
+void F() {
+  int* ptr = nullptr;
+  ValueView v = ptr;
+  G(v);
 }
 
 #elif defined(NCTEST_VALUEVIEW_FROM_STRING_TEMPORARY)  // [r"fatal error: object backing the pointer will be destroyed at the end of the full-expression"]

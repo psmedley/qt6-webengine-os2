@@ -1,4 +1,4 @@
-// Copyright (c) 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,12 +43,26 @@ class VulkanImplementationHeadless : public gpu::VulkanImplementation {
                                           VkSemaphore vk_semaphore) override;
   VkExternalMemoryHandleTypeFlagBits GetExternalImageHandleType() override;
   bool CanImportGpuMemoryBuffer(
+      gpu::VulkanDeviceQueue* device_queue,
       gfx::GpuMemoryBufferType memory_buffer_type) override;
   std::unique_ptr<gpu::VulkanImage> CreateImageFromGpuMemoryHandle(
       gpu::VulkanDeviceQueue* device_queue,
       gfx::GpuMemoryBufferHandle gmb_handle,
       gfx::Size size,
-      VkFormat vk_formae) override;
+      VkFormat vk_format,
+      const gfx::ColorSpace& color_space) override;
+
+#if BUILDFLAG(IS_FUCHSIA)
+  std::unique_ptr<gpu::SysmemBufferCollection> RegisterSysmemBufferCollection(
+      VkDevice device,
+      gfx::SysmemBufferCollectionId id,
+      zx::channel token,
+      gfx::BufferFormat format,
+      gfx::BufferUsage usage,
+      gfx::Size size,
+      size_t min_buffer_count,
+      bool register_with_image_pipe) override;
+#endif  // BUILDFLAG(IS_FUCHSIA)
 
  private:
   bool using_surface_ = true;

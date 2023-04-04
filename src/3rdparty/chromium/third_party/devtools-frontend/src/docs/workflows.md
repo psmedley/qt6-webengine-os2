@@ -44,8 +44,7 @@ gn gen out/fast-build --args='devtools_skip_typecheck=true'
 To update to latest tip of tree version:
 
 ```bash
-git fetch origin
-git checkout origin/main
+git fetch origin; git checkout origin/main  # or, alternatively: git rebase-update
 gclient sync
 ```
 
@@ -59,16 +58,16 @@ This works with Chromium 79 or later.
 **(Requires `brew install coreutils` on Mac.)**
 
 ```bash
-<path-to-chrome>/chrome --custom-devtools-frontend=file://$(realpath out/Default/gen/front_end)
+<path-to-devtools-frontend>/third_party/chrome/chrome-<platform>/chrome --custom-devtools-frontend=file://$(realpath out/Default/gen/front_end)
 ```
 
 Note that `$(realpath out/Default/gen/front_end)` expands to the absolute path to build artifacts for DevTools frontend.
 
-Open DevTools via F12 on Windows/Linux or Cmd+Option+I on Mac.
+Open DevTools via F12 or Ctrl+Shift+J on Windows/Linux or Cmd+Option+I on Mac.
 
 If you get errors along the line of `Uncaught TypeError: Cannot read property 'setInspectedTabId'` you probably specified an incorrect path - the path has to be absolute. On Mac and Linux, the file url will start with __three__ slashes: `file:///Users/...`.
 
-Tip: You can inspect DevTools with DevTools by undocking DevTools and then opening a second instance of DevTools (F12 on Windows/Linux, Cmd+Option+I on Mac).
+**Tip**: You can inspect DevTools with DevTools by undocking DevTools and then opening a second instance of DevTools (see keyboard shortcut above).
 
 ##### Running from remote URL
 
@@ -79,10 +78,10 @@ Serve the content of `out/Default/gen/front_end` on a web server, e.g. via `pyth
 Then point to that web server when starting Chromium, for example:
 
 ```bash
-<path-to-chrome>/chrome --custom-devtools-frontend=http://localhost:8000/
+<path-to-devtools-frontend>/third_party/chrome/chrome-<platform>/chrome --custom-devtools-frontend=http://localhost:8000/
 ```
 
-Open DevTools via F12 on Windows/Linux or Cmd+Option+I on Mac.
+Open DevTools via F12 or Ctrl+Shift+J on Windows/Linux or Cmd+Option+I on Mac.
 
 ##### Running in hosted mode
 
@@ -91,7 +90,7 @@ Serve the content of `out/Default/gen/front_end` on a web server, e.g. via `pyth
 Then point to that web server when starting Chromium, for example:
 
 ```bash
-<path-to-chrome>/chrome --custom-devtools-frontend=http://localhost:8000/ --remote-debugging-port=9222
+<path-to-devtools-frontend>/third_party/chrome/chrome-<platform>/chrome --custom-devtools-frontend=http://localhost:8000/ --remote-debugging-port=9222
 ```
 
 In a regular Chrome tab, go to the URL `http://localhost:9222#custom=true`. It lists URLs that can be copied to new Chrome tabs to inspect individual debug targets.
@@ -117,7 +116,7 @@ gclient sync
 Then, disable `gclient sync` for DevTools frontend inside of Chromium by editing `.gclient` config. From `chromium/src/`, run
 
 ```bash
-vim $(gclient root)/.gclient
+vim "$(gclient root)/.gclient"
 ```
 
 In the `custom_deps` section, insert this line:
@@ -246,9 +245,41 @@ third_party/blink/tools/run_web_tests.py -t Default http/tests/devtools
 
 Usual [steps](https://chromium.googlesource.com/chromium/src/+/main/docs/contributing.md#creating-a-change) for creating a change work out of the box, when executed in the DevTools frontend repository.
 
+Tips to create meaningful CL descriptions:
+- Provide information on what was changed and why
+- Provide before/after screenshots (if applicable)
+- Provide relevant link to demo or example (if applicable)
+- Provide link to design doc (if applicable)
+
+Example CL, adapted from [Chromium guidelines](https://chromium.googlesource.com/chromium/src/+/main/docs/contributing.md#uploading-a-change-for-review):
+
+```
+Summary of change (one line)
+
+Longer description of change addressing as appropriate:
+what change was made, why the change is made, context if
+it is part of many changes, description of previous behavior
+and newly introduced differences, etc.
+
+Long lines should be wrapped to 72 columns for easier log message
+viewing in terminals.
+
+How to test:
+  1. ..
+  2. ..
+
+Before:  https://page-to-before-screenshot.com/before
+After:  https://page-to-after-screenshot.com/after
+Bug: 123456
+
+```
 ## Managing dependencies
 
-- To sync dependencies from Chromium to DevTools frontend, use `scripts/deps/roll_deps.py && npm run generate-protocol-resources`.
+To sync dependencies from Chromium to DevTools frontend, use `scripts/deps/roll_deps.py && npm run generate-protocol-resources`.
+Note that this may:
+- Introduce unneeded whitespace/formatting changes. Presubmit scripts (e.g. invoked via `git cl upload`) will automatically fix these locally, so just apply the changes directly to your change (e.g. with `git commit --amend`) afterwards.
+- Introduce breaking changes to the devtools protocol, causing compilation failures. Unfortunately these need to be handled manually as there are some changes (e.g. removing an enum value) that cannot fail gracefully.
+
 
 The following scripts run as AutoRollers, but can be manually invoked if desired:
 

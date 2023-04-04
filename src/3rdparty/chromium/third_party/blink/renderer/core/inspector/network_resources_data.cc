@@ -29,6 +29,8 @@
 #include "third_party/blink/renderer/core/inspector/network_resources_data.h"
 
 #include <memory>
+
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
@@ -303,7 +305,7 @@ void NetworkResourcesData::MaybeAddResourceData(const String& request_id,
                                                 uint64_t data_length) {
   if (ResourceData* resource_data =
           PrepareToAddResourceData(request_id, data_length)) {
-    resource_data->AppendData(data, SafeCast<size_t>(data_length));
+    resource_data->AppendData(data, base::checked_cast<size_t>(data_length));
   }
 }
 
@@ -402,7 +404,7 @@ void NetworkResourcesData::AddPendingEncodedDataLength(
 }
 
 void NetworkResourcesData::Clear(const String& preserved_loader_id) {
-  if (request_id_to_resource_data_map_.IsEmpty())
+  if (request_id_to_resource_data_map_.empty())
     return;
   request_ids_deque_.clear();
   content_size_ = 0;

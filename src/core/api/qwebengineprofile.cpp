@@ -186,14 +186,11 @@ void QWebEngineProfilePrivate::downloadRequested(DownloadItemInfo &info)
     Q_Q(QWebEngineProfile);
 
     Q_ASSERT(!m_ongoingDownloads.contains(info.id));
-    QWebEngineDownloadRequestPrivate *itemPrivate =
-            new QWebEngineDownloadRequestPrivate(m_profileAdapter);
+    QWebEngineDownloadRequestPrivate *itemPrivate = new QWebEngineDownloadRequestPrivate(m_profileAdapter, info.url);
     itemPrivate->downloadId = info.id;
     itemPrivate->downloadState = info.accepted ? QWebEngineDownloadRequest::DownloadInProgress
                                                : QWebEngineDownloadRequest::DownloadRequested;
     itemPrivate->startTime = info.startTime;
-    itemPrivate->downloadUrl = info.url;
-    itemPrivate->totalBytes = info.totalBytes;
     itemPrivate->downloadDirectory = QFileInfo(info.path).path();
     itemPrivate->downloadFileName = QFileInfo(info.path).fileName();
     itemPrivate->suggestedFileName = info.suggestedFileName;
@@ -390,6 +387,37 @@ void QWebEngineProfile::setDownloadPath(const QString &path)
 {
     Q_D(QWebEngineProfile);
     d->profileAdapter()->setDownloadPath(path);
+}
+
+/*!
+    \since 6.5
+
+    Returns \c true if the push messaging service is enabled.
+    \note By default the push messaging service is disabled.
+
+    \sa setPushServiceEnabled()
+*/
+bool QWebEngineProfile::isPushServiceEnabled() const
+{
+    const Q_D(QWebEngineProfile);
+    return d->profileAdapter()->pushServiceEnabled();
+}
+
+/*!
+    \since 6.5
+
+    Enables the push messaging service if \a enable is \c true, otherwise disables it.
+
+    \note \QWE uses \l {https://firebase.google.com}{Firebase Cloud Messaging (FCM)}
+    as a browser push service. Therefore, all push messages will go through the
+    Google push service and its respective servers.
+
+    \sa isPushServiceEnabled()
+*/
+void QWebEngineProfile::setPushServiceEnabled(bool enable)
+{
+    Q_D(QWebEngineProfile);
+    d->profileAdapter()->setPushServiceEnabled(enable);
 }
 
 /*!

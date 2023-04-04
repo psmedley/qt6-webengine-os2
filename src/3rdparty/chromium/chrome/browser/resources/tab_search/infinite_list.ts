@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@
 import 'chrome://resources/polymer/v3_0/iron-selector/iron-selector.js';
 
 import {assert} from 'chrome://resources/js/assert_ts.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.m.js';
+import {getDeepActiveElement} from 'chrome://resources/js/util.js';
 import {IronSelectorElement} from 'chrome://resources/polymer/v3_0/iron-selector/iron-selector.js';
 import {calculateSplices, PolymerElement, TemplateInstanceBase, templatize} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
@@ -68,7 +68,7 @@ export class InfiniteList extends PolymerElement {
   }
 
   maxHeight: number;
-  items: Array<Object>;
+  items: Object[];
   private instanceConstructors_:
       Map<string,
           new(args: {item: Object, index?: number}) =>
@@ -170,7 +170,7 @@ export class InfiniteList extends PolymerElement {
     }
   }
 
-  ensureTemplatized_() {
+  private ensureTemplatized_() {
     // The user provided light-dom template(s) to use when stamping DOM items.
     const templates = this.querySelectorAll('template');
     assert(templates.length > 0, 'At least one template must be provided');
@@ -366,7 +366,7 @@ export class InfiniteList extends PolymerElement {
    * needed to fill the current scroll position view are added to the DOM, thus
    * improving rendering performance.
    */
-  private onItemsChanged_(newItems: Array<any>, oldItems: Array<any>) {
+  private onItemsChanged_(newItems: any[], oldItems: any[]) {
     if (this.instanceConstructors_.size === 0) {
       return;
     }
@@ -439,7 +439,7 @@ export class InfiniteList extends PolymerElement {
     }
   }
 
-  private updateDomItems_(newItems: Array<any>, oldItems: Array<any>) {
+  private updateDomItems_(newItems: any[], oldItems: any[]) {
     // Identify the differences between the original and new list of items.
     // These are represented as splice objects containing removed and added
     // item information at a given index. We leverage these splices to change

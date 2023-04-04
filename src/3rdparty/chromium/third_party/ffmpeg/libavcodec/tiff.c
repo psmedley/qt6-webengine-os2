@@ -34,19 +34,16 @@
 #endif
 
 #include "libavutil/attributes.h"
-#include "libavutil/avstring.h"
 #include "libavutil/error.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
 #include "libavutil/reverse.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "faxcompr.h"
-#include "internal.h"
 #include "lzw.h"
-#include "mathops.h"
 #include "tiff.h"
 #include "tiff_data.h"
 #include "mjpegdec.h"
@@ -761,6 +758,7 @@ static int tiff_unpack_strip(TiffContext *s, AVFrame *p, uint8_t *dst, int strid
     if (s->is_bayer) {
         av_assert0(width == (s->bpp * s->width + 7) >> 3);
     }
+    av_assert0(!(s->is_bayer && is_yuv));
     if (p->format == AV_PIX_FMT_GRAY12) {
         av_fast_padded_malloc(&s->yuv_line, &s->yuv_line_size, width);
         if (s->yuv_line == NULL) {
@@ -844,6 +842,8 @@ static int tiff_unpack_strip(TiffContext *s, AVFrame *p, uint8_t *dst, int strid
             av_log(s->avctx, AV_LOG_ERROR, "More than one DNG JPEG strips unsupported\n");
             return AVERROR_PATCHWELCOME;
         }
+        if (!s->is_bayer)
+            return AVERROR_PATCHWELCOME;
         if ((ret = dng_decode_jpeg(s->avctx, p, s->stripsize, 0, 0, s->width, s->height)) < 0)
             return ret;
         return 0;
@@ -961,6 +961,9 @@ static int dng_decode_tiles(AVCodecContext *avctx, AVFrame *frame,
     int tile_x = 0, tile_y = 0;
     int pos_x = 0, pos_y = 0;
     int ret;
+
+    if (s->tile_width <= 0 || s->tile_length <= 0)
+        return AVERROR_INVALIDDATA;
 
     has_width_leftover = (s->width % s->tile_width != 0);
     has_height_leftover = (s->height % s->tile_length != 0);
@@ -1364,7 +1367,7 @@ static int tiff_decode_tag(TiffContext *s, AVFrame *frame)
         } else
             s->strippos = off;
         s->strips = count;
-        if (s->strips == 1)
+        if (s->strips == s->bppcount)
             s->rps = s->height;
         s->sot = type;
         break;
@@ -1740,12 +1743,11 @@ end:
     return 0;
 }
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame, AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *p,
+                        int *got_frame, AVPacket *avpkt)
 {
     TiffContext *const s = avctx->priv_data;
-    AVFrame *const p = data;
-    unsigned off, last_off;
+    unsigned off, last_off = 0;
     int le, ret, plane, planes;
     int i, j, entries, stride;
     unsigned soff, ssize;
@@ -1810,7 +1812,6 @@ again:
     /** whether we should process this multi-page IFD's next page */
     retry_for_page = s->get_page && s->cur_page + 1 < s->get_page;  // get_page is 1-indexed
 
-    last_off = off;
     if (retry_for_page) {
         // set offset to the next IFD
         off = ff_tget_long(&s->gb, le);
@@ -1828,6 +1829,7 @@ again:
             avpriv_request_sample(s->avctx, "non increasing IFD offset");
             return AVERROR_INVALIDDATA;
         }
+        last_off = off;
         if (off >= UINT_MAX - 14 || avpkt->size < off + 14) {
             av_log(avctx, AV_LOG_ERROR, "IFD offset is greater than image size\n");
             return AVERROR_INVALIDDATA;
@@ -1940,7 +1942,7 @@ again:
             avpriv_report_missing_feature(avctx, "DNG JPG-compressed tiled non-bayer-encoded images");
             return AVERROR_PATCHWELCOME;
         } else {
-            if ((ret = dng_decode_tiles(avctx, (AVFrame*)data, avpkt)) > 0)
+            if ((ret = dng_decode_tiles(avctx, p, avpkt)) > 0)
                 *got_frame = 1;
             return ret;
         }
@@ -2180,14 +2182,14 @@ static const AVClass tiff_decoder_class = {
 
 const FFCodec ff_tiff_decoder = {
     .p.name         = "tiff",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("TIFF image"),
+    CODEC_LONG_NAME("TIFF image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_TIFF,
     .priv_data_size = sizeof(TiffContext),
     .init           = tiff_init,
     .close          = tiff_end,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_ICC_PROFILES,
     .p.priv_class   = &tiff_decoder_class,
 };

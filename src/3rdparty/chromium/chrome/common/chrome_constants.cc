@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -176,9 +176,6 @@ const wchar_t kUserDataDirname[] = L"User Data";
 const float kMaxShareOfExtensionProcesses = 0.30f;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-const char kProfileDirPrefix[] = "u-";
-const char kLegacyProfileDir[] = "user";
-const char kTestUserProfileDir[] = "test-user";
 const char kLockScreenAppProfile[] = "LockScreenAppsProfile";
 const char kLockScreenProfile[] = "LockScreenProfile";
 #endif

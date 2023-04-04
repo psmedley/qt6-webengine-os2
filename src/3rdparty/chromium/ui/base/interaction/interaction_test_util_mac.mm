@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ bool InteractionTestUtilSimulatorMac::SelectMenuItem(
   if (!model)
     return false;
 
-  for (int i = 0; i < model->GetItemCount(); ++i) {
+  for (size_t i = 0; i < model->GetItemCount(); ++i) {
     if (model->GetElementIdentifierAt(i) == element->identifier()) {
       NSMenuItem* item = [menu itemWithTag:i];
       if (item) {

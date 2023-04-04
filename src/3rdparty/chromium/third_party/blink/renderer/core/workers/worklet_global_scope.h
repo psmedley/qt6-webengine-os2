@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,8 +67,9 @@ class CORE_EXPORT WorkletGlobalScope
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) final;
   FrameOrWorkerScheduler* GetScheduler() final;
   bool CrossOriginIsolatedCapability() const final;
-  bool DirectSocketCapability() const final;
+  bool IsolatedApplicationCapability() const final;
   ukm::UkmRecorder* UkmRecorder() final;
+  ukm::SourceId UkmSourceID() const final;
 
   // WorkerOrWorkletGlobalScope
   void Dispose() override;
@@ -124,9 +125,12 @@ class CORE_EXPORT WorkletGlobalScope
 
   // Constructs an instance as a threaded worklet. Must be called on a worker
   // thread.
+  // When |create_microtask_queue| is true, creates a microtask queue separated
+  // from the Isolate's default microtask queue.
   WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                      WorkerReportingProxy&,
-                     WorkerThread*);
+                     WorkerThread*,
+                     bool create_microtask_queue);
 
   const BrowserInterfaceBrokerProxy& GetBrowserInterfaceBroker() const override;
 
@@ -198,8 +202,8 @@ class CORE_EXPORT WorkletGlobalScope
   // This is inherited at construction to ensure it's possible to use APIs
   // like Direct Sockets if they're made available in Worklets.
   //
-  // TODO(mkwst): We need a spec for this capability.
-  const bool parent_direct_socket_capability_;
+  // TODO(crbug.com/1206150): We need a spec for this capability.
+  const bool parent_isolated_application_capability_;
 
   // This is the interface that handles generated code cache
   // requests both to fetch code cache when loading resources

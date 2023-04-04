@@ -20,14 +20,15 @@ TINT_INSTANTIATE_TYPEINFO(tint::ast::ReturnStatement);
 
 namespace tint::ast {
 
-ReturnStatement::ReturnStatement(ProgramID pid, const Source& src)
-    : Base(pid, src), value(nullptr) {}
+ReturnStatement::ReturnStatement(ProgramID pid, NodeID nid, const Source& src)
+    : Base(pid, nid, src), value(nullptr) {}
 
 ReturnStatement::ReturnStatement(ProgramID pid,
+                                 NodeID nid,
                                  const Source& src,
                                  const Expression* val)
-    : Base(pid, src), value(val) {
-  TINT_ASSERT_PROGRAM_IDS_EQUAL_IF_VALID(AST, value, program_id);
+    : Base(pid, nid, src), value(val) {
+    TINT_ASSERT_PROGRAM_IDS_EQUAL_IF_VALID(AST, value, program_id);
 }
 
 ReturnStatement::ReturnStatement(ReturnStatement&&) = default;
@@ -35,10 +36,10 @@ ReturnStatement::ReturnStatement(ReturnStatement&&) = default;
 ReturnStatement::~ReturnStatement() = default;
 
 const ReturnStatement* ReturnStatement::Clone(CloneContext* ctx) const {
-  // Clone arguments outside of create() call to have deterministic ordering
-  auto src = ctx->Clone(source);
-  auto* ret = ctx->Clone(value);
-  return ctx->dst->create<ReturnStatement>(src, ret);
+    // Clone arguments outside of create() call to have deterministic ordering
+    auto src = ctx->Clone(source);
+    auto* ret = ctx->Clone(value);
+    return ctx->dst->create<ReturnStatement>(src, ret);
 }
 
 }  // namespace tint::ast

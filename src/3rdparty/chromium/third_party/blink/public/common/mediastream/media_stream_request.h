@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,10 @@
 #include "media/mojo/mojom/display_media_information.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/common_export.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-forward.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 
 namespace blink {
-
 
 // Types of media stream requests that can be made to the media controller.
 enum MediaStreamRequestType {
@@ -64,7 +64,7 @@ struct BLINK_COMMON_EXPORT MediaStreamDevice {
                     const std::string& id,
                     const std::string& name,
                     int sample_rate,
-                    int channel_layout,
+                    const media::ChannelLayoutConfig& channel_layout_config,
                     int frames_per_buffer);
   MediaStreamDevice(const MediaStreamDevice& other);
   ~MediaStreamDevice();
@@ -124,6 +124,16 @@ struct BLINK_COMMON_EXPORT MediaStreamDevice {
 };
 
 using MediaStreamDevices = std::vector<MediaStreamDevice>;
+
+// TODO(crbug.com/1313021): Remove this function and use
+// blink::mojom::StreamDevicesSet directly everywhere.
+// Takes a mojom::StreamDevicesSet and returns all contained MediaStreamDevices.
+BLINK_COMMON_EXPORT MediaStreamDevices
+ToMediaStreamDevicesList(const mojom::StreamDevicesSet& stream_devices_set);
+
+BLINK_COMMON_EXPORT size_t CountDevices(const mojom::StreamDevices& devices);
+BLINK_COMMON_EXPORT bool IsMediaStreamDeviceTransferrable(
+    const MediaStreamDevice& device);
 
 }  // namespace blink
 

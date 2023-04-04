@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -169,8 +169,10 @@ NET_EXPORT bool SignatureVerifierInitWithCertificate(
     base::span<const uint8_t> signature,
     const CRYPTO_BUFFER* certificate);
 
-// Returns true if the signature on the certificate uses SHA-1.
-NET_EXPORT_PRIVATE bool HasSHA1Signature(const CRYPTO_BUFFER* cert_buffer);
+// Returns true if the signature on the certificate is RSASSA-PKCS1-v1_5 with
+// SHA-1.
+NET_EXPORT_PRIVATE bool HasRsaPkcs1Sha1Signature(
+    const CRYPTO_BUFFER* cert_buffer);
 
 }  // namespace x509_util
 

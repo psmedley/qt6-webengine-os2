@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,7 @@ class MockClipboardHost : public mojom::blink::ClipboardHost {
 #if BUILDFLAG(IS_MAC)
   void WriteStringToFindPboard(const String& text) override;
 #endif
+  Vector<String> ReadStandardFormatNames();
 
   mojo::ReceiverSet<mojom::blink::ClipboardHost> receivers_;
   ClipboardSequenceNumberToken sequence_number_;

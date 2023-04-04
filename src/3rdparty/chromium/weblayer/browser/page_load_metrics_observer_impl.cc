@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,27 @@
 #include "weblayer/browser/tab_impl.h"
 
 namespace weblayer {
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+PageLoadMetricsObserverImpl::OnFencedFramesStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // This class is only interested in events for outer-most frame that are
+  // forwarded by PageLoadTracker. So, this class doesn't need observer-level
+  // forwarding.
+  return STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+PageLoadMetricsObserverImpl::OnPrerenderStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // Currently, prerendering is not enabled for WebLayer.
+  //
+  // TODO(https://crbug.com/1267224): If support prerendering, add callbacks,
+  // e.g. notification of activation_start.
+  return STOP_OBSERVING;
+}
 
 PageLoadMetricsObserverImpl::ObservePolicy
 PageLoadMetricsObserverImpl::OnCommit(

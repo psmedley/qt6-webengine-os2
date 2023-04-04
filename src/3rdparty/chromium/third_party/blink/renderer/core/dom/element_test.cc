@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/web/web_plugin.h"
+#include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -20,6 +22,7 @@
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
@@ -128,7 +131,7 @@ TEST_F(ElementTest, OffsetTopAndLeftCorrectForStickyElementsAfterInsertion) {
   EXPECT_EQ(DocumentLifecycle::kLayoutClean, document.Lifecycle().GetState());
 }
 
-TEST_F(ElementTest, BoundsInViewportCorrectForStickyElementsAfterInsertion) {
+TEST_F(ElementTest, BoundsInWidgetCorrectForStickyElementsAfterInsertion) {
   Document& document = GetDocument();
   SetBodyContent(R"HTML(
     <style>body { margin: 0 }
@@ -151,7 +154,7 @@ TEST_F(ElementTest, BoundsInViewportCorrectForStickyElementsAfterInsertion) {
 
   // The sticky element should remain at (0, 25) relative to the viewport due to
   // the constraints.
-  gfx::Rect bounds_in_viewport = sticky->BoundsInViewport();
+  gfx::Rect bounds_in_viewport = sticky->BoundsInWidget();
   EXPECT_EQ(0, bounds_in_viewport.y());
   EXPECT_EQ(25, bounds_in_viewport.x());
 
@@ -163,7 +166,7 @@ TEST_F(ElementTest, BoundsInViewportCorrectForStickyElementsAfterInsertion) {
 
   // Requesting the bounds in viewport should cause both layout and compositing
   // inputs clean to be run, and the sticky result shouldn't change.
-  bounds_in_viewport = sticky->BoundsInViewport();
+  bounds_in_viewport = sticky->BoundsInWidget();
   EXPECT_EQ(DocumentLifecycle::kLayoutClean, document.Lifecycle().GetState());
   EXPECT_EQ(0, bounds_in_viewport.y());
   EXPECT_EQ(25, bounds_in_viewport.x());
@@ -182,11 +185,11 @@ TEST_F(ElementTest, OutlineRectsIncludesImgChildren) {
   ASSERT_TRUE(img);
 
   // The a element should include the image in computing its bounds.
-  gfx::Rect img_bounds_in_viewport = img->BoundsInViewport();
+  gfx::Rect img_bounds_in_viewport = img->BoundsInWidget();
   EXPECT_EQ(220, img_bounds_in_viewport.width());
   EXPECT_EQ(147, img_bounds_in_viewport.height());
 
-  Vector<gfx::Rect> a_outline_rects = a->OutlineRectsInVisualViewport();
+  Vector<gfx::Rect> a_outline_rects = a->OutlineRectsInWidget();
   EXPECT_EQ(2u, a_outline_rects.size());
 
   gfx::Rect a_outline_rect;
@@ -304,7 +307,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, rect_bounding_client_rect->top());
   EXPECT_EQ(100, rect_bounding_client_rect->width());
   EXPECT_EQ(71, rect_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), rect->BoundsInViewport());
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), rect->BoundsInWidget());
 
   // TODO(pdr): Should we should be excluding the stroke (here, and below)?
   // See: https://github.com/w3c/svgwg/issues/339 and Element::ClientQuads.
@@ -314,8 +317,9 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, stroke_bounding_client_rect->top());
   EXPECT_EQ(100, stroke_bounding_client_rect->width());
   EXPECT_EQ(71, stroke_bounding_client_rect->height());
-  // TODO(pdr): BoundsInViewport is not web exposed and should include stroke.
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), stroke->BoundsInViewport());
+  // TODO(pdr): BoundsInWidget is not web exposed and should include
+  // stroke.
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), stroke->BoundsInWidget());
 
   Element* stroke_transformed = document.getElementById("stroke_transformed");
   DOMRect* stroke_transformedbounding_client_rect =
@@ -324,9 +328,9 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(105, stroke_transformedbounding_client_rect->top());
   EXPECT_EQ(100, stroke_transformedbounding_client_rect->width());
   EXPECT_EQ(71, stroke_transformedbounding_client_rect->height());
-  // TODO(pdr): BoundsInViewport is not web exposed and should include stroke.
-  EXPECT_EQ(gfx::Rect(13, 105, 100, 71),
-            stroke_transformed->BoundsInViewport());
+  // TODO(pdr): BoundsInWidget is not web exposed and should include
+  // stroke.
+  EXPECT_EQ(gfx::Rect(13, 105, 100, 71), stroke_transformed->BoundsInWidget());
 
   Element* foreign = document.getElementById("foreign");
   DOMRect* foreign_bounding_client_rect = foreign->getBoundingClientRect();
@@ -334,7 +338,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, foreign_bounding_client_rect->top());
   EXPECT_EQ(100, foreign_bounding_client_rect->width());
   EXPECT_EQ(71, foreign_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), foreign->BoundsInViewport());
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), foreign->BoundsInWidget());
 
   Element* foreign_transformed = document.getElementById("foreign_transformed");
   DOMRect* foreign_transformed_bounding_client_rect =
@@ -343,8 +347,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(105, foreign_transformed_bounding_client_rect->top());
   EXPECT_EQ(100, foreign_transformed_bounding_client_rect->width());
   EXPECT_EQ(71, foreign_transformed_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(13, 105, 100, 71),
-            foreign_transformed->BoundsInViewport());
+  EXPECT_EQ(gfx::Rect(13, 105, 100, 71), foreign_transformed->BoundsInWidget());
 
   Element* svg = document.getElementById("svg");
   DOMRect* svg_bounding_client_rect = svg->getBoundingClientRect();
@@ -352,7 +355,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, svg_bounding_client_rect->top());
   EXPECT_EQ(100, svg_bounding_client_rect->width());
   EXPECT_EQ(71, svg_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg->BoundsInViewport());
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg->BoundsInWidget());
 
   Element* svg_stroke = document.getElementById("svg_stroke");
   DOMRect* svg_stroke_bounding_client_rect =
@@ -361,8 +364,9 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, svg_stroke_bounding_client_rect->top());
   EXPECT_EQ(100, svg_stroke_bounding_client_rect->width());
   EXPECT_EQ(71, svg_stroke_bounding_client_rect->height());
-  // TODO(pdr): BoundsInViewport is not web exposed and should include stroke.
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg_stroke->BoundsInViewport());
+  // TODO(pdr): BoundsInWidget is not web exposed and should include
+  // stroke.
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg_stroke->BoundsInWidget());
 }
 
 TEST_F(ElementTest, PartAttribute) {
@@ -668,7 +672,7 @@ TEST_F(ElementTest, ParseFocusgroupAttrSupportedAxesAreValid) {
 
 TEST_F(ElementTest, ParseFocusgroupAttrExtendCorrectly) {
   Document& document = GetDocument();
-  SetBodyContent(R"HTML(
+  document.body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
     <div id=fg1 focusgroup>
       <div id=fg2 focusgroup=extend>
         <div>
@@ -676,10 +680,15 @@ TEST_F(ElementTest, ParseFocusgroupAttrExtendCorrectly) {
             <div id=fg3 focusgroup=extend></div>
           </div>
         </div>
+        <div id=fg4-container>
+          <template shadowroot=open>
+            <div id=fg4 focusgroup=extend></div>
+          </template>
+        </div>
       </div>
-      <div id=fg4 focusgroup></div>
+      <div id=fg5 focusgroup></div>
     </div>
-    <div id=fg5 focusgroup=extend>
+    <div id=fg6 focusgroup=extend>
   )HTML");
 
   // 1. Root focusgroup shouldn't extend any other.
@@ -707,22 +716,34 @@ TEST_F(ElementTest, ParseFocusgroupAttrExtendCorrectly) {
   ASSERT_NE(fg3_flags, FocusgroupFlags::kNone);
   ASSERT_TRUE(fg3_flags & FocusgroupFlags::kExtend);
 
-  // 4. A focusgroup child of another focusgroup should only extend if the
-  // extend keyword is specified - in this case, it's not.
-  auto* fg4 = document.getElementById("fg4");
+  // 4. A focusgroup within a ShadowDOM should be able to extend its focusgroup
+  // ancestor that exists outside the ShadowDOM.
+  auto* fg4_container = document.getElementById("fg4-container");
+  ASSERT_TRUE(fg4_container);
+  ASSERT_NE(nullptr, fg4_container->GetShadowRoot());
+  auto* fg4 = fg4_container->GetShadowRoot()->getElementById("fg4");
   ASSERT_TRUE(fg4);
 
   FocusgroupFlags fg4_flags = fg4->GetFocusgroupFlags();
   ASSERT_NE(fg4_flags, FocusgroupFlags::kNone);
-  ASSERT_FALSE(fg4_flags & FocusgroupFlags::kExtend);
+  ASSERT_TRUE(fg4_flags & FocusgroupFlags::kExtend);
 
-  // 5. A focusgroup that doesn't have an ancestor focusgroup can't extend.
+  // 5. A focusgroup child of another focusgroup should only extend if the
+  // extend keyword is specified - in this case, it's not.
   auto* fg5 = document.getElementById("fg5");
   ASSERT_TRUE(fg5);
 
   FocusgroupFlags fg5_flags = fg5->GetFocusgroupFlags();
   ASSERT_NE(fg5_flags, FocusgroupFlags::kNone);
   ASSERT_FALSE(fg5_flags & FocusgroupFlags::kExtend);
+
+  // 6. A focusgroup that doesn't have an ancestor focusgroup can't extend.
+  auto* fg6 = document.getElementById("fg6");
+  ASSERT_TRUE(fg6);
+
+  FocusgroupFlags fg6_flags = fg6->GetFocusgroupFlags();
+  ASSERT_NE(fg6_flags, FocusgroupFlags::kNone);
+  ASSERT_FALSE(fg6_flags & FocusgroupFlags::kExtend);
 }
 
 TEST_F(ElementTest, ParseFocusgroupAttrWrapCorrectly) {
@@ -898,7 +919,8 @@ TEST_F(ElementTest, ParseFocusgroupAttrDoesntWrapInExtendingFocusgroupOnly) {
 TEST_F(ElementTest, ParseFocusgroupAttrGrid) {
   Document& document = GetDocument();
   SetBodyContent(R"HTML(
-    <div id=e1 focusgroup=grid></div> <!-- Error -->
+    <!-- Not an error, since an author might provide the table structure in CSS. -->
+    <div id=e1 focusgroup=grid></div>
     <table id=e2 focusgroup=grid></table>
     <table id=e3 focusgroup="grid wrap"></table>
     <table id=e4 focusgroup="grid row-wrap"></table>
@@ -968,7 +990,7 @@ TEST_F(ElementTest, ParseFocusgroupAttrGrid) {
   FocusgroupFlags e15_flags = e15->GetFocusgroupFlags();
   FocusgroupFlags e16_flags = e16->GetFocusgroupFlags();
 
-  ASSERT_EQ(e1_flags, FocusgroupFlags::kNone);
+  ASSERT_EQ(e1_flags, FocusgroupFlags::kGrid);
   ASSERT_EQ(e2_flags, FocusgroupFlags::kGrid);
   ASSERT_EQ(e3_flags,
             (FocusgroupFlags::kGrid | FocusgroupFlags::kWrapHorizontally |
@@ -1089,6 +1111,25 @@ TEST_F(ElementTest, ParseFocusgroupAttrValueClearedAfterNodeRemoved) {
 
   fg2_flags = fg2->GetFocusgroupFlags();
   ASSERT_EQ(fg2_flags, FocusgroupFlags::kNone);
+}
+
+TEST_F(ElementTest, MixStyleAttributeAndCSSOMChanges) {
+  Document& document = GetDocument();
+  SetBodyContent(R"HTML(
+    <div id="elmt" style="color: green;"></div>
+  )HTML");
+
+  Element* elmt = document.getElementById("elmt");
+  elmt->style()->setProperty(GetDocument().GetExecutionContext(), "color",
+                             "red", String(), ASSERT_NO_EXCEPTION);
+
+  // Verify that setting the style attribute back to its initial value is not
+  // mistakenly considered as a no-op attribute change and ignored. It would be
+  // without proper synchronization of attributes.
+  elmt->setAttribute(html_names::kStyleAttr, "color: green;");
+
+  EXPECT_EQ(elmt->getAttribute(html_names::kStyleAttr), "color: green;");
+  EXPECT_EQ(elmt->style()->getPropertyValue("color"), "green");
 }
 
 }  // namespace blink

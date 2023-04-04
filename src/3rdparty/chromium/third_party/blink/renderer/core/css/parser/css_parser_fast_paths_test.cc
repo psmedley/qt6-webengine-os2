@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -349,18 +349,39 @@ TEST(CSSParserFastPathsTest, ParseHSLInvalid) {
 }
 
 TEST(CSSParserFastPathsTest, IsValidKeywordPropertyAndValueOverflowClip) {
-  {
-    ScopedOverflowClipForTest overflow_clip_feature_enabler(false);
-    EXPECT_FALSE(CSSParserFastPaths::IsValidKeywordPropertyAndValue(
-        CSSPropertyID::kOverflowX, CSSValueID::kClip,
-        CSSParserMode::kHTMLStandardMode));
-  }
-  {
-    ScopedOverflowClipForTest overflow_clip_feature_enabler(true);
-    EXPECT_TRUE(CSSParserFastPaths::IsValidKeywordPropertyAndValue(
-        CSSPropertyID::kOverflowX, CSSValueID::kClip,
-        CSSParserMode::kHTMLStandardMode));
-  }
+  EXPECT_TRUE(CSSParserFastPaths::IsValidKeywordPropertyAndValue(
+      CSSPropertyID::kOverflowX, CSSValueID::kClip,
+      CSSParserMode::kHTMLStandardMode));
+}
+
+TEST(CSSParserFastPathsTest, InternalColorsOnlyAllowedInUaMode) {
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("blue", kHTMLStandardMode),
+            CSSIdentifierValue::Create(CSSValueID::kBlue));
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("blue", kHTMLQuirksMode),
+            CSSIdentifierValue::Create(CSSValueID::kBlue));
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("blue", kUASheetMode),
+            CSSIdentifierValue::Create(CSSValueID::kBlue));
+
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("-internal-spelling-error-color",
+                                           kHTMLStandardMode),
+            nullptr);
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("-internal-spelling-error-color",
+                                           kHTMLQuirksMode),
+            nullptr);
+  EXPECT_EQ(
+      CSSParserFastPaths::ParseColor("-internal-spelling-error-color",
+                                     kUASheetMode),
+      CSSIdentifierValue::Create(CSSValueID::kInternalSpellingErrorColor));
+
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("-internal-grammar-error-color",
+                                           kHTMLStandardMode),
+            nullptr);
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("-internal-grammar-error-color",
+                                           kHTMLQuirksMode),
+            nullptr);
+  EXPECT_EQ(CSSParserFastPaths::ParseColor("-internal-grammar-error-color",
+                                           kUASheetMode),
+            CSSIdentifierValue::Create(CSSValueID::kInternalGrammarErrorColor));
 }
 
 }  // namespace blink

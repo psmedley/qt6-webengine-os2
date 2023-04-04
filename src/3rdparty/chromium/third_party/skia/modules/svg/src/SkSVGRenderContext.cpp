@@ -10,6 +10,7 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageFilter.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathEffect.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/private/SkTo.h"
 #include "modules/svg/include/SkSVGAttribute.h"
@@ -116,7 +117,7 @@ static sk_sp<SkPathEffect> dash_effect(const SkSVGPresentationAttributes& props,
     }
 
     const auto& da = *props.fStrokeDashArray;
-    const auto count = da.dashArray().count();
+    const auto count = da.dashArray().size();
     SkSTArray<128, SkScalar, true> intervals(count);
     for (const auto& dash : da.dashArray()) {
         intervals.push_back(lctx.resolve(dash, SkSVGLengthContext::LengthType::kOther));
@@ -401,6 +402,7 @@ SkTLazy<SkPaint> SkSVGRenderContext::commonPaint(const SkSVGPaint& paint_selecto
         // (e.g. gradient control points), which requires access to the render context
         // and node being rendered.
         SkSVGPresentationContext pctx;
+        pctx.fNamedColors = fPresentationContext->fNamedColors;
         SkSVGRenderContext local_ctx(fCanvas,
                                      fFontMgr,
                                      fResourceProvider,
@@ -459,6 +461,14 @@ SkTLazy<SkPaint> SkSVGRenderContext::strokePaint() const {
 }
 
 SkSVGColorType SkSVGRenderContext::resolveSvgColor(const SkSVGColor& color) const {
+    if (fPresentationContext->fNamedColors) {
+        for (auto&& ident : color.vars()) {
+            SkSVGColorType* c = fPresentationContext->fNamedColors->find(ident);
+            if (c) {
+                return *c;
+            }
+        }
+    }
     switch (color.type()) {
         case SkSVGColor::Type::kColor:
             return color.color();

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings_provider.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-forward.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-forward.h"
 
 namespace blink {
 
@@ -81,6 +81,12 @@ class BLINK_COMMON_EXPORT IdentifiabilityStudySettings {
   // the type (|kWebFeature|) and the |feature| is allowed. See
   // ShouldSampleSurface for more detail.
   bool ShouldSampleWebFeature(mojom::WebFeature feature) const;
+
+  // Returns true if surfaces should be actively sampled.
+  bool ShouldActivelySample() const;
+
+  // Returns the font families which should be actively sampled.
+  std::vector<std::string> FontFamiliesToActivelySample() const;
 
   // Only used for testing. Resets internal state and violates API contracts
   // made above about the lifetime of IdentifiabilityStudySettings*.

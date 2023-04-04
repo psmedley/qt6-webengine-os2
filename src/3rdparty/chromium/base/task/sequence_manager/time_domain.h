@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/base_export.h"
 #include "base/check.h"
-#include "base/task/sequence_manager/lazy_now.h"
+#include "base/task/common/lazy_now.h"
 #include "base/task/sequence_manager/tasks.h"
 #include "base/time/tick_clock.h"
 #include "base/values.h"
@@ -38,7 +38,7 @@ class BASE_EXPORT TimeDomain : public TickClock {
                                         bool quit_when_idle_requested) = 0;
 
   // Debug info.
-  Value AsValue() const;
+  Value::Dict AsValue() const;
 
  protected:
   TimeDomain() = default;

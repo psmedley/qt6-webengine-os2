@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,8 +100,9 @@ IN_PROC_BROWSER_TEST_P(PermissionsApiTestWithContextType,
       << message_;
 }
 
-// TODO(crbug/1065399): Flaky on ChromeOS and Linux non-dbg builds.
-#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(NDEBUG)
+// TODO(crbug/1065399): Flaky on ChromeOS, Linux, and Mac non-dbg builds.
+#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC)) && \
+    defined(NDEBUG)
 #define MAYBE_FaviconPermission DISABLED_FaviconPermission
 #else
 #define MAYBE_FaviconPermission FaviconPermission
@@ -115,15 +116,7 @@ IN_PROC_BROWSER_TEST_F(PermissionsApiTest, MAYBE_FaviconPermission) {
 
 // Test functions and APIs that are always allowed (even if you ask for no
 // permissions).
-// Flaky on MacOS, Linux and CrOS (see crbug/1064929, crbug/1101043,
-// crbug/1181237).
-#if (BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH) || \
-     BUILDFLAG(IS_WIN))
-#define MAYBE_AlwaysAllowed DISABLED_AlwaysAllowed
-#else
-#define MAYBE_AlwaysAllowed AlwaysAllowed
-#endif
-IN_PROC_BROWSER_TEST_F(PermissionsApiTest, MAYBE_AlwaysAllowed) {
+IN_PROC_BROWSER_TEST_F(PermissionsApiTest, AlwaysAllowed) {
   ASSERT_TRUE(RunExtensionTest("permissions/always_allowed")) << message_;
 }
 

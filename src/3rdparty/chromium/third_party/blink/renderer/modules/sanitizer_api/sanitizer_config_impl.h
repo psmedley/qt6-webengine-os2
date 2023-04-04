@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,7 @@ struct SanitizerConfigImpl {
   AttributeList allow_attributes_;
   AttributeList drop_attributes_;
   bool allow_custom_elements_;
+  bool allow_unknown_markup_;
   bool allow_comments_;
 
   // These members store whether the original SanitizerConfig had the
@@ -45,6 +46,7 @@ struct SanitizerConfigImpl {
   bool had_allow_elements_;
   bool had_allow_attributes_;
   bool had_allow_custom_elements_;
+  bool had_allow_unknown_markup_;
 };
 
 }  // namespace blink

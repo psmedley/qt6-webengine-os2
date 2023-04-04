@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -175,6 +175,10 @@ void ClientSettings::UpdateFromProto(const ClientSettingsProto& proto) {
   if (proto.has_selector_observer_extra_timeout_ms()) {
     selector_observer_extra_timeout =
         base::Milliseconds(proto.selector_observer_extra_timeout_ms());
+  }
+  if (proto.has_selector_observer_debounce_interval_ms()) {
+    selector_observer_debounce_interval =
+        base::Milliseconds(proto.selector_observer_debounce_interval_ms());
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@
 
 namespace base {
 class Time;
-class TimeDelta;
 }  // namespace base
 
 namespace url {
@@ -39,11 +38,14 @@ class AsyncSharedStorageDatabase {
   using SetBehavior = SharedStorageDatabase::SetBehavior;
   using OperationResult = SharedStorageDatabase::OperationResult;
   using GetResult = SharedStorageDatabase::GetResult;
+  using BudgetResult = SharedStorageDatabase::BudgetResult;
+  using TimeResult = SharedStorageDatabase::TimeResult;
 
   // A callback type to check if a given origin matches a storage policy.
   // Can be passed empty/null where used, which means the origin will always
   // match.
-  using OriginMatcherFunction = SharedStorageDatabase::OriginMatcherFunction;
+  using StorageKeyPolicyMatcherFunction =
+      SharedStorageDatabase::StorageKeyPolicyMatcherFunction;
 
   virtual ~AsyncSharedStorageDatabase() = default;
 
@@ -58,11 +60,12 @@ class AsyncSharedStorageDatabase {
 
   // `TrimMemory()`, `Get()`, `Set()`, `Append()`, `Delete()`, `Clear()`,
   // `Length()`, `Keys()`, `Entries()`, `PurgeMatchingOrigins()`,
-  // `PurgeStaleOrigins()`, and `FetchOrigins()` are all async versions of the
-  // corresponding methods in `storage::SharedStorageDatabase`, with the
-  // modification that `Set()` and `Append()` take a boolean callback to
-  // indicate that a value was set or appended, rather than a long integer
-  // callback with the row number for the next available row.
+  // `PurgeStaleOrigins()`, `FetchOrigins()`, `MakeBudgetWithdrawal()`, and
+  // `GetRemainingBudget()` are all async versions of the corresponding methods
+  // in `storage::SharedStorageDatabase`, with the modification that `Set()` and
+  // `Append()` take a boolean callback to indicate that a value was set or
+  // appended, rather than a long integer callback with the row number for the
+  // next available row.
   //
   // It is OK to call these async methods even if the database has failed to
   // initialize, as there is an alternate code path to handle this case that
@@ -166,33 +169,61 @@ class AsyncSharedStorageDatabase {
           pending_listener,
       base::OnceCallback<void(OperationResult)> callback) = 0;
 
-  // Clears all origins that match `origin_matcher` run on the owning
+  // Clears all origins that match `storage_key_matcher` run on the owning
   // StoragePartition's `SpecialStoragePolicy` and have `last_used_time` between
   // the times `begin` and `end`. If `perform_storage_cleanup` is true, vacuums
   // the database afterwards. The parameter of `callback` reports whether the
   // transaction was successful.
   //
-  // Note that `origin_matcher` is accessed on a different sequence than where
-  // it was created.
+  // Note that `storage_key_matcher` is accessed on a different sequence than
+  // where it was created.
   virtual void PurgeMatchingOrigins(
-      OriginMatcherFunction origin_matcher,
+      StorageKeyPolicyMatcherFunction storage_key_matcher,
       base::Time begin,
       base::Time end,
       base::OnceCallback<void(OperationResult)> callback,
       bool perform_storage_cleanup = false) = 0;
 
-  // Clear all entries for all origins whose `last_read_time` falls before
-  // `base::Time::Now() - window_to_be_deemed_active`.
+  // Clear all entries for all origins whose `last_read_time` (i.e. creation
+  // time) falls before `SharedStorageDatabase::clock_->Now() -
+  // SharedStorageDatabase::origin_staleness_threshold_`. Also purges, for all
+  // origins, all privacy budget withdrawals that have `time_stamps` older than
+  // `SharedStorageDatabase::clock_->Now() -
+  // SharedStorageDatabase::budget_interval_`.
   virtual void PurgeStaleOrigins(
-      base::TimeDelta window_to_be_deemed_active,
       base::OnceCallback<void(OperationResult)> callback) = 0;
 
   // Fetches a vector of `mojom::StorageUsageInfoPtr`, with one
-  // `mojom::StorageUsageInfoPtr` for each origin currently using shared storage
-  // in this profile.
+  // `mojom::StorageUsageInfoPtr` for each origin currently using shared
+  // storage in this profile. If `exclude_empty_origins` is true, then only
+  // those with positive `length` are included in the vector.
   virtual void FetchOrigins(
       base::OnceCallback<void(std::vector<mojom::StorageUsageInfoPtr>)>
-          callback) = 0;
+          callback,
+      bool exclude_empty_origins = true) = 0;
+
+  // Makes a withdrawal of `bits_debit` stamped with the current time from the
+  // privacy budget of `context_origin`.
+  virtual void MakeBudgetWithdrawal(
+      url::Origin context_origin,
+      double bits_debit,
+      base::OnceCallback<void(OperationResult)> callback) = 0;
+
+  // Determines the number of bits remaining in the privacy budget of
+  // `context_origin`, where only withdrawals within the most recent
+  // `budget_interval_` are counted as still valid, and calls `callback` with
+  // this information bundled with an `OperationResult` value to indicate
+  // whether the database retrieval was successful.
+  virtual void GetRemainingBudget(
+      url::Origin context_origin,
+      base::OnceCallback<void(BudgetResult)> callback) = 0;
+
+  // Calls `callback` with the most recent creation time (currently in the
+  // schema as `last_used_time`) for `context_origin` and an `OperationResult`
+  // to indicatewhether or not there were errors.
+  virtual void GetCreationTime(
+      url::Origin context_origin,
+      base::OnceCallback<void(TimeResult)> callback) = 0;
 };
 
 }  // namespace storage

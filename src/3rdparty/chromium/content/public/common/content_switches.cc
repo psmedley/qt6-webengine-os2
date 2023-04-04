@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,14 @@ const char kAllowLoopbackInPeerConnection[] =
 // This is used in blimp to emulate android fonts on linux.
 const char kAndroidFontsPath[]          = "android-fonts-path";
 
+// Indicates that the ash web browser is disabled (i.e. lacros the only
+// browser).
+const char kAshWebBrowserDisabled[] = "ash-web-browser-disabled";
+
+// Causes the Attribution Report API to run without delays or noise.
+const char kAttributionReportingDebugMode[] =
+    "attribution-reporting-debug-mode";
+
 // Causes the browser process to crash on startup.
 const char kBrowserCrashTest[]              = "crash-test";
 
@@ -51,21 +59,6 @@ const char kBrowserTest[] = "browser-test";
 const char kChangeStackGuardOnFork[] = "change-stack-guard-on-fork";
 const char kChangeStackGuardOnForkEnabled[] = "enable";
 const char kChangeStackGuardOnForkDisabled[] = "disable";
-
-// Causes the Conversion Measurement API to run without delays or noise.
-const char kConversionsDebugMode[] = "conversions-debug-mode";
-
-// Enable restricted APIs for a set of origins, specified as a
-// comma-separated list. For example:
-//   --restricted-api-origins=https://www.foo.com,https://www.bar.com
-const char kRestrictedApiOrigins[] = "restricted-api-origins";
-
-// Enables gating of getDisplayMedia by the display-capture permissions-policy.
-// This switch supports the shipping of display-capture, as it allows admins to
-// temporarily disable display-capture gating with an Enterprise policy.
-// TODO(crbug.com/1233969): Remove this around m100.
-const char kDisplayCapturePermissionsPolicyAllowed[] =
-    "display-capture-permissions-policy-allowed";
 
 // Disable antialiasing on 2d canvas.
 const char kDisable2dCanvasAntialiasing[]   = "disable-canvas-aa";
@@ -340,6 +333,10 @@ const char kEnableExperimentalCookieFeatures[] =
 const char kEnableExperimentalWebAssemblyFeatures[] =
     "enable-experimental-webassembly-features";
 
+// Enables experimental WebAssembly stack switching.
+const char kEnableExperimentalWebAssemblyStackSwitching[] =
+    "enable-experimental-webassembly-stack-switching";
+
 // Enables Web Platform features that are in development.
 const char kEnableExperimentalWebPlatformFeatures[] =
     "enable-experimental-web-platform-features";
@@ -388,6 +385,10 @@ const char kEnablePluginPlaceholderTesting[] =
 // still available, but it is bucketized and updated less frequently. This flag
 // also applys to workers.
 const char kEnablePreciseMemoryInfo[] = "enable-precise-memory-info";
+
+// Enables Privacy Sandbox APIs: Attribution Reporting, Fledge, Topics, Fenced
+// Frames, Shared Storage, Private Aggregation, and their associated features.
+const char kEnablePrivacySandboxAdsApis[] = "enable-privacy-sandbox-ads-apis";
 
 // Set options to cache V8 data. (none, code, or default)
 const char kV8CacheOptions[] = "v8-cache-options";
@@ -459,6 +460,11 @@ const char kEnableWebGLDraftExtensions[] = "enable-webgl-draft-extensions";
 // Enables WebGL rendering into a scanout buffer for overlay support.
 const char kEnableWebGLImageChromium[] = "enable-webgl-image-chromium";
 
+// Controls whether async interface for FileSystemSyncAccessHandle is
+// force-enabled.
+const char kFileSystemSyncAccessHandleAsyncInterfaceEnabled[] =
+    "file-system-sync-access-handle-async-interface-enabled";
+
 // Define an alias root directory which is replaced with the replacement string
 // in file URLs. The format is "/alias=/replacement", which would turn
 // file:///alias/some/path.html into file:///replacement/some/path.html.
@@ -467,10 +473,6 @@ const char kFileUrlPathAlias[] = "file-url-path-alias";
 // Forces the Chrome major version to the minor position in the User-Agent
 // string. Locks major version to 99.
 const char kForceMajorVersionToMinorPosition[] = "force-major-version-to-minor";
-
-// Forces use of hardware overlay for fullscreen video playback. Useful for
-// testing the Android overlay fullscreen functionality on other platforms.
-const char kForceOverlayFullscreenVideo[]   = "force-overlay-fullscreen-video";
 
 // This forces pages to be loaded as presentation receivers.  Useful for testing
 // behavior specific to presentation receivers.
@@ -482,12 +484,6 @@ const char kForcePresentationReceiverForTesting[] =
 // a screen reader is detected. The disable-renderer-accessibility switch
 // overrides this if present.
 const char kForceRendererAccessibility[]    = "force-renderer-accessibility";
-
-// For development / testing only. When running content_browsertests,
-// saves output of failing accessibility tests to their expectations files in
-// content/test/data/accessibility/, overwriting existing file content.
-const char kGenerateAccessibilityTestExpectations[] =
-    "generate-accessibility-test-expectations";
 
 // Extra command line options for launching the GPU process (normally used
 // for debugging). Use like renderer-cmd-prefix.
@@ -509,6 +505,11 @@ const char kInProcessGPU[]                  = "in-process-gpu";
 // connection from the browser before killing itself.
 const char kIPCConnectionTimeout[]          = "ipc-connection-timeout";
 
+// Enable Isolated App restrictions for a set of origins, specified as a
+// comma-separated list. For example:
+//   --isolated-app-origins=https://www.foo.com,https://www.bar.com
+const char kIsolatedAppOrigins[] = "isolated-app-origins";
+
 // Require dedicated processes for a set of origins, specified as a
 // comma-separated list. For example:
 //   --isolate-origins=https://www.foo.com,https://www.bar.com
@@ -526,9 +527,6 @@ const char kDisableJavaScriptHarmonyShipping[] =
 
 // Enables experimental Harmony (ECMAScript 6) features.
 const char kJavaScriptHarmony[]             = "javascript-harmony";
-
-// Enables unsafe fast JS calls between Blink and V8.
-const char kEnableUnsafeFastJSCalls[] = "enable-unsafe-fast-js-calls";
 
 // Flag to launch tests in the browser process.
 const char kLaunchAsBrowser[] = "as-browser";
@@ -580,9 +578,6 @@ const char kNoUnsandboxedZygote[] = "no-unsandboxed-zygote";
 // zygote to work.
 const char kNoZygote[] = "no-zygote";
 
-// Number of worker threads used to rasterize content.
-const char kNumRasterThreads[]              = "num-raster-threads";
-
 // Overrides the language detection result determined based on the page
 // contents.
 const char kOverrideLanguageDetection[] = "override-language-detection";
@@ -604,6 +599,10 @@ const char kPpapiPluginProcess[]            = "ppapi";
 // Causes the PPAPI sub process to display a dialog on launch. Be sure to use
 // --no-sandbox as well or the sandbox won't allow the dialog to display.
 const char kPpapiStartupDialog[]            = "ppapi-startup-dialog";
+
+// Causes the Private Aggregation API to run without reporting delays.
+const char kPrivateAggregationDeveloperMode[] =
+    "private-aggregation-developer-mode";
 
 // Enable the "Process Per Site" process model for all domains. This mode
 // consolidates same-site pages so that they share a single process.
@@ -649,10 +648,19 @@ const char kPullToRefresh[] = "pull-to-refresh";
 // the debounce mechanimsm.
 const char kQuotaChangeEventInterval[] = "quota-change-event-interval";
 
-// Reduce the minor version number in the User-Agent string.  This flag
+// Reduce the accept-language http header, and only send one language in the
+// request header: https://github.com/Tanych/accept-language.
+const char kReduceAcceptLanguage[] = "reduce-accept-language";
+
+// Reduce the minor version number in the User-Agent string. This flag
 // implements phase 4 of User-Agent reduction:
 // https://blog.chromium.org/2021/09/user-agent-reduction-origin-trial-and-dates.html.
 const char kReduceUserAgentMinorVersion[] = "reduce-user-agent-minor-version";
+
+// Reduce the platform and oscpu in the desktop User-Agent string. This flag
+// implements phase 5 of User-Agent reduction:
+// https://blog.chromium.org/2021/09/user-agent-reduction-origin-trial-and-dates.html.
+const char kReduceUserAgentPlatformOsCpu[] = "reduce-user-agent-platform-oscpu";
 
 // Register Pepper plugins (see pepper_plugin_list.cc for its format).
 const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
@@ -788,6 +796,11 @@ const char kTouchEventFeatureDetectionDisabled[] = "disabled";
 // Accepts specified file URL of a trustable WebBundle file. This flag
 // should be used only for testing purpose.
 const char kTrustableWebBundleFileUrl[] = "trustable-web-bundles-file-url";
+
+// Accepts a number representing the time-ticks value at the Unix epoch.
+// Since different processes can produce a different value for this due to
+// system clock changes, this allows synchronizing them to a single value.
+const char kTimeTicksAtUnixEpoch[] = "time-ticks-at-unix-epoch";
 
 // Replaces the existing codecs supported in peer connection with a single fake
 // codec entry that create a fake video encoder and decoder.

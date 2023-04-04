@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "build/build_config.h"
 #include "components/crash/core/common/crash_key.h"
 #include "content/common/content_constants_internal.h"
+#include "content/public/app/initialize_mojo_core.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -35,6 +36,7 @@
 #include "content/shell/utility/shell_content_utility_client.h"
 #include "ipc/ipc_buildflags.h"
 #include "net/cookies/cookie_monster.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
@@ -133,11 +135,7 @@ ShellMainDelegate::ShellMainDelegate(bool is_content_browsertests)
 ShellMainDelegate::~ShellMainDelegate() {
 }
 
-bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
-  int dummy;
-  if (!exit_code)
-    exit_code = &dummy;
-
+absl::optional<int> ShellMainDelegate::BasicStartupComplete() {
   base::CommandLine& command_line = *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch("run-layout-test")) {
     std::cerr << std::string(79, '*') << "\n"
@@ -183,11 +181,15 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 
   RegisterShellPathProvider();
 
-  return false;
+  return absl::nullopt;
 }
 
-bool ShellMainDelegate::ShouldCreateFeatureList() {
-  return false;
+bool ShellMainDelegate::ShouldCreateFeatureList(InvokedIn invoked_in) {
+  return absl::holds_alternative<InvokedInChildProcess>(invoked_in);
+}
+
+bool ShellMainDelegate::ShouldInitializeMojo(InvokedIn invoked_in) {
+  return ShouldCreateFeatureList(invoked_in);
 }
 
 void ShellMainDelegate::PreSandboxStartup() {
@@ -329,15 +331,28 @@ void ShellMainDelegate::InitializeResourceBundle() {
 #endif
 }
 
-void ShellMainDelegate::PreBrowserMain() {
+absl::optional<int> ShellMainDelegate::PreBrowserMain() {
+  absl::optional<int> exit_code =
+      content::ContentMainDelegate::PreBrowserMain();
+  if (exit_code.has_value())
+    return exit_code;
+
 #if BUILDFLAG(IS_MAC)
   RegisterShellCrApp();
 #endif
+  return absl::nullopt;
 }
 
-void ShellMainDelegate::PostEarlyInitialization(bool is_running_tests) {
-  // Apply field trial testing configuration.
-  browser_client_->CreateFeatureListAndFieldTrials();
+absl::optional<int> ShellMainDelegate::PostEarlyInitialization(
+    InvokedIn invoked_in) {
+  if (!ShouldCreateFeatureList(invoked_in)) {
+    // Apply field trial testing configuration since content did not.
+    browser_client_->CreateFeatureListAndFieldTrials();
+  }
+  if (!ShouldInitializeMojo(invoked_in)) {
+    InitializeMojoCore();
+  }
+  return absl::nullopt;
 }
 
 ContentClient* ShellMainDelegate::CreateContentClient() {

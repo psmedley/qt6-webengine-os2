@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ class PrivacySandboxDialogUI : public content::WebUIController {
                   base::OnceCallback<void(int)> resize_callback,
                   base::OnceClosure show_dialog_callback,
                   base::OnceClosure open_settings_callback,
-                  PrivacySandboxService::DialogType dialog_type);
+                  PrivacySandboxService::PromptType prompt_type);
 
  private:
   WEB_UI_CONTROLLER_TYPE_DECL();

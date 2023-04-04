@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,10 +24,10 @@ std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> CreateFormatPattern(
   return pattern;
 }
 
-std::unique_ptr<base::ListValue> GetFontList_SlowBlocking() {
+base::Value::List GetFontList_SlowBlocking() {
   DCHECK(GetFontListTaskRunner()->RunsTasksInCurrentSequence());
 
-  std::unique_ptr<base::ListValue> font_list(new base::ListValue);
+  base::Value::List font_list;
 
   std::unique_ptr<FcObjectSet, decltype(&FcObjectSetDestroy)> object_set(
       FcObjectSetBuild(FC_FAMILY, NULL), FcObjectSetDestroy);
@@ -60,11 +60,11 @@ std::unique_ptr<base::ListValue> GetFontList_SlowBlocking() {
   sorted_families.insert("Serif");
 
   for (const auto& family : sorted_families) {
-    std::unique_ptr<base::ListValue> font_item(new base::ListValue());
-    font_item->Append(family);
-    font_item->Append(family);  // localized name.
+    base::Value::List font_item;
+    font_item.Append(family);
+    font_item.Append(family);  // localized name.
     // TODO(yusukes): Support localized family names.
-    font_list->Append(std::move(font_item));
+    font_list.Append(std::move(font_item));
   }
 
   return font_list;

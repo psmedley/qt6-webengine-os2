@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,9 @@
 #include "base/check.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
+#include "base/syslog_logging.h"
 #include "chromeos/lacros/lacros_service.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #include "components/policy/core/common/cloud/affiliation.h"
 #include "components/policy/core/common/cloud/cloud_policy_validator.h"
 #include "components/policy/core/common/policy_bundle.h"
@@ -41,12 +43,9 @@ bool IsManaged(const enterprise_management::PolicyData& policy_data) {
 
 // Returns whether a primary device account for this session is child.
 bool IsChildSession() {
-  const crosapi::mojom::BrowserInitParams* init_params =
-      chromeos::LacrosService::Get()->init_params();
-  if (!init_params) {
-    return false;
-  }
-  return init_params->session_type ==
+  const chromeos::BrowserParamsProxy* init_params =
+      chromeos::BrowserParamsProxy::Get();
+  return init_params->SessionType() ==
          crosapi::mojom::SessionType::kChildSession;
 }
 
@@ -59,18 +58,19 @@ PolicyLoaderLacros::PolicyLoaderLacros(
     PolicyPerProfileFilter per_profile)
     : AsyncPolicyLoader(task_runner, /*periodic_updates=*/false),
       per_profile_(per_profile) {
-  auto* lacros_service = chromeos::LacrosService::Get();
-  const crosapi::mojom::BrowserInitParams* init_params =
-      lacros_service->init_params();
-  if (!init_params) {
-    LOG(ERROR) << "No init params";
-    return;
+  const chromeos::BrowserParamsProxy* init_params =
+      chromeos::BrowserParamsProxy::Get();
+  if (per_profile_ == PolicyPerProfileFilter::kTrue &&
+      init_params->DeviceAccountComponentPolicy()) {
+    SetComponentPolicy(init_params->DeviceAccountComponentPolicy().value());
   }
-  if (!init_params->device_account_policy) {
+  if (!init_params->DeviceAccountPolicy().has_value()) {
     LOG(ERROR) << "No policy data";
     return;
   }
-  policy_fetch_response_ = init_params->device_account_policy.value();
+  policy_fetch_response_ = init_params->DeviceAccountPolicy().value();
+  last_fetch_timestamp_ =
+      base::Time::FromTimeT(init_params->LastPolicyFetchAttemptTimestamp());
 }
 
 PolicyLoaderLacros::~PolicyLoaderLacros() {
@@ -97,6 +97,10 @@ void PolicyLoaderLacros::InitOnBackgroundThread() {
 std::unique_ptr<PolicyBundle> PolicyLoaderLacros::Load() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::unique_ptr<PolicyBundle> bundle = std::make_unique<PolicyBundle>();
+
+  // If per_profile loader is used, apply policy for extensions.
+  if (per_profile_ == PolicyPerProfileFilter::kTrue && component_policy_)
+    bundle->MergeFrom(*component_policy_);
 
   if (!policy_fetch_response_ || policy_fetch_response_->empty()) {
     return bundle;
@@ -137,11 +141,12 @@ std::unique_ptr<PolicyBundle> PolicyLoaderLacros::Load() {
   bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .MergeFrom(policy_map);
 
-  // Remember if the policy is managed or not.
-  g_is_main_user_managed_ = IsManaged(*validator.policy_data());
-  if (g_is_main_user_managed_ &&
-      per_profile_ == PolicyPerProfileFilter::kFalse) {
-    *MainUserPolicyDataStorage() = *validator.policy_data();
+  // Remember if the main profile is managed or not.
+  if (per_profile_ == PolicyPerProfileFilter::kFalse) {
+    g_is_main_user_managed_ = IsManaged(*validator.policy_data());
+    if (g_is_main_user_managed_) {
+      *MainUserPolicyDataStorage() = *validator.policy_data();
+    }
   }
   policy_data_ = std::move(validator.policy_data());
 
@@ -155,6 +160,49 @@ void PolicyLoaderLacros::OnPolicyUpdated(
   Reload(true);
 }
 
+void PolicyLoaderLacros::OnPolicyFetchAttempt() {
+  last_fetch_timestamp_ = base::Time::Now();
+}
+
+void PolicyLoaderLacros::OnComponentPolicyUpdated(
+    const policy::ComponentPolicyMap& component_policy) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // The component policy is per_profile=true policy. If Lacros is using
+  // secondary profile, that policy is loaded directly from DMServer. In case
+  // it is using the device account, there are two PolicyLoaderLacros objects
+  // present, and we need to store it only in the object with per_profile:True.
+  if (per_profile_ == PolicyPerProfileFilter::kFalse) {
+    return;
+  }
+
+  SetComponentPolicy(component_policy);
+  Reload(true);
+}
+
+void PolicyLoaderLacros::SetComponentPolicy(
+    const policy::ComponentPolicyMap& component_policy) {
+  if (component_policy_) {
+    component_policy_->Clear();
+  } else {
+    component_policy_ = std::make_unique<PolicyBundle>();
+  }
+  for (auto& policy_pair : component_policy) {
+    PolicyMap component_policy_map;
+    std::string error;
+    // The component policy received from Ash is the JSON data corresponding to
+    // the policy for the namespace.
+    ParseComponentPolicy(policy_pair.second.Clone(), POLICY_SCOPE_USER,
+                         POLICY_SOURCE_CLOUD_FROM_ASH, &component_policy_map,
+                         &error);
+    DCHECK(error.empty());
+
+    // The data is also good; expose the policies.
+    component_policy_->Get(policy_pair.first).Swap(&component_policy_map);
+  }
+  // TODO(igorcov): crbug.com/1301854 Remove after bug fix.
+  SYSLOG(INFO) << "New component policy installed";
+}
+
 enterprise_management::PolicyData* PolicyLoaderLacros::GetPolicyData() {
   if (!policy_fetch_response_ || !policy_data_)
     return nullptr;
@@ -164,12 +212,9 @@ enterprise_management::PolicyData* PolicyLoaderLacros::GetPolicyData() {
 
 // static
 bool PolicyLoaderLacros::IsDeviceLocalAccountUser() {
-  const crosapi::mojom::BrowserInitParams* init_params =
-      chromeos::LacrosService::Get()->init_params();
-  if (!init_params) {
-    return false;
-  }
-  crosapi::mojom::SessionType session_type = init_params->session_type;
+  const chromeos::BrowserParamsProxy* init_params =
+      chromeos::BrowserParamsProxy::Get();
+  crosapi::mojom::SessionType session_type = init_params->SessionType();
   return session_type == crosapi::mojom::SessionType::kPublicSession ||
          session_type == crosapi::mojom::SessionType::kWebKioskSession ||
          session_type == crosapi::mojom::SessionType::kAppKioskSession;
@@ -184,8 +229,8 @@ bool PolicyLoaderLacros::IsMainUserManaged() {
 bool PolicyLoaderLacros::IsMainUserAffiliated() {
   const enterprise_management::PolicyData* policy =
       policy::PolicyLoaderLacros::main_user_policy_data();
-  const crosapi::mojom::BrowserInitParams* init_params =
-      chromeos::LacrosService::Get()->init_params();
+  const chromeos::BrowserParamsProxy* init_params =
+      chromeos::BrowserParamsProxy::Get();
 
   // To align with `DeviceLocalAccountUserBase::IsAffiliated()`, a device local
   // account user is always treated as affiliated.
@@ -193,12 +238,12 @@ bool PolicyLoaderLacros::IsMainUserAffiliated() {
     return true;
   }
 
-  if (policy && !policy->user_affiliation_ids().empty() && init_params &&
-      init_params->device_properties &&
-      init_params->device_properties->device_affiliation_ids.has_value()) {
+  if (policy && !policy->user_affiliation_ids().empty() &&
+      init_params->DeviceProperties() &&
+      init_params->DeviceProperties()->device_affiliation_ids.has_value()) {
     const auto& user_ids = policy->user_affiliation_ids();
     const auto& device_ids =
-        init_params->device_properties->device_affiliation_ids.value();
+        init_params->DeviceProperties()->device_affiliation_ids.value();
     return policy::IsAffiliated({user_ids.begin(), user_ids.end()},
                                 {device_ids.begin(), device_ids.end()});
   }

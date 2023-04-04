@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ namespace {
 constexpr char kEventFlagKey[] = "event_flag";
 constexpr char kContainerKey[] = "container";
 constexpr char kDispositionKey[] = "disposition";
+constexpr char kOverrideUrlKey[] = "override_url";
 constexpr char kDisplayIdKey[] = "display_id";
 constexpr char kHandlerIdKey[] = "handler_id";
 constexpr char kUrlsKey[] = "urls";
@@ -28,6 +29,7 @@ constexpr char kFilePathsKey[] = "file_paths";
 constexpr char kAppTypeBrowserKey[] = "is_app";
 constexpr char kAppNameKey[] = "app_name";
 constexpr char kActivationIndexKey[] = "index";
+constexpr char kFirstNonPinnedTabIndexKey[] = "first_non_pinned_tab_index";
 constexpr char kDeskIdKey[] = "desk_id";
 constexpr char kCurrentBoundsKey[] = "current_bounds";
 constexpr char kWindowStateTypeKey[] = "window_state_type";
@@ -63,53 +65,58 @@ base::Value ConvertUintToValue(uint32_t number) {
   return base::Value(base::NumberToString(number));
 }
 
-// Gets bool value from base::DictionaryValue, e.g. { "key": true } returns
+// Gets bool value from base::Value::Dict, e.g. { "key": true } returns
 // true.
-absl::optional<bool> GetBoolValueFromDict(const base::DictionaryValue& dict,
+absl::optional<bool> GetBoolValueFromDict(const base::Value::Dict& dict,
                                           const std::string& key_name) {
-  return dict.FindBoolKey(key_name);
+  return dict.FindBool(key_name);
 }
 
-// Gets int value from base::DictionaryValue, e.g. { "key": 100 } returns 100.
-absl::optional<int32_t> GetIntValueFromDict(const base::DictionaryValue& dict,
+// Gets int value from base::Value::Dict, e.g. { "key": 100 } returns 100.
+absl::optional<int32_t> GetIntValueFromDict(const base::Value::Dict& dict,
                                             const std::string& key_name) {
-  return dict.FindIntKey(key_name);
+  return dict.FindInt(key_name);
 }
 
-// Gets uint32_t value from base::DictionaryValue, e.g. { "key": "123" } returns
+// Gets uint32_t value from base::Value::Dict, e.g. { "key": "123" } returns
 // 123.
-absl::optional<uint32_t> GetUIntValueFromDict(const base::DictionaryValue& dict,
+absl::optional<uint32_t> GetUIntValueFromDict(const base::Value::Dict& dict,
                                               const std::string& key_name) {
   uint32_t result = 0;
-  if (!dict.FindKey(key_name) ||
-      !base::StringToUint(dict.FindStringKey(key_name)->c_str(), &result)) {
+  if (!dict.contains(key_name) ||
+      !base::StringToUint(dict.FindString(key_name)->c_str(), &result)) {
     return absl::nullopt;
   }
   return result;
 }
 
 absl::optional<std::string> GetStringValueFromDict(
-    const base::DictionaryValue& dict,
+    const base::Value::Dict& dict,
     const std::string& key_name) {
-  const std::string* value = dict.FindStringKey(key_name);
+  const std::string* value = dict.FindString(key_name);
   return value ? absl::optional<std::string>(*value) : absl::nullopt;
 }
 
+absl::optional<GURL> GetUrlValueFromDict(const base::Value::Dict& dict,
+                                         const std::string& key_name) {
+  const std::string* value = dict.FindString(key_name);
+  return value ? absl::optional<GURL>(*value) : absl::nullopt;
+}
+
 absl::optional<std::u16string> GetU16StringValueFromDict(
-    const base::DictionaryValue& dict,
+    const base::Value::Dict& dict,
     const std::string& key_name) {
   std::u16string result;
-  const std::string* value = dict.FindStringKey(key_name);
+  const std::string* value = dict.FindString(key_name);
   if (!value || !base::UTF8ToUTF16(value->c_str(), value->length(), &result))
     return absl::nullopt;
   return result;
 }
 
-// Gets display id from base::DictionaryValue, e.g. { "display_id": "22000000" }
+// Gets display id from base::Value::Dict, e.g. { "display_id": "22000000" }
 // returns 22000000.
-absl::optional<int64_t> GetDisplayIdFromDict(
-    const base::DictionaryValue& dict) {
-  const std::string* display_id_str = dict.FindStringKey(kDisplayIdKey);
+absl::optional<int64_t> GetDisplayIdFromDict(const base::Value::Dict& dict) {
+  const std::string* display_id_str = dict.FindString(kDisplayIdKey);
   int64_t display_id_value;
   if (display_id_str &&
       base::StringToInt64(*display_id_str, &display_id_value)) {
@@ -121,15 +128,14 @@ absl::optional<int64_t> GetDisplayIdFromDict(
 
 // Gets urls from the dictionary value.
 absl::optional<std::vector<GURL>> GetUrlsFromDict(
-    const base::DictionaryValue& dict) {
-  const base::Value* urls_path_value = dict.FindListKey(kUrlsKey);
-  if (!urls_path_value || !urls_path_value->is_list() ||
-      urls_path_value->GetListDeprecated().empty()) {
+    const base::Value::Dict& dict) {
+  const base::Value::List* urls_path_value = dict.FindList(kUrlsKey);
+  if (!urls_path_value || urls_path_value->empty()) {
     return absl::nullopt;
   }
 
   std::vector<GURL> url_paths;
-  for (const auto& item : urls_path_value->GetListDeprecated()) {
+  for (const auto& item : *urls_path_value) {
     if (item.GetString().empty())
       continue;
     GURL url(item.GetString());
@@ -141,18 +147,17 @@ absl::optional<std::vector<GURL>> GetUrlsFromDict(
   return url_paths;
 }
 
-// Gets std::vector<base::FilePath> from base::DictionaryValue, e.g.
+// Gets std::vector<base::FilePath> from base::Value::Dict, e.g.
 // {"file_paths": { "aa.cc", "bb.h", ... }} returns
 // std::vector<base::FilePath>{"aa.cc", "bb.h", ...}.
 absl::optional<std::vector<base::FilePath>> GetFilePathsFromDict(
-    const base::DictionaryValue& dict) {
-  const base::Value* file_paths_value = dict.FindListKey(kFilePathsKey);
-  if (!file_paths_value || !file_paths_value->is_list() ||
-      file_paths_value->GetListDeprecated().empty())
+    const base::Value::Dict& dict) {
+  const base::Value::List* file_paths_value = dict.FindList(kFilePathsKey);
+  if (!file_paths_value || file_paths_value->empty())
     return absl::nullopt;
 
   std::vector<base::FilePath> file_paths;
-  for (const auto& item : file_paths_value->GetListDeprecated()) {
+  for (const auto& item : *file_paths_value) {
     if (item.GetString().empty())
       continue;
     file_paths.push_back(base::FilePath(item.GetString()));
@@ -163,16 +168,15 @@ absl::optional<std::vector<base::FilePath>> GetFilePathsFromDict(
 
 // Gets gfx::Size from base::Value, e.g. { 100, 300 } returns
 // gfx::Size(100, 300).
-absl::optional<gfx::Size> GetSizeFromDict(const base::DictionaryValue& dict,
+absl::optional<gfx::Size> GetSizeFromDict(const base::Value::Dict& dict,
                                           const std::string& key_name) {
-  const base::Value* size_value = dict.FindListKey(key_name);
-  if (!size_value || !size_value->is_list() ||
-      size_value->GetListDeprecated().size() != 2) {
+  const base::Value::List* size_value = dict.FindList(key_name);
+  if (!size_value || size_value->size() != 2) {
     return absl::nullopt;
   }
 
   std::vector<int> size;
-  for (const auto& item : size_value->GetListDeprecated())
+  for (const auto& item : *size_value)
     size.push_back(item.GetInt());
 
   return gfx::Size(size[0], size[1]);
@@ -180,16 +184,14 @@ absl::optional<gfx::Size> GetSizeFromDict(const base::DictionaryValue& dict,
 
 // Gets gfx::Rect from base::Value, e.g. { 0, 100, 200, 300 } returns
 // gfx::Rect(0, 100, 200, 300).
-absl::optional<gfx::Rect> GetBoundsRectFromDict(
-    const base::DictionaryValue& dict,
-    const std::string& key_name) {
-  const base::Value* rect_value = dict.FindListKey(key_name);
-  if (!rect_value || !rect_value->is_list() ||
-      rect_value->GetListDeprecated().empty())
+absl::optional<gfx::Rect> GetBoundsRectFromDict(const base::Value::Dict& dict,
+                                                const std::string& key_name) {
+  const base::Value::List* rect_value = dict.FindList(key_name);
+  if (!rect_value || rect_value->empty())
     return absl::nullopt;
 
   std::vector<int> rect;
-  for (const auto& item : rect_value->GetListDeprecated())
+  for (const auto& item : *rect_value)
     rect.push_back(item.GetInt());
 
   if (rect.size() != 4)
@@ -198,21 +200,21 @@ absl::optional<gfx::Rect> GetBoundsRectFromDict(
   return gfx::Rect(rect[0], rect[1], rect[2], rect[3]);
 }
 
-// Gets WindowStateType from base::DictionaryValue, e.g. { "window_state_type":
+// Gets WindowStateType from base::Value::Dict, e.g. { "window_state_type":
 // 2 } returns WindowStateType::kMinimized.
 absl::optional<chromeos::WindowStateType> GetWindowStateTypeFromDict(
-    const base::DictionaryValue& dict) {
-  return dict.FindKey(kWindowStateTypeKey)
+    const base::Value::Dict& dict) {
+  return dict.Find(kWindowStateTypeKey)
              ? absl::make_optional(static_cast<chromeos::WindowStateType>(
-                   dict.FindIntKey(kWindowStateTypeKey).value()))
+                   dict.FindInt(kWindowStateTypeKey).value()))
              : absl::nullopt;
 }
 
 absl::optional<ui::WindowShowState> GetPreMinimizedShowStateTypeFromDict(
-    const base::DictionaryValue& dict) {
-  return dict.FindKey(kPreMinimizedShowStateTypeKey)
+    const base::Value::Dict& dict) {
+  return dict.Find(kPreMinimizedShowStateTypeKey)
              ? absl::make_optional(static_cast<ui::WindowShowState>(
-                   dict.FindIntKey(kPreMinimizedShowStateTypeKey).value()))
+                   dict.FindInt(kPreMinimizedShowStateTypeKey).value()))
              : absl::nullopt;
 }
 
@@ -221,8 +223,8 @@ absl::optional<ui::WindowShowState> GetPreMinimizedShowStateTypeFromDict(
 AppRestoreData::AppRestoreData() = default;
 
 AppRestoreData::AppRestoreData(base::Value&& value) {
-  base::DictionaryValue* data_dict = nullptr;
-  if (!value.is_dict() || !value.GetAsDictionary(&data_dict) || !data_dict) {
+  const base::Value::Dict* data_dict = value.GetIfDict();
+  if (!data_dict) {
     DVLOG(0) << "Fail to parse app restore data. "
              << "Cannot find the app restore data dict.";
     return;
@@ -231,6 +233,7 @@ AppRestoreData::AppRestoreData(base::Value&& value) {
   event_flag = GetIntValueFromDict(*data_dict, kEventFlagKey);
   container = GetIntValueFromDict(*data_dict, kContainerKey);
   disposition = GetIntValueFromDict(*data_dict, kDispositionKey);
+  override_url = GetUrlValueFromDict(*data_dict, kOverrideUrlKey);
   display_id = GetDisplayIdFromDict(*data_dict);
   handler_id = GetStringValueFromDict(*data_dict, kHandlerIdKey);
   urls = GetUrlsFromDict(*data_dict);
@@ -239,6 +242,8 @@ AppRestoreData::AppRestoreData(base::Value&& value) {
   app_type_browser = GetBoolValueFromDict(*data_dict, kAppTypeBrowserKey);
   app_name = GetStringValueFromDict(*data_dict, kAppNameKey);
   activation_index = GetIntValueFromDict(*data_dict, kActivationIndexKey);
+  first_non_pinned_tab_index =
+      GetIntValueFromDict(*data_dict, kFirstNonPinnedTabIndexKey);
   desk_id = GetIntValueFromDict(*data_dict, kDeskIdKey);
   current_bounds = GetBoundsRectFromDict(*data_dict, kCurrentBoundsKey);
   window_state_type = GetWindowStateTypeFromDict(*data_dict);
@@ -252,9 +257,9 @@ AppRestoreData::AppRestoreData(base::Value&& value) {
   primary_color = GetUIntValueFromDict(*data_dict, kPrimaryColorKey);
   status_bar_color = GetUIntValueFromDict(*data_dict, kStatusBarColorKey);
 
-  if (data_dict->FindKey(kIntentKey)) {
-    intent = apps_util::ConvertValueToIntent(
-        std::move(*data_dict->FindDictKey(kIntentKey)));
+  const base::Value::Dict* intent_value = data_dict->FindDict(kIntentKey);
+  if (intent_value) {
+    intent = apps_util::ConvertDictToIntent(*intent_value);
   }
 }
 
@@ -265,14 +270,18 @@ AppRestoreData::AppRestoreData(std::unique_ptr<AppLaunchInfo> app_launch_info) {
   event_flag = std::move(app_launch_info->event_flag);
   container = std::move(app_launch_info->container);
   disposition = std::move(app_launch_info->disposition);
+  override_url = std::move(app_launch_info->override_url);
   display_id = std::move(app_launch_info->display_id);
   handler_id = std::move(app_launch_info->handler_id);
   urls = std::move(app_launch_info->urls);
   active_tab_index = std::move(app_launch_info->active_tab_index);
+  first_non_pinned_tab_index =
+      std::move(app_launch_info->first_non_pinned_tab_index);
   file_paths = std::move(app_launch_info->file_paths);
   intent = std::move(app_launch_info->intent);
   app_type_browser = std::move(app_launch_info->app_type_browser);
   app_name = std::move(app_launch_info->app_name);
+  tab_group_infos = std::move(app_launch_info->tab_group_infos);
 }
 
 AppRestoreData::~AppRestoreData() = default;
@@ -289,6 +298,9 @@ std::unique_ptr<AppRestoreData> AppRestoreData::Clone() const {
   if (disposition.has_value())
     data->disposition = disposition.value();
 
+  if (override_url.has_value())
+    data->override_url = override_url.value();
+
   if (display_id.has_value())
     data->display_id = display_id.value();
 
@@ -301,8 +313,11 @@ std::unique_ptr<AppRestoreData> AppRestoreData::Clone() const {
   if (active_tab_index.has_value())
     data->active_tab_index = active_tab_index.value();
 
-  if (intent.has_value() && intent.value())
-    data->intent = intent.value()->Clone();
+  if (first_non_pinned_tab_index.has_value())
+    data->first_non_pinned_tab_index = first_non_pinned_tab_index.value();
+
+  if (intent)
+    data->intent = intent->Clone();
 
   if (file_paths.has_value())
     data->file_paths = file_paths.value();
@@ -349,6 +364,9 @@ std::unique_ptr<AppRestoreData> AppRestoreData::Clone() const {
   if (status_bar_color.has_value())
     data->status_bar_color = status_bar_color.value();
 
+  if (tab_group_infos.has_value())
+    data->tab_group_infos = tab_group_infos.value();
+
   return data;
 }
 
@@ -363,6 +381,9 @@ base::Value AppRestoreData::ConvertToValue() const {
 
   if (disposition.has_value())
     launch_info_dict.SetIntKey(kDispositionKey, disposition.value());
+
+  if (override_url.has_value())
+    launch_info_dict.SetStringKey(kOverrideUrlKey, override_url.value().spec());
 
   if (display_id.has_value()) {
     launch_info_dict.SetStringKey(kDisplayIdKey,
@@ -382,9 +403,14 @@ base::Value AppRestoreData::ConvertToValue() const {
   if (active_tab_index.has_value())
     launch_info_dict.SetIntKey(kActiveTabIndexKey, active_tab_index.value());
 
-  if (intent.has_value() && intent.value()) {
+  if (first_non_pinned_tab_index.has_value()) {
+    launch_info_dict.SetIntKey(kFirstNonPinnedTabIndexKey,
+                               first_non_pinned_tab_index.value());
+  }
+
+  if (intent) {
     launch_info_dict.SetKey(kIntentKey,
-                            apps_util::ConvertIntentToValue(intent.value()));
+                            apps_util::ConvertIntentToValue(intent));
   }
 
   if (file_paths.has_value() && !file_paths.value().empty()) {
@@ -522,13 +548,16 @@ std::unique_ptr<AppLaunchInfo> AppRestoreData::GetAppLaunchInfo(
   app_launch_info->container = container;
   app_launch_info->disposition = disposition;
   app_launch_info->display_id = display_id;
+  app_launch_info->active_tab_index = active_tab_index;
   app_launch_info->handler_id = handler_id;
   app_launch_info->urls = urls;
+  app_launch_info->first_non_pinned_tab_index = first_non_pinned_tab_index;
   app_launch_info->file_paths = file_paths;
-  if (intent.has_value())
+  if (intent)
     app_launch_info->intent = intent->Clone();
   app_launch_info->app_type_browser = app_type_browser;
   app_launch_info->app_name = app_name;
+  app_launch_info->tab_group_infos = tab_group_infos;
   return app_launch_info;
 }
 
@@ -571,24 +600,20 @@ std::unique_ptr<WindowInfo> AppRestoreData::GetWindowInfo() const {
   return window_info;
 }
 
-apps::mojom::WindowInfoPtr AppRestoreData::GetAppWindowInfo() const {
-  apps::mojom::WindowInfoPtr window_info = apps::mojom::WindowInfo::New();
+apps::WindowInfoPtr AppRestoreData::GetAppWindowInfo() const {
+  apps::WindowInfoPtr window_info = std::make_unique<apps::WindowInfo>();
 
   if (display_id.has_value())
     window_info->display_id = display_id.value();
 
   if (bounds_in_root.has_value()) {
-    window_info->bounds = apps::mojom::Rect::New();
-    window_info->bounds->x = bounds_in_root.value().x();
-    window_info->bounds->y = bounds_in_root.value().y();
-    window_info->bounds->width = bounds_in_root.value().width();
-    window_info->bounds->height = bounds_in_root.value().height();
+    window_info->bounds = gfx::Rect{
+        bounds_in_root.value().x(), bounds_in_root.value().y(),
+        bounds_in_root.value().width(), bounds_in_root.value().height()};
   } else if (current_bounds.has_value()) {
-    window_info->bounds = apps::mojom::Rect::New();
-    window_info->bounds->x = current_bounds.value().x();
-    window_info->bounds->y = current_bounds.value().y();
-    window_info->bounds->width = current_bounds.value().width();
-    window_info->bounds->height = current_bounds.value().height();
+    window_info->bounds = gfx::Rect{
+        current_bounds.value().x(), current_bounds.value().y(),
+        current_bounds.value().width(), current_bounds.value().height()};
   }
 
   if (window_state_type.has_value())

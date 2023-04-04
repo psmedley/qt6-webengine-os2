@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,6 +95,7 @@ SkPath MessageView::HighlightPathGenerator::GetHighlightPath(
 MessageView::MessageView(const Notification& notification)
     : notification_id_(notification.id()),
       notifier_id_(notification.notifier_id()),
+      timestamp_(notification.timestamp()),
       slide_out_controller_(this, this) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
   views::FocusRing::Install(this);
@@ -354,7 +355,17 @@ void MessageView::OnThemeChanged() {
 }
 
 ui::Layer* MessageView::GetSlideOutLayer() {
-  return is_nested_ ? layer() : GetWidget()->GetLayer();
+  // If a message view is contained in a parent message view it should give up
+  // slide behavior to the parent message view when the parent view is
+  // collapsed.
+  auto* nested_layer =
+      (parent_message_view_ && !parent_message_view_->IsExpanded())
+          ? parent_message_view_->layer()
+          : layer();
+  bool is_nested = (parent_message_view_ && !parent_message_view_->IsExpanded())
+                       ? parent_message_view_->is_nested()
+                       : is_nested_;
+  return is_nested ? nested_layer : GetWidget()->GetLayer();
 }
 
 void MessageView::OnSlideStarted() {
@@ -364,6 +375,21 @@ void MessageView::OnSlideStarted() {
 }
 
 void MessageView::OnSlideChanged(bool in_progress) {
+  // crbug/1333664: We need to make sure to disable scrolling while a
+  // notification view is sliding. This is to ensure the notification view can
+  // only move horizontally or vertically at one time.
+  if (scroller_ && !is_sliding_ && slide_out_controller_.GetGestureAmount()) {
+    is_sliding_ = true;
+    scroller_->SetVerticalScrollBarMode(
+        views::ScrollView::ScrollBarMode::kDisabled);
+  }
+
+  if (scroller_ && !in_progress) {
+    is_sliding_ = false;
+    scroller_->SetVerticalScrollBarMode(
+        views::ScrollView::ScrollBarMode::kEnabled);
+  }
+
   for (auto& observer : observers_) {
     if (in_progress)
       observer.OnSlideChanged(notification_id_);

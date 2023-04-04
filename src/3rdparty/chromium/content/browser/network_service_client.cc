@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/threading/sequence_bound.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "content/browser/browsing_data/clear_site_data_handler.h"
+#include "content/browser/buildflags.h"
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/browser/webrtc/webrtc_connections_observer.h"
 #include "content/public/browser/browser_context.h"
@@ -28,7 +30,7 @@
 #include "services/network/public/cpp/network_switches.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/content_uri_utils.h"
@@ -143,7 +145,14 @@ void NetworkServiceClient::OnDNSChanged() {
       network::mojom::ConnectionSubtype(
           net::NetworkChangeNotifier::GetConnectionSubtype()));
 }
-#endif
+#endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(USE_SOCKET_BROKER)
+mojo::PendingRemote<network::mojom::SocketBroker>
+NetworkServiceClient::BindSocketBroker() {
+  return socket_broker_.BindNewRemote();
+}
+#endif  // BUILDFLAG(USE_SOCKET_BROKER)
 
 mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
 NetworkServiceClient::BindURLLoaderNetworkServiceObserver() {

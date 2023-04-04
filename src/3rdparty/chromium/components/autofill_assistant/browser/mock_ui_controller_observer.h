@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,8 @@ class MockUiControllerObserver : public UiControllerObserver {
                void(const std::vector<UserAction>& user_actions));
   MOCK_METHOD1(OnCollectUserDataOptionsChanged,
                void(const CollectUserDataOptions* options));
+  MOCK_METHOD2(OnCollectUserDataUiStateChanged,
+               void(bool loading, UserDataEventField event_field));
   MOCK_METHOD1(OnDetailsChanged, void(const std::vector<Details>& details));
   MOCK_METHOD1(OnInfoBoxChanged, void(const InfoBox* info_box));
   MOCK_METHOD1(OnProgressChanged, void(int progress));
@@ -45,6 +47,8 @@ class MockUiControllerObserver : public UiControllerObserver {
   MOCK_METHOD0(OnCollapseBottomSheet, void());
   MOCK_METHOD2(OnFormChanged,
                void(const FormProto* form, const FormProto::Result* result));
+  MOCK_METHOD1(OnQrCodeScanUiChanged,
+               void(const PromptQrCodeScanProto* qr_code_scan));
   MOCK_METHOD1(OnGenericUserInterfaceChanged,
                void(const GenericUserInterfaceProto* generic_ui));
   MOCK_METHOD1(OnPersistentGenericUserInterfaceChanged,
@@ -52,6 +56,11 @@ class MockUiControllerObserver : public UiControllerObserver {
   MOCK_METHOD1(OnTtsButtonVisibilityChanged, void(bool visible));
   MOCK_METHOD1(OnTtsButtonStateChanged, void(TtsButtonState state));
   MOCK_METHOD0(OnFeedbackFormRequested, void());
+  MOCK_METHOD(void,
+              OnShowAccountScreen,
+              (const ShowAccountScreenProto& proto,
+               const std::string& email_address),
+              (override));
 };
 
 }  // namespace autofill_assistant

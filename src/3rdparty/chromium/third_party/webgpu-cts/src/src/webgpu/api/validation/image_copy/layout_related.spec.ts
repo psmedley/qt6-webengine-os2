@@ -169,7 +169,7 @@ Test the computation of requiredBytesInCopy by computing the minimum data size f
         );
       })
       .unless(p => p.dimension === '1d' && (p.copyHeightInBlocks > 1 || p.copyDepth > 1))
-      .expand('bufferOffset', p => {
+      .expand('offset', p => {
         const info = kTextureFormatInfo[p.format];
         if (info.depth || info.stencil) {
           return [p._offsetMultiplier * 4];
@@ -177,9 +177,13 @@ Test the computation of requiredBytesInCopy by computing the minimum data size f
         return [p._offsetMultiplier * info.bytesPerBlock];
       })
   )
+  .beforeAllSubcases(t => {
+    const info = kTextureFormatInfo[t.params.format];
+    t.selectDeviceOrSkipTestCase(info.feature);
+  })
   .fn(async t => {
     const {
-      bufferOffset,
+      offset,
       bytesPerRowPadding,
       rowsPerImagePaddingInBlocks,
       copyWidthInBlocks,
@@ -190,7 +194,6 @@ Test the computation of requiredBytesInCopy by computing the minimum data size f
       method,
     } = t.params;
     const info = kTextureFormatInfo[format];
-    await t.selectDeviceOrSkipTestCase(info.feature);
 
     // In the CopyB2T and CopyT2B cases we need to have bytesPerRow 256-aligned,
     // to make this happen we align the bytesInACompleteRow value and multiply
@@ -204,7 +207,7 @@ Test the computation of requiredBytesInCopy by computing the minimum data size f
       bytesPerRowPadding * bytesPerRowAlignment;
     const copySize = { width: copyWidth, height: copyHeight, depthOrArrayLayers: copyDepth };
 
-    const layout = { bufferOffset, bytesPerRow, rowsPerImage };
+    const layout = { offset, bytesPerRow, rowsPerImage };
     const minDataSize = dataBytesForCopyOrFail({ layout, format, copySize, method });
 
     const texture = t.createAlignedTexture(format, copySize, undefined, dimension);
@@ -246,10 +249,13 @@ Test that rowsPerImage has no alignment constraints.
       // Copy height is info.blockHeight, so rowsPerImage must be equal or greater than it.
       .filter(({ rowsPerImage, format }) => rowsPerImage >= kTextureFormatInfo[format].blockHeight)
   )
+  .beforeAllSubcases(t => {
+    const info = kTextureFormatInfo[t.params.format];
+    t.selectDeviceOrSkipTestCase(info.feature);
+  })
   .fn(async t => {
     const { rowsPerImage, format, method } = t.params;
     const info = kTextureFormatInfo[format];
-    await t.selectDeviceOrSkipTestCase(info.feature);
 
     const size = { width: info.blockWidth, height: info.blockHeight, depthOrArrayLayers: 1 };
     const texture = t.device.createTexture({
@@ -285,10 +291,13 @@ Test the alignment requirement on the linear data offset (block size, or 4 for d
       .beginSubcases()
       .expand('offset', texelBlockAlignmentTestExpanderForOffset)
   )
+  .beforeAllSubcases(t => {
+    const info = kTextureFormatInfo[t.params.format];
+    t.selectDeviceOrSkipTestCase(info.feature);
+  })
   .fn(async t => {
     const { format, offset, method } = t.params;
     const info = kTextureFormatInfo[format];
-    await t.selectDeviceOrSkipTestCase(info.feature);
 
     const size = { width: info.blockWidth, height: info.blockHeight, depthOrArrayLayers: 1 };
     const texture = t.device.createTexture({
@@ -386,6 +395,10 @@ Test that bytesPerRow, if specified must be big enough for a full copy row.
         ];
       })
   )
+  .beforeAllSubcases(t => {
+    const info = kTextureFormatInfo[t.params.format];
+    t.selectDeviceOrSkipTestCase(info.feature);
+  })
   .fn(async t => {
     const {
       method,
@@ -398,7 +411,6 @@ Test that bytesPerRow, if specified must be big enough for a full copy row.
       _success,
     } = t.params;
     const info = kTextureFormatInfo[format];
-    await t.selectDeviceOrSkipTestCase(info.feature);
 
     // We create an aligned texture using the widthInBlocks which may be different from the
     // copyWidthInBlocks. This allows us to test scenarios where the two may be different.

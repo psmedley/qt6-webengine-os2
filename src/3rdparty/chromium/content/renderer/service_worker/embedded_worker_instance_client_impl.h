@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,15 +42,6 @@ class EmbeddedWorkerInstanceClientImpl
   // TODO(shimazu): Create a service worker's execution context by this method
   // instead of just creating an instance of EmbeddedWorkerInstanceClient.
   static void Create(
-      scoped_refptr<base::SingleThreadTaskRunner> initiator_task_runner,
-      const std::vector<std::string>& cors_exempt_header_list,
-      mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient>
-          receiver);
-
-  // TODO(https://crbug.com/955171): Remove this method and use Create once
-  // RenderFrameHostImpl uses mojo::BinderMap instead of
-  // service_manager::BinderRegistry.
-  static void CreateForRequest(
       scoped_refptr<base::SingleThreadTaskRunner> initiator_task_runner,
       const std::vector<std::string>& cors_exempt_header_list,
       mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient>

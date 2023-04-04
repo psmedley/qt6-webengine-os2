@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,6 +72,38 @@ bool ShouldShowFeedbackChipForReason(Metrics::DropOutReason reason) {
     case Metrics::DropOutReason::UI_CLOSED_UNEXPECTEDLY:
     case Metrics::DropOutReason::ONBOARDING_NAVIGATION:
     case Metrics::DropOutReason::ONBOARDING_DIALOG_DISMISSED:
+      return false;
+  }
+}
+
+bool ShouldReloadData(const CollectUserDataOptions& options,
+                      UserDataEventType event_type) {
+  if (!options.use_alternative_edit_dialogs) {
+    return false;
+  }
+  switch (event_type) {
+    case UserDataEventType::ENTRY_CREATED:
+    case UserDataEventType::ENTRY_EDITED:
+      return true;
+    case UserDataEventType::UNKNOWN:
+    case UserDataEventType::NO_NOTIFICATION:
+    case UserDataEventType::SELECTION_CHANGED:
+      return false;
+  }
+}
+
+bool ShouldStoreTemporaryData(const CollectUserDataOptions& options,
+                              UserDataEventType event_type) {
+  if (!options.use_alternative_edit_dialogs) {
+    return false;
+  }
+  switch (event_type) {
+    case UserDataEventType::ENTRY_CREATED:
+    case UserDataEventType::ENTRY_EDITED:
+      return true;
+    case UserDataEventType::UNKNOWN:
+    case UserDataEventType::NO_NOTIFICATION:
+    case UserDataEventType::SELECTION_CHANGED:
       return false;
   }
 }
@@ -287,11 +319,10 @@ const InfoBox* UiController::GetInfoBox() const {
 
 bool UiController::SetProgressActiveStepIdentifier(
     const std::string& active_step_identifier) {
-  const auto it = base::ranges::find_if(
+  const auto it = base::ranges::find(
       step_progress_bar_configuration_.annotated_step_icons(),
-      [&](const ShowProgressBarProto::StepProgressBarIcon& icon) {
-        return icon.identifier() == active_step_identifier;
-      });
+      active_step_identifier,
+      &ShowProgressBarProto::StepProgressBarIcon::identifier);
   if (it == step_progress_bar_configuration_.annotated_step_icons().cend()) {
     return false;
   }
@@ -412,17 +443,51 @@ void UiController::SetVisibilityAndUpdateUserActions() {
   }
 }
 
+void UiController::ShowQrCodeScanUi(
+    std::unique_ptr<PromptQrCodeScanProto> qr_code_scan,
+    base::OnceCallback<void(const ClientStatus&,
+                            const absl::optional<ValueProto>&)> callback) {
+  qr_code_scan_ = std::move(qr_code_scan);
+  qr_code_scan_callback_ = std::move(callback);
+  for (UiControllerObserver& observer : observers_) {
+    observer.OnQrCodeScanUiChanged(qr_code_scan_.get());
+  }
+}
+
+void UiController::ClearQrCodeScanUi() {
+  qr_code_scan_.reset();
+  qr_code_scan_callback_ = base::DoNothing();
+  for (UiControllerObserver& observer : observers_) {
+    observer.OnQrCodeScanUiChanged(nullptr);
+  }
+}
+
 void UiController::SetGenericUi(
     std::unique_ptr<GenericUserInterfaceProto> generic_ui,
     base::OnceCallback<void(const ClientStatus&)> end_action_callback,
     base::OnceCallback<void(const ClientStatus&)>
-        view_inflation_finished_callback) {
+        view_inflation_finished_callback,
+    base::RepeatingCallback<void(const RequestBackendDataProto&)>
+        request_backend_data_callback,
+    base::RepeatingCallback<void(const ShowAccountScreenProto&)>
+        show_account_screen_callback) {
   generic_user_interface_ = std::move(generic_ui);
   basic_interactions_.SetEndActionCallback(std::move(end_action_callback));
   basic_interactions_.SetViewInflationFinishedCallback(
       std::move(view_inflation_finished_callback));
+  basic_interactions_.SetRequestBackendDataCallback(
+      std::move(request_backend_data_callback));
+  basic_interactions_.SetShowAccountScreenCallback(
+      std::move(show_account_screen_callback));
   for (UiControllerObserver& observer : observers_) {
     observer.OnGenericUserInterfaceChanged(generic_user_interface_.get());
+  }
+}
+
+void UiController::ShowAccountScreen(const ShowAccountScreenProto& proto,
+                                     const std::string& email_address) {
+  for (UiControllerObserver& observer : observers_) {
+    observer.OnShowAccountScreen(proto, email_address);
   }
 }
 
@@ -646,6 +711,10 @@ BasicInteractions* UiController::GetBasicInteractions() {
   return &basic_interactions_;
 }
 
+const PromptQrCodeScanProto* UiController::GetPromptQrCodeScanProto() const {
+  return qr_code_scan_.get();
+}
+
 const GenericUserInterfaceProto* UiController::GetGenericUiProto() const {
   return generic_user_interface_.get();
 }
@@ -679,17 +748,17 @@ void UiController::SetBottomSheetState(BottomSheetState state) {
   bottom_sheet_state_ = state;
 }
 base::Value UiController::GetDebugContext() const {
-  base::Value dict(base::Value::Type::DICTIONARY);
+  base::Value::Dict dict;
 
-  dict.SetKey("status", base::Value(status_message_));
+  dict.Set("status", status_message_);
 
-  std::vector<base::Value> details_list;
+  base::Value::List details_list;
   for (const auto& holder : details_) {
-    details_list.push_back(holder.GetDetails().GetDebugContext());
+    details_list.Append(holder.GetDetails().GetDebugContext());
   }
-  dict.SetKey("details", base::Value(details_list));
+  dict.Set("details", std::move(details_list));
 
-  return dict;
+  return base::Value(std::move(dict));
 }
 
 const CollectUserDataOptions* UiController::GetCollectUserDataOptions() const {
@@ -811,19 +880,29 @@ void UiController::SetAdditionalValue(const std::string& client_memory_key,
       UserDataFieldChange::ADDITIONAL_VALUES);
 }
 
+void UiController::OnQrCodeScanFinished(
+    const ClientStatus& status,
+    const absl::optional<ValueProto>& value) {
+  if (qr_code_scan_callback_) {
+    std::move(qr_code_scan_callback_).Run(status, value);
+  }
+}
+
 void UiController::HandleShippingAddressChange(
     std::unique_ptr<autofill::AutofillProfile> address,
     UserDataEventType event_type) {
   if (collect_user_data_options_ == nullptr) {
     return;
   }
-  if (collect_user_data_options_->use_gms_core_edit_dialogs) {
+
+  collect_user_data_options_->selected_user_data_changed_callback.Run(
+      UserDataEventField::SHIPPING_EVENT, event_type);
+
+  if (ShouldReloadData(*collect_user_data_options_, event_type)) {
     ReloadUserData(UserDataEventField::SHIPPING_EVENT, event_type);
     return;
   }
 
-  collect_user_data_options_->selected_user_data_changed_callback.Run(
-      SHIPPING_EVENT, event_type);
   DCHECK(!collect_user_data_options_->shipping_address_name.empty());
   SetProfile(collect_user_data_options_->shipping_address_name,
              UserDataFieldChange::SHIPPING_ADDRESS, std::move(address));
@@ -835,13 +914,16 @@ void UiController::HandleContactInfoChange(
   if (collect_user_data_options_ == nullptr) {
     return;
   }
-  if (collect_user_data_options_->use_gms_core_edit_dialogs) {
-    ReloadUserData(UserDataEventField::CONTACT_EVENT, event_type);
-    return;
-  }
 
   collect_user_data_options_->selected_user_data_changed_callback.Run(
-      CONTACT_EVENT, event_type);
+      UserDataEventField::CONTACT_EVENT, event_type);
+
+  if (ShouldStoreTemporaryData(*collect_user_data_options_, event_type)) {
+    UserData* user_data = GetUserData();
+    DCHECK(user_data);
+    user_data::UpsertContact(*profile, user_data->transient_contacts_);
+  }
+
   DCHECK(!collect_user_data_options_->contact_details_name.empty());
   SetProfile(collect_user_data_options_->contact_details_name,
              UserDataFieldChange::CONTACT_PROFILE, std::move(profile));
@@ -853,13 +935,15 @@ void UiController::HandlePhoneNumberChange(
   if (collect_user_data_options_ == nullptr) {
     return;
   }
-  if (collect_user_data_options_->use_gms_core_edit_dialogs) {
-    ReloadUserData(UserDataEventField::CONTACT_EVENT, event_type);
-    return;
-  }
 
-  // We don't notify the UserDataEvent in this case since we currently don't log
-  // metrics for the phone number.
+  collect_user_data_options_->selected_user_data_changed_callback.Run(
+      UserDataEventField::PHONE_NUMBER_EVENT, event_type);
+
+  if (ShouldStoreTemporaryData(*collect_user_data_options_, event_type)) {
+    UserData* user_data = GetUserData();
+    DCHECK(user_data);
+    user_data::UpsertPhoneNumber(*profile, user_data->transient_phone_numbers_);
+  }
 
   GetUserData()->SetSelectedPhoneNumber(std::move(profile));
   execution_delegate_->NotifyUserDataChange(UserDataFieldChange::PHONE_NUMBER);
@@ -872,13 +956,15 @@ void UiController::HandleCreditCardChange(
   if (collect_user_data_options_ == nullptr) {
     return;
   }
-  if (collect_user_data_options_->use_gms_core_edit_dialogs) {
+
+  collect_user_data_options_->selected_user_data_changed_callback.Run(
+      UserDataEventField::CREDIT_CARD_EVENT, event_type);
+
+  if (ShouldReloadData(*collect_user_data_options_, event_type)) {
     ReloadUserData(UserDataEventField::CREDIT_CARD_EVENT, event_type);
     return;
   }
 
-  collect_user_data_options_->selected_user_data_changed_callback.Run(
-      CREDIT_CARD_EVENT, event_type);
   DCHECK(!collect_user_data_options_->billing_address_name.empty());
   SetProfile(collect_user_data_options_->billing_address_name,
              UserDataFieldChange::BILLING_ADDRESS, std::move(billing_profile));
@@ -898,15 +984,9 @@ void UiController::SetProfile(
 
 void UiController::ReloadUserData(UserDataEventField event_field,
                                   UserDataEventType event_type) {
-  if (collect_user_data_options_ == nullptr) {
-    return;
-  }
-
-  collect_user_data_options_->selected_user_data_changed_callback.Run(
-      event_field, event_type);
-
-  auto callback = std::move(collect_user_data_options_->reload_data_callback);
-  std::move(callback).Run(GetUserData());
+  DCHECK(collect_user_data_options_);
+  std::move(collect_user_data_options_->reload_data_callback)
+      .Run(event_field, GetUserData());
 }
 
 void UiController::SetTermsAndConditions(
@@ -987,6 +1067,13 @@ void UiController::SetCollectUserDataOptions(CollectUserDataOptions* options) {
   execution_delegate_->NotifyUserDataChange(UserDataFieldChange::ALL);
 }
 
+void UiController::SetCollectUserDataUiState(bool loading,
+                                             UserDataEventField event) {
+  for (UiControllerObserver& observer : observers_) {
+    observer.OnCollectUserDataUiStateChanged(loading, event);
+  }
+}
+
 void UiController::SetLastSuccessfulUserDataOptions(
     std::unique_ptr<CollectUserDataOptions> collect_user_data_options) {
   last_collect_user_data_options_ = std::move(collect_user_data_options);
@@ -1017,11 +1104,6 @@ void UiController::OnFeedbackSent() {
   execution_delegate_->ShutdownIfNecessary();
 }
 
-void UiController::OnStateChanged(AutofillAssistantState state) {}
-
-void UiController::OnKeyboardSuppressionStateChanged(
-    bool should_suppress_keyboard) {}
-void UiController::CloseCustomTab() {}
 void UiController::OnError(const std::string& error_message,
                            Metrics::DropOutReason reason) {
   show_feedback_chip_ = ShouldShowFeedbackChipForReason(reason);
@@ -1033,16 +1115,6 @@ void UiController::OnUserDataChanged(const UserData& user_data,
                                      UserDataFieldChange field_change) {
   UpdateCollectUserDataActions();
 }
-void UiController::OnTouchableAreaChanged(
-    const RectF& visual_viewport,
-    const std::vector<RectF>& touchable_areas,
-    const std::vector<RectF>& restricted_areas) {}
-void UiController::OnViewportModeChanged(ViewportMode mode) {}
-void UiController::OnOverlayColorsChanged(
-    const ExecutionDelegate::OverlayColors& colors) {}
-void UiController::OnClientSettingsChanged(const ClientSettings& settings) {}
-void UiController::OnShouldShowOverlayChanged(bool should_show) {}
-void UiController::OnShutdown(Metrics::DropOutReason reason) {}
 
 void UiController::OnExecuteScript(const std::string& start_message) {
   if (!start_message.empty())
@@ -1056,10 +1128,8 @@ void UiController::InitFromParameters(const TriggerContext& trigger_context) {
   if (details->UpdateFromParameters(trigger_context.GetScriptParameters()))
     SetDetails(std::move(details), base::TimeDelta());
 
-  const absl::optional<bool> enable_tts =
-      trigger_context.GetScriptParameters().GetEnableTts();
-  if (enable_tts && enable_tts.value() &&
-      !client_->IsSpokenFeedbackAccessibilityServiceEnabled()) {
+  const bool enable_tts = trigger_context.GetScriptParameters().GetEnableTts();
+  if (enable_tts && !client_->IsSpokenFeedbackAccessibilityServiceEnabled()) {
     tts_enabled_ = true;
     for (UiControllerObserver& observer : observers_) {
       observer.OnTtsButtonVisibilityChanged(/* visible= */ true);
@@ -1131,5 +1201,22 @@ void UiController::OnUiShownChanged(bool shown) {
     SetTtsButtonState(TtsButtonState::DEFAULT);
   }
 }
+
+bool UiController::SupportsExternalActions() {
+  return false;
+}
+
+void UiController::ExecuteExternalAction(
+    const external::Action& external_action,
+    bool is_interrupt,
+    base::OnceCallback<void(ExternalActionDelegate::DomUpdateCallback)>
+        start_dom_checks_callback,
+    base::OnceCallback<void(const external::Result& result)>
+        end_action_callback) {
+  NOTREACHED() << "Flows using default UI don't support external actions.";
+}
+
+void UiController::OnInterruptStarted() {}
+void UiController::OnInterruptFinished() {}
 
 }  // namespace autofill_assistant

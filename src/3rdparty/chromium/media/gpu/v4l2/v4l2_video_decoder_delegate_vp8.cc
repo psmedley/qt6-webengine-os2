@@ -1,11 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "v4l2_video_decoder_delegate_vp8.h"
 
+// ChromeOS specific header; does not exist upstream
+#if BUILDFLAG(IS_CHROMEOS)
 #define __LINUX_MEDIA_VP8_CTRLS_LEGACY_H
 #include <linux/media/vp8-ctrls-upstream.h>
+#endif
+
 #include <linux/videodev2.h>
 
 #include <type_traits>

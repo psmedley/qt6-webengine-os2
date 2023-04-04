@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,18 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
+#include "media/base/media_switches.h"
+#include "media/cast/common/openscreen_conversion_helpers.h"
+#include "media/cast/common/rtp_time.h"
+#include "media/cast/common/sender_encoded_frame.h"
 #include "media/cast/constants.h"
-#include "media/cast/sender/sender_encoded_frame.h"
+#include "media/cast/sender/openscreen_frame_sender.h"
 #include "media/mojo/common/mojo_data_pipe_read_write.h"
+#include "third_party/openscreen/src/cast/streaming/encoded_frame.h"
+#include "third_party/openscreen/src/cast/streaming/sender.h"
+
+using Dependency = openscreen::cast::EncodedFrame::Dependency;
 
 namespace mirroring {
 
@@ -25,10 +34,43 @@ RemotingSender::RemotingSender(
     mojo::ScopedDataPipeConsumerHandle pipe,
     mojo::PendingReceiver<media::mojom::RemotingDataStreamSender> stream_sender,
     base::OnceClosure error_callback)
-    : FrameSender(cast_environment,
-                  transport,
-                  config,
-                  media::cast::NewFixedCongestionControl(config.max_bitrate)),
+    : RemotingSender(cast_environment,
+                     media::cast::FrameSender::Create(cast_environment,
+                                                      config,
+                                                      transport,
+                                                      *this),
+                     config,
+                     std::move(pipe),
+                     std::move(stream_sender),
+                     std::move(error_callback)) {}
+
+RemotingSender::RemotingSender(
+    scoped_refptr<media::cast::CastEnvironment> cast_environment,
+    std::unique_ptr<openscreen::cast::Sender> sender,
+    const media::cast::FrameSenderConfig& config,
+    mojo::ScopedDataPipeConsumerHandle pipe,
+    mojo::PendingReceiver<media::mojom::RemotingDataStreamSender> stream_sender,
+    base::OnceClosure error_callback)
+    : RemotingSender(cast_environment,
+                     media::cast::FrameSender::Create(cast_environment,
+                                                      config,
+                                                      std::move(sender),
+                                                      *this),
+                     config,
+                     std::move(pipe),
+                     std::move(stream_sender),
+                     std::move(error_callback)) {
+  DCHECK(base::FeatureList::IsEnabled(media::kOpenscreenCastStreamingSession));
+}
+
+RemotingSender::RemotingSender(
+    scoped_refptr<media::cast::CastEnvironment> cast_environment,
+    std::unique_ptr<media::cast::FrameSender> frame_sender,
+    const media::cast::FrameSenderConfig& config,
+    mojo::ScopedDataPipeConsumerHandle pipe,
+    mojo::PendingReceiver<media::mojom::RemotingDataStreamSender> stream_sender,
+    base::OnceClosure error_callback)
+    : frame_sender_(std::move(frame_sender)),
       clock_(cast_environment->Clock()),
       error_callback_(std::move(error_callback)),
       data_pipe_reader_(new media::MojoDataPipeReader(std::move(pipe))),
@@ -67,14 +109,13 @@ int RemotingSender::GetNumberOfFramesInEncoder() const {
   return 0;
 }
 
-base::TimeDelta RemotingSender::GetInFlightMediaDuration() const {
+base::TimeDelta RemotingSender::GetEncoderBacklogDuration() const {
   NOTREACHED();
   return base::TimeDelta();
 }
 
-void RemotingSender::OnCancelSendingFrames() {
-  // One or more frames were canceled. This may allow pending input operations
-  // to complete.
+void RemotingSender::OnFrameCanceled(media::cast::FrameId frame_id) {
+  // The frame cancellation may allow for the next input task to complete.
   ProcessNextInputTask();
 }
 
@@ -121,52 +162,60 @@ void RemotingSender::TrySendFrame() {
   }
 
   // If there would be too many frames in-flight, do not proceed.
-  if (GetUnacknowledgedFrameCount() >= media::cast::kMaxUnackedFrames) {
+  if (frame_sender_->GetUnacknowledgedFrameCount() >=
+      media::cast::kMaxUnackedFrames) {
     VLOG(1) << "Cannot send frame now because too many frames are in flight.";
     return;
   }
 
-  const bool is_first_frame_to_be_sent = last_send_time_.is_null();
-  const media::cast::FrameId frame_id = is_first_frame_to_be_sent
-                                            ? media::cast::FrameId::first()
-                                            : (last_sent_frame_id_ + 1);
-
-  base::TimeTicks last_frame_reference_time = last_send_time_;
+  const bool is_first_frame = (next_frame_id_ == media::cast::FrameId::first());
   auto remoting_frame = std::make_unique<media::cast::SenderEncodedFrame>();
-  remoting_frame->frame_id = frame_id;
+  remoting_frame->frame_id = next_frame_id_;
   if (flow_restart_pending_) {
-    remoting_frame->dependency = media::cast::EncodedFrame::KEY;
+    remoting_frame->dependency = Dependency::kKeyFrame;
     flow_restart_pending_ = false;
   } else {
-    DCHECK(!is_first_frame_to_be_sent);
-    remoting_frame->dependency = media::cast::EncodedFrame::DEPENDENT;
+    DCHECK(!is_first_frame);
+    remoting_frame->dependency = Dependency::kDependent;
   }
   remoting_frame->referenced_frame_id =
-      remoting_frame->dependency == media::cast::EncodedFrame::KEY
-          ? frame_id
-          : frame_id - 1;
+      remoting_frame->dependency == Dependency::kKeyFrame ? next_frame_id_
+                                                          : next_frame_id_ - 1;
   remoting_frame->reference_time = clock_->NowTicks();
   remoting_frame->encode_completion_time = remoting_frame->reference_time;
+
+  base::TimeTicks last_frame_reference_time;
   media::cast::RtpTimeTicks last_frame_rtp_timestamp;
-  if (is_first_frame_to_be_sent) {
+  if (is_first_frame) {
     last_frame_reference_time = remoting_frame->reference_time;
     last_frame_rtp_timestamp =
         media::cast::RtpTimeTicks() - media::cast::RtpTimeDelta::FromTicks(1);
   } else {
-    last_frame_rtp_timestamp = GetRecordedRtpTimestamp(frame_id - 1);
+    last_frame_reference_time = frame_sender_->LastSendTime();
+    last_frame_rtp_timestamp =
+        frame_sender_->GetRecordedRtpTimestamp(next_frame_id_ - 1);
   }
+
   // Ensure each successive frame's RTP timestamp is unique, but otherwise just
   // base it on the reference time.
-  remoting_frame->rtp_timestamp =
+  const media::cast::RtpTimeTicks rtp_timestamp =
       last_frame_rtp_timestamp +
       std::max(media::cast::RtpTimeDelta::FromTicks(1),
-               media::cast::RtpTimeDelta::FromTimeDelta(
+               ToRtpTimeDelta(
                    remoting_frame->reference_time - last_frame_reference_time,
                    media::cast::kRemotingRtpTimebase));
+  remoting_frame->rtp_timestamp = rtp_timestamp;
   remoting_frame->data.swap(next_frame_data_);
 
-  SendEncodedFrame(0, std::move(remoting_frame));
-
+  if (frame_sender_->EnqueueFrame(std::move(remoting_frame))) {
+    // Only increment if we successfully enqueued.
+    next_frame_id_++;
+  } else {
+    TRACE_EVENT_INSTANT2("cast.stream", "Remoting Frame Drop",
+                         TRACE_EVENT_SCOPE_THREAD, "rtp_timestamp",
+                         rtp_timestamp.lower_32_bits(), "reason",
+                         "openscreen sender did not accept the frame");
+  }
   OnInputTaskComplete();
 }
 

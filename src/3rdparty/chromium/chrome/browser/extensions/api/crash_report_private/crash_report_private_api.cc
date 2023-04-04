@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ ExtensionFunction::ResponseAction CrashReportPrivateReportErrorFunction::Run() {
     error_report.window_type = GetWindowType(web_contents);
 
     base::TimeTicks render_process_start_time =
-        web_contents->GetMainFrame()->GetProcess()->GetLastInitTime();
+        web_contents->GetPrimaryMainFrame()->GetProcess()->GetLastInitTime();
     base::TimeDelta render_process_uptime;
     if (!render_process_start_time.is_null()) {
       render_process_uptime =

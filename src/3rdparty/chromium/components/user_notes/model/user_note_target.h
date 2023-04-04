@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,18 +14,18 @@ namespace user_notes {
 // Model class for a note target.
 class UserNoteTarget {
  public:
-  enum TargetType { PAGE = 0, PAGE_TEXT };
+  enum TargetType { kPage = 0, kPageText };
 
-  explicit UserNoteTarget(TargetType type,
-                          const std::string& original_text,
-                          GURL target_page,
-                          const std::string& selector);
+  UserNoteTarget(TargetType type,
+                 const std::u16string& original_text,
+                 GURL target_page,
+                 const std::string& selector);
   ~UserNoteTarget();
   UserNoteTarget(const UserNoteTarget&) = delete;
   UserNoteTarget& operator=(const UserNoteTarget&) = delete;
 
   TargetType type() const { return type_; }
-  const std::string& original_text() const { return original_text_; }
+  const std::u16string& original_text() const { return original_text_; }
   const GURL& target_page() const { return target_page_; }
   const std::string& selector() const { return selector_; }
 
@@ -35,7 +35,7 @@ class UserNoteTarget {
 
   // The original text to which the note was attached. Useful if the page
   // changes. Empty for `TargetType::PAGE`.
-  std::string original_text_;
+  std::u16string original_text_;
 
   // The URL of the page the note is attached to.
   GURL target_page_;

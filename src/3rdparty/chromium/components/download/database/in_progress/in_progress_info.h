@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_item_rename_progress_update.h"
-#include "components/download/public/common/download_schedule.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -129,9 +128,6 @@ struct InProgressInfo {
   // Whether the download is initiated on a metered network. If false, download
   // can ony be resumed on WIFI.
   bool metered = false;
-
-  // When to start the download. Used by download later feature.
-  absl::optional<DownloadSchedule> download_schedule;
 
   // The credentials mode of the request.
   ::network::mojom::CredentialsMode credentials_mode =

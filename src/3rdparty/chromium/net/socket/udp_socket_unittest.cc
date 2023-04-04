@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -145,7 +145,7 @@ class UDPSocketTest : public PlatformTest, public WithTaskEnvironment {
   int SendToSocket(UDPSocket* socket,
                    std::string msg,
                    const IPEndPoint& address) {
-    scoped_refptr<StringIOBuffer> io_buffer = new StringIOBuffer(msg);
+    auto io_buffer = base::MakeRefCounted<StringIOBuffer>(msg);
     TestCompletionCallback callback;
     int rv = socket->SendTo(io_buffer.get(), io_buffer->size(), address,
                             callback.callback());
@@ -155,7 +155,7 @@ class UDPSocketTest : public PlatformTest, public WithTaskEnvironment {
   // Run unit test for a connection test.
   // |use_nonblocking_io| is used to switch between overlapped and non-blocking
   // IO on Windows. It has no effect in other ports.
-  void ConnectTest(bool use_nonblocking_io);
+  void ConnectTest(bool use_nonblocking_io, bool use_async);
 
  protected:
   static const int kMaxRead = 1024;
@@ -172,13 +172,13 @@ void ReadCompleteCallback(int* result_out,
   std::move(callback).Run();
 }
 
-void UDPSocketTest::ConnectTest(bool use_nonblocking_io) {
+void UDPSocketTest::ConnectTest(bool use_nonblocking_io, bool use_async) {
   std::string simple_message("hello world!");
   RecordingNetLogObserver net_log_observer;
   // Setup the server to listen.
   IPEndPoint server_address(IPAddress::IPv4Localhost(), 0 /* port */);
-  std::unique_ptr<UDPServerSocket> server(
-      new UDPServerSocket(NetLog::Get(), NetLogSource()));
+  auto server =
+      std::make_unique<UDPServerSocket>(NetLog::Get(), NetLogSource());
   if (use_nonblocking_io)
     server->UseNonBlockingIO();
   server->AllowAddressReuse();
@@ -192,8 +192,19 @@ void UDPSocketTest::ConnectTest(bool use_nonblocking_io) {
   if (use_nonblocking_io)
     client->UseNonBlockingIO();
 
-  EXPECT_THAT(client->Connect(server_address), IsOk());
-
+  if (!use_async) {
+    EXPECT_THAT(client->Connect(server_address), IsOk());
+  } else {
+    TestCompletionCallback callback;
+    int rv = client->ConnectAsync(server_address, callback.callback());
+    if (rv != OK) {
+      ASSERT_EQ(rv, ERR_IO_PENDING);
+      rv = callback.WaitForResult();
+      EXPECT_EQ(rv, OK);
+    } else {
+      EXPECT_EQ(rv, OK);
+    }
+  }
   // Client sends to the server.
   EXPECT_EQ(simple_message.length(),
             static_cast<size_t>(WriteSocket(client.get(), simple_message)));
@@ -280,12 +291,15 @@ void UDPSocketTest::ConnectTest(bool use_nonblocking_io) {
 
 TEST_F(UDPSocketTest, Connect) {
   // The variable |use_nonblocking_io| has no effect in non-Windows ports.
-  ConnectTest(false);
+  // Run ConnectTest once with sync connect and once with async connect
+  ConnectTest(false, false);
+  ConnectTest(false, true);
 }
 
 #if BUILDFLAG(IS_WIN)
 TEST_F(UDPSocketTest, ConnectNonBlocking) {
-  ConnectTest(true);
+  ConnectTest(true, false);
+  ConnectTest(true, true);
 }
 #endif
 
@@ -343,10 +357,10 @@ TEST_F(UDPSocketTest, MAYBE_LocalBroadcast) {
   IPEndPoint listen_address;
   ASSERT_TRUE(CreateUDPAddress("0.0.0.0", 0 /* port */, &listen_address));
 
-  std::unique_ptr<UDPServerSocket> server1(
-      new UDPServerSocket(NetLog::Get(), NetLogSource()));
-  std::unique_ptr<UDPServerSocket> server2(
-      new UDPServerSocket(NetLog::Get(), NetLogSource()));
+  auto server1 =
+      std::make_unique<UDPServerSocket>(NetLog::Get(), NetLogSource());
+  auto server2 =
+      std::make_unique<UDPServerSocket>(NetLog::Get(), NetLogSource());
   server1->AllowAddressReuse();
   server1->AllowBroadcast();
   server2->AllowAddressReuse();
@@ -509,20 +523,20 @@ TEST_F(UDPSocketTest, ClientGetLocalPeerAddresses) {
     {"2001:db8:0::42", "::1", true},
 #endif
   };
-  for (size_t i = 0; i < std::size(tests); i++) {
-    SCOPED_TRACE(std::string("Connecting from ") + tests[i].local_address +
-                 std::string(" to ") + tests[i].remote_address);
+  for (const auto& test : tests) {
+    SCOPED_TRACE(std::string("Connecting from ") + test.local_address +
+                 std::string(" to ") + test.remote_address);
 
     IPAddress ip_address;
-    EXPECT_TRUE(ip_address.AssignFromIPLiteral(tests[i].remote_address));
+    EXPECT_TRUE(ip_address.AssignFromIPLiteral(test.remote_address));
     IPEndPoint remote_address(ip_address, 80);
-    EXPECT_TRUE(ip_address.AssignFromIPLiteral(tests[i].local_address));
+    EXPECT_TRUE(ip_address.AssignFromIPLiteral(test.local_address));
     IPEndPoint local_address(ip_address, 80);
 
     UDPClientSocket client(DatagramSocket::DEFAULT_BIND, nullptr,
                            NetLogSource());
     int rv = client.Connect(remote_address);
-    if (tests[i].may_fail && rv == ERR_ADDRESS_UNREACHABLE) {
+    if (test.may_fail && rv == ERR_ADDRESS_UNREACHABLE) {
       // Connect() may return ERR_ADDRESS_UNREACHABLE for IPv6
       // addresses if IPv6 is not configured.
       continue;
@@ -805,7 +819,7 @@ TEST_F(UDPSocketTest, ConnectUsingNetwork) {
   // server needs to be running here. The test only needs to call
   // ConnectUsingNetwork() and won't send any datagrams.
   const IPEndPoint fake_server_address(IPAddress::IPv4Localhost(), 8080);
-  const NetworkChangeNotifier::NetworkHandle wrong_network_handle = 65536;
+  const handles::NetworkHandle wrong_network_handle = 65536;
 #if BUILDFLAG(IS_ANDROID)
   NetworkChangeNotifierFactoryAndroid ncn_factory;
   NetworkChangeNotifier::DisableForTest ncn_disable_for_test;
@@ -830,9 +844,9 @@ TEST_F(UDPSocketTest, ConnectUsingNetwork) {
     // NetworkChangeNotifier returns a valid default network.
     UDPClientSocket socket(DatagramSocket::RANDOM_BIND, nullptr,
                            NetLogSource());
-    const NetworkChangeNotifier::NetworkHandle network_handle =
+    const handles::NetworkHandle network_handle =
         NetworkChangeNotifier::GetDefaultNetwork();
-    if (network_handle != NetworkChangeNotifier::kInvalidNetworkHandle) {
+    if (network_handle != handles::kInvalidNetworkHandle) {
       EXPECT_EQ(
           OK, socket.ConnectUsingNetwork(network_handle, fake_server_address));
       EXPECT_EQ(network_handle, socket.GetBoundNetwork());
@@ -843,6 +857,64 @@ TEST_F(UDPSocketTest, ConnectUsingNetwork) {
   EXPECT_EQ(
       ERR_NOT_IMPLEMENTED,
       socket.ConnectUsingNetwork(wrong_network_handle, fake_server_address));
+#endif  // BUILDFLAG(IS_ANDROID)
+}
+
+TEST_F(UDPSocketTest, ConnectUsingNetworkAsync) {
+  // The specific value of this address doesn't really matter, and no
+  // server needs to be running here. The test only needs to call
+  // ConnectUsingNetwork() and won't send any datagrams.
+  const IPEndPoint fake_server_address(IPAddress::IPv4Localhost(), 8080);
+  const handles::NetworkHandle wrong_network_handle = 65536;
+#if BUILDFLAG(IS_ANDROID)
+  NetworkChangeNotifierFactoryAndroid ncn_factory;
+  NetworkChangeNotifier::DisableForTest ncn_disable_for_test;
+  std::unique_ptr<NetworkChangeNotifier> ncn(ncn_factory.CreateInstance());
+  if (!NetworkChangeNotifier::AreNetworkHandlesSupported())
+    GTEST_SKIP() << "Network handles are required to test BindToNetwork.";
+
+  {
+    // Connecting using a not existing network should fail but not report
+    // ERR_NOT_IMPLEMENTED when network handles are supported.
+    UDPClientSocket socket(DatagramSocket::RANDOM_BIND, nullptr,
+                           NetLogSource());
+    TestCompletionCallback callback;
+    int rv = socket.ConnectUsingNetworkAsync(
+        wrong_network_handle, fake_server_address, callback.callback());
+
+    if (rv == ERR_IO_PENDING) {
+      rv = callback.WaitForResult();
+    }
+    EXPECT_NE(ERR_NOT_IMPLEMENTED, rv);
+    EXPECT_NE(OK, rv);
+    EXPECT_NE(NetworkChangeNotifier::GetDefaultNetwork(),
+              socket.GetBoundNetwork());
+  }
+
+  {
+    // Connecting using an existing network should succeed when
+    // NetworkChangeNotifier returns a valid default network.
+    UDPClientSocket socket(DatagramSocket::RANDOM_BIND, nullptr,
+                           NetLogSource());
+    TestCompletionCallback callback;
+    const handles::NetworkHandle network_handle =
+        NetworkChangeNotifier::GetDefaultNetwork();
+    if (network_handle != handles::kInvalidNetworkHandle) {
+      int rv = socket.ConnectUsingNetworkAsync(
+          network_handle, fake_server_address, callback.callback());
+      if (rv == ERR_IO_PENDING) {
+        rv = callback.WaitForResult();
+      }
+      EXPECT_EQ(OK, rv);
+      EXPECT_EQ(network_handle, socket.GetBoundNetwork());
+    }
+  }
+#else
+  UDPClientSocket socket(DatagramSocket::RANDOM_BIND, nullptr, NetLogSource());
+  TestCompletionCallback callback;
+  EXPECT_EQ(ERR_NOT_IMPLEMENTED, socket.ConnectUsingNetworkAsync(
+                                     wrong_network_handle, fake_server_address,
+                                     callback.callback()));
 #endif  // BUILDFLAG(IS_ANDROID)
 }
 
@@ -1418,7 +1490,7 @@ TEST_F(UDPSocketTest, RecordRadioWakeUpTrigger) {
   android::RadioActivityTracker::GetInstance().OverrideRadioTypeForTesting(
       base::android::RadioConnectionType::kCell);
 
-  ConnectTest(/*use_nonblocking_io=*/false);
+  ConnectTest(/*use_nonblocking_io=*/false, false);
 
   // Check the write is recorded as a possible radio wake-up trigger.
   histograms.ExpectTotalCount(
@@ -1437,24 +1509,24 @@ TEST_F(UDPSocketTest, BindToNetwork) {
     GTEST_SKIP() << "Network handles are required to test BindToNetwork.";
 
   // Binding the socket to a not existing network should fail at connect time.
-  const NetworkChangeNotifier::NetworkHandle wrong_network_handle = 65536;
-  UDPClientSocket socket(DatagramSocket::RANDOM_BIND, nullptr, NetLogSource(),
-                         wrong_network_handle);
+  const handles::NetworkHandle wrong_network_handle = 65536;
+  UDPClientSocket wrong_socket(DatagramSocket::RANDOM_BIND, nullptr,
+                               NetLogSource(), wrong_network_handle);
   // Different Android versions might report different errors. Hence, just check
   // what shouldn't happen.
-  int rv = socket.Connect(fake_server_address);
+  int rv = wrong_socket.Connect(fake_server_address);
   EXPECT_NE(OK, rv);
   EXPECT_NE(ERR_NOT_IMPLEMENTED, rv);
-  EXPECT_NE(wrong_network_handle, socket.GetBoundNetwork());
+  EXPECT_NE(wrong_network_handle, wrong_socket.GetBoundNetwork());
 
   // Binding the socket to an existing network should succeed.
-  const NetworkChangeNotifier::NetworkHandle network_handle =
+  const handles::NetworkHandle network_handle =
       NetworkChangeNotifier::GetDefaultNetwork();
-  if (network_handle != NetworkChangeNotifier::kInvalidNetworkHandle) {
-    UDPClientSocket socket(DatagramSocket::RANDOM_BIND, nullptr, NetLogSource(),
-                           network_handle);
-    EXPECT_EQ(OK, socket.Connect(fake_server_address));
-    EXPECT_EQ(network_handle, socket.GetBoundNetwork());
+  if (network_handle != handles::kInvalidNetworkHandle) {
+    UDPClientSocket correct_socket(DatagramSocket::RANDOM_BIND, nullptr,
+                                   NetLogSource(), network_handle);
+    EXPECT_EQ(OK, correct_socket.Connect(fake_server_address));
+    EXPECT_EQ(network_handle, correct_socket.GetBoundNetwork());
   }
 }
 

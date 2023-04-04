@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,22 +12,20 @@
 #include <string>
 #include <vector>
 
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_crypto_algorithm.h"
 #include "third_party/blink/public/platform/web_crypto_key.h"
 
+// Compare the input in hex, because `base::span` supports neither equality nor
+// printing.
 #define EXPECT_BYTES_EQ(expected, actual) \
-  EXPECT_EQ(CryptoData(expected), CryptoData(actual))
+  EXPECT_EQ(base::HexEncode(expected), base::HexEncode(actual))
 
 #define EXPECT_BYTES_EQ_HEX(expected_hex, actual_bytes) \
   EXPECT_BYTES_EQ(HexStringToBytes(expected_hex), actual_bytes)
-
-namespace base {
-class DictionaryValue;
-class Value;
-}
 
 namespace blink {
 class WebCryptoAlgorithm;
@@ -45,18 +43,12 @@ class WebCryptoTestBase : public testing::Test {
 };
 
 class Status;
-class CryptoData;
 
 // These functions are used by GTEST to support EXPECT_EQ() for
-// webcrypto::Status and webcrypto::CryptoData
-
+// webcrypto::Status.
 void PrintTo(const Status& status, ::std::ostream* os);
 bool operator==(const Status& a, const Status& b);
 bool operator!=(const Status& a, const Status& b);
-
-void PrintTo(const CryptoData& data, ::std::ostream* os);
-bool operator==(const CryptoData& a, const CryptoData& b);
-bool operator!=(const CryptoData& a, const CryptoData& b);
 
 // Gives a human-readable description of |status| and any error it represents.
 std::string StatusToString(const Status& status);
@@ -152,13 +144,13 @@ Status ImportKeyJwkFromDict(const base::DictionaryValue& dict,
                             blink::WebCryptoKey* key);
 
 // Parses a vector of JSON into a dictionary.
-absl::optional<base::DictionaryValue> GetJwkDictionary(
+absl::optional<base::Value::Dict> GetJwkDictionary(
     const std::vector<uint8_t>& json);
 
 // Verifies the input dictionary contains the expected values. Exact matches are
 // required on the fields examined.
 ::testing::AssertionResult VerifyJwk(
-    const std::unique_ptr<base::DictionaryValue>& dict,
+    const base::Value::Dict& dict,
     const std::string& kty_expected,
     const std::string& alg_expected,
     blink::WebCryptoKeyUsageMask use_mask_expected);
@@ -212,6 +204,8 @@ std::vector<uint8_t> GetKeyDataFromJsonTestCase(
 // WebCryptoNamedCurve.
 blink::WebCryptoNamedCurve GetCurveNameFromDictionary(
     const base::DictionaryValue* dict);
+
+blink::WebCryptoNamedCurve CurveNameToCurve(const std::string& name);
 
 // Creates an HMAC import algorithm whose inner hash algorithm is determined by
 // the specified algorithm ID. It is an error to call this method with a hash

@@ -1,8 +1,8 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert.m.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {microTask, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {recordLoadDuration, recordOccurence, recordPerdecage} from '../metrics_utils.js';
@@ -56,7 +56,7 @@ export class ModuleWrapperElement extends PolymerElement {
 
     // Log module's id when module's info button is clicked.
     this.module.element.addEventListener('info-button-click', () => {
-      chrome.metricsPrivate.recordSparseHashable(
+      chrome.metricsPrivate.recordSparseValueWithPersistentHash(
           'NewTabPage.Modules.InfoButtonClicked', this.module.descriptor.id);
     }, {once: true});
 
@@ -99,7 +99,7 @@ export class ModuleWrapperElement extends PolymerElement {
 
     // Track whether the user hovered on the module.
     this.addEventListener('mouseover', () => {
-      chrome.metricsPrivate.recordSparseHashable(
+      chrome.metricsPrivate.recordSparseValueWithPersistentHash(
           'NewTabPage.Modules.Hover', this.module.descriptor.id);
     }, {
       capture: true,  // So that modules cannot swallow event.

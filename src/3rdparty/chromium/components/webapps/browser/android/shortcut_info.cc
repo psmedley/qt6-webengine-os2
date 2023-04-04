@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,6 +103,8 @@ void ShortcutInfo::UpdateFromManifest(const blink::mojom::Manifest& manifest) {
 
   scope = manifest.scope;
 
+  manifest_id = blink::GetIdFromManifest(manifest);
+
   // Set the display based on the manifest value, if any.
   if (manifest.display != DisplayMode::kUndefined)
     display = manifest.display;
@@ -147,7 +149,7 @@ void ShortcutInfo::UpdateFromManifest(const blink::mojom::Manifest& manifest) {
   // Set the screenshots urls based on the screenshots in the manifest, if any.
   screenshot_urls.clear();
   for (const auto& screenshot : manifest.screenshots)
-    screenshot_urls.push_back(screenshot.src);
+    screenshot_urls.push_back(screenshot->image.src);
 
   if (manifest.share_target) {
     share_target = ShareTarget();

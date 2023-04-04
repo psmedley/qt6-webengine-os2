@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,14 +104,12 @@
       {
         "id": "FrameType",
         "type": "string",
-        "nodoc": true,
         "enum": ["outermost_frame", "fenced_frame", "sub_frame"],
         "description": "The type of frame."
       },
       {
         "id": "DocumentLifecycle",
         "type": "string",
-        "nodoc": true,
         "enum": ["prerender", "active", "cached", "pending_deletion"],
         "description": "The document lifecycle of the frame."
       },

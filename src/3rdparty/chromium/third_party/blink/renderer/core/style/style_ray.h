@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,11 @@ class StyleRay : public BasicShape {
   bool Contain() const { return contain_; }
 
   void GetPath(Path&, const gfx::RectF&, float) override;
-  bool operator==(const BasicShape&) const override;
 
   ShapeType GetType() const override { return kStyleRayType; }
+
+ protected:
+  bool IsEqualAssumingSameType(const BasicShape&) const override;
 
  private:
   StyleRay(float angle, RaySize, bool contain);

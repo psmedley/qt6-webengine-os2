@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -183,9 +183,9 @@ ADD_PROPERTY_METADATA(std::u16string, Text)
 END_METADATA
 
 SubtleNotificationView::SubtleNotificationView() : instruction_view_(nullptr) {
-  std::unique_ptr<views::BubbleBorder> bubble_border(new views::BubbleBorder(
-      views::BubbleBorder::NONE, views::BubbleBorder::NO_SHADOW,
-      kSubtleNotificationBackgroundColor));
+  auto bubble_border = std::make_unique<views::BubbleBorder>(
+      views::BubbleBorder::NONE, views::BubbleBorder::NO_SHADOW);
+  bubble_border->SetColor(kSubtleNotificationBackgroundColor);
   SetBackground(std::make_unique<views::BubbleBackground>(bubble_border.get()));
   SetBorder(std::move(bubble_border));
 
@@ -248,7 +248,7 @@ void SubtleNotificationView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   std::u16string accessible_name;
   base::RemoveChars(instruction_view_->GetText(), kKeyNameDelimiter,
                     &accessible_name);
-  node_data->SetName(accessible_name);
+  node_data->SetNameChecked(accessible_name);
 }
 
 BEGIN_METADATA(SubtleNotificationView, views::View)

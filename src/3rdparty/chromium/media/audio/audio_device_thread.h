@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/sync_socket.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_checker.h"
+#include "build/buildflag.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
 
@@ -71,7 +72,7 @@ class MEDIA_EXPORT AudioDeviceThread : public base::PlatformThread::Delegate {
   AudioDeviceThread(Callback* callback,
                     base::SyncSocket::ScopedHandle socket,
                     const char* thread_name,
-                    base::ThreadPriority thread_priority);
+                    base::ThreadType thread_type);
 
   AudioDeviceThread(const AudioDeviceThread&) = delete;
   AudioDeviceThread& operator=(const AudioDeviceThread&) = delete;
@@ -82,7 +83,9 @@ class MEDIA_EXPORT AudioDeviceThread : public base::PlatformThread::Delegate {
   ~AudioDeviceThread() override;
 
  private:
+#if BUILDFLAG(IS_APPLE)
   base::TimeDelta GetRealtimePeriod() final;
+#endif
   void ThreadMain() final;
 
   const raw_ptr<Callback> callback_;

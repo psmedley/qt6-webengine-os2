@@ -117,7 +117,7 @@ typedef struct SliceArgs {
 typedef struct TransformArgs {
     void *ctx;
     Plane *plane;
-    void *idata;
+    const void *idata;
     ptrdiff_t istride;
     int field;
     VC2TransformContext t;
@@ -1226,15 +1226,15 @@ static const enum AVPixelFormat allowed_pix_fmts[] = {
 
 const FFCodec ff_vc2_encoder = {
     .p.name         = "vc2",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("SMPTE VC-2"),
+    CODEC_LONG_NAME("SMPTE VC-2"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_DIRAC,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(VC2EncContext),
     .init           = vc2_encode_init,
     .close          = vc2_encode_end,
-    .encode2        = vc2_encode_frame,
+    FF_CODEC_ENCODE_CB(vc2_encode_frame),
     .p.priv_class   = &vc2enc_class,
     .defaults       = vc2enc_defaults,
     .p.pix_fmts     = allowed_pix_fmts

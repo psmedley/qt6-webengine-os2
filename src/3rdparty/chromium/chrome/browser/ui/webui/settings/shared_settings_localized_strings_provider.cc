@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,11 +37,10 @@
 #include "ash/constants/ash_features.h"
 #include "chrome/browser/ash/crosapi/browser_util.h"
 #include "chrome/browser/nearby_sharing/common/nearby_share_features.h"
-#include "chrome/common/url_constants.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chromeos/lacros/lacros_service.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -78,13 +77,11 @@ bool ShouldShowLacrosSideBySideWarningInAsh() {
 bool ShouldShowLacrosSideBySideWarningInLacros() {
   return base::FeatureList::IsEnabled(
              syncer::kSyncSettingsShowLacrosSideBySideWarning) &&
-         !chromeos::LacrosService::Get()
-              ->init_params()
-              ->standalone_browser_is_only_browser;
+         !chromeos::BrowserParamsProxy::Get()->StandaloneBrowserIsOnlyBrowser();
 }
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 std::string BuildOSSettingsUrl(const std::string& sub_page) {
   std::string os_settings_url = chrome::kChromeUIOSSettingsURL;
   os_settings_url.append(sub_page);
@@ -206,6 +203,11 @@ void AddPersonalizationOptionsStrings(content::WebUIDataSource* html_source) {
     {"linkDoctorPrefDesc", IDS_SETTINGS_LINKDOCTOR_PREF_DESC},
     {"driveSuggestPref", IDS_DRIVE_SUGGEST_PREF},
     {"driveSuggestPrefDesc", IDS_DRIVE_SUGGEST_PREF_DESC},
+    {"autofillAssistantPref", IDS_SETTINGS_AUTOFILL_ASSISTANT_PREF},
+    {"autofillAssistantPrefDesc", IDS_SETTINGS_AUTOFILL_ASSISTANT_PREF_DESC},
+    {"priceEmailNotificationsPref", IDS_PRICE_TRACKING_SETTINGS_TITLE},
+    {"priceEmailNotificationsPrefDesc",
+     IDS_PRICE_TRACKING_SETTINGS_EMAIL_DESCRIPTION},
   };
   html_source->AddLocalizedStrings(kLocalizedStrings);
 }
@@ -299,6 +301,7 @@ void AddSyncPageStrings(content::WebUIDataSource* html_source) {
     {"existingPassphraseLabelWithDate",
      IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM_WITH_DATE},
     {"existingPassphraseLabel", IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM},
+    {"themeCheckboxLabel", IDS_SETTINGS_THEME_CHECKBOX_LABEL},
   // Settings warning for Lacros side-by-side mode.
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     {"syncSettingsLacrosSideBySideWarning",
@@ -307,27 +310,11 @@ void AddSyncPageStrings(content::WebUIDataSource* html_source) {
     {"syncSettingsLacrosSideBySideWarning",
      IDS_SYNC_SETTINGS_SIDE_BY_SIDE_WARNING_LACROS},
 #endif
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
     {"browserSyncFeatureLabel", IDS_BROWSER_SETTINGS_SYNC_FEATURE_LABEL},
 #endif
   };
   html_source->AddLocalizedStrings(kLocalizedStrings);
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  if (chromeos::features::IsSyncSettingsCategorizationEnabled()) {
-    html_source->AddLocalizedString("themeCheckboxLabel",
-                                    IDS_SETTINGS_THEME_CHECKBOX_LABEL);
-  } else {
-    html_source->AddLocalizedString(
-        "themeCheckboxLabel",
-        IDS_SETTINGS_THEMES_AND_WALLPAPERS_CHECKBOX_LABEL);
-  }
-#else
-  // TODO(https://crbug.com/1249845): Move this string back to the list above
-  //     after launching SyncSettingsCategorization.
-  html_source->AddLocalizedString("themeCheckboxLabel",
-                                  IDS_SETTINGS_THEME_CHECKBOX_LABEL);
-#endif
 
   std::string sync_dashboard_url =
       google_util::AppendGoogleLocaleParam(
@@ -376,7 +363,7 @@ void AddSyncPageStrings(content::WebUIDataSource* html_source) {
       BuildOSSettingsUrl(chromeos::settings::mojom::kSyncSetupSubpagePath));
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   html_source->AddString(
       "osSyncSettingsUrl",
       BuildOSSettingsUrl(chromeos::settings::mojom::kSyncSubpagePath));

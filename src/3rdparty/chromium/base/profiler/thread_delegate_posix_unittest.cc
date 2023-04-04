@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,9 @@ TEST(ThreadDelegatePosixTest, MAYBE_CurrentThreadBase) {
 }
 
 #if BUILDFLAG(IS_ANDROID)
-
-TEST(ThreadDelegatePosixTest, AndroidMainThreadStackBase) {
+// On ChromeOS, this functionality is tested by
+// GetThreadStackBaseAddressTest.MainThread.
+TEST(ThreadDelegatePosixTest, MainThreadStackBase) {
   // The delegate does not use pthread id for main thread.
   auto delegate = ThreadDelegatePosix::Create(
       SamplingProfilerThreadToken{GetCurrentProcId(), pthread_t()});

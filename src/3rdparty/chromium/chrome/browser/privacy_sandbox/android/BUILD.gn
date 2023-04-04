@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,14 +13,18 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/privacy_sandbox/AdMeasurementFragment.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/AdPersonalizationFragment.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/AdPersonalizationRemovedFragment.java",
+    "java/src/org/chromium/chrome/browser/privacy_sandbox/FledgePreference.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/FlocSettingsFragment.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/LearnMoreFragment.java",
+    "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxBottomSheetNotice.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxBridge.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxDialogConsent.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxDialogController.java",
+    "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxDialogLaunchContext.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxDialogNotice.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxHelpers.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxReferrer.java",
+    "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxSettingsBaseFragment.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxSettingsFragment.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxSettingsFragmentV3.java",
     "java/src/org/chromium/chrome/browser/privacy_sandbox/PrivacySandboxSnackbarController.java",
@@ -31,12 +35,17 @@ android_library("java") {
   deps = [
     ":java_resources",
     "//base:base_java",
+    "//base:jni_java",
+    "//build/android:build_java",
     "//chrome/browser/flags:java",
+    "//chrome/browser/profiles/android:java",
     "//chrome/browser/settings:java",
     "//chrome/browser/ui/messages/android:java",
     "//components/browser_ui/bottomsheet/android:java",
     "//components/browser_ui/settings/android:java",
     "//components/browser_ui/styles/android:java",
+    "//components/browser_ui/util/android:java",
+    "//components/favicon/android:java",
     "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
     "//third_party/androidx:androidx_browser_browser_java",
@@ -47,6 +56,7 @@ android_library("java") {
     "//third_party/androidx:androidx_recyclerview_recyclerview_java",
     "//third_party/androidx:androidx_vectordrawable_vectordrawable_java",
     "//ui/android:ui_full_java",
+    "//url:gurl_java",
   ]
   annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
   srcjar_deps = [ ":privacy_sandbox_enums" ]
@@ -68,9 +78,11 @@ android_library("javatests") {
     "//base:base_java",
     "//base:base_java_test_support",
     "//base/test:test_support_java",
+    "//chrome/android:chrome_java",
     "//chrome/browser/flags:java",
     "//chrome/browser/settings:test_support_java",
-    "//chrome/test/android:chrome_java_test_support",
+    "//chrome/test/android:chrome_java_integration_test_support",
+    "//components/browser_ui/bottomsheet/android:java",
     "//components/browser_ui/settings/android:java",
     "//content/public/test/android:content_java_test_support",
     "//third_party/android_deps:espresso_java",
@@ -94,6 +106,7 @@ android_resources("java_resources") {
     "java/res/layout/privacy_sandbox_consent_dropdown.xml",
     "java/res/layout/privacy_sandbox_header.xml",
     "java/res/layout/privacy_sandbox_notice.xml",
+    "java/res/layout/privacy_sandbox_notice_bottom_sheet.xml",
     "java/res/values/dimens.xml",
     "java/res/xml/ad_measurement_preference.xml",
     "java/res/xml/ad_personalization_preference.xml",

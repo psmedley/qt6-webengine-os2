@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,14 +36,14 @@
 #include "device/bluetooth/dbus/bluetooth_profile_manager_client.h"
 #include "device/bluetooth/dbus/bluetooth_profile_service_provider.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "device/bluetooth/bluetooth_low_energy_scan_filter.h"
 #include "device/bluetooth/bluetooth_low_energy_scan_session.h"
 #include "device/bluetooth/dbus/bluetooth_advertisement_monitor_manager_client.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/data_decoder/public/mojom/ble_scan_parser.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace base {
 class TimeDelta;
@@ -60,10 +60,10 @@ namespace bluez {
 class BluetoothBlueZTest;
 class BluetoothAdapterProfileBlueZ;
 class BluetoothAdvertisementBlueZ;
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 class BluetoothAdvertisementMonitorApplicationServiceProvider;
 class BluetoothAdvertisementMonitorServiceProvider;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 class BluetoothDeviceBlueZ;
 class BluetoothLocalGattCharacteristicBlueZ;
 class BluetoothLocalGattServiceBlueZ;
@@ -93,9 +93,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
       public bluez::BluetoothDeviceClient::Observer,
       public bluez::BluetoothInputClient::Observer,
       public bluez::BluetoothAgentManagerClient::Observer,
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
       public bluez::BluetoothAdvertisementMonitorManagerClient::Observer,
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
       public bluez::BluetoothAgentServiceProvider::Delegate {
  public:
   using ErrorCompletionCallback =
@@ -106,10 +106,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   using ServiceRecordErrorCallback =
       base::OnceCallback<void(BluetoothServiceRecordBlueZ::ErrorCode)>;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   using ScanRecordPtr = data_decoder::mojom::ScanRecordPtr;
   using ScanRecordCallback = base::OnceCallback<void(ScanRecordPtr)>;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   static scoped_refptr<BluetoothAdapterBlueZ> CreateAdapter();
 
@@ -169,12 +169,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
       const std::string& address,
       const absl::optional<device::BluetoothDevice::AddressType>& address_type,
       ConnectDeviceCallback callback,
-      ErrorCallback error_callback) override;
+      ConnectDeviceErrorCallback error_callback) override;
 
   device::BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   void SetServiceAllowList(const UUIDList& uuids,
                            base::OnceClosure callback,
                            ErrorCallback error_callback) override;
@@ -187,7 +187,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
       std::unique_ptr<device::BluetoothLowEnergyScanFilter> filter,
       base::WeakPtr<device::BluetoothLowEnergyScanSession::Delegate> delegate)
       override;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Set the adapter name to one chosen from the system information. Only Ash
@@ -229,7 +229,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
                                          int16_t rssi,
                                          const std::vector<uint8_t>& eir);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Announce to observers advertisement received from |device|.
   void OnAdvertisementReceived(std::string device_address,
                                std::string device_name,
@@ -237,7 +237,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
                                uint16_t device_appearance,
                                const dbus::ObjectPath& device_path,
                                ScanRecordPtr scan_record);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // Announce to observers that |device| has changed its connected state.
   void NotifyDeviceConnectedStateChanged(BluetoothDeviceBlueZ* device,
@@ -360,10 +360,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   void AgentManagerAdded(const dbus::ObjectPath& object_path) override;
   void AgentManagerRemoved(const dbus::ObjectPath& object_path) override;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // bluez::BluetoothAdvertisementMonitorManagerClient::Observer override.
   void SupportedAdvertisementMonitorFeaturesChanged() override;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // bluez::BluetoothAgentServiceProvider::Delegate override.
   void Released() override;
@@ -385,6 +385,20 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
                         const std::string& uuid,
                         ConfirmationCallback callback) override;
   void Cancel() override;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  // Called by dbus:: on completion of the D-Bus method call to update
+  // bluetooth devcoredump state.
+  void OnSetDevCoredumpSuccess();
+  void OnSetDevCoredumpError(const std::string& error_name,
+                             const std::string& error_message);
+#endif // BUILDFLAG(IS_CHROMEOS)
+
+  // Called by dbus:: on completion of the D-Bus method call to enable LL
+  // privacy.
+  void OnSetLLPrivacySuccess();
+  void OnSetLLPrivacyError(const std::string& error_name,
+                           const std::string& error_message);
 
   // Called by dbus:: on completion of the D-Bus method call to register the
   // pairing agent.
@@ -514,7 +528,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
 
   void OnConnectDevice(ConnectDeviceCallback callback,
                        const dbus::ObjectPath& object_path);
-  void OnConnectDeviceError(ErrorCallback error_callback,
+  void OnConnectDeviceError(ConnectDeviceErrorCallback error_callback,
                             const std::string& error_name,
                             const std::string& error_message);
 
@@ -530,14 +544,14 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   void UpdateDeviceBatteryLevelFromBatteryClient(
       const dbus::ObjectPath& object_path);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   void RegisterAdvertisementMonitorApplicationServiceProvider();
   void OnRegisterAdvertisementMonitorApplicationServiceProvider();
 
   // Unregister the underlying advertisement monitor through
   // |advertisement_monitor_application_provider_|.
   void OnLowEnergyScanSessionDestroyed(const std::string& session_id);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   base::OnceClosure init_callback_;
 
@@ -599,7 +613,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   // crbug.com/687396.
   std::vector<scoped_refptr<BluetoothAdvertisementBlueZ>> advertisements_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // Timer used to schedule a second update to BlueZ's long term keys. This
   // second update is necessary in a first-time install situation, where field
   // trials might not yet have been available. By scheduling a second update
@@ -621,7 +635,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ final
   // is registered.
   base::queue<std::unique_ptr<BluetoothAdvertisementMonitorServiceProvider>>
       pending_advertisement_monitors_;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

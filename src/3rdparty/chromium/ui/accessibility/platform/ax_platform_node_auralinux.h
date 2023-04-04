@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,7 +154,6 @@ class AX_EXPORT AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   bool GrabFocusOrSetSequentialFocusNavigationStartingPointAtOffset(int offset);
   bool GrabFocusOrSetSequentialFocusNavigationStartingPoint();
   bool SetSequentialFocusNavigationStartingPoint();
-  bool DoDefaultAction();
   const gchar* GetDefaultActionName();
   AtkAttributeSet* GetAtkAttributes();
 
@@ -240,7 +239,7 @@ class AX_EXPORT AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
 
   // AXPlatformNodeBase overrides.
   bool IsPlatformCheckable() const override;
-  absl::optional<int> GetIndexInParent() override;
+  absl::optional<size_t> GetIndexInParent() override;
 
   bool IsNameExposed();
 
@@ -293,11 +292,8 @@ class AX_EXPORT AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   // nullopt.
   absl::optional<std::pair<int, int>> GetEmbeddedObjectIndices();
 
-  std::vector<ax::mojom::Action> GetSupportedActions() const;
-  bool HasDefaultActionVerb() const;
-
   std::string accessible_name_;
-
+  
  protected:
   AXPlatformNodeAuraLinux();
 

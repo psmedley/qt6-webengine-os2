@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
@@ -358,7 +359,7 @@ class BASE_EXPORT ScopedDisallowRunningRunLoop {
 
  private:
 #if DCHECK_IS_ON()
-  RunLoop::Delegate* current_delegate_;
+  raw_ptr<RunLoop::Delegate> current_delegate_;
   const bool previous_run_allowance_;
 #endif  // DCHECK_IS_ON()
 };

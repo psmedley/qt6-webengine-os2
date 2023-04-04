@@ -117,7 +117,7 @@ static bool ShouldTreatAsOpaqueOrigin(const KURL& url) {
   // host.
   DCHECK(!((relevant_url.ProtocolIsInHTTPFamily() ||
             relevant_url.ProtocolIs("ftp")) &&
-           relevant_url.Host().IsEmpty()));
+           relevant_url.Host().empty()));
 
   if (base::Contains(url::GetNoAccessSchemes(),
                      relevant_url.Protocol().Ascii()))
@@ -153,7 +153,7 @@ SecurityOrigin::SecurityOrigin(const KURL& url)
           (url.HasPort() || !url.IsValid() || !url.IsHierarchical())
               ? url.Port()
               : DefaultPortForProtocol(url.Protocol())) {
-  full_url_ = url.Copy();
+  full_url_ = url;
 }
 
 SecurityOrigin::SecurityOrigin(const String& protocol,
@@ -193,9 +193,9 @@ SecurityOrigin::SecurityOrigin(NewUniqueOpaque, const SecurityOrigin* precursor)
 
 SecurityOrigin::SecurityOrigin(const SecurityOrigin* other,
                                ConstructIsolatedCopy)
-    : protocol_(other->protocol_.IsolatedCopy()),
-      host_(other->host_.IsolatedCopy()),
-      domain_(other->domain_.IsolatedCopy()),
+    : protocol_(other->protocol_),
+      host_(other->host_),
+      domain_(other->domain_),
       port_(other->port_),
       nonce_if_opaque_(other->nonce_if_opaque_),
       universal_access_(other->universal_access_),
@@ -210,7 +210,7 @@ SecurityOrigin::SecurityOrigin(const SecurityOrigin* other,
       precursor_origin_(other->precursor_origin_
                             ? other->precursor_origin_->IsolatedCopy()
                             : nullptr),
-      full_url_(other->full_url_.Copy()) {}
+      full_url_(other->full_url_) {}
 
 SecurityOrigin::SecurityOrigin(const SecurityOrigin* other,
                                ConstructSameThreadCopy)
@@ -229,7 +229,7 @@ SecurityOrigin::SecurityOrigin(const SecurityOrigin* other,
       cross_agent_cluster_access_(other->cross_agent_cluster_access_),
       agent_cluster_id_(other->agent_cluster_id_),
       precursor_origin_(other->precursor_origin_),
-      full_url_(other->full_url_.Copy()) {}
+      full_url_(other->full_url_) {}
 
 scoped_refptr<SecurityOrigin> SecurityOrigin::CreateWithReferenceOrigin(
     const KURL& url,
@@ -316,7 +316,7 @@ url::Origin SecurityOrigin::ToUrlOrigin() const {
   }
   url::Origin result = url::Origin::CreateFromNormalizedTuple(
       std::move(scheme), std::move(host), port);
-  result.SetFullURL(full_url_);
+  result.SetFullURL(GURL(full_url_));
   CHECK(!result.opaque());
   return result;
 }
@@ -338,7 +338,7 @@ String SecurityOrigin::RegistrableDomain() const {
   OriginAccessEntry entry(
       *this, network::mojom::CorsDomainMatchMode::kAllowRegistrableDomains);
   String domain = entry.registrable_domain();
-  return domain.IsEmpty() ? String() : domain;
+  return domain.empty() ? String() : domain;
 }
 
 const base::UnguessableToken* SecurityOrigin::GetNonceForSerialization() const {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,7 +47,7 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD) ScopedClipboardWriter {
   // Converts |text| to UTF-8 and adds it to the clipboard.
   void WriteText(const std::u16string& text);
 
-  // Adds HTML to the clipboard.  The url parameter is optional, but especially
+  // Adds HTML to the clipboard. The url parameter is optional, but especially
   // useful if the HTML fragment contains relative links.
   void WriteHTML(const std::u16string& markup, const std::string& source_url);
 

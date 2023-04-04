@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,9 @@ class ClientStorage {
   // divied by |modulus|, result in the specified |remainder|.
   std::vector<std::string> GetMatchingStateKeyHashes(uint64_t modulus,
                                                      uint64_t remainder) const;
+
+  // Returns all the clients in the storage.
+  std::vector<ClientInfo> GetAllClients();
 
  private:
   // Key: device ids.

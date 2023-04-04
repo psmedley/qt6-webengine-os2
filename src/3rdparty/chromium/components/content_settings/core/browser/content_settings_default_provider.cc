@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,13 +52,17 @@ const char kObsoleteFileHandlingDefaultPref[] =
     "profile.default_content_setting_values.file_handling";
 const char kObsoleteFontAccessDefaultPref[] =
     "profile.default_content_setting_values.font_access";
+const char kObsoleteInstalledWebAppMetadataDefaultPref[] =
+    "profile.default_content_setting_values.installed_web_app_metadata";
+const char kObsoletePpapiBrokerDefaultPref[] =
+    "profile.default_content_setting_values.ppapi_broker";
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // !BUILDFLAG(IS_IOS)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
 // This setting was moved and should be migrated on profile startup.
 const char kDeprecatedEnableDRM[] = "settings.privacy.drm_enabled";
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
 
 ContentSetting GetDefaultValue(const WebsiteSettingsInfo* info) {
   const base::Value& initial_default = info->initial_default_value();
@@ -95,8 +99,7 @@ class DefaultRuleIterator : public RuleIterator {
     DCHECK(HasNext());
     is_done_ = true;
     return Rule(ContentSettingsPattern::Wildcard(),
-                ContentSettingsPattern::Wildcard(), std::move(value_),
-                base::Time(), SessionModel::Durable);
+                ContentSettingsPattern::Wildcard(), std::move(value_), {});
   }
 
  private:
@@ -135,12 +138,14 @@ void DefaultProvider::RegisterProfilePrefs(
   registry->RegisterIntegerPref(kObsoletePluginsDefaultPref, 0);
   registry->RegisterIntegerPref(kObsoleteFileHandlingDefaultPref, 0);
   registry->RegisterIntegerPref(kObsoleteFontAccessDefaultPref, 0);
+  registry->RegisterIntegerPref(kObsoleteInstalledWebAppMetadataDefaultPref, 0);
+  registry->RegisterIntegerPref(kObsoletePpapiBrokerDefaultPref, 0);
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // !BUILDFLAG(IS_IOS)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
   registry->RegisterBooleanPref(kDeprecatedEnableDRM, true);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
 }
 
 DefaultProvider::DefaultProvider(PrefService* prefs, bool off_the_record)
@@ -420,10 +425,12 @@ void DefaultProvider::DiscardOrMigrateObsoletePreferences() {
   prefs_->ClearPref(kObsoletePluginsDataDefaultPref);
   prefs_->ClearPref(kObsoleteFileHandlingDefaultPref);
   prefs_->ClearPref(kObsoleteFontAccessDefaultPref);
+  prefs_->ClearPref(kObsoleteInstalledWebAppMetadataDefaultPref);
+  prefs_->ClearPref(kObsoletePpapiBrokerDefaultPref);
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // !BUILDFLAG(IS_IOS)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
   // TODO(crbug.com/1191642): Remove this migration logic in M100.
   WebsiteSettingsRegistry* website_settings =
       WebsiteSettingsRegistry::GetInstance();
@@ -437,7 +444,7 @@ void DefaultProvider::DiscardOrMigrateObsoletePreferences() {
                                                : CONTENT_SETTING_BLOCK);
   }
   prefs_->ClearPref(kDeprecatedEnableDRM);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_WIN)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
 }
 
 }  // namespace content_settings

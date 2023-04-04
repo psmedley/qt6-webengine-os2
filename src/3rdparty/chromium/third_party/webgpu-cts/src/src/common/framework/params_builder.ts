@@ -1,4 +1,6 @@
 import { Merged, mergeParams } from '../internal/params_utils.js';
+import { stringifyPublicParams } from '../internal/query/stringify_params.js';
+import { assert, mapLazy } from '../util/util.js';
 
 // ================================================================
 // "Public" ParamsBuilder API / Documentation
@@ -144,7 +146,7 @@ export class CaseParamsBuilder<CaseP extends {}>
     return this.cases();
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   expandWithParams<NewP extends {}>(
     expander: (_: Merged<{}, CaseP>) => Iterable<NewP>
   ): CaseParamsBuilder<Merged<CaseP, NewP>> {
@@ -152,41 +154,50 @@ export class CaseParamsBuilder<CaseP extends {}>
     return new CaseParamsBuilder(() => newGenerator({}));
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   expand<NewPKey extends string, NewPValue>(
     key: NewPKey,
     expander: (_: Merged<{}, CaseP>) => Iterable<NewPValue>
   ): CaseParamsBuilder<Merged<CaseP, { [name in NewPKey]: NewPValue }>> {
     return this.expandWithParams(function* (p) {
       for (const value of expander(p)) {
-        // TypeScript doesn't know here that NewPKey is always a single literal string type.
-        yield { [key]: value } as { [name in NewPKey]: NewPValue };
+        yield { [key]: value } as { readonly [name in NewPKey]: NewPValue };
       }
     });
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   combineWithParams<NewP extends {}>(
     newParams: Iterable<NewP>
   ): CaseParamsBuilder<Merged<CaseP, NewP>> {
+    assertNotGenerator(newParams);
+    const seenValues = new Set<string>();
+    for (const params of newParams) {
+      const paramsStr = stringifyPublicParams(params);
+      assert(!seenValues.has(paramsStr), `Duplicate entry in combine[WithParams]: ${paramsStr}`);
+      seenValues.add(paramsStr);
+    }
+
     return this.expandWithParams(() => newParams);
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   combine<NewPKey extends string, NewPValue>(
     key: NewPKey,
     values: Iterable<NewPValue>
   ): CaseParamsBuilder<Merged<CaseP, { [name in NewPKey]: NewPValue }>> {
-    return this.expand(key, () => values);
+    assertNotGenerator(values);
+    const mapped = mapLazy(values, v => ({ [key]: v } as { [name in NewPKey]: NewPValue }));
+    return this.combineWithParams(mapped);
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   filter(pred: (_: Merged<{}, CaseP>) => boolean): CaseParamsBuilder<CaseP> {
     const newGenerator = filterGenerator(this.cases, pred);
     return new CaseParamsBuilder(() => newGenerator({}));
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   unless(pred: (_: Merged<{}, CaseP>) => boolean): CaseParamsBuilder<CaseP> {
     return this.filter(x => !pred(x));
   }
@@ -241,14 +252,14 @@ export class SubcaseParamsBuilder<CaseP extends {}, SubcaseP extends {}>
     }
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   expandWithParams<NewP extends {}>(
     expander: (_: Merged<CaseP, SubcaseP>) => Iterable<NewP>
   ): SubcaseParamsBuilder<CaseP, Merged<SubcaseP, NewP>> {
     return new SubcaseParamsBuilder(this.cases, expanderGenerator(this.subcases, expander));
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   expand<NewPKey extends string, NewPValue>(
     key: NewPKey,
     expander: (_: Merged<CaseP, SubcaseP>) => Iterable<NewPValue>
@@ -261,27 +272,29 @@ export class SubcaseParamsBuilder<CaseP extends {}, SubcaseP extends {}>
     });
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   combineWithParams<NewP extends {}>(
     newParams: Iterable<NewP>
   ): SubcaseParamsBuilder<CaseP, Merged<SubcaseP, NewP>> {
+    assertNotGenerator(newParams);
     return this.expandWithParams(() => newParams);
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   combine<NewPKey extends string, NewPValue>(
     key: NewPKey,
     values: Iterable<NewPValue>
   ): SubcaseParamsBuilder<CaseP, Merged<SubcaseP, { [name in NewPKey]: NewPValue }>> {
+    assertNotGenerator(values);
     return this.expand(key, () => values);
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   filter(pred: (_: Merged<CaseP, SubcaseP>) => boolean): SubcaseParamsBuilder<CaseP, SubcaseP> {
     return new SubcaseParamsBuilder(this.cases, filterGenerator(this.subcases, pred));
   }
 
-  /** @inheritdoc */
+  /** @inheritDoc */
   unless(pred: (_: Merged<CaseP, SubcaseP>) => boolean): SubcaseParamsBuilder<CaseP, SubcaseP> {
     return this.filter(x => !pred(x));
   }
@@ -311,4 +324,14 @@ function filterGenerator<Base, A>(
       }
     }
   };
+}
+
+/** Assert an object is not a Generator (a thing returned from a generator function). */
+function assertNotGenerator(x: object) {
+  if ('constructor' in x) {
+    assert(
+      x.constructor !== (function* () {})().constructor,
+      'Argument must not be a generator, as generators are not reusable'
+    );
+  }
 }

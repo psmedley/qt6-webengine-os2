@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,13 +63,14 @@ class Controller : public ScriptExecutorDelegate,
  public:
   // |web_contents|, |client|, |tick_clock| and |script_executor_ui_delegate|
   // must remain valid for the lifetime of the instance. Controller will take
-  // ownership of |service| if specified, otherwise will create and own the
-  // default service.
+  // ownership of |service| and |web_controller| if specified, otherwise will
+  // create and own a default instance.
   Controller(content::WebContents* web_contents,
              Client* client,
              const base::TickClock* tick_clock,
              base::WeakPtr<RuntimeManager> runtime_manager,
              std::unique_ptr<Service> service,
+             std::unique_ptr<WebController> web_controller,
              ukm::UkmRecorder* ukm_recorder,
              AnnotateDomModelService* annotate_dom_model_service);
 
@@ -124,6 +125,9 @@ class Controller : public ScriptExecutorDelegate,
   password_manager::PasswordChangeSuccessTracker*
   GetPasswordChangeSuccessTracker() override;
   content::WebContents* GetWebContents() override;
+  const std::string GetLocale() override;
+  void SetJsFlowLibrary(const std::string& js_flow_library) override;
+  JsFlowDevtoolsWrapper* GetJsFlowDevtoolsWrapper() override;
   std::string GetEmailAddressForAccessTokenAccount() override;
   ukm::UkmRecorder* GetUkmRecorder() override;
   void SetTouchableElementArea(const ElementAreaProto& area) override;
@@ -135,6 +139,19 @@ class Controller : public ScriptExecutorDelegate,
   void SetBrowseModeInvisible(bool invisible) override;
   bool ShouldShowWarning() override;
   ProcessedActionStatusDetailsProto& GetLogInfo() override;
+  bool MustUseBackendData() const override;
+
+  // Checks if given XML is signed or not.
+  bool IsXmlSigned(const std::string& xml_string) const override;
+
+  // Extracts attribute values from the |xml_string| corresponding to the
+  // |keys|.
+  const std::vector<std::string> ExtractValuesFromSingleTagXml(
+      const std::string& xml_string,
+      const std::vector<std::string>& keys) const override;
+
+  void OnActionsResponseReceived(
+      const RoundtripNetworkStats& network_stats) override;
 
   // Show the UI if it's not already shown. This is only meaningful while in
   // states where showing the UI is optional, such as RUNNING, in tracking mode.
@@ -231,13 +248,7 @@ class Controller : public ScriptExecutorDelegate,
   // execution with an error.
   void MaybeAutostartScript(const std::vector<ScriptHandle>& runnable_scripts);
 
-  void DisableAutostart();
-
   void InitFromParameters();
-
-  // Called when a script is selected.
-  void OnScriptSelected(const ScriptHandle& handle,
-                        std::unique_ptr<TriggerContext> context);
 
   // Overrides ScriptTracker::Listener:
   void OnNoRunnableScriptsForPage() override;
@@ -295,20 +306,33 @@ class Controller : public ScriptExecutorDelegate,
   void SetDirectActionScripts(
       const std::vector<ScriptHandle>& direct_action_scripts);
 
+  // Records flow metrics. This may be invoked multiple times per flow, but will
+  // only record the first impression for each flow.
+  void MaybeRecordFlowFinishedMetrics(Metrics::FlowFinishedState state);
+
+  // Sets the semantic selector in the DOM annotation service.
+  void SetSemanticSelectorPolicy(SemanticSelectorPolicy policy);
+
+  void MaybeUpdateClientContextAndGetScriptsForUrl(const GURL& url);
+  void OnGetAnnotateDomModelVersionForGetScripts(
+      const GURL& url,
+      absl::optional<int64_t> model_version);
+  void GetScriptsForUrl(const GURL& url);
+
   ClientSettings settings_;
   const raw_ptr<Client> client_;
   const raw_ptr<const base::TickClock> tick_clock_;
   base::WeakPtr<RuntimeManager> runtime_manager_;
 
-  // Lazily instantiate in GetWebController().
-  std::unique_ptr<WebController> web_controller_;
-
   // An instance to suppress keyboard. If this is not nullptr, the keyboard
   // is suppressed.
   std::unique_ptr<SuppressKeyboardRAII> suppress_keyboard_raii_;
 
-  // Lazily instantiate in GetService().
   std::unique_ptr<Service> service_;
+
+  // Lazily instantiate in GetWebController().
+  std::unique_ptr<WebController> web_controller_;
+
   std::unique_ptr<TriggerContext> trigger_context_;
 
   AutofillAssistantState state_ = AutofillAssistantState::INACTIVE;
@@ -372,6 +396,8 @@ class Controller : public ScriptExecutorDelegate,
   // The next DidStartNavigation will not cause an error.
   bool expect_navigation_ = false;
 
+  std::unique_ptr<JsFlowDevtoolsWrapper> js_flow_devtools_wrapper_;
+
   // Tracks scripts and script execution. It's kept at the end, as it tend to
   // depend on everything the controller support, through script and script
   // actions.
@@ -429,6 +455,10 @@ class Controller : public ScriptExecutorDelegate,
   // If instantiated, will start delivering the required model for annotating
   // DOM nodes. May be nullptr.
   const raw_ptr<AnnotateDomModelService> annotate_dom_model_service_;
+
+  // The accumulated network stats of an entire flow. Used for metrics upon
+  // flow completion.
+  RoundtripNetworkStats accumulated_network_stats_;
 
   base::WeakPtrFactory<Controller> weak_ptr_factory_{this};
 };

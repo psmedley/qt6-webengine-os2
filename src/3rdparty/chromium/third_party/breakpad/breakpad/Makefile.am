@@ -130,6 +130,7 @@ EXTRA_PROGRAMS =
 CLEANFILES =
 
 check_LIBRARIES += src/testing/libtesting.a
+check_PROGRAMS += src/common/safe_math_unittest
 
 if !SYSTEM_TEST_LIBS
 src_testing_libtesting_a_SOURCES = \
@@ -168,6 +169,7 @@ src_client_linux_libbreakpad_client_a_SOURCES = \
 	src/client/linux/minidump_writer/linux_dumper.cc \
 	src/client/linux/minidump_writer/linux_ptrace_dumper.cc \
 	src/client/linux/minidump_writer/minidump_writer.cc \
+	src/client/linux/minidump_writer/pe_file.cc \
 	src/client/minidump_file_writer-inl.h \
 	src/client/minidump_file_writer.cc \
 	src/client/minidump_file_writer.h \
@@ -491,6 +493,7 @@ src_client_linux_linux_client_unittest_shlib_SOURCES = \
 	src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc \
 	src/client/linux/minidump_writer/minidump_writer_unittest.cc \
 	src/client/linux/minidump_writer/minidump_writer_unittest_utils.cc \
+	src/client/linux/minidump_writer/pe_file.cc \
 	src/client/linux/minidump_writer/proc_cpuinfo_reader_unittest.cc \
 	src/common/linux/elf_core_dump.cc \
 	src/common/linux/linux_libc_support_unittest.cc \
@@ -687,6 +690,15 @@ src_tools_mac_dump_syms_dump_syms_mac_CXXFLAGS= \
 	-DHAVE_MACH_O_NLIST_H
 src_tools_mac_dump_syms_dump_syms_mac_LDADD= \
 	$(RUSTC_DEMANGLE_LIBS)
+
+src_common_safe_math_unittest_SOURCES = \
+	src/common/safe_math.h \
+	src/common/safe_math_unittest.cc
+src_common_safe_math_unittest_CPPFLAGS = \
+	$(AM_CPPFLAGS) $(TEST_CFLAGS)
+src_common_safe_math_unittest_LDADD = \
+	$(TEST_LIBS) \
+	$(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 
 src_common_dumper_unittest_SOURCES = \
 	src/common/byte_cursor_unittest.cc \

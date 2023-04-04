@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ TEST_F(CachedTextInputInfoTest, PlaceholderBRInTextArea) {
 TEST_F(CachedTextInputInfoTest, PlaceholderBROnlyInTextArea) {
   SetBodyContent("<textarea id=target></textarea>");
   auto& target = *To<TextControlElement>(GetElementById("target"));
-  target.focus();
+  target.Focus();
   GetDocument().execCommand("insertparagraph", false, "", ASSERT_NO_EXCEPTION);
   GetDocument().execCommand("delete", false, "", ASSERT_NO_EXCEPTION);
 

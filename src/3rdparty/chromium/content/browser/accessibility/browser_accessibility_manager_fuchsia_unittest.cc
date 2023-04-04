@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,13 @@
 #include "content/browser/accessibility/browser_accessibility_fuchsia.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/accessibility/test_browser_accessibility_delegate.h"
-#include "content/common/render_accessibility.mojom.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/render_accessibility.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/ax_node_id_forward.h"
+#include "ui/accessibility/platform/ax_platform_tree_manager.h"
+#include "ui/accessibility/platform/ax_platform_tree_manager_delegate.h"
 #include "ui/accessibility/platform/fuchsia/accessibility_bridge_fuchsia.h"
 #include "ui/accessibility/platform/fuchsia/accessibility_bridge_fuchsia_registry.h"
 
@@ -30,10 +33,11 @@ class MockBrowserAccessibilityDelegate
 
   void AccessibilityHitTest(
       const gfx::Point& point_in_frame_pixels,
-      ax::mojom::Event opt_event_to_fire,
+      const ax::mojom::Event& opt_event_to_fire,
       int opt_request_id,
-      base::OnceCallback<void(BrowserAccessibilityManager* hit_manager,
-                              int hit_node_id)> opt_callback) override {
+      base::OnceCallback<void(ui::AXPlatformTreeManager* hit_manager,
+                              ui::AXNodeID hit_node_id)> opt_callback)
+      override {
     last_hit_test_point_ = point_in_frame_pixels;
     last_request_id_ = opt_request_id;
   }
@@ -283,11 +287,11 @@ TEST_F(BrowserAccessibilityManagerFuchsiaTest, TestLocationChange) {
   }
 
   // Send location update for node 2.
-  std::vector<mojom::LocationChangesPtr> changes;
+  std::vector<blink::mojom::LocationChangesPtr> changes;
   ui::AXRelativeBounds relative_bounds;
   relative_bounds.bounds =
       gfx::RectF(/*x=*/1, /*y=*/2, /*width=*/3, /*height=*/4);
-  changes.push_back(mojom::LocationChanges::New(2, relative_bounds));
+  changes.push_back(blink::mojom::LocationChanges::New(2, relative_bounds));
   manager_->OnLocationChanges(std::move(changes));
 
   {
@@ -391,41 +395,6 @@ TEST_F(BrowserAccessibilityManagerFuchsiaTest, TestFocusChange) {
     ASSERT_TRUE(node_updates.back().has_states());
     ASSERT_TRUE(node_updates.back().states().has_has_input_focus());
     EXPECT_TRUE(node_updates.back().states().has_input_focus());
-  }
-}
-
-TEST_F(BrowserAccessibilityManagerFuchsiaTest, TestDeviceScale) {
-  const float kScaleFactor = 0.8f;
-  mock_accessibility_bridge_->SetDeviceScaleFactor(kScaleFactor);
-
-  AXEventNotificationDetails event;
-  ui::AXTreeUpdate initial_state;
-  ui::AXTreeID tree_id = ui::AXTreeID::CreateNewAXTreeID();
-  initial_state.tree_data.tree_id = tree_id;
-  initial_state.has_tree_data = true;
-  initial_state.tree_data.loaded = true;
-  initial_state.root_id = 1;
-  initial_state.nodes.resize(1);
-  initial_state.nodes[0].id = 1;
-  event.updates.push_back(std::move(initial_state));
-
-  EXPECT_TRUE(manager_->OnAccessibilityEvents(std::move(event)));
-
-  {
-    const auto& node_updates = mock_accessibility_bridge_->node_updates();
-    ASSERT_FALSE(node_updates.empty());
-
-    BrowserAccessibilityFuchsia* root_node =
-        ToBrowserAccessibilityFuchsia(manager_->GetRoot());
-    ASSERT_TRUE(root_node);
-
-    EXPECT_EQ(node_updates.back().node_id(), root_node->GetFuchsiaNodeID());
-
-    ASSERT_TRUE(node_updates[0].has_node_to_container_transform());
-    const auto& transform =
-        node_updates[0].node_to_container_transform().matrix;
-    EXPECT_EQ(transform[0], 1.f / kScaleFactor);
-    EXPECT_EQ(transform[5], 1.f / kScaleFactor);
   }
 }
 

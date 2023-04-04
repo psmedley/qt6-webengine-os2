@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,7 +110,8 @@ FlexSpecification FlexLayoutExample::GetFlexSpecification(int weight) const {
 void FlexLayoutExample::OrientationChanged() {
   constexpr LayoutOrientation kOrientations[2] = {
       LayoutOrientation::kHorizontal, LayoutOrientation::kVertical};
-  layout_->SetOrientation(kOrientations[orientation_->GetSelectedIndex()]);
+  layout_->SetOrientation(
+      kOrientations[orientation_->GetSelectedIndex().value()]);
   RefreshLayoutPanel(false);
 }
 
@@ -118,7 +119,7 @@ void FlexLayoutExample::MainAxisAlignmentChanged() {
   constexpr LayoutAlignment kMainAxisAlignments[3] = {
       LayoutAlignment::kStart, LayoutAlignment::kCenter, LayoutAlignment::kEnd};
   layout_->SetMainAxisAlignment(
-      kMainAxisAlignments[main_axis_alignment_->GetSelectedIndex()]);
+      kMainAxisAlignments[main_axis_alignment_->GetSelectedIndex().value()]);
   RefreshLayoutPanel(false);
 }
 
@@ -127,7 +128,7 @@ void FlexLayoutExample::CrossAxisAlignmentChanged() {
       LayoutAlignment::kStretch, LayoutAlignment::kStart,
       LayoutAlignment::kCenter, LayoutAlignment::kEnd};
   layout_->SetCrossAxisAlignment(
-      kCrossAxisAlignments[cross_axis_alignment_->GetSelectedIndex()]);
+      kCrossAxisAlignments[cross_axis_alignment_->GetSelectedIndex().value()]);
   RefreshLayoutPanel(false);
 }
 

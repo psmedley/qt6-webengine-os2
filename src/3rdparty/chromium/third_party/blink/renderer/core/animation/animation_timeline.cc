@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,19 +70,6 @@ V8CSSNumberish* AnimationTimeline::duration() {
   return nullptr;
 }
 
-String AnimationTimeline::phase() {
-  switch (CurrentPhaseAndTime().phase) {
-    case TimelinePhase::kInactive:
-      return "inactive";
-    case TimelinePhase::kBefore:
-      return "before";
-    case TimelinePhase::kActive:
-      return "active";
-    case TimelinePhase::kAfter:
-      return "after";
-  }
-}
-
 void AnimationTimeline::ClearOutdatedAnimation(Animation* animation) {
   DCHECK(!animation->Outdated());
   outdated_animation_count_--;
@@ -92,7 +79,8 @@ wtf_size_t AnimationTimeline::AnimationsNeedingUpdateCount() const {
   wtf_size_t count = 0;
   for (const auto& animation : animations_needing_update_) {
     // Exclude animations which are not actively generating frames.
-    if ((!animation->CompositorPending() && !animation->Playing()) ||
+    if ((!animation->CompositorPending() && !animation->Playing() &&
+         !IsScrollTimeline()) ||
         animation->AnimationHasNoEffect()) {
       continue;
     }
@@ -109,10 +97,10 @@ bool AnimationTimeline::NeedsAnimationTimingUpdate() {
   // We allow |last_current_phase_and_time_| to advance here when there
   // are no animations to allow animations spawned during style
   // recalc to not invalidate this flag.
-  if (animations_needing_update_.IsEmpty())
+  if (animations_needing_update_.empty())
     last_current_phase_and_time_ = current_phase_and_time;
 
-  return !animations_needing_update_.IsEmpty();
+  return !animations_needing_update_.empty();
 }
 
 void AnimationTimeline::ServiceAnimations(TimingUpdateReason reason) {

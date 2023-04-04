@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,7 +73,7 @@ class VIEWS_EXPORT ClientView : public View {
 
  private:
   // The View that this ClientView contains.
-  raw_ptr<View> contents_view_;
+  raw_ptr<View, DanglingUntriaged> contents_view_;
 };
 
 BEGIN_VIEW_BUILDER(VIEWS_EXPORT, ClientView, View)

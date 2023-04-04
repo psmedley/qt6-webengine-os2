@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@
 #include "ui/gl/gl_enums.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/scoped_binders.h"
-#include "ui/gl/yuv_to_rgb_converter.h"
 
 #if defined(USE_EGL)
 #include "ui/gl/gl_image_io_surface_egl.h"
@@ -71,6 +70,7 @@ GLenum TextureFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:  // See https://crbug.com/595948.
     case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::RGBA_F16:
     case gfx::BufferFormat::BGRA_1010102:
       return GL_RGBA;
@@ -80,7 +80,6 @@ GLenum TextureFormat(gfx::BufferFormat format) {
       return GL_RGB_YCBCR_P010_CHROMIUM;
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
-    case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::RGBA_1010102:
     case gfx::BufferFormat::YVU_420:
       NOTREACHED() << gfx::BufferFormatToString(format);
@@ -218,14 +217,7 @@ bool GLImageIOSurface::Initialize(IOSurfaceRef io_surface,
   format_ = format;
   io_surface_.reset(io_surface, base::scoped_policy::RETAIN);
   io_surface_id_ = io_surface_id;
-
-  // YUV_420_BIPLANAR and P010 are not supported by BindTexImage. CopyTexImage
-  // is supported by these formats as that performs conversion to RGB as part of
-  // the copy operation.
-  if (format_ != gfx::BufferFormat::YUV_420_BIPLANAR &&
-      format_ != gfx::BufferFormat::P010) {
-    io_surface_plane_ = io_surface_plane;
-  }
+  io_surface_plane_ = io_surface_plane;
   return true;
 }
 
@@ -233,7 +225,8 @@ bool GLImageIOSurface::InitializeWithCVPixelBuffer(
     CVPixelBufferRef cv_pixel_buffer,
     uint32_t io_surface_plane,
     gfx::GenericSharedMemoryId io_surface_id,
-    gfx::BufferFormat format) {
+    gfx::BufferFormat format,
+    const gfx::ColorSpace& color_space) {
   IOSurfaceRef io_surface = CVPixelBufferGetIOSurface(cv_pixel_buffer);
   if (!io_surface) {
     LOG(ERROR) << "Can't init GLImage from CVPixelBuffer with no IOSurface";
@@ -244,6 +237,8 @@ bool GLImageIOSurface::InitializeWithCVPixelBuffer(
     return false;
 
   cv_pixel_buffer_.reset(cv_pixel_buffer, base::scoped_policy::RETAIN);
+  disable_in_use_by_window_server_ = true;
+  GLImage::SetColorSpace(color_space);
   return true;
 }
 
@@ -260,7 +255,7 @@ unsigned GLImageIOSurface::GetDataType() {
 }
 
 GLImageIOSurface::BindOrCopy GLImageIOSurface::ShouldBindOrCopy() {
-  return io_surface_plane_ == kInvalidIOSurfacePlane ? COPY : BIND;
+  return BIND;
 }
 
 bool GLImageIOSurface::BindTexImage(unsigned target) {
@@ -312,81 +307,6 @@ bool GLImageIOSurface::BindTexImageImpl(unsigned target,
   return true;
 }
 
-bool GLImageIOSurface::CopyTexImage(unsigned target) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(COPY, ShouldBindOrCopy());
-
-  GLContext* gl_context = GLContext::GetCurrent();
-  DCHECK(gl_context);
-
-  YUVToRGBConverter* yuv_to_rgb_converter =
-      gl_context->GetYUVToRGBConverter(color_space_for_yuv_to_rgb_);
-  DCHECK(yuv_to_rgb_converter);
-
-  // Note that state restoration is done explicitly instead of scoped binders to
-  // avoid https://crbug.com/601729.
-  GLint rgb_texture = 0;
-  GLenum target_getter = 0;
-  switch (target) {
-    case GL_TEXTURE_2D:
-      target_getter = GL_TEXTURE_BINDING_2D;
-      break;
-    case GL_TEXTURE_CUBE_MAP:
-      target_getter = GL_TEXTURE_BINDING_CUBE_MAP;
-      break;
-    case GL_TEXTURE_EXTERNAL_OES:
-      target_getter = GL_TEXTURE_BINDING_EXTERNAL_OES;
-      break;
-    case GL_TEXTURE_RECTANGLE_ARB:
-      target_getter = GL_TEXTURE_BINDING_RECTANGLE_ARB;
-      break;
-    default:
-      NOTIMPLEMENTED() << " Target not supported.";
-      return false;
-  }
-  glGetIntegerv(target_getter, &rgb_texture);
-  base::ScopedClosureRunner destroy_resources_runner(
-      base::BindOnce(base::RetainBlock(^{
-        glBindTexture(target, rgb_texture);
-      })));
-
-  const auto src_type =
-      format_ == gfx::BufferFormat::P010 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
-
-  CGLContextObj cgl_context = CGLGetCurrentContext();
-  {
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, yuv_to_rgb_converter->y_texture());
-    CGLError cgl_error = CGLTexImageIOSurface2D(
-        cgl_context, GL_TEXTURE_RECTANGLE_ARB, GL_RED, size_.width(),
-        size_.height(), GL_RED, src_type, io_surface_, 0);
-    if (cgl_error != kCGLNoError) {
-      LOG(ERROR) << "Error in CGLTexImageIOSurface2D for the Y plane. "
-                 << cgl_error;
-      return false;
-    }
-  }
-  {
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, yuv_to_rgb_converter->uv_texture());
-    CGLError cgl_error = CGLTexImageIOSurface2D(
-        cgl_context, GL_TEXTURE_RECTANGLE_ARB, GL_RG, size_.width() / 2,
-        size_.height() / 2, GL_RG, src_type, io_surface_, 1);
-    if (cgl_error != kCGLNoError) {
-      LOG(ERROR) << "Error in CGLTexImageIOSurface2D for the UV plane. "
-                 << cgl_error;
-      return false;
-    }
-  }
-
-  yuv_to_rgb_converter->CopyYUV420ToRGB(target, size_, rgb_texture, src_type);
-  return true;
-}
-
-bool GLImageIOSurface::CopyTexSubImage(unsigned target,
-                                       const gfx::Point& offset,
-                                       const gfx::Rect& rect) {
-  return false;
-}
-
 void GLImageIOSurface::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                                     uint64_t process_tracing_id,
                                     const std::string& dump_name) {
@@ -431,6 +351,8 @@ void GLImageIOSurface::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
         base::trace_event::MemoryAllocatorDump::kNameSize,
         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
         static_cast<uint64_t>(size_bytes));
+    anonymous_dump->AddScalar("width", "pixels", size_.width());
+    anonymous_dump->AddScalar("height", "pixels", size_.height());
   }
 }
 
@@ -449,18 +371,6 @@ bool GLImageIOSurface::IsInUseByWindowServer() const {
 
 void GLImageIOSurface::DisableInUseByWindowServer() {
   disable_in_use_by_window_server_ = true;
-}
-
-void GLImageIOSurface::SetColorSpaceForYUVToRGBConversion(
-    const gfx::ColorSpace& color_space) {
-  DCHECK(color_space.IsValid());
-  DCHECK_NE(color_space, color_space.GetAsFullRangeRGB());
-  color_space_for_yuv_to_rgb_ = color_space;
-}
-
-void GLImageIOSurface::SetColorSpaceShallow(
-    const gfx::ColorSpace& color_space) {
-  GLImage::SetColorSpace(color_space);
 }
 
 base::ScopedCFTypeRef<IOSurfaceRef> GLImageIOSurface::io_surface() {
@@ -520,6 +430,7 @@ bool GLImageIOSurface::ValidFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::RGBA_F16:
     case gfx::BufferFormat::BGRA_1010102:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
@@ -527,7 +438,6 @@ bool GLImageIOSurface::ValidFormat(gfx::BufferFormat format) {
       return true;
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
-    case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::RGBA_1010102:
     case gfx::BufferFormat::YVU_420:
       return false;

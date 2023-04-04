@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,13 @@ namespace blink {
 
 namespace {
 
-class MFTestWebFrameClient : public frame_test_helpers::TestWebFrameClient {
+class MobileFriendlinessObserver : public WebLocalFrameObserver {
  public:
+  explicit MobileFriendlinessObserver(WebLocalFrame* frame)
+      : WebLocalFrameObserver(frame) {}
+
+  void OnFrameDetached() override {}
+
   void DidChangeMobileFriendliness(const MobileFriendliness& mf) override {
     mobile_friendliness_ = mf;
   }
@@ -73,24 +78,11 @@ class ScopedTimeTicksOverride {
 };
 
 class MobileFriendlinessCheckerTest : public testing::Test {
-  static void EvalMobileFriendliness(LocalFrameView* view,
-                                     int scroll_y_offset,
-                                     bool fixed_clock) {
+  static void EvalMobileFriendliness(LocalFrameView* view, bool fixed_clock) {
     DCHECK(view->GetFrame().IsLocalRoot());
     ScopedTimeTicksOverride clock(fixed_clock);
-    for (const Frame* frame = &view->GetFrame(); frame;
-         frame = frame->Tree().TraverseNext()) {
-      if (const auto* local_frame = DynamicTo<LocalFrame>(frame)) {
-        local_frame->View()->UpdateLifecycleToPrePaintClean(
-            DocumentUpdateReason::kTest);
-      }
-    }
-
-    // Scroll the view to specified offset
-    view->LayoutViewport()->SetScrollOffsetUnconditionally(
-        ScrollOffset(0, scroll_y_offset));
-
-    view->GetMobileFriendlinessChecker()->DidFinishLifecycleUpdate(*view);
+    view->UpdateAllLifecyclePhasesForTest();
+    view->GetMobileFriendlinessChecker()->ComputeNowForTesting();
   }
 
   static void ConfigureAndroidSettings(WebSettings* settings) {
@@ -99,10 +91,9 @@ class MobileFriendlinessCheckerTest : public testing::Test {
   }
 
   static std::unique_ptr<frame_test_helpers::WebViewHelper>
-  CreateMobileMetricsWebViewHelper(MFTestWebFrameClient& web_frame_client,
-                                   float device_scale) {
+  CreateMobileMetricsWebViewHelper(float device_scale) {
     auto helper = std::make_unique<frame_test_helpers::WebViewHelper>();
-    helper->Initialize(&web_frame_client, nullptr, ConfigureAndroidSettings);
+    helper->Initialize(nullptr, nullptr, ConfigureAndroidSettings);
     helper->GetWebView()->MainFrameWidget()->SetDeviceScaleFactorForTesting(
         device_scale);
     helper->Resize(gfx::Size(kDeviceWidth, kDeviceHeight));
@@ -117,6 +108,7 @@ class MobileFriendlinessCheckerTest : public testing::Test {
         .SetShrinksViewportContentToFit(true);
     helper->GetWebView()->GetPage()->GetSettings().SetViewportStyle(
         mojom::blink::ViewportStyle::kMobile);
+    helper->LoadAhem();
     return helper;
   }
 
@@ -127,40 +119,34 @@ class MobileFriendlinessCheckerTest : public testing::Test {
 
   MobileFriendliness CalculateMetricsForHTMLString(const std::string& html,
                                                    float device_scale = 1.0,
-                                                   int scroll_y_offset = 0,
                                                    bool fixed_clock = true) {
-    MFTestWebFrameClient web_frame_client;
-    {
-      std::unique_ptr<frame_test_helpers::WebViewHelper> helper(
-          CreateMobileMetricsWebViewHelper(web_frame_client, device_scale));
-      frame_test_helpers::LoadHTMLString(
-          helper->GetWebView()->MainFrameImpl(), html,
-          url_test_helpers::ToKURL("about:blank"));
-      EvalMobileFriendliness(
-          helper->GetWebView()->MainFrameImpl()->GetFrameView(),
-          scroll_y_offset, fixed_clock);
-    }
-    return web_frame_client.GetMobileFriendliness();
+    std::unique_ptr<frame_test_helpers::WebViewHelper> helper(
+        CreateMobileMetricsWebViewHelper(device_scale));
+    frame_test_helpers::LoadHTMLString(helper->GetWebView()->MainFrameImpl(),
+                                       html,
+                                       url_test_helpers::ToKURL("about:blank"));
+    MobileFriendlinessObserver mobile_friendliess_observer(
+        helper->GetWebView()->MainFrameImpl());
+    EvalMobileFriendliness(
+        helper->GetWebView()->MainFrameImpl()->GetFrameView(), fixed_clock);
+    return mobile_friendliess_observer.GetMobileFriendliness();
   }
 
   MobileFriendliness CalculateMetricsForFile(const std::string& path,
                                              float device_scale = 1.0,
-                                             int scroll_y_offset = 0,
                                              bool fixed_clock = true) {
-    MFTestWebFrameClient web_frame_client;
-    {
-      std::unique_ptr<frame_test_helpers::WebViewHelper> helper(
-          CreateMobileMetricsWebViewHelper(web_frame_client, device_scale));
-      url_test_helpers::RegisterMockedURLLoadFromBase(
-          WebString::FromUTF8(kBaseUrl), blink::test::CoreTestDataPath(),
-          WebString::FromUTF8(path));
-      frame_test_helpers::LoadFrame(helper->GetWebView()->MainFrameImpl(),
-                                    kBaseUrl + path);
-      EvalMobileFriendliness(
-          helper->GetWebView()->MainFrameImpl()->GetFrameView(),
-          scroll_y_offset, fixed_clock);
-    }
-    return web_frame_client.GetMobileFriendliness();
+    std::unique_ptr<frame_test_helpers::WebViewHelper> helper(
+        CreateMobileMetricsWebViewHelper(device_scale));
+    url_test_helpers::RegisterMockedURLLoadFromBase(
+        WebString::FromUTF8(kBaseUrl), blink::test::CoreTestDataPath(),
+        WebString::FromUTF8(path));
+    frame_test_helpers::LoadFrame(helper->GetWebView()->MainFrameImpl(),
+                                  kBaseUrl + path);
+    MobileFriendlinessObserver mobile_friendliess_observer(
+        helper->GetWebView()->MainFrameImpl());
+    EvalMobileFriendliness(
+        helper->GetWebView()->MainFrameImpl()->GetFrameView(), fixed_clock);
+    return mobile_friendliess_observer.GetMobileFriendliness();
   }
 };
 
@@ -207,30 +193,30 @@ TEST_F(MobileFriendlinessCheckerTest, DeviceWidthWithInitialScale05) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, AllowUserScalableWithSmallMaxZoom) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
     <head>
       <meta name="viewport" content="user-scalable=yes, maximum-scale=1.1">
     </head>
-  )");
+  )HTML");
   EXPECT_EQ(actual_mf.allow_user_zoom, false);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, AllowUserScalableWithLargeMaxZoom) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
     <head>
       <meta name="viewport" content="user-scalable=yes, maximum-scale=2.0">
     </head>
-  )");
+  )HTML");
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
 }
 
 TEST_F(MobileFriendlinessCheckerTest,
        AllowUserScalableWithLargeMaxZoomAndLargeInitialScale) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
     <head>
       <meta name="viewport" content="user-scalable=yes, maximum-scale=2.0, initial-scale=1.9">
     </head>
-  )");
+  )HTML");
   EXPECT_EQ(actual_mf.allow_user_zoom, false);
 }
 
@@ -245,7 +231,7 @@ TEST_F(MobileFriendlinessCheckerTest, UserZoom) {
 
 TEST_F(MobileFriendlinessCheckerTest, NoText) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(<body></body>)");
+      CalculateMetricsForHTMLString(R"HTML(<body></body>)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
   EXPECT_EQ(actual_mf.small_text_ratio, 0);
@@ -253,7 +239,7 @@ TEST_F(MobileFriendlinessCheckerTest, NoText) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, NoSmallFonts) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -264,7 +250,7 @@ TEST_F(MobileFriendlinessCheckerTest, NoSmallFonts) {
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
   EXPECT_EQ(actual_mf.small_text_ratio, 0);
@@ -272,7 +258,7 @@ TEST_F(MobileFriendlinessCheckerTest, NoSmallFonts) {
 
 TEST_F(MobileFriendlinessCheckerTest, NoSmallFontsWithDeviceScaleFactor) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(
+      CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -283,7 +269,7 @@ TEST_F(MobileFriendlinessCheckerTest, NoSmallFontsWithDeviceScaleFactor) {
     </div>
   </body>
 </html>
-)",
+)HTML",
                                     /*device_scale=*/2.0);
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
@@ -291,7 +277,7 @@ TEST_F(MobileFriendlinessCheckerTest, NoSmallFontsWithDeviceScaleFactor) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, OnlySmallFonts) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -302,7 +288,7 @@ TEST_F(MobileFriendlinessCheckerTest, OnlySmallFonts) {
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
@@ -310,7 +296,7 @@ TEST_F(MobileFriendlinessCheckerTest, OnlySmallFonts) {
 
 TEST_F(MobileFriendlinessCheckerTest, OnlySmallFontsWithDeviceScaleFactor) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(
+      CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -321,7 +307,7 @@ TEST_F(MobileFriendlinessCheckerTest, OnlySmallFontsWithDeviceScaleFactor) {
     </div>
   </body>
 </html>
-)",
+)HTML",
                                     /*device_scale=*/2.0);
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
@@ -329,7 +315,7 @@ TEST_F(MobileFriendlinessCheckerTest, OnlySmallFontsWithDeviceScaleFactor) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, MostlySmallFont) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -365,13 +351,13 @@ TEST_F(MobileFriendlinessCheckerTest, MostlySmallFont) {
     </div>
   </body>
 <html>
-)");
+)HTML");
   EXPECT_LT(actual_mf.small_text_ratio, 100);
   EXPECT_GT(actual_mf.small_text_ratio, 80);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, MostlySmallInSpan) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <div style="font-size: 12px">
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -382,13 +368,13 @@ TEST_F(MobileFriendlinessCheckerTest, MostlySmallInSpan) {
   </span>
   y
 </div>
-)");
+)HTML");
   EXPECT_LT(actual_mf.small_text_ratio, 100);
   EXPECT_GT(actual_mf.small_text_ratio, 80);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, MultipleDivs) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -406,13 +392,13 @@ TEST_F(MobileFriendlinessCheckerTest, MultipleDivs) {
     </div>
   </body>
 </html>
-)");
-  EXPECT_LT(actual_mf.small_text_ratio, 100);
-  EXPECT_GT(actual_mf.small_text_ratio, 68);
+)HTML");
+  EXPECT_LT(actual_mf.small_text_ratio, 90);
+  EXPECT_GT(actual_mf.small_text_ratio, 60);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, DontCountInvisibleSmallFontArea) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -426,14 +412,14 @@ TEST_F(MobileFriendlinessCheckerTest, DontCountInvisibleSmallFontArea) {
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.small_text_ratio, 0);
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ScaleZoomedLegibleFont) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=10">
@@ -442,7 +428,7 @@ TEST_F(MobileFriendlinessCheckerTest, ScaleZoomedLegibleFont) {
     Legible text in 50px.
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, true);
   EXPECT_EQ(actual_mf.viewport_initial_scale_x10, 100);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
@@ -450,7 +436,7 @@ TEST_F(MobileFriendlinessCheckerTest, ScaleZoomedLegibleFont) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ViewportZoomedOutIllegibleFont) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=0.5">
@@ -459,7 +445,7 @@ TEST_F(MobileFriendlinessCheckerTest, ViewportZoomedOutIllegibleFont) {
     Illegible text in 8px.
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.viewport_hardcoded_width, 480);
   EXPECT_EQ(actual_mf.viewport_initial_scale_x10, 5);
@@ -468,7 +454,7 @@ TEST_F(MobileFriendlinessCheckerTest, ViewportZoomedOutIllegibleFont) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TooWideViewportWidthIllegibleFont) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=960">
@@ -477,7 +463,7 @@ TEST_F(MobileFriendlinessCheckerTest, TooWideViewportWidthIllegibleFont) {
     Illegible text in 6px.
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
   EXPECT_EQ(actual_mf.viewport_hardcoded_width, 960);
@@ -485,46 +471,47 @@ TEST_F(MobileFriendlinessCheckerTest, TooWideViewportWidthIllegibleFont) {
 }
 
 TEST_F(MobileFriendlinessCheckerTest, CSSZoomedIllegibleFont) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body style="font-size: 12px; zoom:50%">
     Illegible text in 6px.
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_device_width, false);
   EXPECT_EQ(actual_mf.allow_user_zoom, true);
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, OnlySmallFontsClipped) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body style="font-size: 6px; clip: rect(0 0 0 0); position: absolute">
     Small font text.
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.small_text_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, NormalTextAndWideImage) {
   // Wide image forces Chrome to zoom out.
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
-  <body>
-    <img style="width:3000px; height:50px">
+  <body style="margin:0px">
+    <img style="width:720px; height:800px">
     <p style="font-size: 12pt">Normal font text.</p>
   </body>
 </html>
-)");
+)HTML");
+  // Automatic zoom-out makes text small and image fits in display.
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
-  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 50);
+  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, SmallTextByWideTable) {
   // Wide image forces Chrome to zoom out.
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body style="font-size: 12pt">
     <table>
@@ -536,59 +523,83 @@ TEST_F(MobileFriendlinessCheckerTest, SmallTextByWideTable) {
     </table>
   </body>
 </html>
-)");
+)HTML");
+  // Automatic zoom-out makes text small.
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
   EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest,
        NormalTextAndWideImageWithDeviceWidthViewport) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=device-width">
   </head>
   <body>
-    <img style="width:3000px; height:50px">
+    <img style="width:5000px; height:50px">
     <p style="font-size: 12pt">Normal font text.</p>
   </body>
 </html>
-)");
+)HTML");
+  // Automatic zoom-out makes text small and image fits in display.
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
+  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 10);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, ZIndex) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  </head>
+  <body style="margin:240px;font-size: 12pt">
+    <div style="z-index: 1">
+      hello
+      <div style="z-index: 10">
+        foo
+        <img style="width:5000px; height:380px">
+        <p>Normal font text.</p>
+      </div>
+    </div>
+  </body>
+</html>
+)HTML");
+  EXPECT_EQ(actual_mf.small_text_ratio, 0);
   EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 50);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, NormalTextAndWideImageWithInitialScale) {
   // initial-scale=1.0 prevents the automatic zoom out.
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
   </head>
-  <body>
-    <img style="width:3000px; height:50px">
+  <body style="margin: 0px">
+    <img style="width:3000px; height:240px">
     <p style="font-size: 9pt">Normal font text.</p>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.small_text_ratio, 0);
-  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 100);
+  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 50);
 }
 
 TEST_F(MobileFriendlinessCheckerTest,
        NormalTextAndWideImageWithInitialScaleAndDeviceScale) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(
+      CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
   </head>
-  <body>
-    <img style="width:3000px; height:50px">
+  <body style="margin: 0px">
+    <img style="width:3000px; height:240px">
     <p style="font-size: 6pt">Illegible font text.</p>
   </body>
 </html>
-)",
+)HTML",
                                     /*device_scale=*/2.0);
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
   EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 100);
@@ -597,7 +608,7 @@ TEST_F(MobileFriendlinessCheckerTest,
 // This test shows that text will grow with text-size-adjust: auto in a
 // fixed-width table.
 TEST_F(MobileFriendlinessCheckerTest, FixedWidthTableTextSizeAdjustAuto) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body>
     <table width="800">
@@ -610,14 +621,14 @@ TEST_F(MobileFriendlinessCheckerTest, FixedWidthTableTextSizeAdjustAuto) {
     </table>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.small_text_ratio, 0);
 }
 
 // This test shows that text remains small with text-size-adjust: none in a
 // fixed-width table.
 TEST_F(MobileFriendlinessCheckerTest, FixedWidthTableTextSizeAdjustNone) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body>
     <table width="800">
@@ -630,12 +641,12 @@ TEST_F(MobileFriendlinessCheckerTest, FixedWidthTableTextSizeAdjustNone) {
     </table>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.small_text_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TextNarrow) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=.25">
@@ -644,118 +655,176 @@ TEST_F(MobileFriendlinessCheckerTest, TextNarrow) {
     <pre>foo foo foo foo foo</pre>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TextTooWide) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      R"(
+      R"HTML(
 <html>
   <head>
+    <link rel="stylesheet" type="text/css" href="/fonts/ahem.css" />
     <meta name="viewport" content="initial-scale=1.0">
   </head>
   <body>
-    <pre>)" +
+    <pre style="font: 30px Ahem; line-height: 1">)HTML" +
       std::string(10000, 'a') +
-      R"(</pre>
+      R"HTML(</pre>
   </body>
 </html>
-)");
-  EXPECT_NE(actual_mf.text_content_outside_viewport_percentage, 0);
+)HTML");
+  EXPECT_GT(actual_mf.text_content_outside_viewport_percentage, 20);
 }
 
-TEST_F(MobileFriendlinessCheckerTest, TextTooWideAbsolutePositioning) {
+TEST_F(MobileFriendlinessCheckerTest, TextAbsolutePositioning) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      R"(
+      R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
   </head>
-  <body>
-    <pre style="position:absolute; left:2000px">a</pre>
+  <body style="font-size: 12px">
+    <pre style="position:absolute; left:2000px">)HTML" +
+      std::string(10000, 'a') +
+      R"HTML(</pre>
   </body>
 </html>
-)");
-  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 317);
+)HTML");
+  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 15);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, ImageAbsolutePositioning) {
+  MobileFriendliness actual_mf_full_out = CalculateMetricsForHTMLString(
+      R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0">
+  </head>
+  <body style="margin: 0px">
+    <img style="width:480px; height:800px; position:absolute; left:480px">
+  </body>
+</html>
+)HTML");
+  EXPECT_EQ(actual_mf_full_out.text_content_outside_viewport_percentage, 100);
+
+  MobileFriendliness actual_mf_half_out = CalculateMetricsForHTMLString(
+      R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0">
+  </head>
+  <body style="margin: 0px">
+    <img style="width:480px; height:800px; position:absolute; left:240px">
+  </body>
+</html>
+)HTML");
+  EXPECT_EQ(actual_mf_half_out.text_content_outside_viewport_percentage, 50);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, SmallTextOutsideViewportCeiling) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
+      R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0">
+  </head>
+  <body style="font-size: 12px">
+    <pre style="position:absolute; left:2000px">x</pre>
+  </body>
+</html>
+)HTML");
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 1);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TextTooWideOverflowXHidden) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      R"(
+      R"HTML(
 <html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
   <body>
-    <pre style="overflow-x:hidden">)" +
-      std::string(10000, 'a') + R"(</pre>
+    <pre style="overflow-x:hidden; font-size:12px">)HTML" +
+      std::string(10000, 'a') + R"HTML(</pre>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TextTooWideHidden) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      R"(
+      R"HTML(
 <html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
   <body>
-    <pre style="overflow:hidden">)" +
+    <pre style="overflow:hidden">)HTML" +
       std::string(10000, 'a') +
-      R"(</pre>
+      R"HTML(</pre>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TextTooWideHiddenInDiv) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      R"(
+      R"HTML(
 <html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
   <body>
-    <div style="overflow:hidden">
-      <pre>)" +
+    <div style="overflow:hidden; font-size: 12px">
+      <pre>)HTML" +
       std::string(10000, 'a') +
-      R"(
+      R"HTML(
       </pre>
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TextTooWideHiddenInDivDiv) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      R"(
+      R"HTML(
 <html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
   <body>
     <div style="overflow:hidden">
       <div>
-        <pre>)" +
+        <pre>)HTML" +
       std::string(10000, 'a') +
-      R"(
+      R"HTML(
         </pre>
       <div>
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ImageNarrow) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body>
     <img style="width:200px; height:50px">
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ImageTooWide) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
@@ -764,57 +833,88 @@ TEST_F(MobileFriendlinessCheckerTest, ImageTooWide) {
     <img style="width:2000px; height:50px">
   </body>
 </html>
-)");
-  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 319);
+)HTML");
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 20);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, ImageTooWide100) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0">
+  </head>
+  <body style="margin:0px;">
+    <img style="width:960px; height:800px">
+  </body>
+</html>
+)HTML");
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 100);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, WideImageClipped) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0">
+  </head>
+  <body>
+    <div style="overflow: hidden">
+      <img style="width:2000px; height:50px">
+    </div>
+  </body>
+</html>
+)HTML");
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ImageTooWideTwoImages) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
-    <meta name="viewport" content="initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
   </head>
-  <body style="width:4000px">
+  <body style="width:4036px">
     <img style="width:2000px; height:50px">
     <img style="width:2000px; height:50px">
   </body>
 </html>
-)");
-  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 735);
+)HTML");
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 46);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ImageTooWideAbsolutePosition) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0">
   </head>
   <body>
-    <img style="width:100px; height:100px; position:absolute; left:2000px">
+    <img style="width:480px; height:800px; position:absolute; left:2000px">
   </body>
 </html>
-)");
-  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 338);
+)HTML");
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ImageTooWideDisplayNone) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body>
     <img style="width:2000px; height:50px; display:none">
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ScaleTextOutsideViewport) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
+    <link rel="stylesheet" type="text/css" href="/fonts/ahem.css" />
     <meta name="viewport" content="minimum-scale=1, initial-scale=3">
   </head>
-  <body style="font-size: 76px; width: 480">
+  <body style="font: 76px Ahem; width: 480">
     foo foo foo foo foo foo foo foo foo foo
     foo foo foo foo foo foo foo foo foo foo
     foo foo foo foo foo foo foo foo foo foo
@@ -827,19 +927,22 @@ TEST_F(MobileFriendlinessCheckerTest, ScaleTextOutsideViewport) {
     foo foo foo foo foo foo foo foo foo foo
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.viewport_initial_scale_x10, 30);
-  EXPECT_GE(actual_mf.text_content_outside_viewport_percentage, 100.0);
+  EXPECT_GT(actual_mf.text_content_outside_viewport_percentage, 90);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, ScrollerOutsideViewport) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
+    <link rel="stylesheet" type="text/css" href="/fonts/ahem.css" />
     <style>
+      body {
+        margin: 0px;
+      }
       div.scrollmenu {
         background-color: #333;
-        overflow: auto;
         white-space: nowrap;
       }
       div.scrollmenu a {
@@ -848,9 +951,54 @@ TEST_F(MobileFriendlinessCheckerTest, ScrollerOutsideViewport) {
         padding: 14px;
       }
     </style>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0 minimum-scale=1.0">
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
   </head>
-  <body style="font-size: 18px">
+  <body style="font: 40px/1 Ahem; line-height: 1; height: 200px">
+    <div class="scrollmenu">
+      <a href="#1">First text</a>
+      <a href="#2">Second text</a>
+      <a href="#3">Third text</a>
+      <a href="#4">Fourth text</a>
+      <a href="#5">Fifth text</a>
+      <a href="#6">Sixth text</a>
+      <a href="#7">Seventh text</a>
+      <a href="#8">Eighth text</a>
+      <a href="#9">Ninth text</a>
+      <a href="#10">Tenth text</a>
+      <a href="#11">Eleventh text</a>
+      <a href="#12">Twelveth text</a>
+    </div>
+  </body>
+</html>
+)HTML");
+  // the viewport
+  EXPECT_GT(actual_mf.text_content_outside_viewport_percentage, 10);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, SubScroller) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/fonts/ahem.css" />
+    <style>
+      body {
+        margin: 0px;
+      }
+      div.scrollmenu {
+        width: 480px;
+        background-color: #333;
+        overflow: scroll;
+        white-space: nowrap;
+      }
+      div.scrollmenu a {
+        display: inline-block;
+        color: white;
+        padding: 14px;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 40px/1 Ahem; line-height: 1">
   <div class="scrollmenu">
     <a href="#1">First text</a>
     <a href="#2">Second text</a>
@@ -862,16 +1010,289 @@ TEST_F(MobileFriendlinessCheckerTest, ScrollerOutsideViewport) {
     <a href="#8">Eighth text</a>
     <a href="#9">Ninth text</a>
     <a href="#10">Tenth text</a>
+    <a href="#11">Eleventh text</a>
+    <a href="#12">Twelveth text</a>
   </div>
   </body>
 </html>
-)");
-  // the viewport
-  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0.0);
+)HTML");
+  // Fits within the viewport by scrollbar.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 0);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, SubScrollerHalfOutByMargin) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/fonts/ahem.css" />
+    <style>
+      body {
+        margin: 0px;
+      }
+      div.scrollmenu {
+        margin-left: 240px;
+        width: 480px;
+        height: 800px;
+        background-color: #333;
+        overflow: scroll;
+        white-space: nowrap;
+      }
+      div.scrollmenu a {
+        display: inline-block;
+        color: white;
+        padding: 14px;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 40px/1 Ahem; line-height: 1">
+  <div class="scrollmenu">
+    <a href="#1">First text</a>
+    <a href="#2">Second text</a>
+    <a href="#3">Third text</a>
+    <a href="#4">Fourth text</a>
+    <a href="#5">Fifth text</a>
+    <a href="#6">Sixth text</a>
+    <a href="#7">Seventh text</a>
+    <a href="#8">Eighth text</a>
+    <a href="#9">Ninth text</a>
+    <a href="#10">Tenth text</a>
+    <a href="#11">Eleventh text</a>
+    <a href="#12">Twelveth text</a>
+  </div>
+  </body>
+</html>
+)HTML");
+  // Fits within the viewport by scrollbar.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 50);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, SubScrollerOutByTranslate) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/fonts/ahem.css" />
+    <style>
+      body {
+        margin: 0px;
+      }
+      div.scrollmenu {
+        transform: translate(360px, 0px);
+        width: 480px;
+        height: 800px;
+        background-color: #333;
+        overflow: scroll;
+        white-space: nowrap;
+      }
+      div.scrollmenu a {
+        display: inline-block;
+        color: white;
+        padding: 14px;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 40px/1 Ahem; line-height: 1">
+  <div class="scrollmenu">
+    <a href="#1">First text</a>
+    <a href="#2">Second text</a>
+    <a href="#3">Third text</a>
+    <a href="#4">Fourth text</a>
+    <a href="#5">Fifth text</a>
+    <a href="#6">Sixth text</a>
+    <a href="#7">Seventh text</a>
+    <a href="#8">Eighth text</a>
+    <a href="#9">Ninth text</a>
+    <a href="#10">Tenth text</a>
+    <a href="#11">Eleventh text</a>
+    <a href="#12">Twelveth text</a>
+  </div>
+  </body>
+</html>
+)HTML");
+  // Fits within the viewport by scrollbar.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 75);
+}
+
+/*
+ * TODO(kumagi): Get precise paint offset of rtl environment is hard.
+TEST_F(MobileFriendlinessCheckerTest, SubScrollerGoesLeft) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0px;
+        direction: rtl;
+      }
+      div.scroller {
+        margin-right: 360px;
+        width: 480px;
+        height: 800px;
+        overflow: scroll;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0
+minimum-scale=1.0">
+  </head>
+  <body style="font: 40px/1 Ahem; line-height: 1">
+    <div class="scroller">
+      <img style="width: 9000px; height: 1px">
+    </div>
+  </body>
+</html>
+)HTML");
+  // Right to left language scrollbar goes to left.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 75);
+}
+*/
+
+TEST_F(MobileFriendlinessCheckerTest, SubScrollerFitsWithinViewport) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0px;
+      }
+      div.scroller1 {
+        width: 481px;
+        height: 1px;
+        overflow: scroll;
+      }
+      div.scroller2 {
+        width: 10px;
+        height: 800px;
+        overflow: scroll;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 40px/1 Ahem; line-height: 1">
+    <div class="scroller1">
+      <img style="width: 9000px; height: 1px">
+      This div goes out of viewport width 1px.
+    </div>
+    <div class="scroller2">
+      <img style="width: 9000px; height: 1px">
+      This div fits within viewport width.
+    </div>
+  </body>
+</html>
+)HTML");
+  // Only scroller1 gets out of viewport width.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 1);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, SubScrollerTwice) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0px;
+      }
+      div.scroller {
+        margin-left: 240px;
+        width: 480px;
+        height: 400px;
+        overflow: scroll;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 40px/1 Ahem; line-height: 1">
+    <div class="scroller">
+      <img style="width: 9000px; height: 1px">
+      hello this is a pen.
+    </div>
+    <div class="scroller">
+      <img style="width: 9000px; height: 1px">
+    </div>
+  </body>
+</html>
+)HTML");
+  // Both of subscrollers get out of viewport width.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 50);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, SubScrollerInSubScroller) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0px;
+      }
+      div.scroller {
+        width: 480px;
+        height: 200px;
+        overflow: scroll;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 20px/1; line-height: 1">
+    <div class="scroller" style="margin-left: 240px;">
+      240px*200px gets out of viewport.
+      <img style="width: 9000px; height: 1px">
+    </div>
+    <div class="scroller" style="margin-left: 480px;">
+      480px*200px gets out of viewport.
+      <img style="width: 9000px; height: 1px">
+    </div>
+    <div class="scroller" style="margin-left: 240px;">
+      240px*200px gets out of viewport.
+      <img style="width: 9000px; height: 1px">
+      <div class="scroller">
+        Contents inside of scroller will be ignored from the
+        text_content_outside_viewport_percentage metrics.
+        <img style="width: 9000px; height: 1px">
+      </div>
+    </div>
+    <div class="scroller" style="margin-left: 480px;">
+      480px*200px gets out of viewport.
+      Hereby (240px*2)*400px + (480px*2)*400px gets out of viewport(480px*800px),
+      This is exactly 0.75. Then text_content_outside_viewport_percentage should be 75.
+      <img style="width: 9000px; height: 1px">
+      <div class="scroller">
+        <img style="width: 9000px; height: 1px">
+        <div class="scroller">
+          <img style="width: 9000px; height: 1px">
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+)HTML");
+  // Fits within the viewport by scrollbar.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 75);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, ScrollableLayoutView) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <style>
+      body {
+        margin: 0px;
+        width: 960px;
+        height: 800px;
+      }
+    </style>
+    <meta name="viewport" content="width=480px, initial-scale=1.0 minimum-scale=1.0">
+  </head>
+  <body style="font: 20px/1; line-height: 1">
+    <img style="width: 600px; height: 800px">
+  </body>
+</html>
+)HTML");
+  // Fits within the viewport by scrollbar.
+  EXPECT_EQ(actual_mf.text_content_outside_viewport_percentage, 25);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, SingleTapTarget) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -882,13 +1303,13 @@ TEST_F(MobileFriendlinessCheckerTest, SingleTapTarget) {
     </a>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TwoImageTapTargetsClose) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      base::StringPrintf(R"(
+      base::StringPrintf(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -898,7 +1319,7 @@ TEST_F(MobileFriendlinessCheckerTest, TwoImageTapTargetsClose) {
     <img onclick="alert('clicked');" src="%s">
   </body>
 </html>
-)",
+)HTML",
                          kInlineRedDot, kInlineRedDot));
   // Two onclick images next to each other are both bad tap targets.
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
@@ -906,7 +1327,7 @@ TEST_F(MobileFriendlinessCheckerTest, TwoImageTapTargetsClose) {
 
 TEST_F(MobileFriendlinessCheckerTest, HiddenBadTapTargets) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(base::StringPrintf(R"(
+      CalculateMetricsForHTMLString(base::StringPrintf(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=viewport-width">
@@ -918,14 +1339,14 @@ TEST_F(MobileFriendlinessCheckerTest, HiddenBadTapTargets) {
     </div>
   </body>
 </html>
-)"));
+)HTML"));
   // Two too closed links are bad but hidden, then no BadTapTargets.
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, VisibleBadTapTargets) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(base::StringPrintf(R"(
+      CalculateMetricsForHTMLString(base::StringPrintf(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=viewport-width">
@@ -937,14 +1358,14 @@ TEST_F(MobileFriendlinessCheckerTest, VisibleBadTapTargets) {
     </div>
   </body>
 </html>
-)"));
+)HTML"));
   // Two too closed links are bad and visible.
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, YVisibleXClipBadTapTargets) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(base::StringPrintf(R"(
+      CalculateMetricsForHTMLString(base::StringPrintf(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=viewport-width">
@@ -958,14 +1379,33 @@ TEST_F(MobileFriendlinessCheckerTest, YVisibleXClipBadTapTargets) {
     </div>
   </body>
 </html>
-)"));
+)HTML"));
   // Two too closed links are bad and visible.
+  EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, BodyOnClickBadTapTargets) {
+  MobileFriendliness actual_mf =
+      CalculateMetricsForHTMLString(base::StringPrintf(R"HTML(
+<html>
+  <head>
+    <meta name="viewport" content="width=viewport-width">
+  </head>
+  <body style="font-size: 12pt;" onclick="javascript:alert(0);">
+    <div>
+      <a href="about:blank">a</a><br>
+      <a href="about:blank">b</a>
+    </div>
+  </body>
+</html>
+)HTML"));
+  // Two too closed links are bad.
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TwoImageTapTargetsFar) {
   MobileFriendliness actual_mf = CalculateMetricsForHTMLString(
-      base::StringPrintf(R"(
+      base::StringPrintf(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -976,14 +1416,14 @@ TEST_F(MobileFriendlinessCheckerTest, TwoImageTapTargetsFar) {
     <img onclick="alert('clicked');" src="%s">
   </body>
 </html>
-)",
+)HTML",
                          kInlineRedDot, kInlineRedDot));
   // Two onclick images aren't a problem if there's some distance between them.
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, NoBadTapTarget) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -997,13 +1437,13 @@ TEST_F(MobileFriendlinessCheckerTest, NoBadTapTarget) {
     </button>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, NoBadTapTargetWithDeviceScaleFactor) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(
+      CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1017,14 +1457,14 @@ TEST_F(MobileFriendlinessCheckerTest, NoBadTapTargetWithDeviceScaleFactor) {
     </button>
   </body>
 </html>
-)",
+)HTML",
                                     /*device_scale=*/2.0);
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, BadTapTargetWithDeviceScaleFactor) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(
+      CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1038,13 +1478,13 @@ TEST_F(MobileFriendlinessCheckerTest, BadTapTargetWithDeviceScaleFactor) {
     </button>
   </body>
 </html>
-)",
+)HTML",
                                     /*device_scale=*/4.0);
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, BadTapTargetWithAutoZoomOut) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <body style="font-size: 18px">
     <img style="width:30000px; height:50px">
@@ -1056,12 +1496,12 @@ TEST_F(MobileFriendlinessCheckerTest, BadTapTargetWithAutoZoomOut) {
     </button>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsVertical) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1079,12 +1519,33 @@ TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsVertical) {
     </a>
   </body>
 </html>
-)");
+)HTML");
+  EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 50);
+}
+
+TEST_F(MobileFriendlinessCheckerTest, EntireImageTagIsTapTarget) {
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
+<html>
+  <head>
+    <Meta Name="Viewport" Content="Width=480, initial-scale=1">
+  </head>
+  <body style="font-size: 18px">
+    <a href="about:blank">
+      <img style="width: 400px;height: 400px; margin: 0px">
+    </a>
+    <a href="about:blank">
+      <div style="width: 10px;height: 10px; margin: 0px">
+        A
+      </div>
+    </a>
+  </body>
+</html>
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 50);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsVerticalEventListener) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1099,12 +1560,12 @@ TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsVerticalEventListener) {
     </script>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 50);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsVerticalSamePoint) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1127,12 +1588,12 @@ TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsVerticalSamePoint) {
     </a>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 34);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsHorizontal) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1150,12 +1611,12 @@ TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsHorizontal) {
     </a>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 50);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsHorizontalSamePoint) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1178,12 +1639,12 @@ TEST_F(MobileFriendlinessCheckerTest, TooCloseTapTargetsHorizontalSamePoint) {
     </a>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 34);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, GridGoodTargets3X3) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1242,12 +1703,12 @@ TEST_F(MobileFriendlinessCheckerTest, GridGoodTargets3X3) {
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, GridBadTargets3X3) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1306,12 +1767,12 @@ TEST_F(MobileFriendlinessCheckerTest, GridBadTargets3X3) {
     </div>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, FormTapTargets) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1323,12 +1784,12 @@ TEST_F(MobileFriendlinessCheckerTest, FormTapTargets) {
     </form>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 50);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, InvisibleTapTargetWillBeIgnored) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1342,12 +1803,12 @@ TEST_F(MobileFriendlinessCheckerTest, InvisibleTapTargetWillBeIgnored) {
     </form>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 0);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, BadTapTargetWithPositionAbsolute) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1361,13 +1822,13 @@ TEST_F(MobileFriendlinessCheckerTest, BadTapTargetWithPositionAbsolute) {
     </button>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TapTargetTimeout) {
   MobileFriendliness actual_mf =
-      CalculateMetricsForHTMLString(R"(
+      CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1391,17 +1852,58 @@ TEST_F(MobileFriendlinessCheckerTest, TapTargetTimeout) {
     <button>
       f
     </button>
+    <button>
+      g
+    </button>
+    <button>
+      h
+    </button>
+    <button>
+      i
+    </button>
+    <button>
+      j
+    </button>
+    <button>
+      k
+    </button>
+    <button>
+      l
+    </button>
+    <button>
+      m
+    </button>
+    <button>
+      n
+    </button>
+    <button>
+      o
+    </button>
+    <button>
+      p
+    </button>
+    <button>
+      q
+    </button>
+    <button>
+      r
+    </button>
+    <button>
+      s
+    </button>
+    <button>
+      t
+    </button>
   </body>
 </html>
-)",
+)HTML",
                                     /*device_scale=*/1.0,
-                                    /*scroll_y_offset=*/0,
                                     /*fixed_clock=*/false);
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, -2);
 }
 
 TEST_F(MobileFriendlinessCheckerTest, TapTargetPositionFixed) {
-  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"(
+  MobileFriendliness actual_mf = CalculateMetricsForHTMLString(R"HTML(
 <html>
   <head>
     <meta name="viewport" content="width=480, initial-scale=1">
@@ -1411,11 +1913,11 @@ TEST_F(MobileFriendlinessCheckerTest, TapTargetPositionFixed) {
     <button style="position: fixed; bottom: 10; right: 100">fixed</button>
   </body>
 </html>
-)");
+)HTML");
   EXPECT_EQ(actual_mf.bad_tap_targets_ratio, 100);
 }
 
-TEST_F(MobileFriendlinessCheckerTest, IFrameTest) {
+TEST_F(MobileFriendlinessCheckerTest, IFrame) {
   url_test_helpers::RegisterMockedURLLoadFromBase(
       WebString::FromUTF8(kBaseUrl), blink::test::CoreTestDataPath(),
       WebString::FromUTF8("visible_iframe.html"));

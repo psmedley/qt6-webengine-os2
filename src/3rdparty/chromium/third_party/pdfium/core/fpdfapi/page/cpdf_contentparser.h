@@ -7,15 +7,17 @@
 #ifndef CORE_FPDFAPI_PAGE_CPDF_CONTENTPARSER_H_
 #define CORE_FPDFAPI_PAGE_CPDF_CONTENTPARSER_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <set>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_streamcontentparser.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
-#include "core/fxcrt/maybe_owned.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 class CPDF_AllStates;
 class CPDF_Array;
@@ -52,14 +54,27 @@ class CPDF_ContentParser {
     kComplete,
   };
 
+  // TODO(thestig): Evaluate fxcrt::MaybeOwned usage, and see if that can be
+  // replaced with absl::variant<pdfium::span<const uint8_t>, OwnedData>.
+  struct OwnedData {
+    OwnedData(std::unique_ptr<uint8_t, FxFreeDeleter> buffer, uint32_t size);
+    ~OwnedData();
+
+    std::unique_ptr<uint8_t, FxFreeDeleter> buffer;
+    uint32_t size;
+  };
+
   Stage GetContent();
   Stage PrepareContent();
   Stage Parse();
   Stage CheckClip();
 
-  void HandlePageContentStream(CPDF_Stream* pStream);
-  bool HandlePageContentArray(CPDF_Array* pArray);
+  void HandlePageContentStream(const CPDF_Stream* pStream);
+  bool HandlePageContentArray(const CPDF_Array* pArray);
   void HandlePageContentFailure();
+
+  bool is_owned() const { return m_Data.index() == 1; }
+  pdfium::span<const uint8_t> GetData() const;
 
   Stage m_CurrentStage;
   UnownedPtr<CPDF_PageObjectHolder> const m_pObjectHolder;
@@ -67,9 +82,8 @@ class CPDF_ContentParser {
   RetainPtr<CPDF_StreamAcc> m_pSingleStream;
   std::vector<RetainPtr<CPDF_StreamAcc>> m_StreamArray;
   std::vector<uint32_t> m_StreamSegmentOffsets;
-  MaybeOwned<uint8_t, FxFreeDeleter> m_pData;
+  absl::variant<pdfium::span<const uint8_t>, OwnedData> m_Data;
   uint32_t m_nStreams = 0;
-  uint32_t m_Size = 0;
   uint32_t m_CurrentOffset = 0;
   std::set<const uint8_t*> m_ParsedSet;  // Only used when parsing pages.
 

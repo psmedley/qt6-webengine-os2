@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,18 +27,14 @@
 
 class SkCanvas;
 
-namespace gpu {
-namespace raster {
+namespace gpu::raster {
 class RasterImplementation;
 class RasterImplementationGLES;
-}  // namespace raster
-}  // namespace gpu
+}  // namespace gpu::raster
 
-namespace base {
-namespace trace_event {
+namespace base::trace_event {
 class TracedValue;
-}
-}
+}  // namespace base::trace_event
 
 namespace cc {
 
@@ -91,8 +87,8 @@ class CC_PAINT_EXPORT DisplayItemList
     size_t offset = paint_op_buffer_.next_op_offset();
     if (usage_hint_ == kTopLevelDisplayItemList)
       offsets_.push_back(offset);
-    const T* op = paint_op_buffer_.push<T>(std::forward<Args>(args)...);
-    DCHECK(op->IsValid());
+    const T& op = paint_op_buffer_.push<T>(std::forward<Args>(args)...);
+    DCHECK(op.IsValid());
     return offset;
   }
 
@@ -149,7 +145,9 @@ class CC_PAINT_EXPORT DisplayItemList
   absl::optional<DirectlyCompositedImageResult>
   GetDirectlyCompositedImageResult() const;
 
-  int num_slow_paths() const { return paint_op_buffer_.num_slow_paths(); }
+  int num_slow_paths_up_to_min_for_MSAA() const {
+    return paint_op_buffer_.num_slow_paths_up_to_min_for_MSAA();
+  }
   bool HasNonAAPaint() const { return paint_op_buffer_.HasNonAAPaint(); }
 
   // This gives the total number of PaintOps.
@@ -173,7 +171,9 @@ class CC_PAINT_EXPORT DisplayItemList
   void EmitTraceSnapshot() const;
   void GenerateDiscardableImagesMetadata();
 
-  gfx::Rect VisualRectForTesting(int index) { return visual_rects_[index]; }
+  gfx::Rect VisualRectForTesting(int index) {
+    return visual_rects_[static_cast<size_t>(index)];
+  }
 
   // Generate a PaintRecord from this DisplayItemList, leaving |this| in
   // an empty state.
@@ -183,7 +183,7 @@ class CC_PAINT_EXPORT DisplayItemList
   // indicates the maximum number of draw ops we consider when determining if a
   // rectangle is solid color.
   bool GetColorIfSolidInRect(const gfx::Rect& rect,
-                             SkColor* color,
+                             SkColor4f* color,
                              int max_ops_to_analyze = 1);
 
   std::string ToString() const;

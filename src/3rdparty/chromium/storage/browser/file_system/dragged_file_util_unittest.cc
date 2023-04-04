@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,9 @@
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/test/async_file_test_helper.h"
 #include "storage/browser/test/file_system_test_file_set.h"
+#include "storage/browser/test/mock_quota_manager.h"
+#include "storage/browser/test/mock_quota_manager_proxy.h"
+#include "storage/browser/test/mock_special_storage_policy.h"
 #include "storage/browser/test/test_file_system_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -107,8 +110,16 @@ class DraggedFileUtilTest : public testing::Test {
     // root paths) as dropped files.
     SimulateDropFiles();
 
-    file_system_context_ = CreateFileSystemContextForTesting(
-        /*quota_manager_proxy=*/nullptr, partition_dir_.GetPath());
+    base::FilePath partition_path = partition_dir_.GetPath();
+    quota_manager_ = base::MakeRefCounted<storage::MockQuotaManager>(
+        /*is_incognito=*/false, partition_path,
+        base::ThreadTaskRunnerHandle::Get(),
+        base::MakeRefCounted<storage::MockSpecialStoragePolicy>());
+    quota_manager_proxy_ = base::MakeRefCounted<storage::MockQuotaManagerProxy>(
+        quota_manager_.get(), base::ThreadTaskRunnerHandle::Get());
+    // Prepare file system.
+    file_system_context_ = storage::CreateFileSystemContextForTesting(
+        quota_manager_proxy_.get(), partition_path);
 
     isolated_context()->AddReference(filesystem_id_);
   }
@@ -274,9 +285,11 @@ class DraggedFileUtilTest : public testing::Test {
 
   base::ScopedTempDir data_dir_;
   base::ScopedTempDir partition_dir_;
-  base::test::SingleThreadTaskEnvironment task_environment_{
-      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::MainThreadType::IO};
   std::string filesystem_id_;
+  scoped_refptr<storage::MockQuotaManager> quota_manager_;
+  scoped_refptr<storage::MockQuotaManagerProxy> quota_manager_proxy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   std::map<base::FilePath, base::FilePath> toplevel_root_map_;
   std::unique_ptr<DraggedFileUtil> file_util_;
@@ -476,6 +489,12 @@ TEST_F(DraggedFileUtilTest, CopyOutDirectoryTest) {
   }
 }
 
+// TODO(https://crbug.com/702990): Remove this test once last_access_time has
+// been removed after PPAPI has been deprecated. Fuchsia does not support touch,
+// which breaks this test that relies on it. Since PPAPI is being deprecated,
+// this test is excluded from the Fuchsia build.
+// See https://crbug.com/1077456 for details.
+#if !BUILDFLAG(IS_FUCHSIA)
 TEST_F(DraggedFileUtilTest, TouchTest) {
   for (size_t i = 0; i < kRegularFileSystemTestCaseSize; ++i) {
     const FileSystemTestCaseRecord& test_case = kRegularFileSystemTestCases[i];
@@ -501,6 +520,7 @@ TEST_F(DraggedFileUtilTest, TouchTest) {
     EXPECT_EQ(last_modified_time.ToTimeT(), info.last_modified.ToTimeT());
   }
 }
+#endif  // !BUILDFLAG(IS_FUCHSIA)
 
 TEST_F(DraggedFileUtilTest, TruncateTest) {
   for (size_t i = 0; i < kRegularFileSystemTestCaseSize; ++i) {
@@ -592,6 +612,10 @@ TEST_F(DraggedFileUtilTest, EnumerateRecursivelyTest) {
           base::FilePath(FILE_PATH_LITERAL("dir a/dir d/dir e/dir g/file 3"))
               .NormalizePathSeparators(),
           base::FilePath(FILE_PATH_LITERAL("dir a/dir d/dir e/dir h"))
+              .NormalizePathSeparators(),
+          base::FilePath(FILE_PATH_LITERAL("dir a/dir d/dir e/dir h/file 0"))
+              .NormalizePathSeparators(),
+          base::FilePath(FILE_PATH_LITERAL("dir a/dir d/dir e/dir h/file 1"))
               .NormalizePathSeparators()));
 }
 

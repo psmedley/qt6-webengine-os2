@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,17 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/assistant_ui_action_delegate.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/assistant_field_trial_util.h"
 #include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/onboarding_result.h"
+#include "components/autofill_assistant/browser/preference_manager.h"
+#include "components/autofill_assistant/browser/public/headless_script_controller.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/starter.h"
 #include "components/autofill_assistant/browser/starter_platform_delegate.h"
 #include "components/autofill_assistant/browser/trigger_context.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -76,14 +79,22 @@ class StarterDelegateAndroid
   void HideOnboarding() override;
   bool GetProactiveHelpSettingEnabled() const override;
   void SetProactiveHelpSettingEnabled(bool enabled) override;
-  bool GetMakeSearchesAndBrowsingBetterEnabled() const override;
   bool GetIsLoggedIn() override;
+  bool GetIsSupervisedUser() override;
+  bool GetIsAllowedForMachineLearning() override;
   bool GetIsCustomTab() const override;
   bool GetIsWebLayer() const override;
   bool GetIsTabCreatedByGSA() const override;
   std::unique_ptr<AssistantFieldTrialUtil> CreateFieldTrialUtil() override;
   bool IsAttached() override;
+  const CommonDependencies* GetCommonDependencies() const override;
+  const PlatformDependencies* GetPlatformDependencies() const override;
   base::WeakPtr<StarterPlatformDelegate> GetWeakPtr() override;
+
+  // Returns the `PreferenceManager` used to read and write Assistant-related
+  // prefs.
+  const PreferenceManager& GetPreferenceManager() const;
+  PreferenceManager& GetPreferenceManager();
 
   // Called by Java to start an autofill-assistant flow for an incoming intent.
   void Start(
@@ -123,14 +134,20 @@ class StarterDelegateAndroid
  private:
   friend class content::WebContentsUserData<StarterDelegateAndroid>;
   StarterDelegateAndroid(content::WebContents* web_contents,
-                         std::unique_ptr<Dependencies> dependencies);
+                         std::unique_ptr<DependenciesAndroid> dependencies);
 
   void CreateJavaDependenciesIfNecessary();
+
+  void HeadlessControllerDoneCallback(
+      HeadlessScriptController::ScriptResult result);
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
   base::WeakPtr<Starter> starter_;
   // Contains AssistantStaticDependencies which do not change.
-  const std::unique_ptr<const Dependencies> dependencies_;
+  const std::unique_ptr<const DependenciesAndroid> dependencies_;
+  PreferenceManager preference_manager_;
+  std::unique_ptr<HeadlessScriptController> headless_script_controller_;
+  std::unique_ptr<AssistantUiActionDelegate> assistant_ui_delegate_;
   // Can change based on activity attachment.
   base::android::ScopedJavaGlobalRef<jobject> java_dependencies_;
 

@@ -36,6 +36,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
+#include "third_party/blink/public/mojom/render_accessibility.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/accessibility/scoped_blink_ax_event_intent.h"
@@ -48,6 +49,7 @@
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/events/event_util.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -59,7 +61,6 @@
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/forms/listed_element.h"
 #include "third_party/blink/renderer/core/html/html_area_element.h"
-#include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
@@ -106,6 +107,7 @@
 #include "ui/accessibility/ax_enums.mojom-blink.h"
 #include "ui/accessibility/ax_event.h"
 #include "ui/accessibility/ax_role_properties.h"
+#include "ui/accessibility/mojom/ax_relative_bounds.mojom-blink.h"
 
 // Prevent code that runs during the lifetime of the stack from altering the
 // document lifecycle. Usually doc is the same as document_, but it can be
@@ -171,7 +173,7 @@ bool IsActive(Document& document) {
 bool HasAriaCellRole(Element* elem) {
   DCHECK(elem);
   const AtomicString& role_str = elem->FastGetAttribute(html_names::kRoleAttr);
-  if (role_str.IsEmpty())
+  if (role_str.empty())
     return false;
 
   return ui::IsCellOrTableHeader(AXObject::AriaRoleStringToRoleEnum(role_str));
@@ -277,6 +279,13 @@ bool IsTextRelevantForAccessibility(const LayoutText& layout_text) {
 
   const Node* node = layout_text.GetNode();
   DCHECK(node);  // Anonymous text is processed earlier, doesn't reach here.
+
+#if DCHECK_IS_ON()
+  DCHECK(node->GetDocument().Lifecycle().GetState() >=
+         DocumentLifecycle::kAfterPerformLayout)
+      << "Unclean document at lifecycle "
+      << node->GetDocument().Lifecycle().ToString();
+#endif
 
   // Ignore empty text.
   if (layout_text.HasEmptyText())
@@ -399,13 +408,13 @@ bool IsShadowContentRelevantForAccessibility(const Node* node) {
     return true;
   }
 
-  // If the slot element's host is an <object> with any descendant nodes
+  // If the slot element's host is an <object>/<embed>with any descendant nodes
   // (including whitespace), LayoutTreeBuilderTraversal::FirstChild will
   // return a node. We should only treat that node as slot content if it is
   // being used as fallback content.
-  if (const HTMLObjectElement* object_element =
-          DynamicTo<HTMLObjectElement>(node->OwnerShadowHost())) {
-    return object_element->UseFallbackContent();
+  if (const HTMLPlugInElement* plugin_element =
+          DynamicTo<HTMLPlugInElement>(node->OwnerShadowHost())) {
+    return plugin_element->UseFallbackContent();
   }
 
   return LayoutTreeBuilderTraversal::FirstChild(*slot_element);
@@ -493,6 +502,12 @@ bool IsNodeRelevantForAccessibility(const Node* node,
   }
 
   if (node->IsTextNode()) {
+    // Children of an <iframe> tag will always be replaced by a new Document,
+    // either loaded from the iframe src or empty. In fact, we don't even parse
+    // them and they are treated like one text node. Consider irrelevant.
+    if (AXObject::IsFrame(node->parentElement()))
+      return false;
+
     // Layout has more info available to determine if whitespace is relevant.
     // If display-locked, layout object may be missing or stale:
     // Assume that all display-locked text nodes are relevant.
@@ -509,12 +524,6 @@ bool IsNodeRelevantForAccessibility(const Node* node,
       return false;
     }
 
-    // Children of an <iframe> tag will always be replaced by a new Document,
-    // either loaded from the iframe src or empty. In fact, we don't even parse
-    // them and they are treated like one text node. Consider irrelevant.
-    if (IsA<HTMLIFrameElement>(node->parentElement()))
-      return false;
-
     // If unrendered and in <canvas>, consider even whitespace relevant.
     // TODO(aleventhal) Consider including all text, even unrendered whitespace,
     // whether or not in <canvas>. For now this matches previous behavior.
@@ -528,7 +537,8 @@ bool IsNodeRelevantForAccessibility(const Node* node,
     return !To<Text>(node)->ContainsOnlyWhitespaceOrEmpty();
   }
 
-  if (!node->IsElementNode())
+  const Element* element = DynamicTo<Element>(node);
+  if (!element)
     return false;  // Only documents, elements and text nodes get ax objects.
 
   if (IsA<HTMLAreaElement>(node) && !IsA<HTMLMapElement>(node->parentNode())) {
@@ -572,8 +582,9 @@ bool IsNodeRelevantForAccessibility(const Node* node,
   if (IsA<HTMLScriptElement>(node))
     return false;
 
-  // Style elements in SVG are not display: none, unlike HTML style elements,
-  // but they are still hidden and thus treated as irrelevant for accessibility.
+  // Style elements in SVG are not display: none, unlike HTML style
+  // elements, but they are still hidden and thus treated as irrelevant for
+  // accessibility.
   if (IsA<SVGStyleElement>(node))
     return false;
 
@@ -587,24 +598,26 @@ bool IsNodeRelevantForAccessibility(const Node* node,
   if (parent_ax_known)
     return true;  // No need to check inside if the parent exists.
 
-  // Objects inside <head> are irrelevant.
-  if (Traversal<HTMLHeadElement>::FirstAncestor(*node))
-    return false;
-  // Objects inside a <style> are irrelevant.
-  if (Traversal<HTMLStyleElement>::FirstAncestor(*node))
-    return false;
-  // Objects inside a <script> are irrelevant.
-  if (Traversal<HTMLScriptElement>::FirstAncestor(*node))
-    return false;
-  // Objects inside an SVG <style> are irrelevant.
-  if (Traversal<SVGStyleElement>::FirstAncestor(*node))
-    return false;
-  // Elements inside of a frame/iframe are irrelevant unless inside a document
-  // that is a child of the frame. In the case where descendants are allowed,
-  // they will be in a different document.
-  for (const Node* ancestor = node; ancestor;
-       ancestor = ancestor->parentNode()) {
-    if (IsA<HTMLFrameElementBase>(ancestor))
+  for (const Element* ancestor = element; ancestor;
+       ancestor = ancestor->parentElement()) {
+    // Objects inside <head> are irrelevant.
+    if (IsA<HTMLHeadElement>(ancestor))
+      return false;
+    // Objects inside a <style> are irrelevant.
+    if (IsA<HTMLStyleElement>(ancestor))
+      return false;
+    // Objects inside a <script> are irrelevant.
+    if (IsA<HTMLScriptElement>(ancestor))
+      return false;
+    // Elements inside of a frame/iframe are irrelevant unless inside a document
+    // that is a child of the frame. In the case where descendants are allowed,
+    // they will be in a different document, and therefore this loop will not
+    // reach the frame/iframe.
+    if (AXObject::IsFrame(ancestor))
+      return false;
+    // Objects inside an SVG <style> are irrelevant.
+    // However, when can this condition be reached?
+    if (IsA<SVGStyleElement>(ancestor))
       return false;
   }
 
@@ -633,7 +646,10 @@ AXObjectCacheImpl::AXObjectCacheImpl(Document& document,
       relation_cache_(std::make_unique<AXRelationCache>(this)),
       accessibility_event_permission_(mojom::blink::PermissionStatus::ASK),
       permission_service_(document.GetExecutionContext()),
-      permission_observer_receiver_(this, document.GetExecutionContext()) {
+      permission_observer_receiver_(this, document.GetExecutionContext()),
+      ax_tree_source_(BlinkAXTreeSource::Create(*this)),
+      ax_tree_serializer_(
+          std::make_unique<ui::AXTreeSerializer<AXObject*>>(ax_tree_source_)) {
   if (document_->LoadEventFinished())
     AddPermissionStatusListener();
   use_ax_menu_list_ = GetSettings()->GetUseAXMenuList();
@@ -697,7 +713,20 @@ Node* AXObjectCacheImpl::FocusedElement() {
   return focused_node;
 }
 
+void AXObjectCacheImpl::UpdateLifecycleIfNeeded() {
+  if (GetDocument().Lifecycle().GetState() < DocumentLifecycle::kLayoutClean) {
+    // Node is in a different, unclean document. This can occur in an open
+    // popup. Ensure the popup document has a clean layout before trying to
+    // create an AXObject from a node in it.
+    if (auto* view = GetDocument().View()) {
+      view->UpdateAllLifecyclePhasesExceptPaint(
+          DocumentUpdateReason::kAccessibility);
+    }
+  }
+}
+
 AXObject* AXObjectCacheImpl::GetOrCreateFocusedObjectFromNode(Node* node) {
+  // TODO(chrishtr): refactor to use UpdateLifecycleIfNeeded.
   if (node->GetDocument() != GetDocument() &&
       node->GetDocument().Lifecycle().GetState() <
           DocumentLifecycle::kLayoutClean) {
@@ -713,6 +742,33 @@ AXObject* AXObjectCacheImpl::GetOrCreateFocusedObjectFromNode(Node* node) {
   AXObject* obj = GetOrCreate(node);
   if (!obj)
     return nullptr;
+
+  Settings* settings = GetSettings();
+  if (settings && settings->GetAriaModalPrunesAXTree()) {
+    // It is possible for the active_aria_modal_dialog_ to become detached in
+    // between the time a node claims focus and the time we notify platforms
+    // of that focus change. For instance given an aria-modal dialog which was
+    // newly unhidden (rather than newly added to the DOM):
+    // * HandleFocusedUIElementChanged calls UpdateActiveAriaModalDialog
+    // * UpdateActiveAriaModalDialog sets the value of active_aria_modal_dialog_
+    //   and then marks the entire tree dirty if that value changed.
+    // * The subsequent tree update results in the stored active dialog being
+    //   detached and replaced.
+    // Should this occur, the focused node we're getting or creating here is
+    // not a descendant of active_aria_modal_dialog_ and is thus pruned from
+    // the tree. This leads to firing the event on the included parent object,
+    // which is likely a non-focusable container.
+    // We could probably address this situation in one of the clean-layout
+    // functions (e.g. HandleNodeGainedFocusWithCleanLayout). However, because
+    // both HandleNodeGainedFocusWithCleanLayout and FocusedObject call
+    // GetOrCreateFocusedObjectFromNode, detecting and correcting this issue
+    // here seems like it covers more bases.
+    // TODO(crbug.com/1328815): We need to take a close look at the aria-modal
+    // tree pruning logic to be sure there are not other situations where we
+    // incorrectly prune content which should be exposed.
+    if (active_aria_modal_dialog_ && active_aria_modal_dialog_->IsDetached())
+      UpdateActiveAriaModalDialog(node);
+  }
 
   // the HTML element, for example, is focusable but has an AX object that is
   // ignored
@@ -776,9 +832,21 @@ AXObject* AXObjectCacheImpl::Get(const LayoutObject* layout_object) {
   return result;
 }
 
-AXObject* AXObjectCacheImpl::GetWithoutInvalidation(const Node* node) {
+AXObject* AXObjectCacheImpl::SafeGet(const Node* node,
+                                     bool allow_display_locking_invalidation) {
   if (!node)
     return nullptr;
+
+#if DCHECK_IS_ON()
+  if (const Element* element = DynamicTo<Element>(node)) {
+    if (AccessibleNode* accessible_node = element->ExistingAccessibleNode()) {
+      DCHECK(!accessible_node_mapping_.Contains(accessible_node))
+          << "The accessible node directly attached to an element should not "
+             "have its own AXObject: "
+          << element;
+    }
+  }
+#endif
 
   LayoutObject* layout_object = node->GetLayoutObject();
 
@@ -791,8 +859,15 @@ AXObject* AXObjectCacheImpl::GetWithoutInvalidation(const Node* node) {
   DCHECK(!HashTraits<AXID>::IsDeletedValue(layout_id));
   if (layout_id) {
     auto it = objects_.find(layout_id);
-    if (it != objects_.end())
+    if (it != objects_.end()) {
+      if (allow_display_locking_invalidation && IsDisplayLocked(node)) {
+        // Change from AXLayoutObject -> AXNodeObject.
+        // The node is in a display locked subtree, but we've previously put it
+        // in the cache with its layout object.
+        Invalidate(layout_object->GetDocument(), layout_id);
+      }
       return it->value;
+    }
     return nullptr;
   }
 
@@ -801,15 +876,42 @@ AXObject* AXObjectCacheImpl::GetWithoutInvalidation(const Node* node) {
   DCHECK(!HashTraits<AXID>::IsDeletedValue(node_id));
   if (node_id) {
     auto it = objects_.find(node_id);
-    if (it != objects_.end())
+    if (it != objects_.end()) {
+      if (allow_display_locking_invalidation && layout_object &&
+          !IsDisplayLocked(node)) {
+        // Change from AXNodeObject -> AXLayoutObject.
+        // Has a layout object but no layout_id, meaning that when the AXObject
+        // was originally created only for Node*, the LayoutObject* didn't exist
+        // yet. This can happen if an AXNodeObject is created for a node that's
+        // not laid out, but later something changes and it gets a layoutObject
+        // (like if it's reparented). It's also possible the layout object
+        // changed.
+        Invalidate(layout_object->GetDocument(), node_id);
+      }
       return it->value;
+    }
   }
+
   return nullptr;
 }
 
 AXObject* AXObjectCacheImpl::Get(const Node* node) {
   if (!node)
     return nullptr;
+
+  if (has_been_disposed_)
+    return SafeGet(node);
+
+#if DCHECK_IS_ON()
+  if (const Element* element = DynamicTo<Element>(node)) {
+    if (AccessibleNode* accessible_node = element->ExistingAccessibleNode()) {
+      DCHECK(!accessible_node_mapping_.Contains(accessible_node))
+          << "The accessible node directly attached to an element should not "
+             "have its own AXObject: "
+          << element;
+    }
+  }
+#endif
 
   LayoutObject* layout_object = node->GetLayoutObject();
 
@@ -845,7 +947,7 @@ AXObject* AXObjectCacheImpl::Get(const Node* node) {
       // Layout object is irrelevant, but node object can still be relevant.
       if (!node_id) {
         DCHECK(layout_id);  // One of of node_id, layout_id is non-zero.
-        Invalidate(layout_object->GetDocument(), layout_id);
+        Invalidate(node->GetDocument(), layout_id);
       } else {
         layout_object = nullptr;
         layout_id = 0;
@@ -857,7 +959,7 @@ AXObject* AXObjectCacheImpl::Get(const Node* node) {
     // Change from AXLayoutObject -> AXNodeObject.
     // The node is in a display locked subtree, but we've previously put it in
     // the cache with its layout object.
-    Invalidate(layout_object->GetDocument(), layout_id);
+    Invalidate(node->GetDocument(), layout_id);
   } else if (layout_object && node_id && !layout_id && !IsDisplayLocked(node)) {
     // Change from AXNodeObject -> AXLayoutObject.
     // Has a layout object but no layout_id, meaning that when the AXObject was
@@ -933,9 +1035,26 @@ AXID AXObjectCacheImpl::GetAXID(Node* node) {
   return ax_object->AXObjectID();
 }
 
+AXID AXObjectCacheImpl::GetExistingAXID(Node* node) {
+  AXObject* ax_object = SafeGet(node);
+  if (!ax_object)
+    return 0;
+  return ax_object->AXObjectID();
+}
+
 AXObject* AXObjectCacheImpl::Get(AccessibleNode* accessible_node) {
   if (!accessible_node)
     return nullptr;
+
+  if (accessible_node->element()) {
+    DCHECK(!accessible_node_mapping_.Contains(accessible_node))
+        << "The accessible node directly attached to an element should not "
+           "have its own AXObject: "
+        << accessible_node->element();
+    // When the AccessibleNode is attached to an element, return the element's
+    // accessible object instead.
+    return SafeGet(accessible_node->element());
+  }
 
   auto it_ax = accessible_node_mapping_.find(accessible_node);
   AXID ax_id = it_ax != accessible_node_mapping_.end() ? it_ax->value : 0;
@@ -947,7 +1066,7 @@ AXObject* AXObjectCacheImpl::Get(AccessibleNode* accessible_node) {
   AXObject* result = it_result != objects_.end() ? it_result->value : nullptr;
 #if DCHECK_IS_ON()
   DCHECK(result) << "Had AXID for accessible_node but no entry in objects_";
-  DCHECK(result->IsVirtualObject());
+  DCHECK(IsA<AXVirtualObject>(result));
   // Do not allow detached objects except when disposing entire tree.
   DCHECK(!result->IsDetached() || has_been_disposed_)
       << "Detached AXVirtualObject in map: "
@@ -1065,7 +1184,10 @@ bool AXObjectCacheImpl::IsRelevantSlotElement(const HTMLSlotElement& slot) {
   // content-visibility:auto may be removed from the AX tree depending on
   // whether it was recently rendered.
   //
-  // TODO(accessibility): There should be a better way to accomplish this.
+  // TODO(accessibility) This fails for the web test
+  // detach-locked-slot-children-crash.html with --force-renderer-accessibility.
+  // See web_tests/FlagExpectations/force-renderer-accessibility.
+  // There should be a better way to accomplish this.
   // Could a new function be added to the slot element?
   const Node* parent = LayoutTreeBuilderTraversal::Parent(slot);
   if (const HTMLSlotElement* parent_slot =
@@ -1131,18 +1253,27 @@ bool AXObjectCacheImpl::IsRelevantPseudoElement(const Node& node) {
     return false;  // Is the clearfix hack: ignore pseudo element.
   }
 
-  // The only other pseudo elements that matter are ::first-letter.
-  // E.g. backdrop does not get an accessibility object.
-  if (!node.IsFirstLetterPseudoElement())
-    return false;
-
-  if (LayoutObject* layout_parent = node.GetLayoutObject()->Parent()) {
-    if (Node* layout_parent_node = layout_parent->GetNode()) {
-      if (layout_parent_node->IsPseudoElement())
-        return IsRelevantPseudoElement(*layout_parent_node);
-    }
+  // ::first-letter is relevant if and only if its parent layout object is a
+  // relevant pseudo element. If it's not a pseudo element, then this the
+  // ::first-letter text would end up being repeated in the AX Tree.
+  if (node.IsFirstLetterPseudoElement()) {
+    LayoutObject* layout_parent = node.GetLayoutObject()->Parent();
+    DCHECK(layout_parent);
+    Node* layout_parent_node = layout_parent->GetNode();
+    return layout_parent_node && layout_parent_node->IsPseudoElement() &&
+           IsRelevantPseudoElement(*layout_parent_node);
   }
 
+  // The remaining possible pseudo element types are not relevant.
+  if (node.IsBackdropPseudoElement() ||
+      node.IsDocumentTransitionPseudoElement()) {
+    return false;
+  }
+
+  // If this is reached, then a new pseudo element type was added and is not
+  // yet handled by accessibility. See  PseudoElementTagName() in
+  // pseudo_element.cc for all possible types.
+  SANITIZER_NOTREACHED() << "Unhandled type of pseudo element on: " << node;
   return false;
 }
 
@@ -1189,9 +1320,17 @@ AXObject* AXObjectCacheImpl::GetOrCreate(AccessibleNode* accessible_node,
   if (AXObject* obj = Get(accessible_node))
     return obj;
 
+  DCHECK_EQ(accessible_node->GetDocument(), &GetDocument());
+
   DCHECK(parent)
       << "A virtual object must have a parent, and cannot exist without one. "
          "The parent is set when the object is constructed.";
+
+  DCHECK(!accessible_node->element())
+      << "The accessible node directly attached to an element should not "
+         "have its own AXObject, since the AXObject will be keyed off of the "
+         "element instead: "
+      << accessible_node->element();
 
   if (!parent->CanHaveChildren())
     return nullptr;
@@ -1438,10 +1577,11 @@ AXObject* AXObjectCacheImpl::GetOrCreate(AbstractInlineTextBox* inline_text_box,
     DCHECK(layout_text_parent->IsText());
     parent = GetOrCreate(layout_text_parent);
     if (!parent) {
-      // Allowed to not have a parent if the text was irrelevant whitespace.
-      DCHECK(inline_text_box->GetText().ContainsOnlyWhitespaceOrEmpty())
+      DCHECK(inline_text_box->GetText().ContainsOnlyWhitespaceOrEmpty() ||
+             !IsRelevantPseudoElementDescendant(*layout_text_parent))
           << "No parent for non-whitespace inline textbox: "
-          << layout_text_parent;
+          << layout_text_parent
+          << "\nParent of parent: " << layout_text_parent->Parent();
       return nullptr;
     }
   }
@@ -1498,9 +1638,10 @@ AXObject* AXObjectCacheImpl::CreateAndInit(ax::mojom::blink::Role role,
   return obj;
 }
 
+// Do not pass a depth if the entire subtree of AXObjects should be removed.
 void AXObjectCacheImpl::RemoveAXObjectsInLayoutSubtree(AXObject* subtree,
-                                                       int depth) {
-  if (!subtree || depth <= 0)
+                                                       int depth = -999) {
+  if (!subtree || depth == 0)
     return;
 
   depth--;
@@ -1557,13 +1698,12 @@ void AXObjectCacheImpl::Remove(AXID ax_id) {
   if (!objects_.Take(ax_id))
     return;
 
-  DCHECK_GE(objects_.size(), ids_in_use_.size());
+  DCHECK_EQ(objects_.size(), ids_in_use_.size());
 }
 
 // This is safe to call even if there isn't a current mapping.
 void AXObjectCacheImpl::Remove(AccessibleNode* accessible_node) {
-  if (!accessible_node)
-    return;
+  DCHECK(accessible_node);
 
   auto iter = accessible_node_mapping_.find(accessible_node);
   if (iter == accessible_node_mapping_.end())
@@ -1620,6 +1760,17 @@ void AXObjectCacheImpl::Remove(Node* node) {
   }
 }
 
+void AXObjectCacheImpl::Remove(Document* document) {
+  DCHECK(IsPopup(*document)) << "Call Dispose() to remove the main document.";
+  for (Node* node = document; node;
+       node = LayoutTreeBuilderTraversal::Next(*node, nullptr)) {
+    Remove(node);
+  }
+  notifications_to_post_popup_.clear();
+  tree_update_callback_queue_popup_.clear();
+  invalidated_ids_popup_.clear();
+}
+
 // This is safe to call even if there isn't a current mapping.
 void AXObjectCacheImpl::Remove(AbstractInlineTextBox* inline_text_box) {
   if (!inline_text_box)
@@ -1673,8 +1824,6 @@ void AXObjectCacheImpl::RemoveAXID(AXObject* object) {
   if (!object)
     return;
 
-  fixed_or_sticky_node_ids_.clear();
-
   if (active_aria_modal_dialog_ == object)
     active_aria_modal_dialog_ = nullptr;
 
@@ -1686,6 +1835,7 @@ void AXObjectCacheImpl::RemoveAXID(AXObject* object) {
   object->SetAXObjectID(0);
   ids_in_use_.erase(obj_id);
   autofill_state_map_.erase(obj_id);
+  fixed_or_sticky_node_ids_.erase(obj_id);
 
   relation_cache_->RemoveAXID(obj_id);
 }
@@ -1738,6 +1888,8 @@ void AXObjectCacheImpl::DeferTreeUpdateInternal(base::OnceClosure callback,
     UpdateNumTreeUpdatesQueuedBeforeLayoutHistogram();
 
     tree_updates_paused_ = true;
+    LOG(INFO) << "Accessibility tree update queue is too big, updates have "
+                 "been paused";
     queue.clear();
     return;
   }
@@ -1788,6 +1940,8 @@ void AXObjectCacheImpl::DeferTreeUpdateInternal(base::OnceClosure callback,
     UpdateNumTreeUpdatesQueuedBeforeLayoutHistogram();
 
     tree_updates_paused_ = true;
+    LOG(INFO) << "Accessibility tree update queue is too big, updates have "
+                 "been paused";
     queue.clear();
     return;
   }
@@ -1824,7 +1978,7 @@ void AXObjectCacheImpl::DeferTreeUpdate(
     void (AXObjectCacheImpl::*method)(const Node*),
     const Node* node) {
   base::OnceClosure callback =
-      WTF::Bind(method, WrapWeakPersistent(this), WrapWeakPersistent(node));
+      WTF::BindOnce(method, WrapWeakPersistent(this), WrapWeakPersistent(node));
   DeferTreeUpdateInternal(std::move(callback), node);
 }
 
@@ -1832,7 +1986,7 @@ void AXObjectCacheImpl::DeferTreeUpdate(
     void (AXObjectCacheImpl::*method)(Node*),
     Node* node) {
   base::OnceClosure callback =
-      WTF::Bind(method, WrapWeakPersistent(this), WrapWeakPersistent(node));
+      WTF::BindOnce(method, WrapWeakPersistent(this), WrapWeakPersistent(node));
   DeferTreeUpdateInternal(std::move(callback), node);
 }
 
@@ -1841,8 +1995,8 @@ void AXObjectCacheImpl::DeferTreeUpdate(
                                       ax::mojom::blink::Event event),
     Node* node,
     ax::mojom::blink::Event event) {
-  base::OnceClosure callback = WTF::Bind(method, WrapWeakPersistent(this),
-                                         WrapWeakPersistent(node), event);
+  base::OnceClosure callback = WTF::BindOnce(method, WrapWeakPersistent(this),
+                                             WrapWeakPersistent(node), event);
   DeferTreeUpdateInternal(std::move(callback), node);
 }
 
@@ -1850,7 +2004,7 @@ void AXObjectCacheImpl::DeferTreeUpdate(
     void (AXObjectCacheImpl::*method)(const QualifiedName&, Element* element),
     const QualifiedName& attr_name,
     Element* element) {
-  base::OnceClosure callback = WTF::Bind(
+  base::OnceClosure callback = WTF::BindOnce(
       method, WrapWeakPersistent(this), attr_name, WrapWeakPersistent(element));
   DeferTreeUpdateInternal(std::move(callback), element);
 }
@@ -1860,8 +2014,8 @@ void AXObjectCacheImpl::DeferTreeUpdate(
     AXObject* obj) {
   Node* node = obj ? obj->GetNode() : nullptr;
   base::OnceClosure callback =
-      WTF::Bind(method, WrapWeakPersistent(this), WrapWeakPersistent(node),
-                WrapWeakPersistent(obj));
+      WTF::BindOnce(method, WrapWeakPersistent(this), WrapWeakPersistent(node),
+                    WrapWeakPersistent(obj));
   if (obj) {
     DeferTreeUpdateInternal(std::move(callback), obj);
   } else {
@@ -1877,16 +2031,14 @@ void AXObjectCacheImpl::SelectionChanged(Node* node) {
   if (settings && settings->GetAriaModalPrunesAXTree())
     UpdateActiveAriaModalDialog(node);
 
-  DeferTreeUpdate(&AXObjectCacheImpl::SelectionChangedWithCleanLayout, node);
-}
+  DeferTreeUpdate(&AXObjectCacheImpl::PostNotification, &GetDocument(),
+                  ax::mojom::blink::Event::kDocumentSelectionChanged);
 
-void AXObjectCacheImpl::SelectionChangedWithCleanLayout(Node* node) {
-  if (!node)
-    return;
-
-  AXObject* ax_object = GetOrCreate(node);
-  if (ax_object)
-    ax_object->SelectionChanged();
+  // If there is a text control, mark it dirty to serialize
+  // IntAttribute::kTextSelStart/kTextSelEnd changes.
+  // TODO(accessibility) Remove once we remove kTextSelStart/kTextSelEnd.
+  if (TextControlElement* text_control = EnclosingTextControl(node))
+    MarkElementDirty(text_control);
 }
 
 void AXObjectCacheImpl::UpdateReverseTextRelations(
@@ -2104,7 +2256,7 @@ void AXObjectCacheImpl::DidInsertChildrenOfNode(Node* node) {
   // changed.
   DCHECK(node);
   while (node) {
-    if (Get(node)) {
+    if (SafeGet(node, true)) {
       TextChanged(node);
       return;
     }
@@ -2117,6 +2269,13 @@ void AXObjectCacheImpl::DidInsertChildrenOfNode(Node* node) {
 void AXObjectCacheImpl::ChildrenChangedOnAncestorOf(AXObject* obj) {
   DCHECK(obj);
   DCHECK(!obj->IsDetached());
+  DCHECK(!IsFrozen())
+      << "Attempting to change children on an ancestor is dangerous during "
+         "serialization, because the ancestor may have already been "
+         "visited. Reaching this line indicates that AXObjectCacheImpl did "
+         "not handle a signal and call ChilldrenChanged() earlier."
+      << "\nChild: " << obj->ToString(true)
+      << "\nParent: " << obj->CachedParentObject()->ToString(true);
 
   // If |obj| is not included, and it has no included descendants, then there is
   // nothing in any ancestor's cached children that needs clearing. This rule
@@ -2126,7 +2285,7 @@ void AXObjectCacheImpl::ChildrenChangedOnAncestorOf(AXObject* obj) {
   // descendants change, no ChildrenChanged() processing is necessary, because
   // #root has no children.
   if (!obj->LastKnownIsIncludedInTreeValue() &&
-      obj->CachedChildrenIncludingIgnored().IsEmpty()) {
+      obj->CachedChildrenIncludingIgnored().empty()) {
     return;
   }
 
@@ -2190,18 +2349,19 @@ AXObject* AXObjectCacheImpl::InvalidateChildren(AXObject* obj) {
 }
 
 void AXObjectCacheImpl::SlotAssignmentWillChange(Node* node) {
-  // Use GetWithoutInvalidation(), because right before slot assignment is a
-  // dangerous time to test whether the slot must be invalidated, because
-  // this currently requires looking at the <slot> children in
+  // Use SafeGet(), because right before slot assignment is a dangerous time to
+  // test whether the slot must be invalidated, because this currently requires
+  // looking at the <slot> children in
   // IsShadowContentRelevantForAccessibility(), resulting in an infinite loop
   // as looking at the children causes slot assignment to be recalculated.
   // TODO(accessibility) In the future this may be simplified.
   // See crbug.com/1219311.
-  ChildrenChanged(GetWithoutInvalidation(node));
+  ChildrenChanged(SafeGet(node));
 }
 
 void AXObjectCacheImpl::ChildrenChanged(Node* node) {
-  ChildrenChanged(Get(node));
+  // Use SafeGet() because there is no guarantee that layout is clean right now.
+  ChildrenChanged(SafeGet(node));
 }
 
 // ChildrenChanged gets called a lot. For the accessibility tests that
@@ -2235,6 +2395,7 @@ void AXObjectCacheImpl::ChildrenChanged(const LayoutObject* layout_object) {
 }
 
 void AXObjectCacheImpl::ChildrenChanged(AccessibleNode* accessible_node) {
+  DCHECK(accessible_node);
   ChildrenChanged(Get(accessible_node));
 }
 
@@ -2273,7 +2434,7 @@ void AXObjectCacheImpl::ChildrenChangedWithCleanLayout(Node* optional_node,
 #if DCHECK_IS_ON()
   if (obj && optional_node) {
     DCHECK_EQ(obj->GetNode(), optional_node);
-    DCHECK_EQ(obj, GetWithoutInvalidation(optional_node));
+    DCHECK_EQ(obj, SafeGet(optional_node));
   }
   Document* document = obj ? obj->GetDocument() : &optional_node->GetDocument();
   DCHECK(document);
@@ -2295,15 +2456,29 @@ void AXObjectCacheImpl::ChildrenChangedWithCleanLayout(Node* optional_node,
 }
 
 void AXObjectCacheImpl::ProcessDeferredAccessibilityEvents(Document& document) {
+  ProcessDeferredAccessibilityEventsImpl(document);
+
+  // Accessibility is now clean: AXObjects can be safely traversed and
+  // AXObject's properties can be safely fetched.
+  for (auto agent : agents_)
+    agent->AXReadyCallback(document);
+
+  // TODO(chrishtr): Accessibility serializations should happen now, on the
+  // condition that enough time has passed since the last serialization.
+}
+
+void AXObjectCacheImpl::ProcessDeferredAccessibilityEventsImpl(
+    Document& document) {
   TRACE_EVENT0("accessibility", "ProcessDeferredAccessibilityEvents");
 
-  if (document.Lifecycle().GetState() != DocumentLifecycle::kInAccessibility) {
-    NOTREACHED() << "Deferred events should only be processed during the "
-                    "accessibility document lifecycle.";
-    return;
-  }
+  DCHECK(document.Lifecycle().GetState() == DocumentLifecycle::kInAccessibility)
+      << "Deferred events should only be processed during the "
+         "accessibility document lifecycle.";
 
-  if (!IsDirty())
+  // When tree updates are paused, IsDirty() will return false. In this
+  // situation we should not return early because we would never trigger the
+  // code that resumes the tree updates, inside ProcessCleanLayoutCallbacks.
+  if (!IsDirty() && !tree_updates_paused_)
     return;
 
   DCHECK(GetDocument().IsAccessibilityEnabled())
@@ -2344,8 +2519,8 @@ void AXObjectCacheImpl::ProcessDeferredAccessibilityEvents(Document& document) {
 #if DCHECK_IS_ON()
     DCHECK_LE(++loop_counter, 100) << "Probable infinite loop detected.";
 #endif
-  } while (!nodes_with_pending_children_changed_.IsEmpty() ||
-           !GetInvalidatedIds(document).IsEmpty());
+  } while (!nodes_with_pending_children_changed_.empty() ||
+           !GetInvalidatedIds(document).empty());
 
   // Send events to RenderAccessibilityImpl, which serializes them and then
   // sends the serialized events and dirty objects to the browser process.
@@ -2355,12 +2530,12 @@ void AXObjectCacheImpl::ProcessDeferredAccessibilityEvents(Document& document) {
 bool AXObjectCacheImpl::IsDirty() const {
   if (tree_updates_paused_)
     return false;
-  return !tree_update_callback_queue_main_.IsEmpty() ||
-         !tree_update_callback_queue_popup_.IsEmpty() ||
-         !notifications_to_post_main_.IsEmpty() ||
-         !notifications_to_post_popup_.IsEmpty() ||
-         !invalidated_ids_main_.IsEmpty() ||
-         !invalidated_ids_popup_.IsEmpty() || relation_cache_->IsDirty();
+  return !tree_update_callback_queue_main_.empty() ||
+         !tree_update_callback_queue_popup_.empty() ||
+         !notifications_to_post_main_.empty() ||
+         !notifications_to_post_popup_.empty() ||
+         !invalidated_ids_main_.empty() || !invalidated_ids_popup_.empty() ||
+         relation_cache_->IsDirty();
 }
 
 void AXObjectCacheImpl::EmbeddingTokenChanged(HTMLFrameOwnerElement* element) {
@@ -2430,6 +2605,14 @@ void AXObjectCacheImpl::ProcessInvalidatedObjects(Document& document) {
         !IsDisplayLocked(node->GetLayoutObject());
     if (is_ax_layout_object == will_be_ax_layout_object)
       return static_cast<AXObject*>(nullptr);  // No change in the AXObject.
+
+    // When a pseudo element loses its layout, destroy all of the nodeless
+    // descendant objects (they could not be individually invalidated because
+    // only AXObjects with a node can be invalidated).
+    if (!will_be_ax_layout_object && node->IsPseudoElement()) {
+      for (const auto& ax_child : current->UnignoredChildren())
+        RemoveAXObjectsInLayoutSubtree(ax_child);
+    }
 
     AXID retained_axid = current->AXObjectID();
     // Remove from relevant maps, but not from relation cache, as the relations
@@ -2539,6 +2722,8 @@ void AXObjectCacheImpl::ProcessCleanLayoutCallbacks(Document& document) {
   if (tree_updates_paused_) {
     ChildrenChangedWithCleanLayout(nullptr, GetOrCreate(&document));
     tree_updates_paused_ = false;
+    LOG(INFO) << "Accessibility tree updates resumed after rebuilding the tree "
+                 "from root";
     return;
   }
 
@@ -2566,7 +2751,7 @@ void AXObjectCacheImpl::ProcessCleanLayoutCallbacks(Document& document) {
         DCHECK(!obj->IsDetached());
         if (node) {
           DCHECK_EQ(node, obj->GetNode());
-          DCHECK_EQ(GetWithoutInvalidation(node), obj);
+          DCHECK_EQ(SafeGet(node), obj);
         }
         DCHECK_EQ(obj->GetDocument(), document);
       }
@@ -2903,6 +3088,7 @@ void AXObjectCacheImpl::HandleNodeGainedFocusWithCleanLayout(Node* node) {
   if (!node || !node->GetDocument().View())
     return;
 
+  // TODO(chrishtr): refactor to use UpdateLifecycleIfNeeded.
   if (node->GetDocument().NeedsLayoutTreeUpdateForNode(*node)) {
     // This should only occur when focus goes into a popup document. The main
     // document has an updated layout, but the popup does not.
@@ -3042,15 +3228,20 @@ void AXObjectCacheImpl::HandleAriaHiddenChangedWithCleanLayout(Node* node) {
       return;
     // If the parent is 'display: none', then the subtree will be ignored and
     // changing aria-hidden will have no effect.
-    if (parent->GetLayoutObject()) {
-      // For elements with layout objects we can get their style directly.
-      if (parent->GetLayoutObject()->Style()->Display() == EDisplay::kNone)
-        return;
-    } else if (Element* parent_element = parent->GetElement()) {
-      // No layout object: must ensure computed style.
-      const ComputedStyle* parent_style = parent_element->EnsureComputedStyle();
-      if (!parent_style || parent_style->IsEnsuredInDisplayNone())
-        return;
+    if (!parent->GetLayoutObject()) {
+      // No layout object: may be in display: none.
+      if (Element* parent_element = parent->GetElement()) {
+        if (!IsDisplayLocked(parent_element)) {
+          // No layout object: must ensure computed style.
+          // Do not perform this check for display locked content, where
+          // computed styles are not updated. In that case, we will need to
+          // assume the need for marking the subtree dirty.
+          const ComputedStyle* parent_style =
+              parent_element->EnsureComputedStyle();
+          if (!parent_style || parent_style->IsEnsuredInDisplayNone())
+            return;
+        }
+      }
     }
     // Unlike AXObject's |IsVisible| or |IsHiddenViaStyle| this method does not
     // consider 'visibility: [hidden|collapse]', because while the visibility
@@ -3341,10 +3532,14 @@ void AXObjectCacheImpl::HandleEventSubscriptionChanged(
   if (!DoesEventListenerImpactIgnoredState(event_type))
     return;
 
-  // If the |event_type| may affect the ignored state of |node|, which means
-  // that the parent's children may have changed.
+  // Adding/removing a listener may affect the ignored state of node's AXObject.
   modification_count_++;
   MarkElementDirty(&node);
+  // If the ignored state changes, the parent's children may have changed.
+  if (AXObject* obj = SafeGet(&node)) {
+    if (obj->CachedParentObject())
+      ChildrenChanged(obj->CachedParentObject());
+  }
 }
 
 void AXObjectCacheImpl::LabelChangedWithCleanLayout(Element* element) {
@@ -3451,8 +3646,11 @@ void AXObjectCacheImpl::PostPlatformNotification(
   }
 }
 
-void AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayoutHelper(AXObject* obj,
-                                                               bool subtree) {
+void AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayoutHelper(
+    AXObject* obj,
+    bool subtree,
+    ax::mojom::blink::EventFrom event_from,
+    ax::mojom::blink::Action event_from_action) {
   obj = GetSerializationTarget(obj);
   if (!obj)
     return;
@@ -3460,30 +3658,41 @@ void AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayoutHelper(AXObject* obj,
   WebLocalFrameImpl* webframe = WebLocalFrameImpl::FromFrame(
       obj->GetDocument()->AXObjectCacheOwner().GetFrame());
   if (webframe && webframe->Client()) {
-    webframe->Client()->MarkWebAXObjectDirty(WebAXObject(obj), subtree,
-                                             active_event_from_,
-                                             active_event_from_action_);
+    webframe->Client()->NotifyWebAXObjectMarkedDirty(WebAXObject(obj));
   }
+
+  std::vector<ui::AXEventIntent> event_intents;
+  MarkAXObjectDirty(obj, subtree, event_from, event_from_action, event_intents);
 
   obj->UpdateCachedAttributeValuesIfNeeded(true);
   for (auto agent : agents_)
     agent->AXObjectModified(obj, subtree);
 }
 
+void AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayoutAndEvent(
+    AXObject* obj,
+    ax::mojom::blink::EventFrom event_from,
+    ax::mojom::blink::Action event_from_action) {
+  MarkAXObjectDirtyWithCleanLayoutHelper(obj, false, event_from,
+                                         event_from_action);
+}
+
 void AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayout(AXObject* obj) {
-  MarkAXObjectDirtyWithCleanLayoutHelper(obj, false);
+  MarkAXObjectDirtyWithCleanLayoutHelper(obj, false, active_event_from_,
+                                         active_event_from_action_);
 }
 
 void AXObjectCacheImpl::MarkAXSubtreeDirtyWithCleanLayout(AXObject* obj) {
-  MarkAXObjectDirtyWithCleanLayoutHelper(obj, true);
+  MarkAXObjectDirtyWithCleanLayoutHelper(obj, true, active_event_from_,
+                                         active_event_from_action_);
 }
 
 void AXObjectCacheImpl::MarkAXObjectDirty(AXObject* obj) {
   if (!obj)
     return;
   base::OnceClosure callback =
-      WTF::Bind(&AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayout,
-                WrapWeakPersistent(this), WrapWeakPersistent(obj));
+      WTF::BindOnce(&AXObjectCacheImpl::MarkAXObjectDirtyWithCleanLayout,
+                    WrapWeakPersistent(this), WrapWeakPersistent(obj));
   DeferTreeUpdateInternal(std::move(callback), obj);
 }
 
@@ -3491,8 +3700,8 @@ void AXObjectCacheImpl::MarkAXSubtreeDirty(AXObject* obj) {
   if (!obj)
     return;
   base::OnceClosure callback =
-      WTF::Bind(&AXObjectCacheImpl::MarkAXSubtreeDirtyWithCleanLayout,
-                WrapWeakPersistent(this), WrapWeakPersistent(obj));
+      WTF::BindOnce(&AXObjectCacheImpl::MarkAXSubtreeDirtyWithCleanLayout,
+                    WrapWeakPersistent(this), WrapWeakPersistent(obj));
   DeferTreeUpdateInternal(std::move(callback), obj);
 }
 
@@ -3641,16 +3850,240 @@ AXObject* AXObjectCacheImpl::GetActiveAriaModalDialog() const {
   return active_aria_modal_dialog_;
 }
 
-HeapVector<Member<AXObject>>
-AXObjectCacheImpl::GetAllObjectsWithChangedBounds() {
-  VectorOf<AXObject> changed_bounds_objects;
-  changed_bounds_objects.ReserveCapacity(changed_bounds_ids_.size());
+void AXObjectCacheImpl::SerializeLocationChanges() {
+  if (changed_bounds_ids_.empty())
+    return;
+  Vector<mojom::blink::LocationChangesPtr> changes;
+  changes.reserve(changed_bounds_ids_.size());
   for (AXID changed_bounds_id : changed_bounds_ids_) {
-    if (AXObject* obj = ObjectFromAXID(changed_bounds_id))
-      changed_bounds_objects.push_back(obj);
+    if (AXObject* obj = ObjectFromAXID(changed_bounds_id)) {
+      // Only update locations that are already known.
+      auto bounds = cached_bounding_boxes_.find(changed_bounds_id);
+      if (bounds == cached_bounding_boxes_.end())
+        continue;
+
+      ui::AXRelativeBounds new_location;
+      bool clips_children;
+      obj->PopulateAXRelativeBounds(new_location, &clips_children);
+      if (bounds->value == new_location)
+        continue;
+
+      cached_bounding_boxes_.Set(changed_bounds_id, new_location);
+      changes.push_back(
+          mojom::blink::LocationChanges::New(changed_bounds_id, new_location));
+    }
   }
   changed_bounds_ids_.clear();
-  return changed_bounds_objects;
+  if (!changes.empty()) {
+    GetOrCreateRemoteRenderAccessibilityHost()->HandleAXLocationChanges(
+        std::move(changes));
+  }
+}
+
+bool AXObjectCacheImpl::SerializeEntireTree(bool exclude_offscreen,
+                                            size_t max_node_count,
+                                            base::TimeDelta timeout,
+                                            ui::AXTreeUpdate* response) {
+  BlinkAXTreeSource* tree_source = BlinkAXTreeSource::Create(*this);
+
+  tree_source->set_exclude_offscreen(exclude_offscreen);
+
+  // The serializer returns an ui::AXTreeUpdate, which can store a complete
+  // or a partial accessibility tree. AXTreeSerializer is stateful, but the
+  // first time you serialize from a brand-new tree you're guaranteed to get a
+  // complete tree.
+  ui::AXTreeSerializer<AXObject*> serializer(tree_source);
+
+  if (max_node_count)
+    serializer.set_max_node_count(max_node_count);
+  if (!timeout.is_zero())
+    serializer.set_timeout(timeout);
+
+  tree_source->Freeze();
+
+  if (!tree_source->GetRoot() || tree_source->GetRoot()->IsDetached()) {
+    tree_source->Thaw();
+    // TODO(chrishtr): not clear why this can happen.
+    NOTREACHED();
+    return false;
+  }
+
+  if (serializer.SerializeChanges(tree_source->GetRoot(), response)) {
+    tree_source->Thaw();
+    return true;
+  }
+
+  // It's possible for the page to fail to serialize the first time due to
+  // aria-owns rearranging the page while it's being scanned. Try a second
+  // time.
+  *response = ui::AXTreeUpdate();
+  bool result = serializer.SerializeChanges(tree_source->GetRoot(), response);
+  tree_source->Thaw();
+  return result;
+}
+
+void AXObjectCacheImpl::MarkAXObjectDirty(
+    AXObject* obj,
+    bool subtree,
+    ax::mojom::blink::EventFrom event_from,
+    ax::mojom::blink::Action event_from_action,
+    const std::vector<ui::AXEventIntent>& event_intents) {
+  dirty_objects_.push_back(
+      AXDirtyObject::Create(obj, event_from, event_from_action, event_intents));
+
+  if (subtree)
+    InvalidateSerializerSubtree(*obj);
+}
+
+void AXObjectCacheImpl::SerializeDirtyObjectsAndEvents(
+    bool has_plugin_tree_source,
+    std::vector<ui::AXTreeUpdate>& updates,
+    std::vector<ui::AXEvent>& events,
+    bool& had_end_of_test_event,
+    bool& had_load_complete_messages,
+    bool& need_to_send_location_changes) {
+  HashSet<int32_t> already_serialized_ids;
+
+  // Make a copy of the events, because it's possible that
+  // actions inside this loop will cause more events to be
+  // queued up.
+  Deque<ui::AXEvent> src_events = pending_events_;
+  pending_events_.clear();
+
+  // Dirty objects can be added as a result of serialization. For example,
+  // as children are iterated during depth first traversal in the serializer,
+  // the children sometimes need to be created. The initialization of these
+  // new children can lead to the discovery of parenting changes via
+  // aria-owns, or name changes on an ancestor that collects its name its from
+  // contents. In some cases this has led to an infinite loop, as the
+  // serialization of new dirty objects keeps adding new dirty objects to
+  // consider. The infinite loop is avoided by tracking the number of dirty
+  // objects that can be serialized from the loop, which is the initial
+  // number of dirty objects + kMaxExtraDirtyObjectsToSerialize.
+  // Allowing kMaxExtraDirtyObjectsToSerialize ensures that most important
+  // additional related changes occur at the same time, and that dump event
+  // tests have consistent results (the results change when dirty objects are
+  // processed in separate batches).
+  constexpr int kMaxExtraDirtyObjectsToSerialize = 100;
+
+  size_t num_remaining_objects_to_serialize =
+      dirty_objects_.size() + kMaxExtraDirtyObjectsToSerialize;
+
+  UpdateLifecycleIfNeeded();
+
+  while (!dirty_objects_.empty() && --num_remaining_objects_to_serialize > 0) {
+    AXDirtyObject* current_dirty_object = std::move(dirty_objects_.front());
+    dirty_objects_.pop_front();
+    AXObject* obj = current_dirty_object->obj;
+
+    // Dirty objects can be added using MarkWebAXObjectDirty(obj) from other
+    // parts of the code as well, so we need to ensure the object still
+    // exists.
+    if (!obj || obj->IsDetached())
+      continue;
+
+    // Cannot serialize unincluded object.
+    // Only included objects are marked dirty, but this can happen if the
+    // object becomes unincluded after it was originally marked dirty, in which
+    // cas a children changed will also be fired on the included ancestor. The
+    // children changed event on the ancestor means that attempting to
+    // serialize this unincluded object is not necessary.
+    if (!obj->AccessibilityIsIncludedInTree())
+      continue;
+
+    DCHECK(obj->AXObjectID());
+
+    // Further down this loop, we update |already_serialized_ids| with all
+    // IDs actually serialized. However, add this object's ID first because
+    // there's a chance that we try to serialize this object but the serializer
+    // ends up skipping it. That's probably a Blink bug if that happens, but
+    // still we need to make sure we don't keep trying the same object over
+    // again.
+    if (!already_serialized_ids.insert(obj->AXObjectID()).is_new_entry)
+      continue;  // No insertion, was already present.
+
+    ui::AXTreeUpdate update;
+    update.event_from = current_dirty_object->event_from;
+    update.event_from_action = current_dirty_object->event_from_action;
+    update.event_intents = current_dirty_object->event_intents;
+
+    // If there's a plugin, force the tree data to be generated in every
+    // message so the plugin can merge its own tree data changes.
+    if (has_plugin_tree_source)
+      update.has_tree_data = true;
+
+    if (!SerializeChanges(*obj, &update)) {
+      VLOG(1) << "Failed to serialize one accessibility event.";
+      continue;
+    }
+
+    DCHECK_GT(update.nodes.size(), 0U);
+    for (auto& node : update.nodes) {
+      DCHECK(node.id);
+      already_serialized_ids.insert(node.id);
+    }
+
+    updates.push_back(update);
+  }
+
+  // Loop over each event and generate an updated event message.
+  for (ui::AXEvent& event : src_events) {
+    if (event.event_type == ax::mojom::blink::Event::kEndOfTest) {
+      had_end_of_test_event = true;
+      continue;
+    }
+
+    if (already_serialized_ids.find(event.id) == already_serialized_ids.end()) {
+      // Node no longer exists or could not be serialized.
+      VLOG(1) << "Dropped AXEvent: " << event.event_type << " on "
+              << ObjectFromAXID(event.id);
+      continue;
+    }
+
+#if DCHECK_IS_ON()
+    AXObject* obj = ObjectFromAXID(event.id);
+    DCHECK(obj && !obj->IsDetached())
+        << "Detached object for AXEvent: " << event.event_type << " on #"
+        << event.id;
+#endif
+
+    if (event.event_type == ax::mojom::blink::Event::kLayoutComplete)
+      need_to_send_location_changes = true;
+
+    if (event.event_type == ax::mojom::blink::Event::kLoadComplete)
+      had_load_complete_messages = true;
+
+    events.push_back(event);
+
+    VLOG(1) << "AXEvent: " << event.event_type << " on "
+            << ObjectFromAXID(event.id);
+  }
+}
+
+bool AXObjectCacheImpl::AddPendingEvent(const ui::AXEvent& event,
+                                        bool insert_at_beginning) {
+  // Discard duplicate accessibility events.
+  for (const ui::AXEvent& pending_event : pending_events_) {
+    if (pending_event.id == event.id &&
+        pending_event.event_type == event.event_type) {
+      return false;
+    }
+  }
+
+  if (insert_at_beginning)
+    pending_events_.push_front(event);
+  else
+    pending_events_.push_back(event);
+  return true;
+}
+
+mojo::Remote<blink::mojom::blink::RenderAccessibilityHost>&
+AXObjectCacheImpl::GetOrCreateRemoteRenderAccessibilityHost() {
+  if (!render_accessibility_host_) {
+    GetDocument().GetFrame()->GetBrowserInterfaceBroker().GetInterface(
+        render_accessibility_host_.BindNewPipeAndPassReceiver());
+  }
+  return render_accessibility_host_;
 }
 
 void AXObjectCacheImpl::HandleInitialFocus() {
@@ -3719,7 +4152,7 @@ void AXObjectCacheImpl::HandleTextMarkerDataAddedWithCleanLayout(Node* node) {
       DocumentMarker::kSuggestion | DocumentMarker::kTextFragment |
       DocumentMarker::kCustomHighlight);
   if (!marker_controller.MarkersFor(*text_node, non_spelling_or_grammar_markers)
-           .IsEmpty()) {
+           .empty()) {
     ChildrenChangedWithCleanLayout(node);
     return;
   }
@@ -3733,7 +4166,7 @@ void AXObjectCacheImpl::HandleTextMarkerDataAddedWithCleanLayout(Node* node) {
       DocumentMarker::DocumentMarker::kGrammar);
   bool has_spelling_or_grammar_markers =
       !marker_controller.MarkersFor(*text_node, spelling_and_grammar_markers)
-           .IsEmpty();
+           .empty();
   if (has_spelling_or_grammar_markers) {
     if (nodes_with_spelling_or_grammar_markers_.insert(node).is_new_entry)
       ChildrenChangedWithCleanLayout(node);
@@ -3875,8 +4308,19 @@ void AXObjectCacheImpl::HandleFrameRectsChanged(Document& document) {
 
 void AXObjectCacheImpl::InvalidateBoundingBox(
     const LayoutObject* layout_object) {
-  if (AXObject* obj = Get(const_cast<LayoutObject*>(layout_object)))
+  if (AXObject* obj = Get(const_cast<LayoutObject*>(layout_object))) {
     changed_bounds_ids_.insert(obj->AXObjectID());
+  }
+}
+
+void AXObjectCacheImpl::SetCachedBoundingBox(
+    AXID id,
+    const ui::AXRelativeBounds& bounds) {
+  cached_bounding_boxes_.Set(id, bounds);
+}
+
+void AXObjectCacheImpl::SerializerClearedNode(AXID id) {
+  cached_bounding_boxes_.erase(id);
 }
 
 void AXObjectCacheImpl::HandleScrollPositionChanged(
@@ -3962,7 +4406,7 @@ void AXObjectCacheImpl::AddPermissionStatusListener() {
   //
   // http://crbug.com/759528 and http://crbug.com/762716
   if (document_->Url().Protocol() != "file" &&
-      document_->Url().Host().IsEmpty()) {
+      document_->Url().Host().empty()) {
     return;
   }
 
@@ -4007,8 +4451,8 @@ void AXObjectCacheImpl::RequestAOMEventListenerPermission() {
       CreatePermissionDescriptor(
           mojom::blink::PermissionName::ACCESSIBILITY_EVENTS),
       LocalFrame::HasTransientUserActivation(document_->GetFrame()),
-      WTF::Bind(&AXObjectCacheImpl::OnPermissionStatusChange,
-                WrapPersistent(this)));
+      WTF::BindOnce(&AXObjectCacheImpl::OnPermissionStatusChange,
+                    WrapPersistent(this)));
 }
 
 void AXObjectCacheImpl::Trace(Visitor* visitor) const {
@@ -4028,6 +4472,8 @@ void AXObjectCacheImpl::Trace(Visitor* visitor) const {
   visitor->Trace(tree_update_callback_queue_popup_);
   visitor->Trace(nodes_with_pending_children_changed_);
   visitor->Trace(nodes_with_spelling_or_grammar_markers_);
+  visitor->Trace(ax_tree_source_);
+  visitor->Trace(dirty_objects_);
   AXObjectCache::Trace(visitor);
 }
 

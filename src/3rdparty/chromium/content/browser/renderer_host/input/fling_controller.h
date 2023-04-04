@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,7 +162,8 @@ class CONTENT_EXPORT FlingController {
     return !last_progress_time_.is_null();
   }
 
-  raw_ptr<FlingControllerEventSenderClient> event_sender_client_;
+  raw_ptr<FlingControllerEventSenderClient, DanglingUntriaged>
+      event_sender_client_;
 
   raw_ptr<FlingControllerSchedulerClient> scheduler_client_;
 

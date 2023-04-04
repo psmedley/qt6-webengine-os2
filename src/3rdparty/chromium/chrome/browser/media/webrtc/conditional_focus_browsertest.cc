@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "third_party/blink/public/common/switches.h"
-
-// TODO(crbug.com/1215089): Enable this test suite on Lacros.
-#if !BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace {
 
@@ -124,7 +121,7 @@ class ConditionalFocusBrowserTest : public WebRtcTestBase {
     std::string script_result;
     // TODO(crbug.com/1243764): Use EvalJs() instead.
     EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-        capturing_tab_->GetMainFrame(),
+        capturing_tab_->GetPrimaryMainFrame(),
         base::StringPrintf("captureOtherTab(%d, \"%s\", %s);", busy_wait_ms,
                            ToString(focus_enum_value),
                            on_correct_microtask ? "true" : "false"),
@@ -156,7 +153,7 @@ class ConditionalFocusBrowserTest : public WebRtcTestBase {
     std::string script_result;
     // TODO(crbug.com/1243764): Use EvalJs() instead.
     EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-        capturing_tab_->GetMainFrame(), "callFocusAndExpectError();",
+        capturing_tab_->GetPrimaryMainFrame(), "callFocusAndExpectError();",
         &script_result));
     EXPECT_EQ(script_result, expected_error);
   }
@@ -276,7 +273,7 @@ IN_PROC_BROWSER_TEST_F(ConditionalFocusBrowserTest,
   // Test.
   CallFocusAndExpectError(
       "InvalidStateError: Failed to execute 'focus' on "
-      "'FocusableMediaStreamTrack': Method may only be called once.");
+      "'BrowserCaptureMediaStreamTrack': Method may only be called once.");
 }
 
 IN_PROC_BROWSER_TEST_F(ConditionalFocusBrowserTest,
@@ -286,12 +283,12 @@ IN_PROC_BROWSER_TEST_F(ConditionalFocusBrowserTest,
   // TODO(crbug.com/1243764): Use EvalJs() instead.
   std::string script_result;
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      capturing_tab_->GetMainFrame(), "captureCloneAndFocusClone();",
+      capturing_tab_->GetPrimaryMainFrame(), "captureCloneAndFocusClone();",
       &script_result));
   EXPECT_EQ(
       script_result,
       "InvalidStateError: Failed to execute 'focus' on "
-      "'FocusableMediaStreamTrack': Method may not be invoked on clones.");
+      "'BrowserCaptureMediaStreamTrack': Method may not be invoked on clones.");
 }
 
 IN_PROC_BROWSER_TEST_F(ConditionalFocusBrowserTest,
@@ -302,8 +299,6 @@ IN_PROC_BROWSER_TEST_F(ConditionalFocusBrowserTest,
           /*on_correct_microtask=*/false,
           /*expected_result=*/
           "InvalidStateError: Failed to execute 'focus' on "
-          "'FocusableMediaStreamTrack': The microtask on which the Promise was "
-          "settled has terminated.");
+          "'BrowserCaptureMediaStreamTrack': The window of opportunity for "
+          "focus-decision is closed.");
 }
-
-#endif  //  !BUILDFLAG(IS_CHROMEOS_LACROS)

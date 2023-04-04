@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include <ostream>
+#include <string>
 
 #include "base/notreached.h"
 #include "base/strings/stringprintf.h"
@@ -169,8 +170,8 @@ class HookManager {
     uint32_t dchecked_co_create_instance_address =
         reinterpret_cast<uint32_t>(&HookManager::DCheckedCoCreateInstance);
     uint32_t jmp_offset_base_address = co_create_instance_padded_address_ + 5;
-    structured_hotpatch_.relative_address =
-        dchecked_co_create_instance_address - jmp_offset_base_address;
+    structured_hotpatch_.relative_address = static_cast<int32_t>(
+        dchecked_co_create_instance_address - jmp_offset_base_address);
 
     HotpatchPlaceholderFormat format = GetHotpatchPlaceholderFormat(
         reinterpret_cast<const void*>(co_create_instance_padded_address_));

@@ -96,6 +96,11 @@ PNGImageReader::PNGImageReader(PNGImageDecoder* decoder,
       ignore_animation_(false) {
   png_ = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, pngFailed,
                                 nullptr);
+  // Configure the PNG encoder to always keep the cICP chunk if present.
+  // TODO(veluca): when libpng starts supporting cICP chunks explicitly, remove
+  // this code.
+  png_set_keep_unknown_chunks(png_, PNG_HANDLE_CHUNK_ALWAYS,
+                              reinterpret_cast<const png_byte*>("cICP"), 1);
   info_ = png_create_info_struct(png_);
   png_set_progressive_read_fn(png_, decoder_, nullptr, pngRowAvailable,
                               pngFrameComplete);
@@ -387,7 +392,7 @@ bool PNGImageReader::Parse(SegmentReader& data, ParseQuery query) {
     frame.frame_rect = gfx::Rect(0, 0, width_, height_);
     frame.disposal_method = ImageFrame::DisposalMethod::kDisposeKeep;
     frame.alpha_blend = ImageFrame::AlphaBlendSource::kBlendAtopBgcolor;
-    DCHECK(frame_info_.IsEmpty());
+    DCHECK(frame_info_.empty());
     frame_info_.push_back(frame);
     parse_completed_ = true;
     return true;
@@ -431,7 +436,7 @@ bool PNGImageReader::Parse(SegmentReader& data, ParseQuery query) {
         // Beginning of a new frame's data.
         new_frame_.start_offset = read_offset_;
 
-        if (frame_info_.IsEmpty()) {
+        if (frame_info_.empty()) {
           // This is the first frame. Report it immediately so it can be
           // decoded progressively.
           new_frame_.byte_length = kFirstFrameIndicator;
@@ -632,7 +637,8 @@ bool PNGImageReader::ParseSize(const FastSharedBufferReader& reader) {
       ignore_animation_ = true;
     } else {
       auto is_necessary_ancillary = [](const png_byte* chunk) {
-        for (const char* tag : {"tRNS", "cHRM", "iCCP", "sRGB", "gAMA"}) {
+        for (const char* tag :
+             {"tRNS", "cHRM", "iCCP", "sRGB", "gAMA", "cICP"}) {
           if (IsChunk(chunk, tag))
             return true;
         }

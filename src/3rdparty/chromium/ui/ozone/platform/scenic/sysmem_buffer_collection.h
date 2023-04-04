@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,8 @@ class SysmemBufferCollection
   // Creates a NativePixmap the buffer with the specified index. Returned
   // NativePixmap holds a reference to the collection, so the collection is not
   // deleted until all NativePixmap are destroyed.
-  scoped_refptr<gfx::NativePixmap> CreateNativePixmap(size_t buffer_index);
+  scoped_refptr<gfx::NativePixmap> CreateNativePixmap(size_t buffer_index,
+                                                      gfx::Size size);
 
   // Creates a new Vulkan image for the buffer with the specified index.
   bool CreateVkImage(size_t buffer_index,
@@ -77,12 +78,10 @@ class SysmemBufferCollection
                      VkImage* vk_image,
                      VkImageCreateInfo* vk_image_info,
                      VkDeviceMemory* vk_device_memory,
-                     VkDeviceSize* mem_allocation_size,
-                     absl::optional<gpu::VulkanYCbCrInfo>* ycbcr_info);
+                     VkDeviceSize* mem_allocation_size);
 
   gfx::SysmemBufferCollectionId id() const { return id_; }
   size_t num_buffers() const { return buffers_info_.buffer_count; }
-  gfx::Size size() const { return image_size_; }
   gfx::BufferFormat format() const { return format_; }
   size_t buffer_size() const {
     return buffers_info_.settings.buffer_settings.size_bytes;
@@ -142,7 +141,6 @@ class SysmemBufferCollection
   // threads.
   THREAD_CHECKER(vulkan_thread_checker_);
 
-  gfx::Size image_size_;
   size_t buffer_size_ = 0;
   bool is_protected_ = false;
 

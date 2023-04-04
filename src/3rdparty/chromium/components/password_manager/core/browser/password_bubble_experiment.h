@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,9 +26,6 @@ bool ShouldShowAutoSignInPromptFirstRunExperience(PrefService* prefs);
 // Sets appropriate value to the preference which controls appearance of the
 // first run experience for the auto sign-in prompt.
 void RecordAutoSignInPromptFirstRunExperienceWasShown(PrefService* prefs);
-
-// Turns off the auto signin experience setting.
-void TurnOffAutoSignin(PrefService* prefs);
 
 }  // namespace password_bubble_experiment
 

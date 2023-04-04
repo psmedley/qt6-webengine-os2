@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.19)
 find_package(Ninja 1.7.2 REQUIRED)
 #find_package(Nodejs 12 REQUIRED)
@@ -120,6 +123,10 @@ foreach(arch ${archs})
                 ARGS use_system_icu
                 CONDITION QT_FEATURE_webengine_system_icu
             )
+            extend_gn_list(gnArgArg
+                ARGS use_system_libopenjpeg2
+                CONDITION QT_FEATURE_webengine_system_libopenjpeg2
+            )
         endif()
         if(MACOS)
             list(APPEND gnArgArg angle_enable_vulkan=false)
@@ -186,7 +193,7 @@ foreach(arch ${archs})
             CMAKE_TARGET Pdf
             NINJA_TARGETS QtPdf
             GN_TARGET ${buildGn}
-            GN_ARGS "${gnArgArg}"
+            GN_ARGS ${gnArgArg}
             BUILDDIR ${buildDir}/${config}/${arch}
             MODULE pdf
         )

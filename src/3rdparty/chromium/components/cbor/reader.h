@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,7 +95,7 @@ class CBOR_EXPORT Reader {
 
     // Used to report the specific error in the case that parsing fails. May be
     // nullptr;
-    raw_ptr<DecoderError> error_code_out = nullptr;
+    raw_ptr<DecoderError, DanglingUntriaged> error_code_out = nullptr;
 
     // Controls the maximum depth of CBOR nesting that will be permitted. This
     // exists to control stack consumption during parsing.

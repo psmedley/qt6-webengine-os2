@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <memory>
 
 #include "base/strings/string_number_conversions.h"
-#include "net/cert/internal/extended_key_usage.h"
-#include "net/cert/internal/parse_certificate.h"
-#include "net/cert/x509_util_ios_and_mac.h"
+#include "net/cert/pki/extended_key_usage.h"
+#include "net/cert/pki/parse_certificate.h"
+#include "net/cert/x509_util_apple.h"
 #include "net/ssl/client_cert_identity_mac.h"
 #include "net/ssl/client_cert_identity_test_util.h"
 #include "net/ssl/client_cert_store_unittest-inl.h"

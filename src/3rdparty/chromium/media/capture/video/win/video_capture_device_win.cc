@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_variant.h"
 #include "base/win/win_util.h"
@@ -420,6 +421,9 @@ void VideoCaptureDeviceWin::AllocateAndStart(
     const VideoCaptureParams& params,
     std::unique_ptr<VideoCaptureDevice::Client> client) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("video_and_image_capture"),
+               "VideoCaptureDeviceWin::AllocateAndStart");
+
   if (state_ != kIdle)
     return;
 
@@ -543,6 +547,8 @@ void VideoCaptureDeviceWin::AllocateAndStart(
 
 void VideoCaptureDeviceWin::StopAndDeAllocate() {
   DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("video_and_image_capture"),
+               "VideoCaptureDeviceWin::StopAndDeAllocate");
   if (state_ != kCapturing)
     return;
 

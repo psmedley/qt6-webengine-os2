@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,9 @@ struct CC_PAINT_EXPORT TargetColorParams {
   // The maximum HDR luminance of the target, in multiples of the SDR maximum
   // luminance (a non-HDR-capable display will have a value of 1).
   float hdr_max_luminance_relative = 1.f;
+
+  // Whether or not tone mapping should be applied.
+  bool enable_tone_mapping = true;
 
   bool operator==(const TargetColorParams& other) const {
     return color_space == other.color_space &&

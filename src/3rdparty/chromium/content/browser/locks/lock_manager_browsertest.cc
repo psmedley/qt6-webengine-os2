@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -148,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverSingleLock) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
   GlobalRenderFrameHostId rfh_id = rfh->GetGlobalId();
 
   {
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverTwoLocks) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
   GlobalRenderFrameHostId rfh_id = rfh->GetGlobalId();
 
   {
@@ -228,18 +228,12 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverTwoLocks) {
 
 // Verify that content::FeatureObserver is notified that a frame stopped holding
 // locks when it is navigated away.
-// TODO(crbug.com/1286329): Flakes on Linux, Chrome OS, Mac and Win.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
-    BUILDFLAG(IS_WIN)
-#define MAYBE_ObserverNavigate DISABLED_ObserverNavigate
-#else
-#define MAYBE_ObserverNavigate ObserverNavigate
-#endif
-IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, MAYBE_ObserverNavigate) {
+// TODO(crbug.com/1286329): Flakes on all platforms.
+IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, DISABLED_ObserverNavigate) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
   GlobalRenderFrameHostId rfh_id = rfh->GetGlobalId();
 
   {
@@ -274,7 +268,7 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverStealLock) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
   GlobalRenderFrameHostId rfh_id = rfh->GetGlobalId();
 
   {
@@ -295,7 +289,8 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverStealLock) {
       Shell::CreateNewWindow(shell()->web_contents()->GetBrowserContext(),
                              GURL(), nullptr, gfx::Size());
   EXPECT_TRUE(NavigateToURL(other_shell, GetLocksURL("a.com")));
-  RenderFrameHost* other_rfh = other_shell->web_contents()->GetMainFrame();
+  RenderFrameHost* other_rfh =
+      other_shell->web_contents()->GetPrimaryMainFrame();
   GlobalRenderFrameHostId other_rfh_id = other_rfh->GetGlobalId();
 
   {
@@ -345,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverDedicatedWorker) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
 
   // Use EvalJs() instead of ExecJs() to ensure that this doesn't return before
   // the lock is acquired and released by the worker.
@@ -369,7 +364,7 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverSharedWorker) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
 
   // Use EvalJs() instead of ExecJs() to ensure that this doesn't return before
   // the lock is acquired and released by the worker.
@@ -392,7 +387,7 @@ IN_PROC_BROWSER_TEST_F(LockManagerBrowserTest, ObserverServiceWorker) {
   if (!CheckShouldRunTestAndNavigate())
     return;
 
-  RenderFrameHost* rfh = shell()->web_contents()->GetMainFrame();
+  RenderFrameHost* rfh = shell()->web_contents()->GetPrimaryMainFrame();
 
   // Use EvalJs() instead of ExecJs() to ensure that this doesn't return before
   // the lock is acquired and released by the worker.

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "components/policy/policy_export.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/url_matcher/url_matcher.h"
@@ -24,7 +25,6 @@
 class PrefService;
 
 namespace base {
-class ListValue;
 class SequencedTaskRunner;
 }  // namespace base
 
@@ -55,11 +55,11 @@ class POLICY_EXPORT URLBlocklist {
   // URLs matching one of the |filters| will be blocked. The filter format is
   // documented at
   // http://www.chromium.org/administrators/url-blocklist-filter-format.
-  void Block(const base::ListValue* filters);
+  void Block(const base::Value::List& filters);
 
   // URLs matching one of the |filters| will be allowed. If a URL is both
   // Blocked and Allowed, Allow takes precedence.
-  void Allow(const base::ListValue* filters);
+  void Allow(const base::Value::List& filters);
 
   // Returns true if the URL is blocked.
   bool IsURLBlocked(const GURL& url) const;
@@ -75,9 +75,8 @@ class POLICY_EXPORT URLBlocklist {
       const url_matcher::util::FilterComponents& lhs,
       const url_matcher::util::FilterComponents& rhs);
 
-  url_matcher::URLMatcherConditionSet::ID id_ = 0;
-  std::map<url_matcher::URLMatcherConditionSet::ID,
-           url_matcher::util::FilterComponents>
+  base::MatcherStringPattern::ID id_ = 0;
+  std::map<base::MatcherStringPattern::ID, url_matcher::util::FilterComponents>
       filters_;
   std::unique_ptr<url_matcher::URLMatcher> url_matcher_;
 };

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,7 +104,7 @@ class EduAccountLoginHandler : public content::WebUIMessageHandler,
 
   virtual void FetchFamilyMembers();
   virtual void FetchParentImages(
-      base::ListValue parents,
+      base::Value::List parents,
       std::map<std::string, GURL> profile_image_urls);
   virtual void FetchAccessToken(const std::string& obfuscated_gaia_id,
                                 const std::string& password);
@@ -121,7 +121,7 @@ class EduAccountLoginHandler : public content::WebUIMessageHandler,
 
   // ProfileImageFetcher callback
   void OnParentProfileImagesFetched(
-      base::ListValue parents,
+      base::Value::List parents,
       std::map<std::string, gfx::Image> profile_images);
 
   // signin::PrimaryAccountAccessTokenFetcher callback

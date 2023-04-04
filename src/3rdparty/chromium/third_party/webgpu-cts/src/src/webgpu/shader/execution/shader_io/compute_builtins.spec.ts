@@ -104,19 +104,19 @@ g.test('inputs')
       struct V {
         data : array<vec3<u32>>
       };
-      @group(0) @binding(0) var<storage, write> local_id_out : V;
-      @group(0) @binding(1) var<storage, write> local_index_out : S;
-      @group(0) @binding(2) var<storage, write> global_id_out : V;
-      @group(0) @binding(3) var<storage, write> group_id_out : V;
-      @group(0) @binding(4) var<storage, write> num_groups_out : V;
+      @group(0) @binding(0) var<storage, read_write> local_id_out : V;
+      @group(0) @binding(1) var<storage, read_write> local_index_out : S;
+      @group(0) @binding(2) var<storage, read_write> global_id_out : V;
+      @group(0) @binding(3) var<storage, read_write> group_id_out : V;
+      @group(0) @binding(4) var<storage, read_write> num_groups_out : V;
 
       ${structures}
 
-      let group_width = ${t.params.groupSize.x}u;
-      let group_height = ${t.params.groupSize.y}u;
-      let group_depth = ${t.params.groupSize.z}u;
+      const group_width = ${t.params.groupSize.x}u;
+      const group_height = ${t.params.groupSize.y}u;
+      const group_depth = ${t.params.groupSize.z}u;
 
-      @stage(compute) @workgroup_size(group_width, group_height, group_depth)
+      @compute @workgroup_size(group_width, group_height, group_depth)
       fn main(
         ${params}
         ) {
@@ -131,6 +131,7 @@ g.test('inputs')
     `;
 
     const pipeline = t.device.createComputePipeline({
+      layout: 'auto',
       compute: {
         module: t.device.createShaderModule({
           code: wgsl,
@@ -177,7 +178,7 @@ g.test('inputs')
     pass.setBindGroup(0, bindGroup);
     switch (t.params.dispatch) {
       case 'direct':
-        pass.dispatch(t.params.numGroups.x, t.params.numGroups.y, t.params.numGroups.z);
+        pass.dispatchWorkgroups(t.params.numGroups.x, t.params.numGroups.y, t.params.numGroups.z);
         break;
       case 'indirect': {
         const dispatchBuffer = t.device.createBuffer({
@@ -191,7 +192,7 @@ g.test('inputs')
         dispatchData[1] = t.params.numGroups.y;
         dispatchData[2] = t.params.numGroups.z;
         dispatchBuffer.unmap();
-        pass.dispatchIndirect(dispatchBuffer, 0);
+        pass.dispatchWorkgroupsIndirect(dispatchBuffer, 0);
         break;
       }
     }

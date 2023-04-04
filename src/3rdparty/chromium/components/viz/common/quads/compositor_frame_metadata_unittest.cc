@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,9 +47,7 @@ bool AreDelegatedInkMetadataEqual(const gfx::DelegatedInkMetadata& a,
 
 bool AreTransitionDirectivesEqual(const CompositorFrameTransitionDirective& a,
                                   const CompositorFrameTransitionDirective& b) {
-  return a.sequence_id() == b.sequence_id() && a.type() == b.type() &&
-         a.effect() == b.effect() &&
-         a.is_renderer_driven_animation() == b.is_renderer_driven_animation();
+  return a.sequence_id() == b.sequence_id() && a.type() == b.type();
 }
 
 TEST(CompositorFrameMetadata, Clone) {
@@ -65,7 +63,7 @@ TEST(CompositorFrameMetadata, Clone) {
   metadata.content_color_usage = gfx::ContentColorUsage::kHDR;
   metadata.may_contain_video = true;
   metadata.is_resourceless_software_draw_with_scroll_or_animation = true;
-  metadata.root_background_color = SK_ColorBLUE;
+  metadata.root_background_color = SkColors::kBlue;
   metadata.latency_info.emplace_back(ui::SourceEventType::KEY_PRESS);
   metadata.referenced_surfaces.emplace_back(
       SurfaceId(frame_sink_id, local_id1), SurfaceId(frame_sink_id, local_id2));
@@ -84,8 +82,7 @@ TEST(CompositorFrameMetadata, Clone) {
       gfx::PointF(88.8, 44.4), 1.f, SK_ColorRED,
       base::TimeTicks() + base::Seconds(125), gfx::RectF(1, 2, 3, 4), true);
   metadata.transition_directives.emplace_back(
-      4u, CompositorFrameTransitionDirective::Type::kSave, true,
-      CompositorFrameTransitionDirective::Effect::kCoverUp);
+      4u, CompositorFrameTransitionDirective::Type::kSave);
 
   CompositorFrameMetadata clone = metadata.Clone();
   EXPECT_FLOAT_EQ(clone.device_scale_factor, metadata.device_scale_factor);

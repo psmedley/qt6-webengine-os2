@@ -7,7 +7,7 @@
 
 #include "src/core/SkGlyphBuffer.h"
 #include "src/core/SkGlyphRunPainter.h"
-#include "src/core/SkStrikeForGPU.h"
+#include "src/text/StrikeForGPU.h"
 
 void SkSourceGlyphBuffer::reset() {
     fRejectedGlyphIDs.reset();
@@ -18,6 +18,7 @@ void SkDrawableGlyphBuffer::ensureSize(size_t size) {
     if (size > fMaxSize) {
         fMultiBuffer.reset(size);
         fPositions.reset(size);
+        fFormats.reset(size);
         fMaxSize = size;
     }
 
@@ -31,6 +32,22 @@ void SkDrawableGlyphBuffer::startSource(const SkZip<const SkGlyphID, const SkPoi
 
     auto positions = source.get<1>();
     memcpy(fPositions, positions.data(), positions.size() * sizeof(SkPoint));
+
+    // Convert from SkGlyphIDs to SkPackedGlyphIDs.
+    SkGlyphVariant* packedIDCursor = fMultiBuffer.get();
+    for (auto t : source) {
+        *packedIDCursor++ = SkPackedGlyphID{std::get<0>(t)};
+    }
+    SkDEBUGCODE(fPhase = kInput);
+}
+
+void SkDrawableGlyphBuffer::startSourceWithMatrixAdjustment(
+        const SkZip<const SkGlyphID, const SkPoint>& source, const SkMatrix& creationMatrix) {
+    fInputSize = source.size();
+    fAcceptedSize = 0;
+
+    auto positions = source.get<1>();
+    creationMatrix.mapPoints(fPositions, positions.data(), positions.size());
 
     // Convert from SkGlyphIDs to SkPackedGlyphIDs.
     SkGlyphVariant* packedIDCursor = fMultiBuffer.get();
@@ -86,6 +103,7 @@ void SkDrawableGlyphBuffer::reset() {
     if (fMaxSize > 200) {
         fMultiBuffer.reset();
         fPositions.reset();
+        fFormats.reset();
         fMaxSize = 0;
     }
     fInputSize = 0;

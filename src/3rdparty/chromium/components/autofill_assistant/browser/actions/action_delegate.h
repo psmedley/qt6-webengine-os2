@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,13 @@
 
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "components/autofill_assistant/browser/js_flow_devtools_wrapper.h"
+#include "components/autofill_assistant/browser/public/external_action_delegate.h"
+#include "components/autofill_assistant/browser/public/headless_script_controller.h"
+#include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/tts_button_state.h"
 #include "components/autofill_assistant/browser/viewport_mode.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
 
@@ -55,6 +60,7 @@ class GenericUserInterfaceProto;
 class FormProto;
 class FormProto_Result;
 class InfoBox;
+class PromptQrCodeScanProto;
 class UserAction;
 class UserData;
 class UserModel;
@@ -66,11 +72,13 @@ class ShowProgressBarProto_StepProgressBarConfiguration;
 class ProcessedActionStatusDetailsProto;
 class GetUserDataResponseProto;
 class ElementAreaProto;
+class ExternalActionProto;
 
 enum ConfigureBottomSheetProto_PeekMode : int;
 enum ConfigureUiStateProto_OverlayBehavior : int;
 enum DocumentReadyState : int;
 enum class UserDataFieldChange;
+enum class UserDataEventField;
 
 // Action delegate called when processing actions.
 class ActionDelegate {
@@ -194,7 +202,7 @@ class ActionDelegate {
       bool browse_mode_invisible = false) = 0;
 
   // Have the UI leave the prompt state and go back to its previous state.
-  virtual void CleanUpAfterPrompt() = 0;
+  virtual void CleanUpAfterPrompt(bool consume_touchable_area = true) = 0;
 
   // Set the list of allowed domains to be used when we enter a browse state.
   // This list is used to determine whether a user initiated navigation to a
@@ -230,11 +238,13 @@ class ActionDelegate {
   virtual void GetFullCard(const autofill::CreditCard* credit_card,
                            GetFullCardCallback callback) = 0;
 
-  // Return |FormData| and |FormFieldData| for the element identified with
-  // |selector|. The result is returned asynchronously through |callback|.
+  // Return |FormData| and |FormFieldData| from |RenderFrameHost| for the
+  // element identified with |selector|. The result is returned asynchronously
+  // through |callback|.
   virtual void RetrieveElementFormAndFieldData(
       const Selector& selector,
       base::OnceCallback<void(const ClientStatus&,
+                              content::RenderFrameHost* rfh,
                               const autofill::FormData&,
                               const autofill::FormFieldData&)> callback) = 0;
 
@@ -311,6 +321,10 @@ class ActionDelegate {
 
   // Get associated web contents.
   virtual content::WebContents* GetWebContents() const = 0;
+
+  // Get the wrapper that owns the web contents and devtools client for js
+  // flows.
+  virtual JsFlowDevtoolsWrapper* GetJsFlowDevtoolsWrapper() const = 0;
 
   // Get the ElementStore.
   virtual ElementStore* GetElementStore() const = 0;
@@ -400,6 +414,16 @@ class ActionDelegate {
       base::RepeatingCallback<void(const FormProto_Result*)> changed_callback,
       base::OnceCallback<void(const ClientStatus&)> cancel_callback) = 0;
 
+  // Show QR Code Scan UI to the user. |callback| should be invoked with the
+  // scanned result or absl::nullopt and an appropriate client status.
+  virtual void ShowQrCodeScanUi(
+      std::unique_ptr<PromptQrCodeScanProto> qr_code_scan,
+      base::OnceCallback<void(const ClientStatus&,
+                              const absl::optional<ValueProto>&)> callback) = 0;
+
+  // Clears the QR Code Scan Ui.
+  virtual void ClearQrCodeScanUi() = 0;
+
   // Force showing the UI if no UI is shown. This is useful when executing a
   // direct action which realizes it needs to interact with the user. Once
   // shown, the UI stays up until the end of the flow.
@@ -407,6 +431,9 @@ class ActionDelegate {
 
   // Gets the user data.
   virtual const UserData* GetUserData() const = 0;
+
+  // Gets the user data (mutable).
+  virtual UserData* GetMutableUserData() const = 0;
 
   // Access to the user model.
   virtual UserModel* GetUserModel() const = 0;
@@ -420,7 +447,11 @@ class ActionDelegate {
       std::unique_ptr<GenericUserInterfaceProto> generic_ui,
       base::OnceCallback<void(const ClientStatus&)> end_action_callback,
       base::OnceCallback<void(const ClientStatus&)>
-          view_inflation_finished_callback) = 0;
+          view_inflation_finished_callback,
+      base::RepeatingCallback<void(const RequestBackendDataProto&)>
+          request_backend_data_callback,
+      base::RepeatingCallback<void(const ShowAccountScreenProto&)>
+          show_account_screen_callback) = 0;
 
   // Show |generic_ui| to the user.
   // |view_inflation_finished_callback| will be called immediately after
@@ -457,12 +488,65 @@ class ActionDelegate {
   // gets attached to the action's response if non empty.
   virtual ProcessedActionStatusDetailsProto& GetLogInfo() = 0;
 
+  // Sends a request to retrieve the required user data for this flow. Returns
+  // the result through the |callback|. Enters the |RUNNING| state while doing
+  // so.
   virtual void RequestUserData(
       const CollectUserDataOptions& options,
       base::OnceCallback<void(bool, const GetUserDataResponseProto&)>
           callback) = 0;
 
-  virtual base::WeakPtr<ActionDelegate> GetWeakPtr() const = 0;
+  // Displays the user's |email_address| account page in a platform-appropriate
+  // way. On Android, for example, this is accomplished by firing an intent to
+  // the GMS core library. |proto| defines which part of the user's account page
+  // should be displayed.
+  virtual void ShowAccountScreen(const ShowAccountScreenProto& proto,
+                                 const std::string& email_address) = 0;
+
+  virtual void SetCollectUserDataUiState(bool loading,
+                                         UserDataEventField event_field) = 0;
+
+  // Whether the current flow supports external actions.
+  virtual bool SupportsExternalActions() = 0;
+
+  // Executes the |external_action|.
+  virtual void RequestExternalAction(
+      const ExternalActionProto& external_action,
+      base::OnceCallback<void(ExternalActionDelegate::DomUpdateCallback)>
+          start_dom_checks_callback,
+      base::OnceCallback<void(const external::Result& result)>
+          end_action_callback) = 0;
+
+  // Returns whether or not this instance of Autofill Assistant must use a
+  // backend endpoint to query data.
+  virtual bool MustUseBackendData() const = 0;
+
+  // Maybe sets the previously executed action. JS flow actions are excluded
+  // because they act as a script executor.
+  virtual void MaybeSetPreviousAction(
+      const ProcessedActionProto& processed_action) = 0;
+
+  // Returns the Autofill Assistant intent for the current flow.
+  virtual absl::optional<std::string> GetIntent() const = 0;
+
+  // Returns the client's locale.
+  virtual const std::string GetLocale() const = 0;
+
+  // Checks if given XML is signed or not.
+  virtual bool IsXmlSigned(const std::string& xml_string) const = 0;
+
+  // Extracts attribute values from the |xml_string| corresponding to the
+  // |keys|. In case if |xml_string| is not successfully parsed or data for all
+  // the |keys| is not found, it returns an empty vector.
+  virtual const std::vector<std::string> ExtractValuesFromSingleTagXml(
+      const std::string& xml_string,
+      const std::vector<std::string>& keys) const = 0;
+
+  virtual base::WeakPtr<ActionDelegate> GetWeakPtr() = 0;
+
+  // Make a fire-and-forget call to report progress.
+  virtual void ReportProgress(const std::string& payload,
+                              base::OnceCallback<void(bool)> callback) = 0;
 
  protected:
   ActionDelegate() = default;

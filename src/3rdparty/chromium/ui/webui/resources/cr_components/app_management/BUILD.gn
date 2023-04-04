@@ -1,43 +1,17 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//tools/grit/preprocess_if_expr.gni")
-import("//tools/polymer/html_to_js.gni")
+import("//tools/polymer/css_to_wrapper.gni")
+import("//tools/polymer/html_to_wrapper.gni")
 import("//tools/typescript/ts_library.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
+import("//ui/webui/webui_features.gni")
+import("app_management.gni")
 
 assert(!is_android && !is_ios)
-
-preprocess_folder_tmp = "$root_gen_dir/ui/webui/resources/preprocessed/cr_components/app_management_tmp"
-preprocess_folder =
-    "$root_gen_dir/ui/webui/resources/preprocessed/cr_components/app_management"
-
-web_component_files = [
-  "file_handling_item.ts",
-  "icons.ts",
-  "more_permissions_item.ts",
-  "permission_item.ts",
-  "run_on_os_login_item.ts",
-  "shared_style.ts",
-  "shared_vars.ts",
-  "toggle_row.ts",
-  "uninstall_button.ts",
-  "window_mode_item.ts",
-]
-
-non_web_component_files = [
-  "constants.ts",
-  "permission_constants.ts",
-  "permission_util.ts",
-  "browser_proxy.ts",
-  "util.ts",
-]
-
-html_to_js("web_components") {
-  js_files = web_component_files
-}
 
 mojom("mojo_bindings") {
   sources = [ "app_management.mojom" ]
@@ -101,19 +75,35 @@ mojom("mojo_bindings") {
   ]
 }
 
-preprocess_if_expr("preprocess_src") {
-  visibility = [ ":build_ts" ]
+preprocess_folder_tmp = "$root_gen_dir/ui/webui/resources/preprocessed/cr_components/app_management_tmp"
+preprocess_folder =
+    "$root_gen_dir/ui/webui/resources/preprocessed/cr_components/app_management"
+
+preprocess_if_expr("preprocess") {
+  visibility = [
+    ":build_ts",
+    ":css_wrapper_files",
+    ":html_wrapper_files",
+  ]
   in_folder = "."
   out_folder = preprocess_folder_tmp
-  in_files = non_web_component_files
+  in_files = ts_files + html_files + html_icons_files + css_files
 }
 
-preprocess_if_expr("preprocess_generated") {
-  visibility = [ ":build_ts" ]
-  deps = [ ":web_components" ]
-  in_folder = target_gen_dir
+html_to_wrapper("html_wrapper_files") {
+  deps = [ ":preprocess" ]
+  in_folder = preprocess_folder_tmp
   out_folder = preprocess_folder_tmp
-  in_files = web_component_files
+  in_files = html_files + html_icons_files
+  minify = optimize_webui
+}
+
+css_to_wrapper("css_wrapper_files") {
+  deps = [ ":preprocess" ]
+  in_folder = preprocess_folder_tmp
+  out_folder = preprocess_folder_tmp
+  in_files = css_files
+  minify = optimize_webui
 }
 
 copy("copy_mojo") {
@@ -133,10 +123,7 @@ ts_library("build_ts") {
   out_dir = preprocess_folder
   composite = true
   tsconfig_base = "tsconfig_base.json"
-  in_files = web_component_files + non_web_component_files + [
-               "app_management.mojom-webui.js",
-               "types.mojom-webui.js",
-             ]
+  in_files = ts_files + html_wrapper_files + css_wrapper_files + mojo_files
 
   definitions = [ "//tools/typescript/definitions/metrics_private.d.ts" ]
 
@@ -146,16 +133,18 @@ ts_library("build_ts") {
   ]
   extra_deps = [
     ":copy_mojo",
-    ":preprocess_generated",
-    ":preprocess_src",
+    ":css_wrapper_files",
+    ":html_wrapper_files",
+    ":preprocess",
   ]
 }
 
 generate_grd("build_grdp") {
   grd_prefix = "cr_components_app_management"
   out_grd = "$target_gen_dir/resources.grdp"
-  deps = [ ":build_ts" ]
-  manifest_files = [ "$target_gen_dir/tsconfig.manifest" ]
+  public_deps = [ ":build_ts" ]
+  manifest_files =
+      filter_include(get_target_outputs(":build_ts"), [ "*.manifest" ])
   resource_path_prefix = "cr_components/app_management"
 }
 
@@ -166,7 +155,6 @@ source_set("unit_tests") {
   deps = [
     ":mojo_bindings",
     "//base/test:test_support",
-    "//chrome/test:test_support",
     "//mojo/public/cpp/test_support:test_utils",
     "//testing/gtest",
   ]

@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,8 +31,6 @@ QuicChromiumPacketReader::QuicChromiumPacketReader(
     const NetLogWithSource& net_log)
     : socket_(socket),
       visitor_(visitor),
-      read_pending_(false),
-      num_packets_read_(0),
       clock_(clock),
       yield_after_packets_(yield_after_packets),
       yield_after_duration_(yield_after_duration),
@@ -40,7 +38,7 @@ QuicChromiumPacketReader::QuicChromiumPacketReader(
       read_buffer_(base::MakeRefCounted<IOBufferWithSize>(kReadBufferSize)),
       net_log_(net_log) {}
 
-QuicChromiumPacketReader::~QuicChromiumPacketReader() {}
+QuicChromiumPacketReader::~QuicChromiumPacketReader() = default;
 
 void QuicChromiumPacketReader::StartReading() {
   for (;;) {

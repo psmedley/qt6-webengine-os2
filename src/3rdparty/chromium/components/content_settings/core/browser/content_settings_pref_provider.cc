@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include <string>
 #include <utility>
 
-#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/default_clock.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/browser/content_settings_info.h"
@@ -22,18 +22,12 @@
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
-#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
-#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
-#include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
 #include "components/prefs/pref_service.h"
-#include "components/prefs/scoped_user_pref_update.h"
-#include "services/preferences/public/cpp/dictionary_value_update.h"
-#include "services/preferences/public/cpp/scoped_pref_update.h"
 #include "services/tracing/public/cpp/perfetto/macros.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_content_settings_event_info.pbzero.h"
 
@@ -44,6 +38,12 @@ namespace {
 // These settings are no longer used, and should be deleted on profile startup.
 const char kObsoleteDomainToOriginMigrationStatus[] =
     "profile.content_settings.domain_to_origin_migration_status";
+const char kObsoleteWebIdActiveSessionPref[] =
+    "profile.content_settings.exceptions.webid_active_session";
+const char kObsoleteWebIdRequestPref[] =
+    "profile.content_settings.exceptions.webid_request";
+const char kObsoleteWebIdSharePref[] =
+    "profile.content_settings.exceptions.webid_share";
 
 #if !BUILDFLAG(IS_IOS)
 const char kObsoleteFullscreenExceptionsPref[] =
@@ -63,6 +63,10 @@ const char kObsoleteFileHandlingExceptionsPref[] =
     "profile.content_settings.exceptions.file_handling";
 const char kObsoleteFontAccessExceptionsPref[] =
     "profile.content_settings.exceptions.font_access";
+const char kObsoleteInstalledWebAppMetadataExceptionsPref[] =
+    "profile.content_settings.exceptions.installed_web_app_metadata";
+const char kObsoletePpapiBrokerExceptionsPref[] =
+    "profile.content_settings.exceptions.ppapi_broker";
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // !BUILDFLAG(IS_IOS)
 
@@ -91,6 +95,9 @@ void PrefProvider::RegisterProfilePrefs(
   // These prefs have been removed, but need to be registered so they can
   // be deleted on startup.
   registry->RegisterIntegerPref(kObsoleteDomainToOriginMigrationStatus, 0);
+  registry->RegisterDictionaryPref(kObsoleteWebIdActiveSessionPref);
+  registry->RegisterDictionaryPref(kObsoleteWebIdRequestPref);
+  registry->RegisterDictionaryPref(kObsoleteWebIdSharePref);
 #if !BUILDFLAG(IS_IOS)
   registry->RegisterDictionaryPref(
       kObsoleteFullscreenExceptionsPref,
@@ -104,6 +111,9 @@ void PrefProvider::RegisterProfilePrefs(
   registry->RegisterDictionaryPref(kObsoletePluginsExceptionsPref);
   registry->RegisterDictionaryPref(kObsoleteFileHandlingExceptionsPref);
   registry->RegisterDictionaryPref(kObsoleteFontAccessExceptionsPref);
+  registry->RegisterDictionaryPref(
+      kObsoleteInstalledWebAppMetadataExceptionsPref);
+  registry->RegisterDictionaryPref(kObsoletePpapiBrokerExceptionsPref);
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // !BUILDFLAG(IS_IOS)
 }
@@ -208,6 +218,18 @@ bool PrefProvider::SetWebsiteSetting(
   base::Time modified_time =
       store_last_modified_ ? clock_->Now() : base::Time();
 
+  // Last visit timestamps should only be tracked for ContentSettings that are
+  // "ASK" by default.
+  DCHECK(!constraints.track_last_visit_for_autoexpiration ||
+         content_settings::CanTrackLastVisit(content_type));
+  // Last visit timestamps can only be tracked for host-specific pattern.
+  DCHECK(!constraints.track_last_visit_for_autoexpiration ||
+         !primary_pattern.GetHost().empty());
+
+  base::Time last_visited = constraints.track_last_visit_for_autoexpiration
+                                ? GetCoarseTime(clock_->Now())
+                                : base::Time();
+
   // If SessionModel is OneTime, we know for sure that a one time permission
   // has been set by the One Time Provider, therefore we reset a potentially
   // existing Allow Always setting.
@@ -217,23 +239,40 @@ bool PrefProvider::SetWebsiteSetting(
   }
 
   GetPref(content_type)
-      ->SetWebsiteSetting(primary_pattern, secondary_pattern, modified_time,
-                          std::move(in_value), constraints);
+      ->SetWebsiteSetting(primary_pattern, secondary_pattern,
+                          std::move(in_value),
+                          {.last_modified = modified_time,
+                           .last_visited = last_visited,
+                           .expiration = constraints.expiration,
+                           .session_model = constraints.session_model});
   return true;
 }
 
-base::Time PrefProvider::GetWebsiteSettingLastModified(
+bool PrefProvider::UpdateLastVisitTime(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(prefs_);
-
   if (!supports_type(content_type))
-    return base::Time();
+    return false;
 
-  return GetPref(content_type)
-      ->GetWebsiteSettingLastModified(primary_pattern, secondary_pattern);
+  auto it = GetRuleIterator(content_type, false);
+  Rule rule;
+  while (it->HasNext()) {
+    rule = it->Next();
+    if (rule.primary_pattern == primary_pattern &&
+        rule.secondary_pattern == secondary_pattern) {
+      // This should only be updated for settings that are already tracked.
+      DCHECK(rule.metadata.last_visited != base::Time());
+      // Reset iterator to release lock before updating setting.
+      it.reset();
+      rule.metadata.last_visited = GetCoarseTime(clock_->Now());
+      GetPref(content_type)
+          ->SetWebsiteSetting(rule.primary_pattern, rule.secondary_pattern,
+                              std::move(rule.value), std::move(rule.metadata));
+      return true;
+    }
+  }
+  return false;
 }
 
 void PrefProvider::ClearAllContentSettingsRules(
@@ -279,6 +318,9 @@ void PrefProvider::DiscardOrMigrateObsoletePreferences() {
     return;
 
   prefs_->ClearPref(kObsoleteDomainToOriginMigrationStatus);
+  prefs_->ClearPref(kObsoleteWebIdActiveSessionPref);
+  prefs_->ClearPref(kObsoleteWebIdRequestPref);
+  prefs_->ClearPref(kObsoleteWebIdSharePref);
 
   // These prefs were never stored on iOS/Android so they don't need to be
   // deleted.
@@ -290,7 +332,8 @@ void PrefProvider::DiscardOrMigrateObsoletePreferences() {
   prefs_->ClearPref(kObsoletePluginsExceptionsPref);
   prefs_->ClearPref(kObsoletePluginsDataExceptionsPref);
   prefs_->ClearPref(kObsoleteFileHandlingExceptionsPref);
-  prefs_->ClearPref(kObsoleteFontAccessExceptionsPref);
+  prefs_->ClearPref(kObsoleteInstalledWebAppMetadataExceptionsPref);
+  prefs_->ClearPref(kObsoletePpapiBrokerExceptionsPref);
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // !BUILDFLAG(IS_IOS)
 }

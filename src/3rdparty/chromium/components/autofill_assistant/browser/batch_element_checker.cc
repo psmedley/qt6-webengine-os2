@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/autofill_assistant/browser/web/element_action_util.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "components/autofill_assistant/browser/web/selector_observer.h"
 #include "components/autofill_assistant/browser/web/web_controller.h"
 
@@ -76,19 +76,13 @@ void BatchElementChecker::AddAllDoneCallback(
 }
 
 void BatchElementChecker::EnableObserver(
-    base::TimeDelta max_wait_time,
-    base::TimeDelta periodic_check_interval,
-    base::TimeDelta extra_timeout) {
-  DCHECK(!use_observers_);
+    const SelectorObserver::Settings& settings) {
+  DCHECK(!observer_settings_);
   DCHECK(!started_);
   DCHECK(get_field_value_callbacks_.empty())
       << "Observer-based BatchElementChecker doesn't work with "
          "AddFieldValueCheck";
-
-  use_observers_ = true;
-  observer_max_wait_time_ = max_wait_time;
-  observer_periodic_check_interval_ = periodic_check_interval;
-  observer_extra_timeout_ = extra_timeout;
+  observer_settings_.emplace(settings);
 }
 
 void BatchElementChecker::Run(WebController* web_controller) {
@@ -97,7 +91,7 @@ void BatchElementChecker::Run(WebController* web_controller) {
   for (size_t i = 0; i < element_condition_checks_.size(); ++i) {
     AddElementConditionResults(element_condition_checks_[i].proto, i);
   }
-  if (use_observers_) {
+  if (observer_settings_) {
     RunWithObserver(web_controller);
     return;
   }
@@ -149,6 +143,7 @@ void BatchElementChecker::RunWithObserver(WebController* web_controller) {
   DCHECK(get_field_value_callbacks_.empty())
       << "Observer-based BatchElementChecker doesn't work with "
          "AddFieldValueCheck";
+  DCHECK(observer_settings_);
   DCHECK(!started_);
   std::vector<SelectorObserver::ObservableSelector> selectors;
 
@@ -164,8 +159,7 @@ void BatchElementChecker::RunWithObserver(WebController* web_controller) {
   }
   started_ = true;
   auto result = web_controller->ObserveSelectors(
-      selectors, observer_max_wait_time_, observer_periodic_check_interval_,
-      observer_extra_timeout_,
+      selectors, *observer_settings_,
       base::BindRepeating(&BatchElementChecker::OnResultsUpdated,
                           weak_ptr_factory_.GetWeakPtr())
 
@@ -179,9 +173,14 @@ void BatchElementChecker::OnResultsUpdated(
     const ClientStatus& status,
     const std::vector<SelectorObserver::Update>& updates,
     SelectorObserver* selector_observer) {
+  bool continue_checking = true;
   if (!status.ok()) {
-    CallAllCallbacksWithError(status);
-    return;
+    if (status.proto_status() == ELEMENT_RESOLUTION_FAILED) {
+      continue_checking = false;
+    } else {
+      CallAllCallbacksWithError(status);
+      return;
+    }
   }
   std::vector<size_t> updated_conditions_vector;
   // Apply updates
@@ -203,18 +202,17 @@ void BatchElementChecker::OnResultsUpdated(
   auto updated_conditions =
       base::flat_set<size_t>(std::move(updated_conditions_vector));
 
-  bool any_match = false;
   for (size_t condition_index : updated_conditions) {
     auto& condition = element_condition_checks_[condition_index];
     size_t index = 0;
     if (EvaluateElementPrecondition(condition.proto, condition.results, &index,
                                     nullptr, nullptr)
             .matches()) {
-      any_match = true;
+      continue_checking = false;
       break;
     }
   }
-  if (!any_match) {
+  if (continue_checking) {
     selector_observer->Continue();
     return;
   }
@@ -452,6 +450,8 @@ void BatchElementChecker::AddElementConditionResults(
       result.strict = proto.require_unique_element();
       if (result.selector.empty()) {
         // Empty selectors never match.
+        VLOG(1) << __func__
+                << " Received invalid selector: " << result.selector;
         result.match = {/* has_value= */ true, /* value= */ false};
       } else {
         unique_selectors_[std::make_pair(result.selector, result.strict)]

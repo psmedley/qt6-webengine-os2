@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,7 +64,7 @@ class PaintTimingCallbackManager : public GarbageCollectedMixin {
 //
 // |GarbageCollected| inheritance is required by the swap-time callback
 // registration.
-class PaintTimingCallbackManagerImpl final
+class CORE_EXPORT PaintTimingCallbackManagerImpl final
     : public GarbageCollected<PaintTimingCallbackManagerImpl>,
       public PaintTimingCallbackManager {
  public:
@@ -123,13 +123,30 @@ class CORE_EXPORT PaintTimingDetector
  public:
   PaintTimingDetector(LocalFrameView*);
 
-  static void NotifyBackgroundImagePaint(
+  struct LargestContentfulPaintDetails {
+    base::TimeTicks largest_image_paint_time_;
+    uint64_t largest_image_paint_size_ = 0;
+    blink::LargestContentfulPaintType largest_contentful_paint_type_ =
+        blink::LargestContentfulPaintType::kNone;
+    double largest_contentful_paint_image_bpp_ = 0.0;
+    base::TimeTicks largest_text_paint_time_;
+    uint64_t largest_text_paint_size_ = 0;
+    base::TimeTicks largest_contentful_paint_time_;
+  };
+
+  // Returns true if the image might ultimately be a candidate for largest
+  // paint, otherwise false. When this method is called we do not know the
+  // largest status for certain, because we need to wait for presentation.
+  // Hence the "maybe" return value.
+  static bool NotifyBackgroundImagePaint(
       const Node&,
       const Image&,
       const StyleFetchedImage&,
       const PropertyTreeStateOrAlias& current_paint_chunk_properties,
       const gfx::Rect& image_border);
-  static void NotifyImagePaint(
+  // Returns true if the image is a candidate for largest paint, otherwise
+  // false. See the comment for NotifyBackgroundImagePaint(...).
+  static bool NotifyImagePaint(
       const LayoutObject&,
       const gfx::Size& intrinsic_size,
       const MediaTiming& media_timing,
@@ -164,31 +181,40 @@ class CORE_EXPORT PaintTimingDetector
   gfx::RectF CalculateVisualRect(const gfx::Rect& visual_rect,
                                  const PropertyTreeStateOrAlias&) const;
 
-  TextPaintTimingDetector* GetTextPaintTimingDetector() const {
+  TextPaintTimingDetector& GetTextPaintTimingDetector() const {
     DCHECK(text_paint_timing_detector_);
-    return text_paint_timing_detector_;
+    return *text_paint_timing_detector_;
   }
-  ImagePaintTimingDetector* GetImagePaintTimingDetector() const {
-    return image_paint_timing_detector_;
+  ImagePaintTimingDetector& GetImagePaintTimingDetector() const {
+    DCHECK(image_paint_timing_detector_);
+    return *image_paint_timing_detector_;
   }
+  void StartRecordingLCP();
 
   LargestContentfulPaintCalculator* GetLargestContentfulPaintCalculator();
 
-  base::TimeTicks LargestImagePaint() const {
-    return largest_image_paint_time_;
+  base::TimeTicks LargestImagePaintForMetrics() const {
+    return lcp_details_for_ukm_.largest_image_paint_time_;
   }
-  uint64_t LargestImagePaintSize() const { return largest_image_paint_size_; }
-  LargestContentfulPaintTypeMask LargestContentfulPaintType() const {
-    return largest_contentful_paint_type_;
+  uint64_t LargestImagePaintSizeForMetrics() const {
+    return lcp_details_for_ukm_.largest_image_paint_size_;
   }
-  double LargestContentfulPaintImageBPP() const {
-    return largest_contentful_paint_image_bpp_;
+  blink::LargestContentfulPaintType LargestContentfulPaintTypeForMetrics()
+      const {
+    return lcp_details_for_ukm_.largest_contentful_paint_type_;
   }
-  base::TimeTicks LargestTextPaint() const { return largest_text_paint_time_; }
-  uint64_t LargestTextPaintSize() const { return largest_text_paint_size_; }
+  double LargestContentfulPaintImageBPPForMetrics() const {
+    return lcp_details_for_ukm_.largest_contentful_paint_image_bpp_;
+  }
+  base::TimeTicks LargestTextPaintForMetrics() const {
+    return lcp_details_for_ukm_.largest_text_paint_time_;
+  }
+  uint64_t LargestTextPaintSizeForMetrics() const {
+    return lcp_details_for_ukm_.largest_text_paint_size_;
+  }
 
-  base::TimeTicks LargestContentfulPaint() const {
-    return largest_contentful_paint_time_;
+  base::TimeTicks LargestContentfulPaintForMetrics() const {
+    return lcp_details_for_ukm_.largest_contentful_paint_time_;
   }
 
   base::TimeTicks FirstInputOrScrollNotifiedTimestamp() const {
@@ -205,6 +231,9 @@ class CORE_EXPORT PaintTimingDetector
   void Trace(Visitor* visitor) const;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ImagePaintTimingDetectorTest,
+                           LargestImagePaint_Detached_Frame);
+
   // Method called to stop recording the Largest Contentful Paint.
   void OnInputOrScroll();
   bool HasLargestImagePaintChanged(base::TimeTicks, uint64_t size) const;
@@ -213,8 +242,7 @@ class CORE_EXPORT PaintTimingDetector
   Member<LocalFrameView> frame_view_;
   // This member lives forever because it is also used for Text Element Timing.
   Member<TextPaintTimingDetector> text_paint_timing_detector_;
-  // This member lives until the end of the paint phase after the largest
-  // image paint is found.
+  // This member lives forever, to detect LCP entries for soft navigations.
   Member<ImagePaintTimingDetector> image_paint_timing_detector_;
 
   // This member lives for as long as the largest contentful paint is being
@@ -230,13 +258,9 @@ class CORE_EXPORT PaintTimingDetector
 
   absl::optional<PaintTimingVisualizer> visualizer_;
 
-  base::TimeTicks largest_image_paint_time_;
-  uint64_t largest_image_paint_size_ = 0;
-  LargestContentfulPaintTypeMask largest_contentful_paint_type_ = 0;
-  double largest_contentful_paint_image_bpp_ = 0.0;
-  base::TimeTicks largest_text_paint_time_;
-  uint64_t largest_text_paint_size_ = 0;
-  base::TimeTicks largest_contentful_paint_time_;
+  LargestContentfulPaintDetails lcp_details_;
+  LargestContentfulPaintDetails lcp_details_for_ukm_;
+  bool record_lcp_to_ukm_ = true;
 };
 
 // Largest Text Paint and Text Element Timing aggregate text nodes by these
@@ -309,6 +333,8 @@ inline void PaintTimingDetector::NotifyTextPaint(
 }
 
 class LCPRectInfo {
+  USING_FAST_MALLOC(LCPRectInfo);
+
  public:
   LCPRectInfo(const gfx::Rect& frame_rect_info, const gfx::Rect& root_rect_info)
       : frame_rect_info_(frame_rect_info), root_rect_info_(root_rect_info) {}

@@ -36,6 +36,10 @@ export class ReportView extends VBox {
     this.sectionList = this.contentBox.createChild('div', 'vbox');
   }
 
+  getHeaderElement(): Element {
+    return this.headerElement;
+  }
+
   setTitle(title: string): void {
     if (this.titleElement.textContent === title) {
       return;
@@ -120,6 +124,17 @@ export class Section extends VBox {
 
   title(): string {
     return this.titleElement.textContent || '';
+  }
+
+  getTitleElement(): Element {
+    return this.titleElement;
+  }
+
+  getFieldElement(): HTMLElement {
+    return this.fieldList;
+  }
+  appendFieldWithCustomView(customElement: HTMLElement): void {
+    this.fieldList.append(customElement);
   }
 
   setTitle(title: string, tooltip?: string): void {

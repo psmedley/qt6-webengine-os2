@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -137,7 +137,7 @@ class RTxtGenerator:
     ret = set()
     for res_dir in self.res_dirs:
       ret.update(self._CollectResourcesListFromDirectory(res_dir))
-    return ret
+    return sorted(ret)
 
   def WriteRTxtFile(self, rtxt_path):
     resources = self._CollectResourcesListFromDirectories()

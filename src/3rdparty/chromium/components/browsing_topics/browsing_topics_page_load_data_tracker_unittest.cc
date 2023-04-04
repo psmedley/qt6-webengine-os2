@@ -1,9 +1,10 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/browsing_topics/browsing_topics_page_load_data_tracker.h"
 
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
@@ -13,6 +14,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/test/test_history_database.h"
 #include "components/ukm/test_ukm_recorder.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/test/back_forward_cache_util.h"
 #include "content/public/test/browsing_topics_test_util.h"
@@ -22,6 +24,7 @@
 #include "content/test/test_render_view_host.h"
 #include "services/metrics/public/cpp/metrics_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
+#include "third_party/blink/public/common/permissions_policy/origin_with_possible_wildcards.h"
 
 namespace browsing_topics {
 
@@ -82,16 +85,18 @@ class BrowsingTopicsPageLoadDataTrackerTest
     if (!browsing_topics_permissions_policy_allowed) {
       policy.emplace_back(
           blink::mojom::PermissionsPolicyFeature::kBrowsingTopics,
-          /*values=*/std::vector<url::Origin>(), /*matches_all_origins=*/false,
+          /*allowed_origins=*/std::vector<blink::OriginWithPossibleWildcards>(),
+          /*matches_all_origins=*/false,
           /*matches_opaque_src=*/false);
     }
 
     if (!interest_cohort_permissions_policy_allowed) {
-      policy.emplace_back(blink::mojom::PermissionsPolicyFeature::
-                              kBrowsingTopicsBackwardCompatible,
-                          /*values=*/std::vector<url::Origin>(),
-                          /*matches_all_origins=*/false,
-                          /*matches_opaque_src=*/false);
+      policy.emplace_back(
+          blink::mojom::PermissionsPolicyFeature::
+              kBrowsingTopicsBackwardCompatible,
+          /*allowed_origins=*/std::vector<blink::OriginWithPossibleWildcards>(),
+          /*matches_all_origins=*/false,
+          /*matches_opaque_src=*/false);
     }
 
     simulator->SetPermissionsPolicyHeader(std::move(policy));
@@ -105,20 +110,18 @@ class BrowsingTopicsPageLoadDataTrackerTest
         /*referrer=*/GURL(),
         /*redirects=*/{}, ui::PageTransition::PAGE_TRANSITION_TYPED,
         history::VisitSource::SOURCE_BROWSED,
-        /*did_replace_entry=*/false,
-        /*floc_allowed=*/false);
+        /*did_replace_entry=*/false);
   }
 
   BrowsingTopicsPageLoadDataTracker* GetBrowsingTopicsPageLoadDataTracker() {
     return BrowsingTopicsPageLoadDataTracker::GetOrCreateForPage(
-        web_contents()->GetMainFrame()->GetPage());
+        web_contents()->GetPrimaryMainFrame()->GetPage());
   }
 
   content::BrowsingTopicsSiteDataManager* topics_site_data_manager() {
     return web_contents()
-        ->GetMainFrame()
-        ->GetProcess()
-        ->GetStoragePartition()
+        ->GetBrowserContext()
+        ->GetDefaultStoragePartition()
         ->GetBrowsingTopicsSiteDataManager();
   }
 

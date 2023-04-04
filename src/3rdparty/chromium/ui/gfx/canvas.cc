@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,7 +162,7 @@ void Canvas::DrawColor(SkColor color) {
 }
 
 void Canvas::DrawColor(SkColor color, SkBlendMode mode) {
-  canvas_->drawColor(color, mode);
+  canvas_->drawColor(SkColor4f::FromColor(color), mode);
 }
 
 void Canvas::FillRect(const Rect& rect, SkColor color) {
@@ -472,7 +472,7 @@ bool Canvas::InitPaintFlagsForTiling(const ImageSkia& image,
 }
 
 void Canvas::Transform(const gfx::Transform& transform) {
-  canvas_->concat(transform.matrix().asM33());
+  canvas_->concat(TransformToFlattenedSkMatrix(transform));
 }
 
 SkBitmap Canvas::GetBitmap() const {

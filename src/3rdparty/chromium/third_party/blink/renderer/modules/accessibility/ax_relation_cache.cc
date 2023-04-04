@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ void AXRelationCache::DoInitialDocumentScan() {
   for (Element& element :
        ElementTraversal::DescendantsOf(*document.documentElement())) {
     const auto& id = element.FastGetAttribute(html_names::kForAttr);
-    if (!id.IsEmpty())
+    if (!id.empty())
       all_previously_seen_label_target_ids_.insert(id);
 
     // Ensure correct ancestor chains even when not all AXObject's in the
@@ -64,7 +64,7 @@ void AXRelationCache::ProcessUpdatesWithCleanLayout() {
 }
 
 bool AXRelationCache::IsDirty() const {
-  return !initialized_ || !owner_ids_to_update_.IsEmpty();
+  return !initialized_ || !owner_ids_to_update_.empty();
 }
 
 bool AXRelationCache::IsAriaOwned(const AXObject* child) const {
@@ -175,6 +175,10 @@ bool AXRelationCache::IsValidOwner(AXObject* owner) {
   // as <input>, <textarea> and content editables, otherwise the result would be
   // unworkable and totally unexpected on the browser side.
   if (owner->IsTextField())
+    return false;
+
+  // A frame/iframe/fencedframe can only parent a document.
+  if (AXObject::IsFrame(owner->GetNode()))
     return false;
 
   // Images can only use <img usemap> to "own" <area> children.
@@ -421,7 +425,6 @@ void AXRelationCache::UpdateAriaOwnsWithCleanLayout(AXObject* owner,
       } else if (child) {
         // Invalid owns relation: repair the parent that was set above.
         object_cache_->RestoreParentOrPrune(child);
-        DCHECK_NE(child->CachedParentObject(), owner);
       }
     }
   }
@@ -454,7 +457,7 @@ void AXRelationCache::UpdateAriaOwnerToChildrenMappingWithCleanLayout(
   // Only force the refresh if there was or will be owned children; otherwise,
   // there is nothing to refresh even for a new AXObject replacing an old owner.
   if (previously_owned_child_ids == validated_owned_child_axids &&
-      (!force || previously_owned_child_ids.IsEmpty())) {
+      (!force || previously_owned_child_ids.empty())) {
     return;
   }
 
@@ -482,7 +485,7 @@ void AXRelationCache::UpdateAriaOwnerToChildrenMappingWithCleanLayout(
 #endif
 
   // Finally, update the mapping from the owner to the list of child IDs.
-  if (validated_owned_child_axids.IsEmpty()) {
+  if (validated_owned_child_axids.empty()) {
     aria_owner_to_children_mapping_.erase(owner->AXObjectID());
   } else {
     aria_owner_to_children_mapping_.Set(owner->AXObjectID(),
@@ -495,7 +498,7 @@ void AXRelationCache::UpdateAriaOwnerToChildrenMappingWithCleanLayout(
 bool AXRelationCache::MayHaveHTMLLabelViaForAttribute(
     const HTMLElement& labelable) {
   const AtomicString& id = labelable.GetIdAttribute();
-  if (id.IsEmpty())
+  if (id.empty())
     return false;
   return all_previously_seen_label_target_ids_.Contains(id);
 }
@@ -529,7 +532,7 @@ void AXRelationCache::UpdateRelatedTree(Node* node, AXObject* obj) {
   DCHECK(node);
   if (obj)
     DCHECK(!obj->IsDetached());
-  AXObject* obj_for_node = object_cache_->GetWithoutInvalidation(node);
+  AXObject* obj_for_node = object_cache_->SafeGet(node);
   DCHECK(!obj || obj_for_node == obj)
       << "Object and node did not match:"
       << "\n* node = " << node << "\n* obj = " << obj->ToString(true, true)
@@ -664,7 +667,7 @@ void AXRelationCache::ChildrenChanged(AXObject* object) {
 void AXRelationCache::LabelChanged(Node* node) {
   const auto& id =
       To<HTMLElement>(node)->FastGetAttribute(html_names::kForAttr);
-  if (!id.IsEmpty()) {
+  if (!id.empty()) {
     all_previously_seen_label_target_ids_.insert(id);
     if (AXObject* obj = Get(To<HTMLLabelElement>(node)->control())) {
       if (obj->AccessibilityIsIncludedInTree())

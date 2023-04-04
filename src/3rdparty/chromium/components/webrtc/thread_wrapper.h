@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,6 @@
 #include "third_party/webrtc_overrides/coalesced_tasks.h"
 
 namespace webrtc {
-
-// Whether ThreadWrapper should schedule low-precision tasks on the metronome.
-// Default: disabled.
-extern const base::Feature kThreadWrapperUsesMetronome;
 
 // ThreadWrapper implements rtc::Thread interface on top of
 // Chromium's SingleThreadTaskRunner interface. Currently only the bare minimum
@@ -84,49 +80,33 @@ class ThreadWrapper : public base::CurrentThread::DestructionObserver,
   ~ThreadWrapper() override;
 
   // Sets whether the thread can be used to send messages
-  // synchronously to another thread using Send() method. Set to false
-  // by default to avoid potential jankiness when Send() used on
+  // synchronously to another thread using BlockingCall() method. Set to false
+  // by default to avoid potential jankiness when BlockingCall() used on
   // renderer thread. It should be set explicitly for threads that
-  // need to call Send() for other threads.
+  // need to call BlockingCall() for other threads.
   void set_send_allowed(bool allowed) { send_allowed_ = allowed; }
+
+  rtc::SocketServer* SocketServer();
 
   // CurrentThread::DestructionObserver implementation.
   void WillDestroyCurrentMessageLoop() override;
 
-  // rtc::MessageQueue overrides.
-  void Post(const rtc::Location& posted_from,
-            rtc::MessageHandler* phandler,
-            uint32_t id,
-            rtc::MessageData* pdata,
-            bool time_sensitive) override;
-  void PostDelayed(const rtc::Location& posted_from,
-                   int delay_ms,
-                   rtc::MessageHandler* handler,
-                   uint32_t id,
-                   rtc::MessageData* data) override;
-  void Clear(rtc::MessageHandler* handler,
-             uint32_t id,
-             rtc::MessageList* removed) override;
-  void Dispatch(rtc::Message* message) override;
-  void Send(const rtc::Location& posted_from,
-            rtc::MessageHandler* handler,
-            uint32_t id,
-            rtc::MessageData* data) override;
+  // TaskQueueBase overrides.
+  void PostTask(absl::AnyInvocable<void() &&> task) override;
+  void PostDelayedTask(absl::AnyInvocable<void() &&> task,
+                       webrtc::TimeDelta delay) override;
+  void PostDelayedHighPrecisionTask(absl::AnyInvocable<void() &&> task,
+                                    webrtc::TimeDelta delay) override;
 
-  // Quitting is not supported (see below); this method performs
-  // NOTIMPLEMENTED_LOG_ONCE() and returns false.
-  // TODO(https://crbug.com/webrtc/10364): When rtc::MessageQueue::Post()
-  // returns a bool, !IsQuitting() will not be needed to infer success and we
-  // may implement this as NOTREACHED() like the rest of the methods.
-  bool IsQuitting() override;
+  void BlockingCall(rtc::FunctionView<void()> functor) override;
+
   // Following methods are not supported. They are overriden just to
   // ensure that they are not called (each of them contain NOTREACHED
   // in the body). Some of this methods can be implemented if it
-  // becomes necessary to use libjingle code that calls them.
+  // becomes necessary to use webrtc code that calls them.
+  bool IsQuitting() override;
   void Quit() override;
   void Restart() override;
-  bool Get(rtc::Message* message, int delay_ms, bool process_io) override;
-  bool Peek(rtc::Message* message, int delay_ms) override;
   int GetDelay() override;
 
   // rtc::Thread overrides.
@@ -134,32 +114,17 @@ class ThreadWrapper : public base::CurrentThread::DestructionObserver,
   void Run() override;
 
  private:
-  typedef std::map<int, rtc::Message> MessagesQueue;
   struct PendingSend;
   class PostTaskLatencySampler;
 
   explicit ThreadWrapper(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  void PostTaskInternal(const rtc::Location& posted_from,
-                        int delay_ms,
-                        rtc::MessageHandler* handler,
-                        uint32_t message_id,
-                        rtc::MessageData* data);
-  void RunTask(int task_id);
-  void RunTaskInternal(int task_id);
   void ProcessPendingSends();
-
-  // TaskQueueBase overrides.
-  void PostTask(std::unique_ptr<webrtc::QueuedTask> task) override;
-  void PostDelayedTask(std::unique_ptr<webrtc::QueuedTask> task,
-                       uint32_t milliseconds) override;
-  void PostDelayedHighPrecisionTask(std::unique_ptr<webrtc::QueuedTask> task,
-                                    uint32_t milliseconds) override;
 
   // Executes WebRTC queued tasks from TaskQueueBase overrides on
   // |task_runner_|.
-  void RunTaskQueueTask(std::unique_ptr<webrtc::QueuedTask> task);
+  void RunTaskQueueTask(absl::AnyInvocable<void() &&> task);
   void RunCoalescedTaskQueueTasks(base::TimeTicks scheduled_time);
 
   // Called before a task runs, returns an opaque optional timestamp which
@@ -174,19 +139,15 @@ class ThreadWrapper : public base::CurrentThread::DestructionObserver,
 
   bool send_allowed_;
 
-  const bool use_metronome_;
-  // |lock_| must be locked when accessing |messages_|.
+  // |lock_| must be locked when accessing |pending_send_messages_|.
   base::Lock lock_;
-  int last_task_id_;
-  MessagesQueue messages_;
   std::list<PendingSend*> pending_send_messages_;
   base::WaitableEvent pending_send_event_;
   std::unique_ptr<PostTaskLatencySampler> latency_sampler_;
   SampledDurationCallback task_latency_callback_;
   SampledDurationCallback task_duration_callback_;
-  // If |kThreadWrapperUsesMetronome| is enabled, low precision tasks are
-  // coalesced onto metronome ticks and stored in |coalesced_tasks_| until they
-  // are ready to run.
+  // Low precision tasks are coalesced onto metronome ticks and stored in
+  // `coalesced_tasks_` until they are ready to run.
   blink::CoalescedTasks coalesced_tasks_;
 
   base::WeakPtr<ThreadWrapper> weak_ptr_;

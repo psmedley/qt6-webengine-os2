@@ -15,6 +15,7 @@
 #ifndef SRC_TINT_UTILS_STRING_H_
 #define SRC_TINT_UTILS_STRING_H_
 
+#include <sstream>
 #include <string>
 
 namespace tint::utils {
@@ -23,16 +24,30 @@ namespace tint::utils {
 /// @param substr the string to search for
 /// @param replacement the replacement string to use instead of `substr`
 /// @returns `str` with all occurrences of `substr` replaced with `replacement`
-inline std::string ReplaceAll(std::string str,
-                              const std::string& substr,
-                              const std::string& replacement) {
-  size_t pos = 0;
-  while ((pos = str.find(substr, pos)) != std::string::npos) {
-    str.replace(pos, substr.length(), replacement);
-    pos += replacement.length();
-  }
-  return str;
+[[nodiscard]] inline std::string ReplaceAll(std::string str,
+                                            const std::string& substr,
+                                            const std::string& replacement) {
+    size_t pos = 0;
+    while ((pos = str.find(substr, pos)) != std::string::npos) {
+        str.replace(pos, substr.length(), replacement);
+        pos += replacement.length();
+    }
+    return str;
 }
+
+/// @param value the value to be printed as a string
+/// @returns value printed as a string via the std::ostream `<<` operator
+template <typename T>
+std::string ToString(const T& value) {
+    std::stringstream s;
+    s << value;
+    return s.str();
+}
+
+/// @param a the first string
+/// @param b the second string
+/// @returns the Levenshtein distance between @p a and @p b
+size_t Distance(const std::string& a, const std::string& b);
 
 }  // namespace tint::utils
 

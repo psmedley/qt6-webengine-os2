@@ -1,9 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/renderer/api/automation/automation_internal_custom_bindings.h"
 
+#include "base/test/bind.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_messages.h"
@@ -13,7 +14,9 @@
 #include "extensions/renderer/native_extension_bindings_system_test_base.h"
 #include "extensions/renderer/script_context.h"
 #include "ui/accessibility/ax_enum_util.h"
+#include "ui/accessibility/ax_event_generator.h"
 #include "ui/accessibility/ax_tree_id.h"
+#include "ui/accessibility/platform/automation/automation_ax_tree_wrapper.h"
 
 namespace extensions {
 
@@ -53,7 +56,7 @@ class AutomationInternalCustomBindingsTest
     EXPECT_TRUE(availability.is_available()) << availability.message();
   }
 
-  std::map<ui::AXTreeID, std::unique_ptr<AutomationAXTreeWrapper>>&
+  std::map<ui::AXTreeID, std::unique_ptr<ui::AutomationAXTreeWrapper>>&
   GetTreeIDToTreeMap() {
     return automation_internal_bindings_->tree_id_to_tree_wrapper_map_;
   }
@@ -61,18 +64,18 @@ class AutomationInternalCustomBindingsTest
   void SendOnAccessibilityEvents(
       const ExtensionMsg_AccessibilityEventBundleParams& event_bundle,
       bool is_active_profile) {
-    automation_internal_bindings_->OnAccessibilityEvents(event_bundle,
-                                                         is_active_profile);
+    automation_internal_bindings_->HandleAccessibilityEvents(event_bundle,
+                                                             is_active_profile);
   }
 
-  bool CallGetFocusInternal(AutomationAXTreeWrapper* top_wrapper,
-                            AutomationAXTreeWrapper** focused_wrapper,
+  bool CallGetFocusInternal(ui::AutomationAXTreeWrapper* top_wrapper,
+                            ui::AutomationAXTreeWrapper** focused_wrapper,
                             ui::AXNode** focused_node) {
     return automation_internal_bindings_->GetFocusInternal(
         top_wrapper, focused_wrapper, focused_node);
   }
 
-  gfx::Rect CallComputeGlobalNodeBounds(AutomationAXTreeWrapper* wrapper,
+  gfx::Rect CallComputeGlobalNodeBounds(ui::AutomationAXTreeWrapper* wrapper,
                                         ui::AXNode* node) {
     return automation_internal_bindings_->ComputeGlobalNodeBounds(wrapper,
                                                                   node);
@@ -80,6 +83,12 @@ class AutomationInternalCustomBindingsTest
 
   std::vector<ui::AXNode*> CallGetRootsOfChildTree(ui::AXNode* node) {
     return automation_internal_bindings_->GetRootsOfChildTree(node);
+  }
+
+  void AddAutomationEventCallback(
+      base::RepeatingCallback<void(api::automation::EventType)> callback) {
+    automation_internal_bindings_->notify_event_for_testing_ =
+        std::move(callback);
   }
 
  private:
@@ -93,14 +102,17 @@ TEST_F(AutomationInternalCustomBindingsTest, GetDesktop) {
   ExtensionMsg_AccessibilityEventBundleParams bundle;
   bundle.updates.emplace_back();
   auto& tree_update = bundle.updates.back();
+  tree_update.root_id = 1;
   tree_update.nodes.emplace_back();
   auto& node_data = tree_update.nodes.back();
   node_data.role = ax::mojom::Role::kDesktop;
+  node_data.id = 1;
   SendOnAccessibilityEvents(bundle, true /* active profile */);
 
   ASSERT_EQ(1U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* desktop = GetTreeIDToTreeMap().begin()->second.get();
+  ui::AutomationAXTreeWrapper* desktop =
+      GetTreeIDToTreeMap().begin()->second.get();
   ASSERT_TRUE(desktop);
   EXPECT_TRUE(desktop->IsDesktopTree());
 }
@@ -124,14 +136,16 @@ TEST_F(AutomationInternalCustomBindingsTest, GetFocusOneTree) {
   auto& node_data2 = tree_update.nodes.back();
   node_data2.id = 2;
   node_data2.role = ax::mojom::Role::kButton;
+  bundle.tree_id = tree_data.tree_id;
   SendOnAccessibilityEvents(bundle, true /* active profile */);
 
   ASSERT_EQ(1U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* desktop = GetTreeIDToTreeMap().begin()->second.get();
+  ui::AutomationAXTreeWrapper* desktop =
+      GetTreeIDToTreeMap().begin()->second.get();
   ASSERT_TRUE(desktop);
 
-  AutomationAXTreeWrapper* focused_wrapper = nullptr;
+  ui::AutomationAXTreeWrapper* focused_wrapper = nullptr;
   ui::AXNode* focused_node = nullptr;
   CallGetFocusInternal(desktop, &focused_wrapper, &focused_node);
   ASSERT_TRUE(focused_wrapper);
@@ -207,14 +221,17 @@ TEST_F(AutomationInternalCustomBindingsTest,
 
   ASSERT_EQ(3U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* wrapper_0 = GetTreeIDToTreeMap()[tree_0_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_0 =
+      GetTreeIDToTreeMap()[tree_0_id].get();
   ASSERT_TRUE(wrapper_0);
-  AutomationAXTreeWrapper* wrapper_1 = GetTreeIDToTreeMap()[tree_1_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_1 =
+      GetTreeIDToTreeMap()[tree_1_id].get();
   ASSERT_TRUE(wrapper_1);
-  AutomationAXTreeWrapper* wrapper_2 = GetTreeIDToTreeMap()[tree_2_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_2 =
+      GetTreeIDToTreeMap()[tree_2_id].get();
   ASSERT_TRUE(wrapper_2);
 
-  AutomationAXTreeWrapper* focused_wrapper = nullptr;
+  ui::AutomationAXTreeWrapper* focused_wrapper = nullptr;
   ui::AXNode* focused_node = nullptr;
   CallGetFocusInternal(wrapper_0, &focused_wrapper, &focused_node);
   ASSERT_TRUE(focused_wrapper);
@@ -298,14 +315,17 @@ TEST_F(AutomationInternalCustomBindingsTest,
 
   ASSERT_EQ(3U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* wrapper_0 = GetTreeIDToTreeMap()[tree_0_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_0 =
+      GetTreeIDToTreeMap()[tree_0_id].get();
   ASSERT_TRUE(wrapper_0);
-  AutomationAXTreeWrapper* wrapper_1 = GetTreeIDToTreeMap()[tree_1_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_1 =
+      GetTreeIDToTreeMap()[tree_1_id].get();
   ASSERT_TRUE(wrapper_1);
-  AutomationAXTreeWrapper* wrapper_2 = GetTreeIDToTreeMap()[tree_2_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_2 =
+      GetTreeIDToTreeMap()[tree_2_id].get();
   ASSERT_TRUE(wrapper_2);
 
-  AutomationAXTreeWrapper* focused_wrapper = nullptr;
+  ui::AutomationAXTreeWrapper* focused_wrapper = nullptr;
   ui::AXNode* focused_node = nullptr;
   CallGetFocusInternal(wrapper_0, &focused_wrapper, &focused_node);
   ASSERT_TRUE(focused_wrapper);
@@ -380,18 +400,20 @@ TEST_F(AutomationInternalCustomBindingsTest, GetBoundsAppIdConstruction) {
 
   ASSERT_EQ(2U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* wrapper_0 = GetTreeIDToTreeMap()[tree_0_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_0 =
+      GetTreeIDToTreeMap()[tree_0_id].get();
   ASSERT_TRUE(wrapper_0);
-  AutomationAXTreeWrapper* wrapper_1 = GetTreeIDToTreeMap()[tree_1_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_1 =
+      GetTreeIDToTreeMap()[tree_1_id].get();
   ASSERT_TRUE(wrapper_1);
 
-  ui::AXNode* wrapper1_button = wrapper_1->tree()->GetFromId(2);
+  ui::AXNode* wrapper1_button = wrapper_1->ax_tree()->GetFromId(2);
   ASSERT_TRUE(wrapper1_button);
 
   // The button in wrapper 1 is scaled by .5 (200 * .5). It's root is also
-  // scaled (100 * .5). In wrapper 0, it is offset by the tree's root bounds
-  // (100 + 50).
-  EXPECT_EQ(gfx::Rect(150, 150, 100, 100),
+  // scaled (100 * .5). In wrapper 0, it is *not* offset by the tree's root
+  // bounds.
+  EXPECT_EQ(gfx::Rect(50, 50, 100, 100),
             CallComputeGlobalNodeBounds(wrapper_1, wrapper1_button));
 }
 
@@ -469,24 +491,27 @@ TEST_F(AutomationInternalCustomBindingsTest, GetBoundsNestedAppIdConstruction) {
 
   ASSERT_EQ(2U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* wrapper_0 = GetTreeIDToTreeMap()[tree_0_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_0 =
+      GetTreeIDToTreeMap()[tree_0_id].get();
   ASSERT_TRUE(wrapper_0);
-  AutomationAXTreeWrapper* wrapper_1 = GetTreeIDToTreeMap()[tree_1_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_1 =
+      GetTreeIDToTreeMap()[tree_1_id].get();
   ASSERT_TRUE(wrapper_1);
 
-  ui::AXNode* wrapper1_button = wrapper_1->tree()->GetFromId(2);
+  ui::AXNode* wrapper1_button = wrapper_1->ax_tree()->GetFromId(2);
   ASSERT_TRUE(wrapper1_button);
 
   // The button in wrapper 1 is scaled by .5 (200 * .5). It's root is also
-  // scaled (100 * .5). In wrapper 0, it is offset by the tree's root bounds
-  // (100 + 50).
-  EXPECT_EQ(gfx::Rect(150, 150, 100, 100),
+  // scaled (100 * .5). In wrapper 0, it is *not* offset by the tree's root
+  // bounds.
+  EXPECT_EQ(gfx::Rect(50, 50, 100, 100),
             CallComputeGlobalNodeBounds(wrapper_1, wrapper1_button));
 
-  ui::AXNode* wrapper1_root = wrapper_1->tree()->GetFromId(1);
+  ui::AXNode* wrapper1_root = wrapper_1->ax_tree()->GetFromId(1);
   ASSERT_TRUE(wrapper1_root);
 
-  // Similar to the button, but not scaled.
+  // Similar to the button, but not scaled. This does not cross an app id
+  // boundary, so is also offset by the parent tree's root (100 + 100).
   EXPECT_EQ(gfx::Rect(200, 200, 100, 100),
             CallComputeGlobalNodeBounds(wrapper_1, wrapper1_root));
 }
@@ -541,11 +566,14 @@ TEST_F(AutomationInternalCustomBindingsTest, IgnoredAncestorTrees) {
 
   ASSERT_EQ(3U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* wrapper_0 = GetTreeIDToTreeMap()[tree_0_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_0 =
+      GetTreeIDToTreeMap()[tree_0_id].get();
   ASSERT_TRUE(wrapper_0);
-  AutomationAXTreeWrapper* wrapper_1 = GetTreeIDToTreeMap()[tree_1_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_1 =
+      GetTreeIDToTreeMap()[tree_1_id].get();
   ASSERT_TRUE(wrapper_1);
-  AutomationAXTreeWrapper* wrapper_2 = GetTreeIDToTreeMap()[tree_2_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_2 =
+      GetTreeIDToTreeMap()[tree_2_id].get();
   ASSERT_TRUE(wrapper_2);
 
   // The root tree isn't ignored.
@@ -557,7 +585,7 @@ TEST_F(AutomationInternalCustomBindingsTest, IgnoredAncestorTrees) {
   EXPECT_TRUE(wrapper_2->IsTreeIgnored());
 
   // No longer invisible.
-  ui::AXNode* button = wrapper_0->tree()->GetFromId(2);
+  ui::AXNode* button = wrapper_0->ax_tree()->GetFromId(2);
   ui::AXNodeData data = button->TakeData();
   data.RemoveState(ax::mojom::State::kInvisible);
   button->SetData(data);
@@ -623,10 +651,11 @@ TEST_F(AutomationInternalCustomBindingsTest,
 
   ASSERT_EQ(2U, GetTreeIDToTreeMap().size());
 
-  AutomationAXTreeWrapper* wrapper_0 = GetTreeIDToTreeMap()[tree_0_id].get();
+  ui::AutomationAXTreeWrapper* wrapper_0 =
+      GetTreeIDToTreeMap()[tree_0_id].get();
   ASSERT_TRUE(wrapper_0);
 
-  ui::AXNode* wrapper0_client = wrapper_0->tree()->GetFromId(3);
+  ui::AXNode* wrapper0_client = wrapper_0->ax_tree()->GetFromId(3);
   ASSERT_TRUE(wrapper0_client);
 
   std::vector<ui::AXNode*> child_roots =
@@ -636,6 +665,111 @@ TEST_F(AutomationInternalCustomBindingsTest,
   EXPECT_EQ(tree_1_id, child_roots[1]->tree()->GetAXTreeID());
   EXPECT_EQ(2, child_roots[0]->id());
   EXPECT_EQ(3, child_roots[1]->id());
+}
+
+TEST_F(AutomationInternalCustomBindingsTest, FireEventsWithListeners) {
+  // A simple tree.
+  ExtensionMsg_AccessibilityEventBundleParams bundle;
+  bundle.updates.emplace_back();
+  auto& tree_update = bundle.updates.back();
+  tree_update.has_tree_data = true;
+  tree_update.root_id = 1;
+  auto& tree_data = tree_update.tree_data;
+  tree_data.tree_id = ui::AXTreeID::CreateNewAXTreeID();
+  bundle.tree_id = tree_data.tree_id;
+  tree_update.nodes.emplace_back();
+  auto& node_data1 = tree_update.nodes.back();
+  node_data1.id = 1;
+  node_data1.role = ax::mojom::Role::kRootWebArea;
+  node_data1.child_ids.push_back(2);
+  node_data1.relative_bounds.bounds = gfx::RectF(100, 100, 100, 100);
+  tree_update.nodes.emplace_back();
+  auto& node_data2 = tree_update.nodes.back();
+  node_data2.id = 2;
+  node_data2.role = ax::mojom::Role::kButton;
+  node_data2.relative_bounds.bounds = gfx::RectF(0, 0, 200, 200);
+
+  // Add a hook for events from automation.
+  std::vector<api::automation::EventType> events;
+  AddAutomationEventCallback(base::BindLambdaForTesting(
+      [&](api::automation::EventType event) { events.push_back(event); }));
+
+  SendOnAccessibilityEvents(bundle, true /* active profile */);
+
+  // We aren't listening for any events yet, but we should still get one that
+  // gets fired on initial tree creation.
+  ASSERT_EQ(1U, events.size());
+  EXPECT_EQ(api::automation::EVENT_TYPE_NONE, events[0]);
+  events.clear();
+
+  // Remove the root node data and don't update tree data.
+  tree_update.nodes.erase(tree_update.nodes.begin());
+  tree_update.has_tree_data = false;
+
+  // Trigger a role change.
+  tree_update.nodes[0].role = ax::mojom::Role::kSwitch;
+  SendOnAccessibilityEvents(bundle, true /* active profile */);
+
+  // There should be no events since there are no listeners and this isn't the
+  // initial tree.
+  ASSERT_TRUE(events.empty());
+
+  // Add a role change listener and do trigger the role change again.
+  auto* wrapper = GetTreeIDToTreeMap()[tree_data.tree_id].get();
+  auto* tree = wrapper->ax_tree();
+  // The button is id 2.
+  std::tuple<ax::mojom::Event, ui::AXEventGenerator::Event> event_type(
+      ax::mojom::Event::kNone, ui::AXEventGenerator::Event::ROLE_CHANGED);
+  wrapper->EventListenerAdded(event_type, tree->GetFromId(2));
+  EXPECT_EQ(1U, wrapper->EventListenerCount());
+  EXPECT_TRUE(wrapper->HasEventListener(event_type, tree->GetFromId(2)));
+  tree_update.nodes[0].role = ax::mojom::Role::kButton;
+  SendOnAccessibilityEvents(bundle, true /* active profile */);
+
+  // We should now have exactly one event.
+  ASSERT_EQ(1U, events.size());
+  EXPECT_EQ(api::automation::EVENT_TYPE_ROLECHANGED, events[0]);
+  events.clear();
+
+  // Now, remove the listener and do the same as above.
+  wrapper->EventListenerRemoved(event_type, tree->GetFromId(2));
+  // We have to add another listener to ensure we don't shut down (no event
+  // listeners means this renderer closes).
+  wrapper->EventListenerAdded(
+      std::tuple<ax::mojom::Event, ui::AXEventGenerator::Event>(
+          ax::mojom::Event::kLoadComplete, ui::AXEventGenerator::Event::NONE),
+      tree->GetFromId(1));
+  tree_update.nodes[0].role = ax::mojom::Role::kSwitch;
+  SendOnAccessibilityEvents(bundle, true /* active profile */);
+
+  // We should have no events.
+  ASSERT_TRUE(events.empty());
+
+  // Finally, let's fire a non-generated event on the button, but add the
+  // listener on the root. This will test both non-generated events and
+  // respecting event listeners on ancestors of the target.
+
+  // First, fire the event without the click listener.
+  tree_update.nodes.clear();
+  bundle.events.emplace_back();
+  auto& event = bundle.events.back();
+  event.event_type = ax::mojom::Event::kClicked;
+  event.id = 2;
+  SendOnAccessibilityEvents(bundle, true /* active profile */);
+
+  // No event.
+  ASSERT_TRUE(events.empty());
+
+  // Now, add the click listener to the root, and fire the click event on the
+  // button.
+  wrapper->EventListenerAdded(
+      std::tuple<ax::mojom::Event, ui::AXEventGenerator::Event>(
+          ax::mojom::Event::kClicked, ui::AXEventGenerator::Event::NONE),
+      tree->GetFromId(1));
+  SendOnAccessibilityEvents(bundle, true /* active profile */);
+
+  ASSERT_EQ(1U, events.size());
+  EXPECT_EQ(api::automation::EVENT_TYPE_CLICKED, events[0]);
 }
 
 }  // namespace extensions

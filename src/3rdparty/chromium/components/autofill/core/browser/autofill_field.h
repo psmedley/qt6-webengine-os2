@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/field_types.h"
-#include "components/autofill/core/browser/form_parsing/field_candidates.h"
+#include "components/autofill/core/browser/form_parsing/regex_patterns.h"
 #include "components/autofill/core/browser/proto/api_v1.pb.h"
 #include "components/autofill/core/browser/proto/password_requirements.pb.h"
 #include "components/autofill/core/common/form_field_data.h"
@@ -32,12 +32,6 @@ typedef std::map<ServerFieldType, AutofillDataModel::ValidityState>
 
 class AutofillField : public FormFieldData {
  public:
-  enum PhonePart {
-    IGNORED = 0,
-    PHONE_PREFIX = 1,
-    PHONE_SUFFIX = 2,
-  };
-
   AutofillField();
   explicit AutofillField(const FormFieldData& field);
 
@@ -53,10 +47,8 @@ class AutofillField : public FormFieldData {
       FieldSignature field_signature);
 
   ServerFieldType heuristic_type() const;
+  ServerFieldType heuristic_type(PatternSource s) const;
   ServerFieldType server_type() const;
-  ServerFieldType get_prediction(PredictionSource s) const {
-    return local_type_predictions_[static_cast<size_t>(s)];
-  }
   bool server_type_prediction_is_override() const;
   const std::vector<
       AutofillQueryResponse::FormSuggestion::FieldSuggestion::FieldPrediction>&
@@ -72,22 +64,18 @@ class AutofillField : public FormFieldData {
   const ServerFieldTypeValidityStatesMap& possible_types_validities() const {
     return possible_types_validities_;
   }
-  PhonePart phone_part() const { return phone_part_; }
   bool previously_autofilled() const { return previously_autofilled_; }
   const std::u16string& parseable_name() const { return parseable_name_; }
   const std::u16string& parseable_label() const { return parseable_label_; }
   bool only_fill_when_focused() const { return only_fill_when_focused_; }
 
   // Setters for the detected types.
-  void set_heuristic_type(ServerFieldType type);
+  void set_heuristic_type(PatternSource s, ServerFieldType t);
   void add_possible_types_validities(
       const ServerFieldTypeValidityStateMap& possible_types_validities);
   void set_server_predictions(
       std::vector<AutofillQueryResponse::FormSuggestion::FieldSuggestion::
                       FieldPrediction> predictions);
-  void set_prediction(PredictionSource s, ServerFieldType t) {
-    local_type_predictions_[static_cast<size_t>(s)] = t;
-  }
 
   void set_may_use_prefilled_placeholder(bool may_use_prefilled_placeholder) {
     may_use_prefilled_placeholder_ = may_use_prefilled_placeholder;
@@ -133,9 +121,9 @@ class AutofillField : public FormFieldData {
   // (i.e. overall_type_ != NO_SERVER_DATA ? overall_type_ : ComputedType())
   AutofillType Type() const;
 
-  // This function automatically chooses between server and heuristic autofill
-  // type, depending on the data available for this field alone.
-  // This type does not take into account the rationalization involving the
+  // This function automatically chooses among the Autofill server, heuristic
+  // and html type, depending on the data available for this field alone. This
+  // type does not take into account the rationalization involving the
   // surrounding fields.
   AutofillType ComputedType() const;
 
@@ -258,8 +246,7 @@ class AutofillField : public FormFieldData {
   // Predictions which where calculated on the client. This is initialized to
   // `NO_SERVER_DATA`, which means "NO_DATA", i.e. no classification was
   // attempted.
-  std::array<ServerFieldType,
-             static_cast<size_t>(PredictionSource::kMaxValue) + 1>
+  std::array<ServerFieldType, static_cast<size_t>(PatternSource::kMaxValue) + 1>
       local_type_predictions_;
 
   // The type of the field. Overrides all other types (html_type_,
@@ -269,20 +256,17 @@ class AutofillField : public FormFieldData {
   AutofillType overall_type_;
 
   // The type of the field, as specified by the site author in HTML.
-  HtmlFieldType html_type_ = HTML_TYPE_UNSPECIFIED;
+  HtmlFieldType html_type_ = HtmlFieldType::kUnspecified;
 
   // The "mode" of the field, as specified by the site author in HTML.
   // Currently this is used to distinguish between billing and shipping fields.
-  HtmlFieldMode html_mode_ = HTML_MODE_NONE;
+  HtmlFieldMode html_mode_ = HtmlFieldMode::kNone;
 
   // The set of possible types for this field.
   ServerFieldTypeSet possible_types_;
 
   // The set of possible types and their validity for this field.
   ServerFieldTypeValidityStatesMap possible_types_validities_;
-
-  // Used to track whether this field is a phone prefix or suffix.
-  PhonePart phone_part_ = IGNORED;
 
   // A low-entropy hash of the field's initial value before user-interactions or
   // automatic fillings. This field is used to detect static placeholders.

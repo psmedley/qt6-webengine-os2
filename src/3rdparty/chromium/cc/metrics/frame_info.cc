@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/check.h"
 #include "build/build_config.h"
 
 namespace cc {
@@ -54,6 +55,10 @@ void FrameInfo::MergeWith(const FrameInfo& other) {
   // the same BeginFrameArgs. This can trip the DCHECK()s in this function.
   if (was_merged)
     return;
+  if (main_thread_response == MainThreadResponse::kIncluded &&
+      other.main_thread_response == MainThreadResponse::kIncluded) {
+    return;
+  }
 #endif
   DCHECK(!was_merged);
   DCHECK(!other.was_merged);
@@ -177,6 +182,10 @@ bool FrameInfo::WasSmoothMainUpdateDropped() const {
   }
 
   return false;
+}
+
+bool FrameInfo::WasSmoothMainUpdateExpected() const {
+  return final_state != FrameFinalState::kNoUpdateDesired;
 }
 
 bool FrameInfo::IsScrollPrioritizeFrameDropped() const {

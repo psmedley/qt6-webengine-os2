@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/component_export.h"
 #include "device/fido/authenticator_data.h"
 #include "device/fido/fido_constants.h"
+#include "device/fido/large_blob.h"
 #include "device/fido/public_key_credential_descriptor.h"
 #include "device/fido/public_key_credential_user_entity.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -68,7 +69,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) AuthenticatorGetAssertionResponse {
   bool user_selected = false;
 
   // The large blob associated with the credential.
-  absl::optional<std::vector<uint8_t>> large_blob;
+  absl::optional<LargeBlob> large_blob;
 
   // Whether a large blob was successfully written as part of this GetAssertion
   // request.
@@ -77,6 +78,11 @@ class COMPONENT_EXPORT(DEVICE_FIDO) AuthenticatorGetAssertionResponse {
   // The transport used to generate this response. This is unknown when using
   // the Windows WebAuthn API.
   absl::optional<FidoTransportProtocol> transport_used;
+
+  // device_public_key_signature contains the optional signature from the
+  // device-bound key. See
+  // https://github.com/fido-alliance/fido-2-specs/pull/1346
+  absl::optional<std::vector<uint8_t>> device_public_key_signature;
 };
 
 }  // namespace device

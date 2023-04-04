@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -115,6 +115,9 @@ std::string CreateHistogramNameWithSuffix(const std::string& name,
       break;
     case DownloadSource::RETRY:
       suffix = "Retry";
+      break;
+    case DownloadSource::RETRY_FROM_BUBBLE:
+      suffix = "RetryFromBubble";
       break;
   }
 
@@ -235,6 +238,13 @@ void RecordDownloadResumption(DownloadInterruptReason reason,
   UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.Resume.LastReason", reason,
                                    samples);
   base::UmaHistogramBoolean("Download.Resume.UserResume", user_resume);
+}
+
+void RecordDownloadRetry(DownloadInterruptReason reason) {
+  std::vector<base::HistogramBase::Sample> samples =
+      base::CustomHistogram::ArrayToCustomEnumRanges(kAllInterruptReasonCodes);
+  UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.Retry.InterruptReason", reason,
+                                   samples);
 }
 
 void RecordAutoResumeCountLimitReached(DownloadInterruptReason reason) {

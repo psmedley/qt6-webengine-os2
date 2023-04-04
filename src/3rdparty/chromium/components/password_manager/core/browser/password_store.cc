@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@
 #include "base/observer_list.h"
 #include "base/ranges/algorithm.h"
 #include "base/task/bind_post_task.h"
-#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
@@ -32,6 +31,7 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_reuse_manager_impl.h"
+#include "components/password_manager/core/browser/password_store_backend.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_store_signin_notifier.h"
 #include "components/password_manager/core/browser/password_store_util.h"
@@ -55,13 +55,13 @@ bool FormSupportsPSL(const PasswordFormDigest& digest) {
 // Helper function which invokes |notifying_callback| and |completion_callback|
 // when changes are received.
 void InvokeCallbacksForSuspectedChanges(
-    PasswordStoreChangeListReply notifying_callback,
+    base::OnceCallback<void(PasswordChanges)> notifying_callback,
     base::OnceCallback<void(bool)> completion_callback,
-    absl::optional<PasswordStoreChangeList> changes) {
+    PasswordChanges changes) {
   DCHECK(notifying_callback);
   // Two cases *presumably* have changes that need to be reported:
   // 1. `changes` contains a non-empty PasswordStoreChangeList.
-  // 2. `changes` contains no PasswordStoreChangeList at all because the
+  // 2. `changes` contains nullopt PasswordStoreChangeList because the
   //    backend can't compute it. A full list will be requested instead.
   // Only if `changes` contains an empty PasswordStoreChangeList, Chrome knows
   // for certain that no changes have happened:
@@ -88,40 +88,46 @@ bool PasswordStore::Init(
   affiliated_match_helper_ = std::move(affiliated_match_helper);
   sync_enabled_or_disabled_cb_ = std::move(sync_enabled_or_disabled_cb);
 
-  // TODO(crbug.com/1226042): Backend might be null in tests, remove this after
-  // tests switch to MockPasswordStoreInterface.
-  if (backend_) {
-    TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
-        "passwords", "PasswordStore::InitOnBackgroundSequence", this);
-    backend_->InitBackend(
-        base::BindRepeating(&PasswordStore::NotifyLoginsChangedOnMainSequence,
-                            this, LoginsChangedTrigger::ExternalUpdate),
-        base::BindPostTask(
-            main_task_runner_,
-            base::BindRepeating(
-                &PasswordStore::NotifySyncEnabledOrDisabledOnMainSequence,
-                this)),
-        base::BindOnce(&PasswordStore::OnInitCompleted, this));
-  }
+  DCHECK(backend_);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
+      "passwords", "PasswordStore::InitOnBackgroundSequence", this);
+  backend_->InitBackend(
+      base::BindRepeating(&PasswordStore::NotifyLoginsChangedOnMainSequence,
+                          this, LoginsChangedTrigger::ExternalUpdate),
+      base::BindPostTask(
+          main_task_runner_,
+          base::BindRepeating(
+              &PasswordStore::NotifySyncEnabledOrDisabledOnMainSequence, this)),
+      base::BindOnce(&PasswordStore::OnInitCompleted, this));
   return true;
 }
 
-void PasswordStore::AddLogin(const PasswordForm& form) {
+void PasswordStore::AddLogin(const PasswordForm& form,
+                             base::OnceClosure completion) {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
+  DCHECK(!form.blocked_by_user ||
+         (form.username_value.empty() && form.password_value.empty()));
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
   backend_->AddLoginAsync(
-      form, base::BindOnce(&PasswordStore::NotifyLoginsChangedOnMainSequence,
-                           this, LoginsChangedTrigger::Addition));
+      form, base::BindOnce(&GetPasswordChangesOrEmptyListOnFailure)
+                .Then(base::BindOnce(
+                          &PasswordStore::NotifyLoginsChangedOnMainSequence,
+                          this, LoginsChangedTrigger::Addition)
+                .Then(std::move(completion))));
 }
 
 void PasswordStore::UpdateLogin(const PasswordForm& form) {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
+  DCHECK(!form.blocked_by_user ||
+         (form.username_value.empty() && form.password_value.empty()));
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
   backend_->UpdateLoginAsync(
-      form, base::BindOnce(&PasswordStore::NotifyLoginsChangedOnMainSequence,
-                           this, LoginsChangedTrigger::Update));
+      form, base::BindOnce(&GetPasswordChangesOrEmptyListOnFailure)
+                .Then(base::BindOnce(
+                    &PasswordStore::NotifyLoginsChangedOnMainSequence, this,
+                    LoginsChangedTrigger::Update)));
 }
 
 void PasswordStore::UpdateLoginWithPrimaryKey(
@@ -134,20 +140,24 @@ void PasswordStore::UpdateLoginWithPrimaryKey(
   // TODO(crbug.com/1223022): Re-evaluate this once all places that call
   // UpdateLoginWithPrimaryKey() have properly set the |password_issues|
   // field.
-  if (new_form.username_value != old_primary_key.username_value ||
-      new_form.password_value != old_primary_key.password_value) {
-    // If the password or the username changes, the password issues aren't valid
+  if (new_form.password_value != old_primary_key.password_value) {
+    // If the password changes, the password issues aren't valid
     // any more. Make sure they are cleared before storing the new form.
-    new_form_with_correct_password_issues.password_issues =
-        base::flat_map<InsecureType, InsecurityMetadata>();
+    new_form_with_correct_password_issues.password_issues.clear();
+  } else if (new_form.username_value != old_primary_key.username_value) {
+    // If the username changed then the phished and leaked issues aren't valid
+    // any more. Make sure they are erased before storing the new form.
+    new_form_with_correct_password_issues.password_issues.erase(
+        InsecureType::kLeaked);
+    new_form_with_correct_password_issues.password_issues.erase(
+        InsecureType::kPhished);
   }
 
-  auto barrier_callback =
-      base::BarrierCallback<absl::optional<PasswordStoreChangeList>>(
-          2, base::BindOnce(&JoinPasswordStoreChanges)
-                 .Then(base::BindOnce(
-                     &PasswordStore::NotifyLoginsChangedOnMainSequence, this,
-                     LoginsChangedTrigger::Update)));
+  auto barrier_callback = base::BarrierCallback<PasswordChangesOrError>(
+      2, base::BindOnce(&JoinPasswordStoreChanges)
+             .Then(base::BindOnce(
+                 &PasswordStore::NotifyLoginsChangedOnMainSequence, this,
+                 LoginsChangedTrigger::Update)));
 
   backend_->RemoveLoginAsync(old_primary_key, barrier_callback);
   backend_->AddLoginAsync(new_form_with_correct_password_issues,
@@ -159,8 +169,10 @@ void PasswordStore::RemoveLogin(const PasswordForm& form) {
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
   backend_->RemoveLoginAsync(
-      form, base::BindOnce(&PasswordStore::NotifyLoginsChangedOnMainSequence,
-                           this, LoginsChangedTrigger::Deletion));
+      form, base::BindOnce(&GetPasswordChangesOrEmptyListOnFailure)
+                .Then(base::BindOnce(
+                    &PasswordStore::NotifyLoginsChangedOnMainSequence, this,
+                    LoginsChangedTrigger::Deletion)));
 }
 
 void PasswordStore::RemoveLoginsByURLAndTime(
@@ -176,8 +188,10 @@ void PasswordStore::RemoveLoginsByURLAndTime(
   }
   backend_->RemoveLoginsByURLAndTimeAsync(
       url_filter, delete_begin, delete_end, std::move(sync_completion),
-      base::BindOnce(&PasswordStore::NotifyLoginsChangedOnMainSequence, this,
-                     LoginsChangedTrigger::BatchDeletion)
+      base::BindOnce(&GetPasswordChangesOrEmptyListOnFailure)
+          .Then(
+              base::BindOnce(&PasswordStore::NotifyLoginsChangedOnMainSequence,
+                             this, LoginsChangedTrigger::BatchDeletion))
           .Then(std::move(completion)));
 }
 
@@ -195,8 +209,9 @@ void PasswordStore::RemoveLoginsCreatedBetween(
                      LoginsChangedTrigger::BatchDeletion);
   backend_->RemoveLoginsCreatedBetweenAsync(
       delete_begin, delete_end,
-      base::BindOnce(&InvokeCallbacksForSuspectedChanges, std::move(callback),
-                     std::move(completion)));
+      base::BindOnce(&GetPasswordChangesOrEmptyListOnFailure)
+          .Then(base::BindOnce(&InvokeCallbacksForSuspectedChanges,
+                               std::move(callback), std::move(completion))));
 }
 
 void PasswordStore::DisableAutoSignInForOrigins(
@@ -215,8 +230,9 @@ void PasswordStore::Unblocklist(const PasswordFormDigest& form_digest,
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
   backend_->FillMatchingLoginsAsync(
-      base::BindOnce(&PasswordStore::UnblocklistInternal, this,
-                     std::move(completion)),
+      base::BindOnce(&GetLoginsOrEmptyListOnFailure)
+          .Then(base::BindOnce(&PasswordStore::UnblocklistInternal, this,
+                               std::move(completion))),
       FormSupportsPSL(form_digest), {form_digest});
 }
 
@@ -228,31 +244,26 @@ void PasswordStore::GetLogins(const PasswordFormDigest& form,
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("passwords", "PasswordStore::GetLogins",
                                     consumer.get());
 
+  // Combines the credentials retrieved for `form` with credentials
+  // retrieved for the form's realm's affiliations and passes them on to
+  // the `consumer`. If an error occurs while fetching one or the other,
+  // the error is passed on instead.
   scoped_refptr<GetLoginsWithAffiliationsRequestHandler> request_handler =
       new GetLoginsWithAffiliationsRequestHandler(form, consumer,
                                                   /*store=*/this);
 
   if (affiliated_match_helper_) {
-    auto branding_injection_for_affiliations_callback =
-        base::BindOnce(&PasswordStore::InjectAffiliationAndBrandingInformation,
-                       this, request_handler->AffiliatedLoginsClosure());
-    // `Shutdown` resets the affiliated_match_helper_ before shutting down the
-    // backend_. Therefore, base::Unretained is safe here.
-    affiliated_match_helper_->GetAffiliatedAndroidAndWebRealms(
-        form, request_handler->AffiliationsClosure().Then(base::BindOnce(
-                  &PasswordStoreBackend::FillMatchingLoginsAsync,
-                  base::Unretained(backend_.get()),
-                  std::move(branding_injection_for_affiliations_callback),
-                  /*include_psl=*/false)));
-  } else {
-    request_handler->AffiliatedLoginsClosure().Run({});
+    // If there is an affiliation helper, both logins for `form` as well
+    // as for the realm's affiliations should be retrieved.
+    GetLoginsForFormAndForAffiliatedRealms(form, request_handler);
+    return;
   }
+  // If there is no helper to retrieve affiliations with, inform the
+  // `request_handler` that there are no affiliated logins.
+  request_handler->AffiliatedLoginsClosure().Run({});
 
-  auto branding_injection_callback =
-      base::BindOnce(&PasswordStore::InjectAffiliationAndBrandingInformation,
-                     this, request_handler->LoginsForFormClosure());
-
-  backend_->FillMatchingLoginsAsync(std::move(branding_injection_callback),
+  // And request the regular logins for `form`.
+  backend_->FillMatchingLoginsAsync(request_handler->LoginsForFormClosure(),
                                     FormSupportsPSL(form), {form});
 }
 
@@ -262,11 +273,9 @@ void PasswordStore::GetAutofillableLogins(
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
 
-  backend_->GetAutofillableLoginsAsync(
-      base::BindOnce(&GetLoginsOrEmptyListOnFailure)
-          .Then(base::BindOnce(
-              &PasswordStoreConsumer::OnGetPasswordStoreResultsFrom, consumer,
-              base::RetainedRef(this))));
+  backend_->GetAutofillableLoginsAsync(base::BindOnce(
+      &PasswordStoreConsumer::OnGetPasswordStoreResultsOrErrorFrom, consumer,
+      base::RetainedRef(this)));
 }
 
 void PasswordStore::GetAllLogins(
@@ -275,11 +284,9 @@ void PasswordStore::GetAllLogins(
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
 
-  backend_->GetAllLoginsAsync(
-      base::BindOnce(&GetLoginsOrEmptyListOnFailure)
-          .Then(base::BindOnce(
-              &PasswordStoreConsumer::OnGetPasswordStoreResultsFrom, consumer,
-              base::RetainedRef(this))));
+  backend_->GetAllLoginsAsync(base::BindOnce(
+      &PasswordStoreConsumer::OnGetPasswordStoreResultsOrErrorFrom, consumer,
+      base::RetainedRef(this)));
 }
 
 void PasswordStore::GetAllLoginsWithAffiliationAndBrandingInformation(
@@ -288,15 +295,14 @@ void PasswordStore::GetAllLoginsWithAffiliationAndBrandingInformation(
   if (!backend_)
     return;  // Once the shutdown started, ignore new requests.
 
-  auto consumer_reply =
-      base::BindOnce(&PasswordStoreConsumer::OnGetPasswordStoreResultsFrom,
-                     consumer, base::RetainedRef(this));
+  auto consumer_reply = base::BindOnce(
+      &PasswordStoreConsumer::OnGetPasswordStoreResultsOrErrorFrom, consumer,
+      base::RetainedRef(this));
 
   auto affiliation_injection =
       base::BindOnce(&PasswordStore::InjectAffiliationAndBrandingInformation,
                      this, std::move(consumer_reply));
-  backend_->GetAllLoginsAsync(base::BindOnce(&GetLoginsOrEmptyListOnFailure)
-                                  .Then(std::move(affiliation_injection)));
+  backend_->GetAllLoginsAsync(std::move(affiliation_injection));
 }
 
 SmartBubbleStatsStore* PasswordStore::GetSmartBubbleStatsStore() {
@@ -385,6 +391,8 @@ void PasswordStore::NotifyLoginsChangedOnMainSequence(
   base::UmaHistogramEnumeration(
       "PasswordManager.PasswordStore.OnLoginsRetained", logins_changed_trigger);
   if (!changes.has_value()) {
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
+        "passwords", "LoginsRetrievedForOnLoginsRetained", this);
     // If the changes aren't provided, the store propagates the latest logins.
     backend_->GetAllLoginsAsync(base::BindOnce(
         &PasswordStore::NotifyLoginsRetainedOnMainSequence, this));
@@ -428,6 +436,11 @@ void PasswordStore::NotifyLoginsRetainedOnMainSequence(
   for (auto& observer : observers_) {
     observer.OnLoginsRetained(this, retained_logins);
   }
+
+#if BUILDFLAG(IS_ANDROID)
+  TRACE_EVENT_NESTABLE_ASYNC_END0("passwords",
+                                  "LoginsRetrievedForOnLoginsRetained", this);
+#endif
 }
 
 void PasswordStore::NotifySyncEnabledOrDisabledOnMainSequence() {
@@ -462,27 +475,61 @@ void PasswordStore::UnblocklistInternal(
   if (completion)
     notify_callback = std::move(notify_callback).Then(std::move(completion));
 
-  auto barrier_callback =
-      base::BarrierCallback<absl::optional<PasswordStoreChangeList>>(
-          forms_to_remove.size(), base::BindOnce(&JoinPasswordStoreChanges)
-                                      .Then(std::move(notify_callback)));
+  auto barrier_callback = base::BarrierCallback<PasswordChangesOrError>(
+      forms_to_remove.size(), base::BindOnce(&JoinPasswordStoreChanges)
+                                  .Then(std::move(notify_callback)));
 
   for (const auto& form : forms_to_remove) {
     backend_->RemoveLoginAsync(form, barrier_callback);
   }
 }
 
+void PasswordStore::GetLoginsForFormAndForAffiliatedRealms(
+    const PasswordFormDigest& form,
+    scoped_refptr<GetLoginsWithAffiliationsRequestHandler> request_handler) {
+  DCHECK(affiliated_match_helper_);
+
+  auto branding_injection_for_affiliations_callback =
+      base::BindOnce(&PasswordStore::InjectAffiliationAndBrandingInformation,
+                     this, request_handler->AffiliatedLoginsClosure());
+
+  // This callback is to be owned and executed from `affiliated_match_helper_`.
+  // Since `Shutdown` resets the `affiliated_match_helper_` before shutting down
+  // the `backend_`, base::Unretained is safe here.
+  auto get_logins_for_affiliations_callback =
+      base::BindOnce(&PasswordStoreBackend::FillMatchingLoginsAsync,
+                     base::Unretained(backend_.get()),
+                     std::move(branding_injection_for_affiliations_callback),
+                     /*include_psl=*/false);
+
+  // Retrieve affiliations, then retrieve logins for those affiliations.
+  affiliated_match_helper_->GetAffiliatedAndroidAndWebRealms(
+      form, request_handler->AffiliationsClosure().Then(
+                std::move(get_logins_for_affiliations_callback)));
+
+  // Retrieve logins for `form`. The request will be handled by the
+  // `request_handler`.
+  auto branding_injection_for_regular_logins_callback =
+      base::BindOnce(&PasswordStore::InjectAffiliationAndBrandingInformation,
+                     this, request_handler->LoginsForFormClosure());
+  backend_->FillMatchingLoginsAsync(
+      std::move(branding_injection_for_regular_logins_callback),
+      FormSupportsPSL(form), {form});
+}
+
 void PasswordStore::InjectAffiliationAndBrandingInformation(
-    LoginsReply callback,
-    LoginsResult forms) {
-  if (affiliated_match_helper_ && !forms.empty()) {
-    affiliated_match_helper_->get_affiliation_service()
-        ->InjectAffiliationAndBrandingInformation(
-            std::move(forms), AffiliationService::StrategyOnCacheMiss::FAIL,
-            std::move(callback));
-  } else {
-    std::move(callback).Run(std::move(forms));
+    LoginsOrErrorReply callback,
+    LoginsResultOrError forms_or_error) {
+  if (!affiliated_match_helper_ ||
+      absl::holds_alternative<PasswordStoreBackendError>(forms_or_error) ||
+      absl::get<LoginsResult>(forms_or_error).empty()) {
+    std::move(callback).Run(std::move(forms_or_error));
+    return;
   }
+  affiliated_match_helper_->get_affiliation_service()
+      ->InjectAffiliationAndBrandingInformation(
+          std::move(absl::get<LoginsResult>(forms_or_error)),
+          AffiliationService::StrategyOnCacheMiss::FAIL, std::move(callback));
 }
 
 }  // namespace password_manager

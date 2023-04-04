@@ -150,7 +150,7 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) final;
+                   HitTestPhase) final;
 
   virtual void AddColumnSetToThread(LayoutMultiColumnSet*) = 0;
   virtual void RemoveColumnSetFromThread(LayoutMultiColumnSet*);
@@ -171,7 +171,7 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
   }
   bool HasValidColumnSetInfo() const {
     NOT_DESTROYED();
-    return !column_sets_invalidated_ && !multi_column_set_list_.IsEmpty();
+    return !column_sets_invalidated_ && !multi_column_set_list_.empty();
   }
 
   bool MapToVisualRectInAncestorSpaceInternal(

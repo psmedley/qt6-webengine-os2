@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,9 +75,6 @@ class NET_EXPORT CertVerifyResult : public base::SupportsUserData {
 
   // Hash algorithms used by the certificate chain, excluding the trust
   // anchor.
-  bool has_md2;
-  bool has_md4;
-  bool has_md5;
   bool has_sha1;
   bool has_sha1_leaf;
 

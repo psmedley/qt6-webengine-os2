@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,12 +47,12 @@ ScopedShapeEventSelector::ScopedShapeEventSelector(Connection* connection,
                                                    Window window)
     : connection_(connection), window_(window) {
   connection_->shape().SelectInput(
-      {.destination_window = window_, .enable = true});
+      {.destination_window = window_, .enable = true}).IgnoreError();
 }
 
 ScopedShapeEventSelector::~ScopedShapeEventSelector() {
   connection_->shape().SelectInput(
-      {.destination_window = window_, .enable = false});
+      {.destination_window = window_, .enable = false}).IgnoreError();
 }
 
 WindowCache::WindowInfo::WindowInfo() = default;

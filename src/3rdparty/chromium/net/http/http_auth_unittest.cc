@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,8 +44,8 @@ std::unique_ptr<HttpAuthHandlerMock> CreateMockHandler(bool connection_based) {
   url::SchemeHostPort scheme_host_port(GURL("https://www.example.com"));
   SSLInfo null_ssl_info;
   EXPECT_TRUE(auth_handler->InitFromChallenge(
-      &challenge, HttpAuth::AUTH_SERVER, null_ssl_info, NetworkIsolationKey(),
-      scheme_host_port, NetLogWithSource()));
+      &challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
+      NetworkAnonymizationKey(), scheme_host_port, NetLogWithSource()));
   return auth_handler;
 }
 
@@ -132,16 +132,16 @@ TEST(HttpAuthTest, ChooseBestChallenge) {
   url::SchemeHostPort scheme_host_port(GURL("http://www.example.com"));
   std::set<HttpAuth::Scheme> disabled_schemes;
   MockAllowHttpAuthPreferences http_auth_preferences;
-  std::unique_ptr<HostResolver> host_resolver(new MockHostResolver());
+  auto host_resolver = std::make_unique<MockHostResolver>();
   std::unique_ptr<HttpAuthHandlerRegistryFactory> http_auth_handler_factory(
       HttpAuthHandlerFactory::CreateDefault());
   http_auth_handler_factory->SetHttpAuthPreferences(kNegotiateAuthScheme,
                                                     &http_auth_preferences);
 
-  for (size_t i = 0; i < std::size(tests); ++i) {
+  for (const auto& test : tests) {
     // Make a HttpResponseHeaders object.
     std::string headers_with_status_line("HTTP/1.1 401 Unauthorized\n");
-    headers_with_status_line += tests[i].headers;
+    headers_with_status_line += test.headers;
     scoped_refptr<HttpResponseHeaders> headers =
         HeadersFromResponseText(headers_with_status_line);
 
@@ -149,15 +149,15 @@ TEST(HttpAuthTest, ChooseBestChallenge) {
     std::unique_ptr<HttpAuthHandler> handler;
     HttpAuth::ChooseBestChallenge(
         http_auth_handler_factory.get(), *headers, null_ssl_info,
-        NetworkIsolationKey(), HttpAuth::AUTH_SERVER, scheme_host_port,
+        NetworkAnonymizationKey(), HttpAuth::AUTH_SERVER, scheme_host_port,
         disabled_schemes, NetLogWithSource(), host_resolver.get(), &handler);
 
     if (handler.get()) {
-      EXPECT_EQ(tests[i].challenge_scheme, handler->auth_scheme());
-      EXPECT_STREQ(tests[i].challenge_realm, handler->realm().c_str());
+      EXPECT_EQ(test.challenge_scheme, handler->auth_scheme());
+      EXPECT_STREQ(test.challenge_realm, handler->realm().c_str());
     } else {
-      EXPECT_EQ(HttpAuth::AUTH_SCHEME_MAX, tests[i].challenge_scheme);
-      EXPECT_STREQ("", tests[i].challenge_realm);
+      EXPECT_EQ(HttpAuth::AUTH_SCHEME_MAX, test.challenge_scheme);
+      EXPECT_STREQ("", test.challenge_realm);
     }
   }
 }

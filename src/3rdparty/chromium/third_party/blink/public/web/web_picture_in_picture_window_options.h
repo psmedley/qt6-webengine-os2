@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 namespace blink {
 
 struct WebPictureInPictureWindowOptions {
-  gfx::Size size;
-  bool constrain_aspect_ratio = false;
+  float initial_aspect_ratio = 0.0;
+  bool lock_aspect_ratio = false;
 };
 
 }  // namespace blink

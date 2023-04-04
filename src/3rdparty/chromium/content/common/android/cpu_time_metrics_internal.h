@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,7 +114,6 @@ class CONTENT_EXPORT ProcessCpuTimeMetrics
   explicit ProcessCpuTimeMetrics(power_scheduler::PowerModeArbiter* arbiter);
 
   void InitializeOnThreadPool();
-  void OnVisibilityChangedOnThreadPool(bool visible);
   void PerformFullCollectionOnThreadPool();
   void CollectHighLevelMetricsOnThreadPool();
   void ReportAverageCpuLoad(base::TimeDelta cumulative_cpu_time);

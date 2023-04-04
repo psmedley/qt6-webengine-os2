@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,10 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_unowned_texture.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
-#include "ui/gfx/color_transform.h"
 
 namespace blink {
 
@@ -35,6 +35,7 @@ const char kRequiredExtension[] = "GL_ANGLE_texture_rectangle";
 const char kRequiredExtension[] = "GL_OES_EGL_image_external";
 #else
 const char kRequiredExtension[] = "";
+#define NO_REQUIRED_EXTENSIONS
 #endif
 
 void GetMediaTaskRunnerAndGpuFactoriesOnMainThread(
@@ -154,13 +155,13 @@ WebGLWebCodecsVideoFrameHandle* WebGLWebCodecsVideoFrame::importVideoFrame(
     base::WaitableEvent waitable_event;
     media_task_runner_->PostTask(
         FROM_HERE,
-        base::BindOnce(
+        WTF::BindOnce(
             &media::GpuMemoryBufferVideoFramePool::MaybeCreateHardwareFrame,
             base::Unretained(gpu_memory_buffer_pool_.get()),
             base::RetainedRef(frame),
-            base::BindOnce(
+            WTF::BindOnce(
                 &WebGLWebCodecsVideoFrame::OnHardwareVideoFrameCreated,
-                base::Unretained(this), base::Unretained(&waitable_event))));
+                WrapWeakPersistent(this), WTF::Unretained(&waitable_event))));
     waitable_event.Wait();
 
     if (frame == hardware_video_frame_) {
@@ -219,9 +220,9 @@ WebGLWebCodecsVideoFrameHandle* WebGLWebCodecsVideoFrame::importVideoFrame(
   WebGLWebCodecsVideoFrameHandle* video_frame_handle =
       MakeGarbageCollected<WebGLWebCodecsVideoFrameHandle>();
   video_frame_handle->setTextureInfoArray(info_array);
-  if (std::string(kRequiredExtension) != "") {
-    video_frame_handle->setRequiredExtension(kRequiredExtension);
-  }
+#ifndef NO_REQUIRED_EXTENSIONS
+  video_frame_handle->setRequiredExtension(kRequiredExtension);
+#endif
   // Remove "PIXEL_FORMAT_" prefix
   auto&& video_pixel_format =
       V8VideoPixelFormat::Create(&VideoPixelFormatToString(pixel_format)[13]);
@@ -245,12 +246,6 @@ WebGLWebCodecsVideoFrameHandle* WebGLWebCodecsVideoFrame::importVideoFrame(
   VideoColorSpace* video_frame_color_space =
       MakeGarbageCollected<VideoColorSpace>(src_color_space);
   video_frame_handle->setColorSpace(video_frame_color_space);
-
-  gfx::ColorSpace dst_color_space = gfx::ColorSpace::CreateSRGB();
-  std::unique_ptr<gfx::ColorTransform> color_transform(
-      gfx::ColorTransform::NewColorTransform(src_color_space, dst_color_space));
-  video_frame_handle->setColorConversionShaderFunc(
-      color_transform->GetShaderSource().c_str());
 
   // Bookkeeping of imported video frames.
   GLuint tex0 = info_array[0]->texture()->Object();
@@ -303,7 +298,9 @@ void WebGLWebCodecsVideoFrame::InitializeGpuMemoryBufferPool() {
       base::WaitableEvent waitable_event;
       // TODO(crbug.com/1164152): Lift the main thread restriction.
       if (PostCrossThreadTask(
-              *Thread::MainThread()->GetTaskRunner(), FROM_HERE,
+              *Thread::MainThread()->GetTaskRunner(
+                  MainThreadTaskRunnerRestricted()),
+              FROM_HERE,
               CrossThreadBindOnce(
                   &GetMediaTaskRunnerAndGpuFactoriesOnMainThread,
                   CrossThreadUnretained(&media_task_runner_),

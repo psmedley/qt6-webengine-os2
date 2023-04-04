@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,9 +88,6 @@ bool ShouldRetryWithStatus(RegistrationRequest::Status status) {
     case RegistrationRequest::TOO_MANY_REGISTRATIONS:
     case RegistrationRequest::REACHED_MAX_RETRIES:
       return false;
-    case RegistrationRequest::STATUS_COUNT:
-      NOTREACHED();
-      break;
   }
   return false;
 }
@@ -184,9 +181,13 @@ void RegistrationRequest::Start() {
   std::string body;
   BuildRequestBody(&body);
 
-  // TODO(crbug.com/1043347): Change back to DVLOG when the bug is resolved.
-  VLOG(1) << "Performing registration for: " << request_info_.app_id();
-  VLOG(1) << "Registration request: " << body;
+  DVLOG(1) << "Performing registration for: " << request_info_.app_id()
+           << ", with android id: " << request_info_.android_id
+           << " and security token: " << request_info_.security_token;
+  DVLOG(1) << "Registration URL: " << registration_url_.possibly_invalid_spec();
+  DVLOG(1) << "Registration request headers: " << request->headers.ToString();
+  DVLOG(1) << "Registration request body: " << body;
+
   url_loader_ =
       network::SimpleURLLoader::Create(std::move(request), traffic_annotation);
   url_loader_->AttachStringForUpload(body, kRegistrationRequestContentType);
@@ -262,7 +263,8 @@ RegistrationRequest::Status RegistrationRequest::ParseResponse(
     std::string error =
         response.substr(error_pos + std::size(kErrorPrefix) - 1);
     LOG(ERROR) << "Registration response error message: " << error;
-    return GetStatusFromError(error);
+    RegistrationRequest::Status status = GetStatusFromError(error);
+    return status;
   }
 
   // Can't even get any header info.
@@ -298,7 +300,7 @@ void RegistrationRequest::OnURLLoadComplete(
                                         source_to_record_, status);
 
   DCHECK(custom_request_handler_.get());
-  custom_request_handler_->ReportStatusToUMA(status);
+  custom_request_handler_->ReportStatusToUMA(status, request_info_.subtype);
   custom_request_handler_->ReportNetErrorCodeToUMA(source->NetError());
 
   if (ShouldRetryWithStatus(status)) {
@@ -312,7 +314,7 @@ void RegistrationRequest::OnURLLoadComplete(
                                           source_to_record_, status);
 
     DCHECK(custom_request_handler_.get());
-    custom_request_handler_->ReportStatusToUMA(status);
+    custom_request_handler_->ReportStatusToUMA(status, request_info_.subtype);
   }
 
   std::move(callback_).Run(status, token);

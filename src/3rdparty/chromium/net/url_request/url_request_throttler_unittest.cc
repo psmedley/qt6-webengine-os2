@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,7 +101,7 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
 
 class MockURLRequestThrottlerManager : public URLRequestThrottlerManager {
  public:
-  MockURLRequestThrottlerManager() : create_entry_index_(0) {}
+  MockURLRequestThrottlerManager() = default;
 
   // Method to process the URL using URLRequestThrottlerManager protected
   // method.
@@ -122,14 +122,13 @@ class MockURLRequestThrottlerManager : public URLRequestThrottlerManager {
     std::string fake_url_string("http://www.fakeurl.com/");
     fake_url_string.append(base::NumberToString(create_entry_index_++));
     GURL fake_url(fake_url_string);
-    OverrideEntryForTests(
-        fake_url,
-        new MockURLRequestThrottlerEntry(this, time, TimeTicks::Now(),
-                                         TimeTicks::Now()));
+    OverrideEntryForTests(fake_url,
+                          base::MakeRefCounted<MockURLRequestThrottlerEntry>(
+                              this, time, TimeTicks::Now(), TimeTicks::Now()));
   }
 
  private:
-  int create_entry_index_;
+  int create_entry_index_ = 0;
 };
 
 struct TimeAndBool {
@@ -181,7 +180,7 @@ void URLRequestThrottlerEntryTest::SetUp() {
   request_->SetLoadFlags(0);
 
   now_ = TimeTicks::Now();
-  entry_ = new MockURLRequestThrottlerEntry(&manager_);
+  entry_ = base::MakeRefCounted<MockURLRequestThrottlerEntry>(&manager_);
   entry_->ResetToBlank(now_);
 }
 

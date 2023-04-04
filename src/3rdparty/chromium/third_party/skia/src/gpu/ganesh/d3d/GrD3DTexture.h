@@ -21,7 +21,8 @@ public:
                                               SkISize dimensions,
                                               const D3D12_RESOURCE_DESC&,
                                               GrProtected,
-                                              GrMipmapStatus);
+                                              GrMipmapStatus,
+                                              std::string_view label);
 
     static sk_sp<GrD3DTexture> MakeWrappedTexture(GrD3DGpu*,
                                                   SkISize dimensions,
@@ -62,6 +63,8 @@ protected:
         return false;
     }
 
+    void onSetLabel() override;
+
 private:
     GrD3DTexture(GrD3DGpu*, SkBudgeted, SkISize dimensions, const GrD3DTextureResourceInfo&,
                  sk_sp<GrD3DResourceState>,
@@ -78,7 +81,7 @@ private:
 
     // In D3D we call the release proc after we are finished with the underlying
     // GrSurfaceResource::Resource object (which occurs after the GPU has finished all work on it).
-    void onSetRelease(sk_sp<skgpu::RefCntedCallback> releaseHelper) override {
+    void onSetRelease(sk_sp<RefCntedReleaseProc> releaseHelper) override {
         // Forward the release proc on to GrSurfaceResource
         this->setResourceRelease(std::move(releaseHelper));
     }

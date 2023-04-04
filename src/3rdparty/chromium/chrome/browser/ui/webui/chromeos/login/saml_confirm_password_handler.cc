@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,8 @@ void SamlConfirmPasswordHandler::Show(const std::string& email,
   ShowInWebUI(std::move(data));
 }
 
-void SamlConfirmPasswordHandler::Retry() {
-  CallExternalAPI("retry");
+void SamlConfirmPasswordHandler::ShowPasswordStep(bool retry) {
+  CallExternalAPI("showPasswordStep", retry);
 }
 
 void SamlConfirmPasswordHandler::DeclareLocalizedValues(

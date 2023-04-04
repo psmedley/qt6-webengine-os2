@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,6 +16,8 @@ generate_grd("build_grd") {
   out_grd = "$target_gen_dir/${grd_prefix}_resources.grd"
 
   input_files = [
+    "illustrations/network_unavailable_darkmode.svg",
+    "illustrations/network_unavailable_lightmode.svg",
     "untrusted_index.html",
     "untrusted_index.js",
   ]

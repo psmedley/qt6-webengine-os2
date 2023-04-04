@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,9 +21,6 @@ bool g_disable_throttle_for_testing_ = false;
 std::unique_ptr<content::NavigationThrottle>
 WebAppSettingsNavigationThrottle::MaybeCreateThrottleFor(
     content::NavigationHandle* handle) {
-  // Check web app settings feature is enabled.
-  if (!base::FeatureList::IsEnabled(features::kDesktopPWAsWebAppSettingsPage))
-    return nullptr;
   // Check the current url scheme is chrome://
   if (!handle->GetURL().SchemeIs(content::kChromeUIScheme))
     return nullptr;

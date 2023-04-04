@@ -18,12 +18,15 @@ config("fxge_warnings") {
 
 source_set("fxge") {
   sources = [
+    "agg/fx_agg_driver.cpp",
+    "agg/fx_agg_driver.h",
     "calculate_pitch.cpp",
     "calculate_pitch.h",
     "cfx_cliprgn.cpp",
     "cfx_cliprgn.h",
     "cfx_color.cpp",
     "cfx_color.h",
+    "cfx_defaultrenderdevice.cpp",
     "cfx_defaultrenderdevice.h",
     "cfx_drawutils.cpp",
     "cfx_drawutils.h",
@@ -100,9 +103,9 @@ source_set("fxge") {
     "fontdata/chromefontdata/FoxitSymbol.cpp",
     "fontdata/chromefontdata/chromefontdata.h",
     "freetype/fx_freetype.cpp",
+    "freetype/fx_freetype.h",
     "fx_font.cpp",
     "fx_font.h",
-    "fx_freetype.h",
     "render_defines.h",
     "renderdevicedriver_iface.cpp",
     "renderdevicedriver_iface.h",
@@ -121,7 +124,10 @@ source_set("fxge") {
     "../../:pdfium_noshorten_config",
   ]
 
-  deps = [ "../fxcrt" ]
+  deps = [
+    "../../third_party:fx_agg",
+    "../fxcrt",
+  ]
 
   if (is_component_build || use_system_freetype) {
     # ft_adobe_glyph_list is not exported from the Freetype shared library so we
@@ -139,12 +145,6 @@ source_set("fxge") {
   if (pdf_use_skia || pdf_use_skia_paths) {
     sources += [ "skia/fx_skia_device.cpp" ]
     deps += [ "//skia" ]
-  } else {
-    sources += [
-      "agg/fx_agg_driver.cpp",
-      "agg/fx_agg_driver.h",
-    ]
-    deps += [ "../../third_party:fx_agg" ]
   }
 
   if (is_android) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,8 @@ void CertDatabase::NotifyObserversCertDBChanged() {
 }
 
 CertDatabase::CertDatabase()
-    : observer_list_(new base::ObserverListThreadSafe<Observer>) {}
+    : observer_list_(
+          base::MakeRefCounted<base::ObserverListThreadSafe<Observer>>()) {}
 
 CertDatabase::~CertDatabase() {
 #if BUILDFLAG(IS_MAC)

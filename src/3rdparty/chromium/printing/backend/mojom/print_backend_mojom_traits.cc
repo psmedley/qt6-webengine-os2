@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <map>
 
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "ui/gfx/geometry/mojom/geometry.mojom-shared.h"
@@ -179,6 +180,25 @@ bool StructTraits<printing::mojom::AdvancedCapabilityDataView,
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
+#if BUILDFLAG(IS_WIN)
+// static
+bool StructTraits<printing::mojom::PageOutputQualityAttributeDataView,
+                  printing::PageOutputQualityAttribute>::
+    Read(printing::mojom::PageOutputQualityAttributeDataView data,
+         printing::PageOutputQualityAttribute* out) {
+  return data.ReadDisplayName(&out->display_name) && data.ReadName(&out->name);
+}
+
+// static
+bool StructTraits<printing::mojom::PageOutputQualityDataView,
+                  printing::PageOutputQuality>::
+    Read(printing::mojom::PageOutputQualityDataView data,
+         printing::PageOutputQuality* out) {
+  return data.ReadQualities(&out->qualities) &&
+         data.ReadDefaultQuality(&out->default_quality);
+}
+#endif
+
 // static
 bool StructTraits<printing::mojom::PrinterSemanticCapsAndDefaultsDataView,
                   printing::PrinterSemanticCapsAndDefaults>::
@@ -239,6 +259,36 @@ bool StructTraits<printing::mojom::PrinterSemanticCapsAndDefaultsDataView,
   }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
+#if BUILDFLAG(IS_WIN)
+  if (!data.ReadPageOutputQuality(&out->page_output_quality)) {
+    return false;
+  }
+  DuplicateChecker<printing::PageOutputQualityAttribute>
+      page_output_quality_dup_checker;
+  if (out->page_output_quality) {
+    printing::PageOutputQualityAttributes qualities =
+        out->page_output_quality->qualities;
+    absl::optional<std::string> default_quality =
+        out->page_output_quality->default_quality;
+
+    // If non-null `default_quality`, there should be a matching element in
+    // `qualities` array.
+    if (default_quality) {
+      if (!base::Contains(qualities, *default_quality,
+                          &printing::PageOutputQualityAttribute::name)) {
+        DLOG(ERROR) << "Non-null default quality, but page output qualities "
+                       "does not contain default quality";
+        return false;
+      }
+    }
+
+    // There should be no duplicates in `qualities` array.
+    if (page_output_quality_dup_checker.HasDuplicates(qualities)) {
+      DLOG(ERROR) << "Duplicate page output qualities detected.";
+      return false;
+    }
+  }
+#endif
   return true;
 }
 

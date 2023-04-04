@@ -14,7 +14,7 @@
 #include "libANGLE/State.h"
 #include "libANGLE/angletypes.h"
 #include "libANGLE/renderer/gl/functionsgl_typedefs.h"
-#include "platform/FeaturesGL.h"
+#include "platform/FeaturesGL_autogen.h"
 
 #include <array>
 #include <map>
@@ -261,6 +261,9 @@ class StateManagerGL final : angle::NonCopyable
 
     void setClipDistancesEnable(const gl::State::ClipDistanceEnableBits &enables);
 
+    void setLogicOpEnabled(bool enabled);
+    void setLogicOp(gl::LogicalOperation opcode);
+
     void pauseTransformFeedback();
     angle::Result pauseAllQueries(const gl::Context *context);
     angle::Result pauseQuery(const gl::Context *context, gl::QueryType type);
@@ -457,7 +460,7 @@ class StateManagerGL final : angle::NonCopyable
     float mSampleCoverageValue;
     bool mSampleCoverageInvert;
     bool mSampleMaskEnabled;
-    std::array<GLbitfield, gl::MAX_SAMPLE_MASK_WORDS> mSampleMaskValues;
+    gl::SampleMaskArray<GLbitfield> mSampleMaskValues;
 
     bool mDepthTestEnabled;
     GLenum mDepthFunc;
@@ -513,7 +516,11 @@ class StateManagerGL final : angle::NonCopyable
     gl::State::ClipDistanceEnableBits mEnabledClipDistances;
     const size_t mMaxClipDistances;
 
+    bool mLogicOpEnabled;
+    gl::LogicalOperation mLogicOp;
+
     gl::State::DirtyBits mLocalDirtyBits;
+    gl::State::ExtendedDirtyBits mLocalExtendedDirtyBits;
     gl::AttributesMask mLocalDirtyCurrentValues;
 };
 

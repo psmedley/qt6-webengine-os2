@@ -1,10 +1,13 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/scheduler/dom_scheduler.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_scheduler_post_task_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_scheduler_post_task_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_task_signal.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -13,6 +16,7 @@
 #include "third_party/blink/renderer/modules/scheduler/dom_task.h"
 #include "third_party/blink/renderer/modules/scheduler/dom_task_signal.h"
 #include "third_party/blink/renderer/platform/bindings/enumeration_base.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
@@ -67,11 +71,18 @@ ScriptPromise DOMScheduler::postTask(
     return ScriptPromise();
   }
   if (options->hasSignal() && options->signal()->aborted()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kAbortError,
-                                      "The task was aborted");
+    exception_state.RethrowV8Exception(
+        ToV8Traits<IDLAny>::ToV8(script_state,
+                                 options->signal()->reason(script_state))
+            .ToLocalChecked());
     return ScriptPromise();
   }
 
+  auto* tracker = ThreadScheduler::Current()->GetTaskAttributionTracker();
+  if (tracker && script_state->World().IsMainWorld()) {
+    callback_function->SetParentTaskId(
+        tracker->RunningTaskAttributionId(script_state));
+  }
   // Always honor the priority and the task signal if given.
   DOMTaskQueue* task_queue;
   AbortSignal* signal = options->hasSignal() ? options->signal() : nullptr;
@@ -101,20 +112,23 @@ ScriptPromise DOMScheduler::postTask(
   return resolver->Promise();
 }
 
-scheduler::TaskIdType DOMScheduler::taskId(ScriptState* script_state) {
+scheduler::TaskAttributionIdType DOMScheduler::taskId(
+    ScriptState* script_state) {
   ThreadScheduler* scheduler = ThreadScheduler::Current();
   DCHECK(scheduler);
   DCHECK(scheduler->GetTaskAttributionTracker());
-  absl::optional<scheduler::TaskId> task_id =
-      scheduler->GetTaskAttributionTracker()->RunningTaskId(script_state);
+  absl::optional<scheduler::TaskAttributionId> task_id =
+      scheduler->GetTaskAttributionTracker()->RunningTaskAttributionId(
+          script_state);
   // task_id cannot be unset here, as a task has presumably already ran in order
   // for this API call to be called.
   DCHECK(task_id);
   return task_id.value().value();
 }
 
-AtomicString DOMScheduler::isAncestor(ScriptState* script_state,
-                                      scheduler::TaskIdType parentId) {
+AtomicString DOMScheduler::isAncestor(
+    ScriptState* script_state,
+    scheduler::TaskAttributionIdType parentId) {
   scheduler::TaskAttributionTracker::AncestorStatus status =
       scheduler::TaskAttributionTracker::AncestorStatus::kNotAncestor;
   ThreadScheduler* scheduler = ThreadScheduler::Current();
@@ -122,7 +136,8 @@ AtomicString DOMScheduler::isAncestor(ScriptState* script_state,
   scheduler::TaskAttributionTracker* tracker =
       scheduler->GetTaskAttributionTracker();
   DCHECK(tracker);
-  status = tracker->IsAncestor(script_state, scheduler::TaskId(parentId));
+  status =
+      tracker->IsAncestor(script_state, scheduler::TaskAttributionId(parentId));
   switch (status) {
     case scheduler::TaskAttributionTracker::AncestorStatus::kAncestor:
       return "ancestor";
@@ -156,9 +171,9 @@ void DOMScheduler::CreateTaskQueueFor(DOMTaskSignal* signal) {
   signal_to_task_queue_map_.insert(
       signal,
       MakeGarbageCollected<DOMTaskQueue>(std::move(task_queue), priority));
-  signal->AddPriorityChangeAlgorithm(WTF::Bind(&DOMScheduler::OnPriorityChange,
-                                               WrapWeakPersistent(this),
-                                               WrapWeakPersistent(signal)));
+  signal->AddPriorityChangeAlgorithm(
+      WTF::BindRepeating(&DOMScheduler::OnPriorityChange,
+                         WrapWeakPersistent(this), WrapWeakPersistent(signal)));
 }
 
 void DOMScheduler::OnPriorityChange(DOMTaskSignal* signal) {

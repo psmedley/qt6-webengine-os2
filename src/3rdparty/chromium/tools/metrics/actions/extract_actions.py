@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -100,10 +100,10 @@ KNOWN_COMPUTED_USERS = (
     'user_metrics.cc',  # method definition
     'external_metrics.cc',  # see AddChromeOSActions()
     'render_thread_impl.cc',  # impl of RenderThread::RecordComputedAction()
-    'render_process_host_impl.cc',  # browser side impl for
-    # RenderThread::RecordComputedAction()
+    # browser side impl for RenderThread::RecordComputedAction()
+    'render_process_host_impl.cc',
     'mock_render_thread.cc',  # mock of RenderThread::RecordComputedAction()
-    'pdf_view_plugin_base.cc',  # see AddPDFPluginActions()
+    'pdf_view_web_plugin_client.cc',  # see AddPDFPluginActions()
     'blink_platform_impl.cc',  # see WebKit/public/platform/Platform.h
     'devtools_ui_bindings.cc',  # see AddDevToolsActions()
     'sharing_hub_bubble_controller.cc',  # share targets
@@ -307,7 +307,8 @@ def GrepForActions(path, actions):
   else:
     action_re = USER_METRICS_ACTION_RE
 
-  finder = ActionNameFinder(path, open(path).read(), action_re)
+  finder = ActionNameFinder(path,
+                            open(path, encoding='utf-8').read(), action_re)
   while True:
     try:
       action_name = finder.FindNextAction()
@@ -321,7 +322,7 @@ def GrepForActions(path, actions):
     return
 
   line_number = 0
-  for line in open(path):
+  for line in open(path, encoding='utf-8'):
     line_number = line_number + 1
     if COMPUTED_ACTION_RE.search(line):
       # Warn if this file shouldn't be calling RecordComputedAction.
@@ -376,7 +377,7 @@ def GrepForWebUIActions(path, actions):
   close_called = False
   try:
     parser = WebUIActionsParser(actions)
-    parser.feed(open(path).read())
+    parser.feed(open(path, encoding='utf-8').read())
     # An exception can be thrown by parser.close(), so do it in the try to
     # ensure the path of the file being parsed gets printed if that happens.
     close_called = True
@@ -402,8 +403,9 @@ def GrepForDevToolsActions(path, actions):
   if ext != '.js':
     return
 
-  finder = ActionNameFinder(path, open(path).read(),
-      USER_METRICS_ACTION_RE_DEVTOOLS)
+  finder = ActionNameFinder(path,
+                            open(path, encoding='utf-8').read(),
+                            USER_METRICS_ACTION_RE_DEVTOOLS)
   while True:
     try:
       action_name = finder.FindNextAction()

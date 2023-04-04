@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -264,10 +264,16 @@ scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
   std::unique_ptr<extensions::Manifest> manifest;
   if (flags & FOR_LOGIN_SCREEN) {
     manifest = Manifest::CreateManifestForLoginScreen(
-        location, value.CreateDeepCopy(), std::move(extension_id));
+        location,
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(value.Clone())),
+        std::move(extension_id));
   } else {
-    manifest = std::make_unique<Manifest>(location, value.CreateDeepCopy(),
-                                          std::move(extension_id));
+    manifest = std::make_unique<Manifest>(
+        location,
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(value.Clone())),
+        std::move(extension_id));
   }
 
   std::vector<InstallWarning> install_warnings;
@@ -284,6 +290,8 @@ scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
   }
 
   extension->guid_ = base::GUID::GenerateRandomV4();
+  extension->dynamic_url_ = Extension::GetBaseURLFromExtensionId(
+      extension->guid_.AsLowercaseString());
 
   return extension;
 }
@@ -480,6 +488,8 @@ void Extension::SetManifestData(const std::string& key,
 void Extension::SetGUID(const ExtensionGuid& guid) {
   guid_ = base::GUID::ParseLowercase(guid);
   DCHECK(guid_.is_valid());
+  dynamic_url_ =
+      Extension::GetBaseURLFromExtensionId(guid_.AsLowercaseString());
 }
 
 const ExtensionGuid& Extension::guid() const {
@@ -725,8 +735,7 @@ bool Extension::LoadExtent(const char* key,
     *error = base::ASCIIToUTF16(list_error);
     return false;
   }
-  base::Value::ConstListView pattern_list =
-      temp_pattern_value->GetListDeprecated();
+  const base::Value::List& pattern_list = temp_pattern_value->GetList();
   for (size_t i = 0; i < pattern_list.size(); ++i) {
     std::string pattern_string;
     if (pattern_list[i].is_string()) {
@@ -859,15 +868,10 @@ ExtensionInfo::ExtensionInfo(const base::DictionaryValue* manifest,
                              ManifestLocation location)
     : extension_id(id), extension_path(path), extension_location(location) {
   if (manifest)
-    extension_manifest = manifest->CreateDeepCopy();
+    extension_manifest = base::DictionaryValue::From(
+        base::Value::ToUniquePtrValue(manifest->Clone()));
 }
 
 ExtensionInfo::~ExtensionInfo() {}
-
-UpdatedExtensionPermissionsInfo::UpdatedExtensionPermissionsInfo(
-    const Extension* extension,
-    const PermissionSet& permissions,
-    Reason reason)
-    : reason(reason), extension(extension), permissions(permissions) {}
 
 }   // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_LOGGING_H_
 
 #include "base/allocator/partition_allocator/allocation_guard.h"
-#include "base/logging.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/logging.h"
 
 namespace partition_alloc::internal {
 
@@ -30,8 +30,9 @@ struct LoggerWithAllowedAllocations : ScopedAllowAllocations,
 // the inner free() call must be non-reentrant).  However, these sorts of things
 // are tricky to enforce and easy to mess up with. Since verbose *Scan logging
 // is essential for debugging, we choose to provide support for it inside *Scan.
-#define PA_PCSCAN_VLOG(verbose_level) \
-  LAZY_STREAM(PA_PCSCAN_VLOG_STREAM(verbose_level), VLOG_IS_ON(verbose_level))
+#define PA_PCSCAN_VLOG(verbose_level)                  \
+  PA_LAZY_STREAM(PA_PCSCAN_VLOG_STREAM(verbose_level), \
+                 PA_VLOG_IS_ON(verbose_level))
 
 }  // namespace partition_alloc::internal
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,7 +126,9 @@ std::string IPAddressToSensitiveString(const net::IPAddress& address) {
       sensitive_address = net::IPAddress(stripped).ToString();
       break;
     }
-    default: { break; }
+    default: {
+      break;
+    }
   }
   return sensitive_address;
 #else
@@ -541,7 +543,10 @@ void WebRtcTextLogHandler::OnGetNetworkInterfaceListFinish(
          NumberToString(
              media::kChromeWideEchoCancellationProcessingFifoSize.Get()),
          ", minimize_resampling = ",
-         media::kChromeWideEchoCancellationMinimizeResampling.Get()
+         media::kChromeWideEchoCancellationMinimizeResampling.Get() ? "true"
+                                                                    : "false",
+         ", allow_all_sample_rates = ",
+         media::kChromeWideEchoCancellationAllowAllSampleRates.Get()
              ? "true"
              : "false"}));
   } else {

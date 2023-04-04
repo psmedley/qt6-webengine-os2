@@ -28,9 +28,32 @@
 - (id)copyWithZone:(NSZone *)zone {
   TFLCpuSettings *cpuSettings = [[TFLCpuSettings alloc] init];
 
-  [cpuSettings setNumThreads:self.numThreads];
+  cpuSettings.numThreads = self.numThreads;
 
   return cpuSettings;
+}
+
+@end
+
+@implementation TFLCoreMLDelegateSettings
+
+- (instancetype)initWithCoreMLVersion:(int32_t)coreMLVersion
+                       enableddevices:
+                           (CoreMLDelegateEnabledDevices)enabledDevices {
+  self = [super init];
+  if (self) {
+    _enabledDevices = enabledDevices;
+    _coreMLVersion = coreMLVersion;
+  }
+  return self;
+}
+
+- (id)copyWithZone:(NSZone*)zone {
+  TFLCoreMLDelegateSettings* coreMLDelegateSettings =
+      [[TFLCoreMLDelegateSettings alloc]
+          initWithCoreMLVersion:self.coreMLVersion
+                 enableddevices:self.enabledDevices];
+  return coreMLDelegateSettings;
 }
 
 @end
@@ -49,22 +72,9 @@
 - (id)copyWithZone:(NSZone *)zone {
   TFLComputeSettings *computeSettings = [[TFLComputeSettings alloc] init];
 
-  [computeSettings setCpuSettings:self.cpuSettings];
+  computeSettings.cpuSettings = self.cpuSettings;
 
   return computeSettings;
-}
-
-@end
-
-@implementation TFLExternalFile
-@synthesize filePath;
-
-- (id)copyWithZone:(NSZone *)zone {
-  TFLExternalFile *externalFile = [[TFLExternalFile alloc] init];
-
-  [externalFile setFilePath:self.filePath];
-
-  return externalFile;
 }
 
 @end
@@ -78,6 +88,8 @@
   if (self) {
     self.computeSettings = [[TFLComputeSettings alloc] init];
     self.modelFile = [[TFLExternalFile alloc] init];
+    // Initialized to nil to indicate CoreML Delegate is not enabled yet.
+    self.coreMLDelegateSettings = nil;
   }
   return self;
 }
@@ -85,8 +97,9 @@
 - (id)copyWithZone:(NSZone *)zone {
   TFLBaseOptions *baseOptions = [[TFLBaseOptions alloc] init];
 
-  [baseOptions setModelFile:self.modelFile];
-  [baseOptions setComputeSettings:self.computeSettings];
+  baseOptions.modelFile = self.modelFile;
+  baseOptions.computeSettings = self.computeSettings;
+  baseOptions.coreMLDelegateSettings = self.coreMLDelegateSettings;
 
   return baseOptions;
 }

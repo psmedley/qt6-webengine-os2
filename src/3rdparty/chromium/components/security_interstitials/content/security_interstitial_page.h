@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,8 @@
 #include <string>
 
 #include "base/memory/raw_ptr.h"
+#include "base/values.h"
 #include "url/gurl.h"
-
-namespace base {
-class Value;
-}
 
 namespace content {
 class WebContents;
@@ -62,7 +59,8 @@ class SecurityInterstitialPage {
 
  protected:
   // Populates the strings used to generate the HTML from the template.
-  virtual void PopulateInterstitialStrings(base::Value* load_time_data) = 0;
+  virtual void PopulateInterstitialStrings(
+      base::Value::Dict& load_time_data) = 0;
 
   virtual int GetHTMLTemplateId();
 

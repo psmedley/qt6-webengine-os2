@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/component_export.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/strings/string_piece.h"
 #include "url/url_canon.h"
 
@@ -45,12 +46,12 @@ class COMPONENT_EXPORT(URL) StdStringCanonOutput : public CanonOutput {
   // Must be called after writing has completed but before the string is used.
   void Complete();
 
-  void Resize(int sz) override;
+  void Resize(size_t sz) override;
 
  protected:
   // `str_` is not a raw_ptr<...> for performance reasons (based on analysis of
   // sampling profiler data and tab_search:top100:2020).
-  std::string* str_;
+  RAW_PTR_EXCLUSION std::string* str_;
 };
 
 // An extension of the Replacements class that allows the setters to use

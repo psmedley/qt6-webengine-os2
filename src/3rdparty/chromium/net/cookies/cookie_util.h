@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 #include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_options.h"
-#include "net/cookies/first_party_set_metadata.h"
 #include "net/cookies/site_for_cookies.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 
@@ -27,6 +27,7 @@ namespace net {
 class IsolationInfo;
 class SchemefulSite;
 class CookieAccessDelegate;
+class CookieInclusionStatus;
 
 namespace cookie_util {
 
@@ -63,6 +64,7 @@ NET_EXPORT std::string GetEffectiveDomain(const std::string& scheme,
 // begin with a '.' character.
 NET_EXPORT bool GetCookieDomainWithString(const GURL& url,
                                           const std::string& domain_string,
+                                          CookieInclusionStatus& status,
                                           std::string* result);
 
 // Returns true if a domain string represents a host-only cookie,
@@ -263,7 +265,7 @@ ComputeFirstPartySetMetadataMaybeAsync(
 NET_EXPORT CookieSamePartyStatus
 GetSamePartyStatus(const CanonicalCookie& cookie,
                    const CookieOptions& options,
-                   bool first_party_sets_enabled);
+                   bool same_party_attribute_enabled);
 
 // Takes a callback accepting a CookieAccessResult and returns a callback
 // that accepts a bool, setting the bool to true if the CookieInclusionStatus

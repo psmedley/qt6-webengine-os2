@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,7 +82,7 @@ TEST_F(DeleteSelectionCommandTest, FixupWhitespace) {
                              .SetSanitizeMarkup(true)
                              .Build());
   EXPECT_TRUE(command.Apply()) << "the delete command should have succeeded";
-  EXPECT_EQ(u8"<p contenteditable>a<b>\u00A0|</b>\u00A0<ruby></ruby></p>",
+  EXPECT_EQ("<p contenteditable>a<b>\u00A0|</b>\u00A0<ruby></ruby></p>",
             GetSelectionTextFromBody());
 }
 
@@ -132,7 +132,7 @@ TEST_F(DeleteSelectionCommandTest, DeleteWithEditabilityChange) {
       SetSelectionTextToBody(
           "^<style>body{-webkit-user-modify:read-write}</style>x|"),
       SetSelectionOptions());
-  EXPECT_TRUE(HasEditableStyle(*GetDocument().body()));
+  EXPECT_TRUE(IsEditable(*GetDocument().body()));
 
   DeleteSelectionCommand& command =
       *MakeGarbageCollected<DeleteSelectionCommand>(
@@ -145,7 +145,7 @@ TEST_F(DeleteSelectionCommandTest, DeleteWithEditabilityChange) {
 
   // The command removes the <style>, so the <body> stops being editable,
   // and then "x" is not removed.
-  EXPECT_FALSE(HasEditableStyle(*GetDocument().body()));
+  EXPECT_FALSE(IsEditable(*GetDocument().body()));
   EXPECT_EQ("|x", GetSelectionTextFromBody());
 }
 

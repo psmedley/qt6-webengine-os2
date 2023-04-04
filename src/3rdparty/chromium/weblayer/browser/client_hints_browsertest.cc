@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ class ClientHintsBrowserTest : public WebLayerBrowserTest {
     content::RenderProcessHost* child_process =
         static_cast<TabImpl*>(shell()->tab())
             ->web_contents()
-            ->GetMainFrame()
+            ->GetPrimaryMainFrame()
             ->GetProcess();
     content::RenderProcessHostWatcher crash_observer(
         child_process,

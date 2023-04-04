@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,7 +88,7 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
       const WebString& sink_id,
       CreateSurfaceLayerBridgeCB create_bridge_callback,
       std::unique_ptr<WebVideoFrameSubmitter> submitter_,
-      WebMediaPlayer::SurfaceLayerMode surface_layer_mode);
+      bool use_surface_layer);
 
   WebMediaPlayerMS(const WebMediaPlayerMS&) = delete;
   WebMediaPlayerMS& operator=(const WebMediaPlayerMS&) = delete;
@@ -122,12 +122,14 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   void SetPreload(WebMediaPlayer::Preload preload) override;
   WebTimeRanges Buffered() const override;
   WebTimeRanges Seekable() const override;
+  void OnFrozen() override;
 
   // Methods for painting.
   void Paint(cc::PaintCanvas* canvas,
              const gfx::Rect& rect,
              cc::PaintFlags& flags) override;
-  scoped_refptr<media::VideoFrame> GetCurrentFrame() override;
+  scoped_refptr<media::VideoFrame> GetCurrentFrameThenUpdate() override;
+  absl::optional<int> CurrentFrameId() const override;
   media::PaintCanvasVideoRenderer* GetPaintCanvasVideoRenderer() override;
   void ResetCanvasCache();
 
@@ -154,8 +156,6 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   WebMediaPlayer::NetworkState GetNetworkState() const override;
   WebMediaPlayer::ReadyState GetReadyState() const override;
 
-  WebMediaPlayer::SurfaceLayerMode GetVideoSurfaceLayerMode() const override;
-
   WebString GetErrorMessage() const override;
   bool DidLoadingProgress() override;
 
@@ -168,6 +168,9 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   uint64_t AudioDecodedByteCount() const override;
   uint64_t VideoDecodedByteCount() const override;
 
+  // WebRTC doesn't need TAO checks, as the timing is already available through
+  // getStats().
+  bool PassedTimingAllowOriginCheck() const override { return true; }
   bool HasAvailableVideoFrame() const override;
 
   void SetVolumeMultiplier(double multiplier) override;
@@ -213,7 +216,7 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   bool IsInPictureInPicture() const;
 
   // Switch to SurfaceLayer, either initially or from VideoLayer.
-  void ActivateSurfaceLayerForVideo();
+  void ActivateSurfaceLayerForVideo(media::VideoTransformation video_transform);
 
   // Need repaint due to state change.
   void RepaintInternal();
@@ -296,7 +299,6 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   bool pending_rvfc_request_ = false;
 
   bool paused_;
-  media::VideoTransformation video_transformation_;
 
   std::unique_ptr<media::MediaLog> media_log_;
 
@@ -343,8 +345,7 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
   std::unique_ptr<WebVideoFrameSubmitter> submitter_;
 
   // Whether the use of a surface layer instead of a video layer is enabled.
-  WebMediaPlayer::SurfaceLayerMode surface_layer_mode_ =
-      WebMediaPlayer::SurfaceLayerMode::kNever;
+  bool use_surface_layer_ = false;
 
   // Owns the weblayer and obtains/maintains SurfaceIds for
   // kUseSurfaceLayerForVideo feature.

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,14 +32,14 @@
 #include "public/fpdf_formfill.h"
 #include "public/fpdf_progressive.h"
 #include "public/fpdf_structtree.h"
-#include "public/fpdf_sysfontinfo.h"
 #include "public/fpdf_text.h"
 #include "public/fpdfview.h"
 #include "samples/pdfium_test_dump_helper.h"
 #include "samples/pdfium_test_event_helper.h"
 #include "samples/pdfium_test_write_helper.h"
+#include "testing/command_line_helpers.h"
+#include "testing/font_renamer.h"
 #include "testing/fx_string_testhelpers.h"
-#include "testing/test_fonts.h"
 #include "testing/test_loader.h"
 #include "testing/utils/file_util.h"
 #include "testing/utils/hash.h"
@@ -58,7 +59,10 @@
 #ifdef PDF_ENABLE_V8
 #include "testing/v8_initializer.h"
 #include "v8/include/libplatform/libplatform.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-array-buffer.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-platform.h"
+#include "v8/include/v8-snapshot.h"
 #endif  // PDF_ENABLE_V8
 
 #ifdef _WIN32
@@ -125,6 +129,7 @@ struct Options {
   bool save_thumbnails = false;
   bool save_thumbnails_decoded = false;
   bool save_thumbnails_raw = false;
+  absl::optional<FPDF_RENDERER_TYPE> use_renderer_type;
 #ifdef PDF_ENABLE_V8
   bool disable_javascript = false;
   std::string js_flags;  // Extra flags to pass to v8 init.
@@ -212,87 +217,6 @@ absl::optional<const char*> GetCustomFontPath(const Options& options) {
   return options.font_directory.c_str();
 }
 
-class FontRenamer final : public FPDF_SYSFONTINFO {
- public:
-  FontRenamer() : impl_(FPDF_GetDefaultSystemFontInfo()) {
-    version = 1;
-    Release = FontRenamer::ReleaseImpl;
-    EnumFonts = FontRenamer::EnumFontsImpl;
-    MapFont = FontRenamer::MapFontImpl;
-    GetFont = FontRenamer::GetFontImpl;
-    GetFontData = FontRenamer::GetFontDataImpl;
-    GetFaceName = FontRenamer::GetFaceNameImpl;
-    GetFontCharset = FontRenamer::GetFontCharsetImpl;
-    DeleteFont = FontRenamer::DeleteFontImpl;
-    FPDF_SetSystemFontInfo(this);
-  }
-
-  ~FontRenamer() { FPDF_FreeDefaultSystemFontInfo(impl_); }
-
- private:
-  static void ReleaseImpl(FPDF_SYSFONTINFO* info) {
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    impl->Release(impl);
-  }
-  static void EnumFontsImpl(FPDF_SYSFONTINFO* info, void* mapper) {
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    impl->EnumFonts(impl, mapper);
-  }
-
-  static void* MapFontImpl(FPDF_SYSFONTINFO* info,
-                           int weight,
-                           FPDF_BOOL italic,
-                           int charset,
-                           int pitch_family,
-                           const char* face,
-                           FPDF_BOOL* exact) {
-    std::string renamed_face = TestFonts::RenameFont(face);
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    return impl->MapFont(impl, weight, italic, charset, pitch_family,
-                         renamed_face.c_str(), exact);
-  }
-
-  static void* GetFontImpl(FPDF_SYSFONTINFO* info, const char* face) {
-    // Any non-null return will do.
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    std::string renamed_face = TestFonts::RenameFont(face);
-    return impl->GetFont(impl, renamed_face.c_str());
-  }
-
-  static unsigned long GetFontDataImpl(FPDF_SYSFONTINFO* info,
-                                       void* font,
-                                       unsigned int table,
-                                       unsigned char* buffer,
-                                       unsigned long buf_size) {
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    return impl->GetFontData(impl, font, table, buffer, buf_size);
-  }
-
-  static unsigned long GetFaceNameImpl(FPDF_SYSFONTINFO* info,
-                                       void* font,
-                                       char* buffer,
-                                       unsigned long buf_size) {
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    return impl->GetFaceName(impl, font, buffer, buf_size);
-  }
-
-  static int GetFontCharsetImpl(FPDF_SYSFONTINFO* info, void* font) {
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    return impl->GetFontCharset(impl, font);
-  }
-
-  static void DeleteFontImpl(FPDF_SYSFONTINFO* info, void* font) {
-    FPDF_SYSFONTINFO* impl = GetImpl(info);
-    impl->DeleteFont(impl, font);
-  }
-
-  static FPDF_SYSFONTINFO* GetImpl(FPDF_SYSFONTINFO* info) {
-    return static_cast<FontRenamer*>(info)->impl_;
-  }
-
-  FPDF_SYSFONTINFO* const impl_;
-};
-
 struct FPDF_FORMFILLINFO_PDFiumTest final : public FPDF_FORMFILLINFO {
   // Hold a map of the currently loaded pages in order to avoid them
   // to get loaded twice.
@@ -308,9 +232,9 @@ FPDF_FORMFILLINFO_PDFiumTest* ToPDFiumTestFormFillInfo(
   return static_cast<FPDF_FORMFILLINFO_PDFiumTest*>(form_fill_info);
 }
 
-void OutputMD5Hash(const char* file_name, const uint8_t* buffer, int len) {
+void OutputMD5Hash(const char* file_name, pdfium::span<const uint8_t> output) {
   // Get the MD5 hash and write it to stdout.
-  std::string hash = GenerateMD5Base16(buffer, len);
+  std::string hash = GenerateMD5Base16(output);
   printf("MD5:%s:%s\n", file_name, hash.c_str());
 }
 
@@ -435,6 +359,10 @@ FPDF_BOOL ExamplePopupMenu(FPDF_FORMFILLINFO* pInfo,
 }
 #endif  // PDF_ENABLE_XFA
 
+void ExampleNamedAction(FPDF_FORMFILLINFO* pInfo, FPDF_BYTESTRING name) {
+  printf("Execute named action: %s\n", name);
+}
+
 void ExampleUnsupportedHandler(UNSUPPORT_INFO*, int type) {
   std::string feature = "Unknown";
   switch (type) {
@@ -477,17 +405,6 @@ void ExampleUnsupportedHandler(UNSUPPORT_INFO*, int type) {
       break;
   }
   printf("Unsupported feature: %s.\n", feature.c_str());
-}
-
-// |arg| is expected to be "--key=value", and |key| is "--key=".
-bool ParseSwitchKeyValue(const std::string& arg,
-                         const std::string& key,
-                         std::string* value) {
-  if (arg.size() <= key.size() || arg.compare(0, key.size(), key) != 0)
-    return false;
-
-  *value = arg.substr(key.size());
-  return true;
 }
 
 bool ParseCommandLine(const std::vector<std::string>& args,
@@ -557,6 +474,23 @@ bool ParseCommandLine(const std::vector<std::string>& args,
       options->save_thumbnails_decoded = true;
     } else if (cur_arg == "--save-thumbs-raw") {
       options->save_thumbnails_raw = true;
+#if defined(_SKIA_SUPPORT_)
+    } else if (ParseSwitchKeyValue(cur_arg, "--use-renderer=", &value)) {
+      if (options->use_renderer_type.has_value()) {
+        fprintf(stderr, "Duplicate --use-renderer argument\n");
+        return false;
+      }
+      if (value == "agg") {
+        options->use_renderer_type = FPDF_RENDERERTYPE_AGG;
+      } else if (value == "skia") {
+        options->use_renderer_type = FPDF_RENDERERTYPE_SKIA;
+      } else {
+        fprintf(stderr,
+                "Invalid --use-renderer argument, value must be one of agg or "
+                "skia\n");
+        return false;
+      }
+#endif  // defined(_SKIA_SUPPORT_)
 #ifdef PDF_ENABLE_V8
     } else if (cur_arg == "--disable-javascript") {
       options->disable_javascript = true;
@@ -952,7 +886,8 @@ bool ProcessPage(const std::string& name,
     // file.
     if (options.md5 && !image_file_name.empty()) {
       OutputMD5Hash(image_file_name.c_str(),
-                    static_cast<const uint8_t*>(buffer), stride * height);
+                    {static_cast<const uint8_t*>(buffer),
+                     static_cast<size_t>(stride) * height});
     }
   } else {
     fprintf(stderr, "Page was too large to be rendered.\n");
@@ -1065,6 +1000,7 @@ void ProcessPdf(const std::string& name,
 #else   // PDF_ENABLE_XFA
   form_callbacks.version = 1;
 #endif  // PDF_ENABLE_XFA
+  form_callbacks.FFI_ExecuteNamedAction = ExampleNamedAction;
   form_callbacks.FFI_GetPage = GetPageForIndex;
 
 #ifdef PDF_ENABLE_V8
@@ -1205,9 +1141,12 @@ constexpr char kUsageString[] =
     "<pdf-name>.thumbnail.decoded.<page-number>.png\n"
     "  --save-thumbs-raw      - write page thumbnails' raw stream data"
     "<pdf-name>.thumbnail.raw.<page-number>.png\n"
+#if defined(_SKIA_SUPPORT_)
+    "  --use-renderer         - renderer to use, one of [agg | skia]\n"
+#endif
 #ifdef PDF_ENABLE_V8
     "  --disable-javascript   - do not execute JS in PDF files\n"
-    "  --js-flags=<flags>     - additional flags to pas to V8"
+    "  --js-flags=<flags>     - additional flags to pass to V8\n"
 #ifdef PDF_ENABLE_XFA
     "  --disable-xfa          - do not process XFA forms\n"
 #endif  // PDF_ENABLE_XFA
@@ -1249,6 +1188,8 @@ constexpr char kUsageString[] =
 }  // namespace
 
 int main(int argc, const char* argv[]) {
+  setlocale(LC_CTYPE, "en_US.UTF-8");  // For printf() of high-characters.
+
   std::vector<std::string> args(argv, argv + argc);
   Options options;
   std::vector<std::string> files;
@@ -1268,11 +1209,13 @@ int main(int argc, const char* argv[]) {
   }
 
   FPDF_LIBRARY_CONFIG config;
-  config.version = 3;
+  config.version = 4;
   config.m_pUserFontPaths = nullptr;
   config.m_pIsolate = nullptr;
   config.m_v8EmbedderSlot = 0;
   config.m_pPlatform = nullptr;
+  config.m_RendererType =
+      options.use_renderer_type.value_or(GetDefaultRendererType());
 
   std::function<void()> idler = []() {};
 #ifdef PDF_ENABLE_V8
@@ -1372,7 +1315,6 @@ int main(int argc, const char* argv[]) {
 
     ProcessPdf(filename, file_contents.get(), file_length, options, events,
                idler);
-    idler();
 
 #ifdef ENABLE_CALLGRIND
     if (options.callgrind_delimiters)

@@ -1,14 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
 #include <map>
 #include <memory>
 #include <utility>
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
+#include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,7 +26,6 @@
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/storage_partition_impl.h"
 #include "content/common/background_fetch/background_fetch_types.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_permission_manager.h"
 #include "content/public/test/test_browser_context.h"
@@ -39,6 +38,7 @@
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 #include "ui/gfx/geometry/size.h"
@@ -66,12 +66,9 @@ blink::Manifest::ImageResource CreateIcon(const std::string& src,
 
 bool ContainsHeader(const base::flat_map<std::string, std::string>& headers,
                     const std::string& target) {
-  return headers.cend() !=
-         std::find_if(headers.cbegin(), headers.cend(),
-                      [target](const auto& pair) -> bool {
-                        return base::EqualsCaseInsensitiveASCII(pair.first,
-                                                                target);
-                      });
+  return base::ranges::any_of(headers, [target](const auto& pair) {
+    return base::EqualsCaseInsensitiveASCII(pair.first, target);
+  });
 }
 
 std::vector<blink::mojom::FetchAPIRequestPtr> CloneRequestVector(
@@ -103,13 +100,14 @@ class BackgroundFetchServiceTest
    public:
     ScopedCustomBackgroundFetchService(BackgroundFetchServiceTest* test,
                                        const blink::StorageKey& storage_key)
-        : scoped_service_(&test->service_,
-                          std::make_unique<BackgroundFetchServiceImpl>(
-                              test->context_,
-                              storage_key,
-                              net::IsolationInfo(),
-                              test->web_contents_->GetMainFrame()->GetProcess(),
-                              /*rfhi=*/nullptr)) {}
+        : scoped_service_(
+              &test->service_,
+              std::make_unique<BackgroundFetchServiceImpl>(
+                  test->context_,
+                  storage_key,
+                  net::IsolationInfo(),
+                  test->web_contents_->GetPrimaryMainFrame()->GetProcess(),
+                  /*rfhi=*/nullptr)) {}
 
     ScopedCustomBackgroundFetchService(
         const ScopedCustomBackgroundFetchService&) = delete;
@@ -307,7 +305,7 @@ class BackgroundFetchServiceTest
     std::unique_ptr<MockPermissionManager> mock_permission_manager(
         new testing::NiceMock<MockPermissionManager>());
     ON_CALL(*mock_permission_manager,
-            GetPermissionStatus(PermissionType::BACKGROUND_FETCH, _, _))
+            GetPermissionStatus(blink::PermissionType::BACKGROUND_FETCH, _, _))
         .WillByDefault(
             testing::Return(blink::mojom::PermissionStatus::GRANTED));
     browser_context()->SetPermissionControllerDelegate(
@@ -315,10 +313,10 @@ class BackgroundFetchServiceTest
 
     context_->Initialize();
     RenderFrameHostImpl* rfhi =
-        static_cast<RenderFrameHostImpl*>(web_contents_->GetMainFrame());
+        static_cast<RenderFrameHostImpl*>(web_contents_->GetPrimaryMainFrame());
     service_ = std::make_unique<BackgroundFetchServiceImpl>(
         context_, storage_key(), net::IsolationInfo(),
-        web_contents_->GetMainFrame()->GetProcess(), rfhi);
+        web_contents_->GetPrimaryMainFrame()->GetProcess(), rfhi);
     rfhi->SetLastCommittedOriginForTesting(storage_key().origin());
   }
 

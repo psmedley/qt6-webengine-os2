@@ -11,8 +11,9 @@ support._
 The C++ language has in recent years received an updated standard every three
 years (C++11, C++14, etc.). For various reasons, Chromium does not immediately
 allow new features on the publication of such a standard. Instead, once
-toolchain support is sufficient, a standard is declared "initially supported",
-with new language/library features banned pending discussion.
+Chromium supports the toolchain to a certain extent (e.g., build support is
+ready), a standard is declared "_initially supported_", with new
+language/library features banned pending discussion but not yet allowed.
 
 You can propose changing the status of a feature by sending an email to
 [cxx@chromium.org](https://groups.google.com/a/chromium.org/forum/#!forum/cxx).
@@ -37,6 +38,8 @@ The current status of existing standards and Abseil features is:
     features below
     *   absl::StatusOr: Initially supported September 3, 2020
     *   absl::Cleanup: Initially supported February 4, 2021
+    *   absl::AnyInvocable: Initially supported June 20, 2022
+    *   Log library: Initially supported Aug 31, 2022
 
 [TOC]
 
@@ -422,6 +425,26 @@ Usage is governed by the
 [Google Style Guide](https://google.github.io/styleguide/cppguide.html#CTAD).
 ***
 
+### Fold expressions <sup>[allowed]</sup>
+
+```c++
+template <typename... Args>
+auto sum(Args... args) {
+  return (... + args);
+}
+```
+
+**Description:** A fold expression performs a fold of a template parameter pack
+over a binary operator.
+
+**Documentation:**
+[Fold expression](https://en.cppreference.com/w/cpp/language/fold)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/4DTm3idXz0w/m/g_JjOh0wAgAJ)
+***
+
 ### Selection statements with initializer <sup>[allowed]</sup>
 
 ```c++
@@ -661,6 +684,38 @@ require default-constructibility of the mapped type.
 [Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/Uv2tUfIwUfQ/m/ffMxCk9uAAAJ)
 ***
 
+### std::apply <sup>[allowed]</sup>
+
+```c++
+static_assert(std::apply(std::plus<>(), std::make_tuple(1, 2)) == 3);
+```
+
+**Description:** Invokes a `Callable` object with a tuple of arguments.
+
+**Documentation:**
+[std::apply](https://en.cppreference.com/w/cpp/utility/apply)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/cNZm_g39fyM)
+***
+
+### std::as_const <sup>[allowed]</sup>
+
+```c++
+auto&& const_ref = std::as_const(mutable_obj);
+```
+
+**Description:** Forms reference to const T.
+
+**Documentation:**
+[std::as_const](https://en.cppreference.com/w/cpp/utility/as_const)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/5Uo4iJK6Mf4)
+***
+
 ### Non-member std::size/std::empty/std::data <sup>[allowed]</sup>
 
 ```c++
@@ -690,6 +745,69 @@ containers. Primarily useful when:
 
 Prefer range-based for loops over `std::size()`: range-based for loops work even
 for regular arrays.
+***
+
+### std::is_invocable <sup>[allowed]</sup>
+
+```c++
+std::is_invocable_v<Fn, 1, "Hello">
+```
+
+**Description:** Checks whether a function may be invoked with the given
+argument types.  The `_r` variant also evaluates whether the result is
+convertible to a given type.
+
+**Documentation:**
+[std::is_invocable](https://en.cppreference.com/w/cpp/types/is_invocable)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/YhlF_sTDSc0/m/QMzf42BtAAAJ)
+***
+
+### std::conjunction/std::disjunction/std::negation <sup>[allowed]</sup>
+
+```c++
+template<typename T, typename... Ts>
+std::enable_if_t<std::conjunction_v<std::is_same<T, Ts>...>>
+func(T, Ts...) { ...
+```
+
+**Description:** Performs logical operations on type traits.
+
+**Documentation:**
+[std::conjunction](https://en.cppreference.com/w/cpp/types/conjunction),
+[std::disjunction](https://en.cppreference.com/w/cpp/types/disjunction),
+[std::negation](https://en.cppreference.com/w/cpp/types/negation)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/YhlF_sTDSc0/m/QMzf42BtAAAJ)
+***
+
+### std::hardware_{constructive|destructive}_interference_size <sup>[allowed]</sup>
+
+```c++
+struct SharedData {
+  ReadOnlyFrequentlyUsed data;
+  alignas(std::hardware_destructive_interference_size) std::atomic<size_t> counter;
+};
+```
+
+**Description:** The `std::hardware_destructive_interference_size` constant is
+useful to avoid false sharing (destructive interference) between variables that
+would otherwise occupy the same cacheline. In contrast,
+`std::hardware_constructive_interference_size` is helpful to promote true
+sharing (constructive interference), e.g. to support better locality for
+non-contended data.
+
+**Documentation:**
+[std::hardware_destructive_interference_size](https://en.cppreference.com/w/cpp/thread/hardware_destructive_interference_size),
+[std::hardware_constructive_interference_size](https://en.cppreference.com/w/cpp/thread/hardware_destructive_interference_size)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/cwktrFxxUY4/m/sP-J-s61AQAJ)
 ***
 
 ## C++17 Banned Library Features {#library-blocklist-17}
@@ -863,6 +981,29 @@ C++ library so that the standard version can be used. In the meanwhile, use
 `absl::optional` instead.
 ***
 
+### std::in_place/in_place_type/in_place_index/in_place_t/in_place_type_t/in_place_index_t <sup>[banned]</sup>
+
+```c++
+std::optional<std::complex<double>> opt{std::in_place, 0, 1};
+std::variant<int, float> v{std::in_place_type<int>, 1.4};
+```
+
+**Description:** The `std::in_place` are disambiguation tags for
+`std::optional`, `std::variant`, and `std::any` to indicate that the object
+should be constructed in-place.
+
+**Documentation:**
+[std::in_place](https://en.cppreference.com/w/cpp/utility/in_place)
+
+**Notes:**
+*** promo
+Banned for now because `std::optional`, `std::variant`, and `std::any` are all
+banned for now. Because `absl::optional` and `absl::variant` are used instead,
+and they require `absl::in_place`, use `absl::in_place` for non-Abseil Chromium
+code. See the
+[discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/ZspmuJPpv6s/m/wYYTCiRwAAAJ).
+***
+
 ### std::clamp <sup>[banned]</sup>
 
 ```c++
@@ -904,26 +1045,6 @@ deduced from the types of its arguments.
 
 **Documentation:**
 [Template parameters](https://en.cppreference.com/w/cpp/language/template_parameters)
-
-**Notes:**
-*** promo
-None
-***
-
-### Fold expressions <sup>[tbd]</sup>
-
-```c++
-template <typename... Args>
-auto sum(Args... args) {
-  return (... + args);
-}
-```
-
-**Description:** A fold expression performs a fold of a template parameter pack
-over a binary operator.
-
-**Documentation:**
-[Fold expression](https://en.cppreference.com/w/cpp/language/fold)
 
 **Notes:**
 *** promo
@@ -1057,22 +1178,6 @@ a regular function.
 See also `base::invoke`.
 ***
 
-### std::apply <sup>[tbd]</sup>
-
-```c++
-static_assert(std::apply(std::plus<>(), std::make_tuple(1, 2)) == 3);
-```
-
-**Description:** Invokes a `Callable` object with a tuple of arguments.
-
-**Documentation:**
-[std::apply](https://en.cppreference.com/w/cpp/utility/apply)
-
-**Notes:**
-*** promo
-See also `absl::apply` and `base::apply`.
-***
-
 ### std::byte <sup>[tbd]</sup>
 
 ```c++
@@ -1166,22 +1271,6 @@ auto it = std::search(haystack.begin(), haystack.end(),
 None
 ***
 
-### std::as_const <sup>[tbd]</sup>
-
-```c++
-auto&& const_ref = std::as_const(mutable_obj);
-```
-
-**Description:** Forms reference to const T.
-
-**Documentation:**
-[std::as_const](https://en.cppreference.com/w/cpp/utility/as_const)
-
-**Notes:**
-*** promo
-See also `base::as_const`.
-***
-
 ### std::not_fn <sup>[tbd]</sup>
 
 ```c++
@@ -1258,26 +1347,6 @@ int* p2 = static_cast<int*>(std::aligned_alloc(1024, 1024));
 None
 ***
 
-### std::conjunction/std::disjunction/std::negation <sup>[tbd]</sup>
-
-```c++
-template<typename T, typename... Ts>
-std::enable_if_t<std::conjunction_v<std::is_same<T, Ts>...>>
-func(T, Ts...) { ...
-```
-
-**Description:** Performs logical operations on type traits.
-
-**Documentation:**
-[std::conjunction](https://en.cppreference.com/w/cpp/types/conjunction),
-[std::disjunction](https://en.cppreference.com/w/cpp/types/disjunction),
-[std::negation](https://en.cppreference.com/w/cpp/types/negation)
-
-**Notes:**
-*** promo
-None
-***
-
 ### std::is_swappable <sup>[tbd]</sup>
 
 ```c++
@@ -1289,24 +1358,6 @@ std::is_swappable_with_v<T, U>
 
 **Documentation:**
 [std::is_swappable](https://en.cppreference.com/w/cpp/types/is_swappable)
-
-**Notes:**
-*** promo
-None
-***
-
-### std::is_invocable <sup>[tbd]</sup>
-
-```c++
-std::is_invocable_v<Fn, 1, "Hello">
-```
-
-**Description:** Checks whether a function may be invoked with the given
-argument types.  The `_r` variant also evaluates whether the result is
-convertible to a given type.
-
-**Documentation:**
-[std::is_invocable](https://en.cppreference.com/w/cpp/types/is_invocable)
 
 **Notes:**
 *** promo
@@ -1483,24 +1534,6 @@ double dist = std::hypot(1.0, 2.5, 3.7);
 None
 ***
 
-### Cache line interface <sup>[tbd]</sup>
-
-```c++
-alignas(std::hardware_destructive_interference_size) std::atomic<int> cat;
-static_assert(sizeof(S) <= std::hardware_constructive_interference_size);
-```
-
-**Description:** A portable way to access the L1 data cache line size.
-
-**Documentation:**
-[Hardware interference size](https://en.cppreference.com/w/cpp/thread/hardware_destructive_interference_size)
-
-**Notes:**
-*** promo
-May not be supported in libc++, according to the
-[library features table](https://en.cppreference.com/w/cpp/17)
-***
-
 ### std::launder <sup>[tbd]</sup>
 
 ```c++
@@ -1598,6 +1631,24 @@ None
 
 The following Abseil library features are allowed in the Chromium codebase.
 
+### Attribute macros <sup>[allowed]</sup>
+
+```c++
+const char* name() ABSL_ATTRIBUTE_RETURNS_NONNULL { return "hello world"; }
+```
+
+**Description:** Macros that conditionally resolve to attributes. Prefer to use
+standard C++ attributes, such as `[[fallthrough]]`. Use these macros for
+non-standard attributes, which may not be present in all compilers.
+
+**Documentation:**
+[attributes.h](https://source.chromium.org/chromium/chromium/src/+/main:third_party/abseil-cpp/absl/base/attributes.h)
+
+**Notes:**
+*** promo
+[Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/vQmaBfbyBGM/m/HHOYUZ5YAwAJ)
+***
+
 ### 128bit integer <sup>[allowed]</sup>
 
 ```c++
@@ -1676,6 +1727,24 @@ absl::variant
 [Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/DqvG-TpvMyU)
 ***
 
+### in_place <sup>[allowed]</sup>
+
+```c++
+absl::in_place
+```
+
+**Description:** Early adaptation of C++17 `std::in_place`.
+
+**Documentation:**
+[std::in_place](https://en.cppreference.com/w/cpp/utility/in_place)
+
+**Notes:**
+*** promo
+Because the Abseil versions of `optional` and `variant` are used, the Abseil
+version of `in_place` is used in Chromium. See the
+[discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/ZspmuJPpv6s/m/wYYTCiRwAAAJ).
+***
+
 ## Abseil Banned Library Features {#absl-blocklist}
 
 The following Abseil library features are not allowed in the Chromium codebase.
@@ -1748,11 +1817,67 @@ Banned due to only working with 8-bit characters. Keep using
 `base::StringPiece` from `base/strings/`.
 ***
 
+### FunctionRef <sup>[banned]</sup>
+
+```c++
+absl::FunctionRef
+```
+
+**Description:** Type for holding a non-owning reference to an object of any
+invocable type.
+
+**Documentation:**
+[function_ref.h](https://source.chromium.org/chromium/chromium/src/+/main:third_party/abseil-cpp/absl/functional/function_ref.h)
+
+**Notes:**
+*** promo
+- `absl::FunctionRef` is banned due to allowing implicit conversions between
+  function signatures in potentially surprising ways. For example, a callable
+  with the signature `int()` will bind to `absl::FunctionRef<void()>`: the
+  return value from the callable will be silently discarded.
+- In Chromium, use `base::FunctionRef` instead.
+- Unlike `base::OnceCallback` and `base::RepeatingCallback`, `base::FunctionRef`
+  supports capturing lambdas.
+- Useful when passing an invocable object to a function that synchronously calls
+  the invocable object, e.g. `ForEachFrame(base::FunctionRef<void(Frame&)>)`.
+  This can often result in clearer code than code that is templated to accept
+  lambdas, e.g. with `template <typename Invocable> void
+  ForEachFrame(Invocable invocable)`, it is much less obvious what arguments
+  will be passed to `invocable`.
+- For now, `base::OnceCallback` and `base::RepeatingCallback` intentionally
+  disallow conversions to `base::FunctionRef`, under the theory that the
+  callback should be a capturing lambda instead. Attempting to use this
+  conversion will trigger a `static_assert` requesting additional feedback for
+  use cases where this conversion would be valuable.
+- *Important:* `base::FunctionRef` must not outlive the function call. Like
+  `base::StringPiece`, `base::FunctionRef` is a *non-owning* reference. Using a
+  `base::FunctionRef` as a return value or class field is dangerous and likely
+  to result in lifetime bugs.
+- [Discussion thread](https://groups.google.com/a/chromium.org/g/cxx/c/JVN4E4IIYA0/m/V0EVUVLiBwAJ)
+***
+
 ## Abseil TBD Features {#absl-review}
 
 The following Abseil library features are not allowed in the Chromium codebase.
 See the top of this page on how to propose moving a feature from this list into
 the allowed or banned sections.
+
+### AnyInvocable <sup>[tbd]</sup>
+
+```c++
+absl::AnyInvocable
+```
+
+**Description:** An equivalent of the C++23 std::move_only_function.
+
+**Documentation:**
+*   [any_invocable.h](https://source.chromium.org/chromium/chromium/src/+/main:third_party/abseil-cpp/absl/functional/any_invocable.h)
+*   [std::move_only_function](https://en.cppreference.com/w/cpp/utility/functional/move_only_function/move_only_function)
+
+**Notes:**
+*** promo
+Overlaps with `base::RepeatingCallback`, `base::OnceCallback`.
+***
 
 ### bind_front <sup>[tbd]</sup>
 
@@ -1833,21 +1958,23 @@ standard library.
 Overlaps with `base/ranges/algorithm.h`.
 ***
 
-### FunctionRef <sup>[tbd]</sup>
+### Log macros are related classes <sup>[tbd]</sup>
 
 ```c++
-absl::FunctionRef
+LOG(INFO) << message;
+CHECK(condition);
+absl::AddLogSink(&custom_sink_to_capture_absl_logs);
 ```
 
-**Description:** Type for holding a non-owning reference to an object of any
-invocable type.
+**Description:** Macros and related classes to perform debug loggings
 
 **Documentation:**
-[function_ref.h](https://source.chromium.org/chromium/chromium/src/+/main:third_party/abseil-cpp/absl/functional/function_ref.h)
+[log.h](https://source.chromium.org/chromium/chromium/src/+/main:third_party/abseil-cpp/absl/log.h)
+[check.h](https://source.chromium.org/chromium/chromium/src/+/main:third_party/abseil-cpp/absl/check.h)
 
 **Notes:**
 *** promo
-None
+Overlaps and uses same macros names as `base/logging.h`.
 ***
 
 ### Random <sup>[tbd]</sup>

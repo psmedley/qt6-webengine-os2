@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@ module network.mojom;
 import "components/content_settings/core/common/content_settings.mojom";
 import "mojo/public/mojom/base/time.mojom";
 import "services/network/public/mojom/cookie_partition_key.mojom";
+import "services/network/public/mojom/first_party_sets.mojom";
+import "services/network/public/mojom/schemeful_site.mojom";
 import "services/network/public/mojom/site_for_cookies.mojom";
 import "url/mojom/url.mojom";
 
@@ -126,16 +128,6 @@ struct CookieSameSiteContext {
   CookieSameSiteContextMetadata schemeful_metadata;
 };
 
-// Computed for every cookie access attempt but is only relevant for SameParty
-// cookies.
-enum SamePartyCookieContextType {
-  // The opposite to kSameParty. Should be the default value.
-  kCrossParty,
-  // If the request URL is in the same First-Party Sets as the top-frame site
-  // and each member of the isolation_info.party_context.
-  kSameParty,
-};
-
 // What rules to apply when determining whether access to a particular cookie is
 // allowed.
 // Keep in sync with net/cookies/cookie_constants.h.
@@ -169,6 +161,7 @@ struct CanonicalCookie {
   mojo_base.mojom.Time creation;
   mojo_base.mojom.Time expiry;
   mojo_base.mojom.Time last_access;
+  mojo_base.mojom.Time last_update;
   bool secure = false;
   bool httponly = false;
   CookieSameSite site_restrictions = NO_RESTRICTION;
@@ -220,13 +213,6 @@ struct CookieAccessResult {
 struct CookieWithAccessResult {
   CanonicalCookie cookie;
   CookieAccessResult access_result;
-};
-
-// Keep defaults in here in sync with net/cookies/same_party_context.cc.
-struct SamePartyContext {
-  SamePartyCookieContextType context_type = kCrossParty;
-  SamePartyCookieContextType ancestors_for_metrics_only = kCrossParty;
-  SamePartyCookieContextType top_resource_for_metrics_only = kCrossParty;
 };
 
 // Keep values here in sync with net::CookieChangeCause.

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -374,6 +374,10 @@ bool HintCache::ProcessAndCacheHints(
       case proto::HOST_SUFFIX:
         // Old component versions if not updated could potentially have
         // HOST_SUFFIX hints. Just skip over them.
+        break;
+      case proto::HASHED_HOST:
+        // The server should not send hints with hashed host key.
+        NOTREACHED();
         break;
       case proto::REPRESENTATION_UNSPECIFIED:
         NOTREACHED();

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,11 @@ class MockAutofillAssistant : public AutofillAssistant {
                const std::string& intent,
                GetCapabilitiesResponseCallback callback),
               (override));
-  MOCK_METHOD(std::unique_ptr<ExternalScriptController>,
-              CreateExternalScriptController,
-              (content::WebContents * web_contents),
+  MOCK_METHOD(std::unique_ptr<HeadlessScriptController>,
+              CreateHeadlessScriptController,
+              (content::WebContents * web_contents,
+               ExternalActionDelegate* action_extension_delegate,
+               WebsiteLoginManager* website_login_manager),
               (override));
 };
 

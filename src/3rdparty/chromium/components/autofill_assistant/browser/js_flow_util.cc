@@ -1,12 +1,15 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill_assistant/browser/js_flow_util.h"
 #include "base/base64.h"
+#include "base/command_line.h"
+#include "base/logging.h"
 #include "base/strings/strcat.h"
 #include "components/autofill_assistant/browser/model.pb.h"
 #include "components/autofill_assistant/browser/service.pb.h"
+#include "components/autofill_assistant/browser/switches.h"
 #include "components/autofill_assistant/browser/web/web_controller_util.h"
 
 namespace autofill_assistant {
@@ -28,6 +31,13 @@ const char kActionSpecificResultKey[] = "actionSpecificResult";
 // by runNativeAction().
 // DO NOT CHANGE
 const char kNavigationStartedKey[] = "navigationStarted";
+// The key for the autofill error info in the result object returned by
+// runNativeAction().
+// DO NOT CHANGE
+const char kAutofillErrorInfo[] = "autofillErrorInfo";
+// By appending //# sourceUrl=some_name.js to a js snippet the snippet can be
+// identified in devtools by url = some_name.js (for example in exceptions).
+constexpr char kSourceUrlCommentPrefix[] = "\n//# sourceURL=";
 
 // Returns true for remote object types that flows are allowed to return. This
 // is mostly used to filter types like FUNCTION which would otherwise slip
@@ -58,48 +68,14 @@ ClientStatus ClientStatusWithSourceLocation(
 
 namespace js_flow_util {
 
-bool ContainsOnlyAllowedValues(const base::Value& value,
-                               std::string& out_error_message) {
-  switch (value.type()) {
-    case base::Value::Type::NONE:
-    case base::Value::Type::BOOLEAN:
-    case base::Value::Type::INTEGER:
-    case base::Value::Type::DOUBLE:
-      return true;
-    case base::Value::Type::STRING:
-      out_error_message.assign("Strings are not supported");
-      return false;
-    case base::Value::Type::BINARY:
-      out_error_message.assign("Binary data are not supported");
-      return false;
-    case base::Value::Type::DICT: {
-      for (const auto [key, nested_value] : *value.GetIfDict()) {
-        if (!ContainsOnlyAllowedValues(nested_value, out_error_message)) {
-          return false;
-        }
-      }
-      return true;
-    }
-    case base::Value::Type::LIST: {
-      for (const auto& entry : *value.GetIfList()) {
-        if (!ContainsOnlyAllowedValues(entry, out_error_message)) {
-          return false;
-        }
-      }
-      return true;
-    }
-  }
-}
-
 ClientStatus ExtractFlowReturnValue(
     const DevtoolsClient::ReplyStatus& devtools_reply_status,
     runtime::EvaluateResult* devtools_result,
     std::unique_ptr<base::Value>& out_flow_result,
-    int js_line_offset,
-    int num_stack_entries_to_drop) {
-  ClientStatus status = CheckJavaScriptResult(
-      devtools_reply_status, devtools_result, __FILE__, __LINE__,
-      js_line_offset, num_stack_entries_to_drop);
+    const JsLineOffsets& js_line_offsets) {
+  ClientStatus status =
+      CheckJavaScriptResult(devtools_reply_status, devtools_result, __FILE__,
+                            __LINE__, js_line_offsets);
   if (!status.ok()) {
     return status;
   }
@@ -124,15 +100,6 @@ ClientStatus ExtractFlowReturnValue(
     return status;
   }
 
-  std::string error_message;
-  if (!ContainsOnlyAllowedValues(*remote_object->GetValue(), error_message)) {
-    status.set_proto_status(INVALID_ACTION);
-    status.mutable_details()
-        ->mutable_unexpected_error_info()
-        ->set_devtools_error_message(error_message);
-    return status;
-  }
-
   out_flow_result =
       base::Value::ToUniquePtrValue(remote_object->GetValue()->Clone());
   return OkClientStatus();
@@ -146,6 +113,7 @@ ClientStatus ExtractJsFlowActionReturnValue(
   }
 
   if (!value.is_dict()) {
+    VLOG(1) << "JS flow did not return a dictionary.";
     return ClientStatusWithSourceLocation(INVALID_ACTION, __FILE__, __LINE__);
   }
 
@@ -153,6 +121,7 @@ ClientStatus ExtractJsFlowActionReturnValue(
   absl::optional<int> flow_status = dict->FindInt(kStatusKey);
   const base::Value* flow_return_value = dict->Find(kResultKey);
   if (!flow_status || !ProcessedActionStatusProto_IsValid(*flow_status)) {
+    VLOG(1) << "JS flow did not return a valid ActionStatus in " << kStatusKey;
     return ClientStatusWithSourceLocation(INVALID_ACTION, __FILE__, __LINE__);
   }
 
@@ -161,6 +130,12 @@ ClientStatus ExtractJsFlowActionReturnValue(
         std::make_unique<base::Value>(flow_return_value->Clone());
   }
   return ClientStatus(static_cast<ProcessedActionStatusProto>(*flow_status));
+}
+
+std::string SerializeToBase64(const google::protobuf::MessageLite* proto) {
+  std::string serialized_result_base64;
+  base::Base64Encode(proto->SerializeAsString(), &serialized_result_base64);
+  return serialized_result_base64;
 }
 
 namespace {
@@ -205,13 +180,14 @@ absl::optional<std::string> SerializeActionResult(
     case ProcessedActionProto::kSaveSubmittedPasswordResult:
       proto = &processed_action.save_submitted_password_result();
       break;
+    case ProcessedActionProto::kExternalActionResult:
+      proto = &processed_action.external_action_result();
+      break;
     case ProcessedActionProto::RESULT_DATA_NOT_SET:
       return absl::nullopt;
   }
 
-  std::string serialized_result_base64;
-  base::Base64Encode(proto->SerializeAsString(), &serialized_result_base64);
-  return serialized_result_base64;
+  return SerializeToBase64(proto);
 }
 
 }  // namespace
@@ -228,7 +204,45 @@ std::unique_ptr<base::Value> NativeActionResultToResultValue(
     result_value.Set(kActionSpecificResultKey, *serialized_result);
   }
 
+  if (processed_action.status_details().has_autofill_error_info()) {
+    result_value.Set(
+        kAutofillErrorInfo,
+        SerializeToBase64(
+            &processed_action.status_details().autofill_error_info()));
+  }
+
   return std::make_unique<base::Value>(std::move(result_value));
+}
+
+std::string GetDevtoolsSourceUrl(
+    UnexpectedErrorInfoProto::JsExceptionLocation js_exception_location) {
+  return UnexpectedErrorInfoProto::JsExceptionLocation_Name(
+      js_exception_location);
+}
+
+UnexpectedErrorInfoProto::JsExceptionLocation GetExceptionLocation(
+    const std::string& devtools_source_url) {
+  UnexpectedErrorInfoProto::JsExceptionLocation js_exception_location;
+  return UnexpectedErrorInfoProto::JsExceptionLocation_Parse(
+             devtools_source_url, &js_exception_location)
+             ? js_exception_location
+             : UnexpectedErrorInfoProto::UNKNOWN;
+}
+
+std::string GetDevtoolsSourceUrlCommentToAppend(
+    UnexpectedErrorInfoProto::JsExceptionLocation js_exception_location) {
+  if (js_exception_location == UnexpectedErrorInfoProto::UNKNOWN) {
+    return "";
+  }
+
+  return base::StrCat(
+      {kSourceUrlCommentPrefix, GetDevtoolsSourceUrl(js_exception_location)});
+}
+
+bool IsDebugMode() {
+  const auto* command_line = base::CommandLine::ForCurrentProcess();
+  return command_line->GetSwitchValueASCII(
+             switches::kAutofillAssistantDebugMode) == "true";
 }
 
 }  // namespace js_flow_util

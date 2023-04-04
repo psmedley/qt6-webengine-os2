@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/interactive_detector.h"
 #include "third_party/blink/renderer/core/loader/progress_tracker.h"
-#include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
@@ -190,10 +190,6 @@ void PaintTiming::NotifyPaint(bool is_first_paint,
   if (image_painted)
     MarkFirstImagePaint();
   fmp_detector_->NotifyPaint();
-  if (auto* local_frame = DynamicTo<LocalFrame>(GetFrame()->Top())) {
-    if (auto* mf_checker = local_frame->View()->GetMobileFriendlinessChecker())
-      mf_checker->NotifyPaint();
-  }
 
   if (is_first_paint)
     GetFrame()->OnFirstPaint(text_painted, image_painted);
@@ -241,6 +237,11 @@ void PaintTiming::SetFirstPaint(base::TimeTicks stamp) {
 
   first_paint_ = stamp;
   RegisterNotifyPresentationTime(PaintEvent::kFirstPaint);
+
+  LocalFrame* frame = GetFrame();
+  if (frame && frame->GetDocument()) {
+    frame->GetDocument()->MarkFirstPaint();
+  }
 }
 
 void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
@@ -251,13 +252,12 @@ void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
   first_contentful_paint_ = stamp;
   RegisterNotifyPresentationTime(PaintEvent::kFirstContentfulPaint);
 
-  // Restart commits that may have been deferred.
   LocalFrame* frame = GetFrame();
-  if (!frame || !frame->IsMainFrame())
+  if (!frame)
     return;
   frame->View()->OnFirstContentfulPaint();
 
-  if (frame->GetFrameScheduler())
+  if (frame->IsMainFrame() && frame->GetFrameScheduler())
     frame->GetFrameScheduler()->OnFirstContentfulPaintInMainFrame();
 
   NotifyPaintTimingChanged();
@@ -319,6 +319,9 @@ void PaintTiming::ReportFirstPaintAfterBackForwardCacheRestorePresentationTime(
 void PaintTiming::SetFirstPaintPresentation(base::TimeTicks stamp) {
   DCHECK(first_paint_presentation_.is_null());
   first_paint_presentation_ = stamp;
+  if (first_paint_presentation_for_ukm_.is_null()) {
+    first_paint_presentation_for_ukm_ = stamp;
+  }
   probe::PaintTiming(GetSupplementable(), "firstPaint",
                      first_paint_presentation_.since_origin().InSecondsF());
   WindowPerformance* performance = GetPerformanceInstance(GetFrame());
@@ -333,6 +336,13 @@ void PaintTiming::SetFirstContentfulPaintPresentation(base::TimeTicks stamp) {
                                       "GlobalFirstContentfulPaint",
                                       TRACE_EVENT_SCOPE_GLOBAL, stamp);
   first_contentful_paint_presentation_ = stamp;
+  bool is_soft_navigation_fcp = false;
+  if (first_contentful_paint_presentation_ignoring_soft_navigations_
+          .is_null()) {
+    first_contentful_paint_presentation_ignoring_soft_navigations_ = stamp;
+  } else {
+    is_soft_navigation_fcp = true;
+  }
   probe::PaintTiming(
       GetSupplementable(), "firstContentfulPaint",
       first_contentful_paint_presentation_.since_origin().InSecondsF());
@@ -340,6 +350,11 @@ void PaintTiming::SetFirstContentfulPaintPresentation(base::TimeTicks stamp) {
   if (performance) {
     performance->AddFirstContentfulPaintTiming(
         first_contentful_paint_presentation_);
+  }
+  // For soft navigations, we just want to report a performance entry, but not
+  // trigger any of the other FCP observers.
+  if (is_soft_navigation_fcp) {
+    return;
   }
   if (GetFrame())
     GetFrame()->Loader().Progress().DidFirstContentfulPaint();
@@ -353,10 +368,15 @@ void PaintTiming::SetFirstContentfulPaintPresentation(base::TimeTicks stamp) {
         first_contentful_paint_presentation_);
   }
   auto* coordinator = GetSupplementable()->GetResourceCoordinator();
-  if (coordinator && GetFrame() && GetFrame()->IsMainFrame()) {
+  if (coordinator && GetFrame() && GetFrame()->IsOutermostMainFrame()) {
     PerformanceTiming* timing = performance->timing();
     base::TimeDelta fcp = stamp - timing->NavigationStartAsMonotonicTime();
     coordinator->OnFirstContentfulPaint(fcp);
+  }
+
+  if (auto* ds_controller =
+          DeferredShapingController::From(*GetSupplementable())) {
+    ds_controller->OnFirstContentfulPaint();
   }
 }
 
@@ -412,7 +432,7 @@ void PaintTiming::OnRestoredFromBackForwardCache() {
       RequestAnimationFrameTimesAfterBackForwardCacheRestore{});
 
   LocalFrame* frame = GetFrame();
-  if (!frame->IsMainFrame()) {
+  if (!frame->IsOutermostMainFrame()) {
     return;
   }
 

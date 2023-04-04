@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -232,7 +232,7 @@ std::unique_ptr<LabelButtonBorder> LabelButton::CreateDefaultBorder() const {
 }
 
 void LabelButton::SetBorder(std::unique_ptr<Border> border) {
-  border_is_themed_border_ = false;
+  explicitly_set_border_ = true;
   View::SetBorder(std::move(border));
 }
 
@@ -247,8 +247,12 @@ gfx::Size LabelButton::CalculatePreferredSize() const {
   // Account for the label only when the button is not shrinking down to hide
   // the label entirely.
   if (!shrinking_down_label_) {
-    if (!label_->GetMultiLine() && max_size_.width() > 0)
-      label_->SetMaximumWidthSingleLine(max_size_.width() - size.width());
+    if (max_size_.width() > 0) {
+      if (label_->GetMultiLine())
+        label_->SetMaximumWidth(max_size_.width() - size.width());
+      else
+        label_->SetMaximumWidthSingleLine(max_size_.width() - size.width());
+    }
 
     const gfx::Size preferred_label_size = label_->GetPreferredSize();
     size.Enlarge(preferred_label_size.width(), 0);
@@ -500,8 +504,8 @@ void LabelButton::OnThemeChanged() {
   Button::OnThemeChanged();
   ResetColorsFromNativeTheme();
   UpdateImage();
-  if (border_is_themed_border_)
-    View::SetBorder(PlatformStyle::CreateThemedLabelButtonBorder(this));
+  if (!explicitly_set_border_)
+    View::SetBorder(CreateDefaultBorder());
   ResetLabelEnabledColor();
   // The entire button has to be repainted here, since the native theme can
   // define the tint for the entire background/border/focus ring.

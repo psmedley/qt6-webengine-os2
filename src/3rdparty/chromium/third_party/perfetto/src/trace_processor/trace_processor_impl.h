@@ -59,6 +59,7 @@ class TraceProcessorImpl : public TraceProcessor,
 
   // TraceProcessorStorage implementation:
   base::Status Parse(TraceBlobView) override;
+  void Flush() override;
   void NotifyEndOfFile() override;
 
   // TraceProcessor implementation:
@@ -90,7 +91,7 @@ class TraceProcessorImpl : public TraceProcessor,
   std::string GetCurrentTraceName() override;
   void SetCurrentTraceName(const std::string&) override;
 
-  void EnableMetatrace() override;
+  void EnableMetatrace(MetatraceConfig config) override;
 
   base::Status DisableAndReadMetatrace(
       std::vector<uint8_t>* trace_proto) override;
@@ -102,14 +103,16 @@ class TraceProcessorImpl : public TraceProcessor,
   template <typename Table>
   void RegisterDbTable(const Table& table) {
     DbSqliteTable::RegisterTable(*db_, query_cache_.get(), Table::Schema(),
-                                 &table, table.table_name());
+                                 &table, Table::Name());
   }
 
-  void RegisterDynamicTable(
-      std::unique_ptr<DbSqliteTable::DynamicTableGenerator> generator) {
+  void RegisterDynamicTable(std::unique_ptr<DynamicTableGenerator> generator) {
     DbSqliteTable::RegisterTable(*db_, query_cache_.get(),
                                  std::move(generator));
   }
+
+  template <typename View>
+  void RegisterView(const View& view);
 
   bool IsRootMetricField(const std::string& metric_name);
 
@@ -120,11 +123,6 @@ class TraceProcessorImpl : public TraceProcessor,
   // State necessary for CREATE_FUNCTION invocations. We store this here as we
   // need to finalize any prepared statements *before* we destroy the database.
   CreateFunction::State create_function_state_;
-
-  // State necessary for CREATE_VIEW_FUNCTION invocations. We store this here as
-  // we need to finalize any prepared statements *before* we destroy the
-  // database.
-  CreateViewFunction::State create_view_function_state_;
 
   std::unique_ptr<QueryCache> query_cache_;
 
@@ -143,6 +141,10 @@ class TraceProcessorImpl : public TraceProcessor,
 
   std::string current_trace_name_;
   uint64_t bytes_parsed_ = 0;
+
+  // NotifyEndOfFile should only be called once. Set to true whenever it is
+  // called.
+  bool notify_eof_called_ = false;
 };
 
 }  // namespace trace_processor

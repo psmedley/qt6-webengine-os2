@@ -826,6 +826,11 @@ TEST_F(CFXJSE_FormCalcContextEmbedderTest, Str) {
   ExecuteExpectString("Str(234.458, 4)", " 234");
   ExecuteExpectString("Str(31.2345, 4, 2)", "****");
 
+  // Test maximum "n3" precision value.
+  ExecuteExpectString("Str(-765, 19, 14)", "-765.00000000000000");
+  ExecuteExpectString("Str(-765, 20, 15)", "-765.000000000000000");
+  ExecuteExpectString("Str(-765, 21, 16)", " -765.000000000000000");
+
   // Error cases.
   ExecuteExpectError("Str()");
   ExecuteExpectError("Str(1, 2, 3, 4)");
@@ -990,15 +995,20 @@ TEST_F(CFXJSE_FormCalcContextEmbedderTest, WordNum) {
 }
 
 TEST_F(CFXJSE_FormCalcContextEmbedderTest, Get) {
-  // TODO(dsinclair): Is this supported?
+  ASSERT_TRUE(OpenDocument("simple_xfa.pdf"));
+  ExecuteExpectString("Get(\"https://example.com\")", "<body>secrets</body>");
 }
 
 TEST_F(CFXJSE_FormCalcContextEmbedderTest, Post) {
-  // TODO(dsinclair): Is this supported?
+  ASSERT_TRUE(OpenDocument("simple_xfa.pdf"));
+  ExecuteExpectString(
+      "Post(\"http://example.com\", \"secret stuff\", \"text/plain\")",
+      "posted");
 }
 
 TEST_F(CFXJSE_FormCalcContextEmbedderTest, Put) {
-  // TODO(dsinclair): Is this supported?
+  ASSERT_TRUE(OpenDocument("simple_xfa.pdf"));
+  ExecuteExpectString("Put(\"http://example.com\", \"secret stuff\")", "");
 }
 
 TEST_F(CFXJSE_FormCalcContextEmbedderTest, InvalidFunctions) {

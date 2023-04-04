@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -171,7 +171,7 @@ bool VisitSegmentDatabase::IncreaseSegmentVisitCount(SegmentID segment_id,
   sql::Statement select(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "SELECT id, visit_count FROM segment_usage "
       "WHERE time_slot = ? AND segment_id = ?"));
-  select.BindInt64(0, t.ToInternalValue());
+  select.BindTime(0, t);
   select.BindInt64(1, segment_id);
 
   if (!select.is_valid())
@@ -189,7 +189,7 @@ bool VisitSegmentDatabase::IncreaseSegmentVisitCount(SegmentID segment_id,
         "INSERT INTO segment_usage "
         "(segment_id, time_slot, visit_count) VALUES (?, ?, ?)"));
     insert.BindInt64(0, segment_id);
-    insert.BindInt64(1, t.ToInternalValue());
+    insert.BindTime(1, t);
     insert.BindInt64(2, static_cast<int64_t>(amount));
 
     return insert.Run();
@@ -198,7 +198,6 @@ bool VisitSegmentDatabase::IncreaseSegmentVisitCount(SegmentID segment_id,
 
 std::vector<std::unique_ptr<PageUsageData>>
 VisitSegmentDatabase::QuerySegmentUsage(
-    base::Time from_time,
     int max_result_count,
     const base::RepeatingCallback<bool(const GURL&)>& url_filter) {
   // This function gathers the highest-ranked segments in two queries.
@@ -207,15 +206,12 @@ VisitSegmentDatabase::QuerySegmentUsage(
   // segments.
 
   // Gather all the segment scores.
-  sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
-      "SELECT segment_id, time_slot, visit_count "
-      "FROM segment_usage WHERE time_slot >= ? "
-      "ORDER BY segment_id"));
+  sql::Statement statement(
+      GetDB().GetCachedStatement(SQL_FROM_HERE,
+                                 "SELECT segment_id, time_slot, visit_count "
+                                 "FROM segment_usage ORDER BY segment_id"));
   if (!statement.is_valid())
     return std::vector<std::unique_ptr<PageUsageData>>();
-
-  base::Time ts = from_time.LocalMidnight();
-  statement.BindInt64(0, ts.ToInternalValue());
 
   std::vector<std::unique_ptr<PageUsageData>> segments;
   base::Time now = base::Time::Now();
@@ -227,8 +223,7 @@ VisitSegmentDatabase::QuerySegmentUsage(
       previous_segment_id = segment_id;
     }
 
-    base::Time timeslot =
-        base::Time::FromInternalValue(statement.ColumnInt64(1));
+    base::Time timeslot = statement.ColumnTime(1);
     int visit_count = statement.ColumnInt(2);
     int days_ago = (now - timeslot).InDays();
 
@@ -361,7 +356,7 @@ bool VisitSegmentDatabase::MergeSegments(SegmentID from_segment_id,
                                  "segment_usage WHERE segment_id = ?"));
   select.BindInt64(0, from_segment_id);
   while (select.Step()) {
-    base::Time ts = base::Time::FromInternalValue(select.ColumnInt64(0));
+    base::Time ts = select.ColumnTime(0);
     int64_t visit_count = select.ColumnInt64(1);
     IncreaseSegmentVisitCount(to_segment_id, ts, visit_count);
   }

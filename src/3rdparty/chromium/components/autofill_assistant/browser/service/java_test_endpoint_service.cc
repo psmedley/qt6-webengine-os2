@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -125,8 +125,16 @@ void JavaTestEndpointService::GetNextActions(
 void JavaTestEndpointService::GetUserData(
     const CollectUserDataOptions& options,
     uint64_t run_id,
+    const UserData* user_data,
     ServiceRequestSender::ResponseCallback callback) {
-  service_impl_->GetUserData(options, run_id, std::move(callback));
+  service_impl_->GetUserData(options, run_id, user_data, std::move(callback));
+}
+
+void JavaTestEndpointService::ReportProgress(
+    const std::string& token,
+    const std::string& payload,
+    ServiceRequestSender::ResponseCallback callback) {
+  service_impl_->ReportProgress(token, payload, std::move(callback));
 }
 
 }  // namespace autofill_assistant

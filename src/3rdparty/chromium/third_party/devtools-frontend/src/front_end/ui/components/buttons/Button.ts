@@ -17,7 +17,16 @@ declare global {
 export const enum Variant {
   PRIMARY = 'primary',
   SECONDARY = 'secondary',
+  // This is a bit confusing: the TOOLBAR variant is the historical variant
+  // that has been used when adding toolbar icons to legacy DevTools toolbars.
+  // In July 2022 we began work on the new unified toolbar, which will first be
+  // built for Performance Insights and then rolled out across the panels. Once
+  // that work is done, we can remove these two variants and revert back to
+  // having one.
+  // We need to differentiate because the unified toolbar icons are 16px in
+  // size, not 18px (which the toolbar small icons are).
   TOOLBAR = 'toolbar',
+  UNIFIED_TOOLBAR_2022 = 'unified_toolbar_2022',
   ROUND = 'round',
 }
 
@@ -38,6 +47,8 @@ interface ButtonState {
   type: ButtonType;
   value?: string;
   title?: string;
+  iconWidth?: string;
+  iconHeight?: string;
 }
 
 export type ButtonData = {
@@ -50,6 +61,8 @@ export type ButtonData = {
   type?: ButtonType,
   value?: string,
   title?: string,
+  iconWidth?: string,
+  iconHeight?: string,
 }|{
   variant: Variant.PRIMARY | Variant.SECONDARY,
   iconUrl?: string,
@@ -60,10 +73,16 @@ export type ButtonData = {
   type?: ButtonType,
   value?: string,
   title?: string,
+}|{
+  variant: Variant.UNIFIED_TOOLBAR_2022,
+  iconUrl: string,
+  disabled?: boolean,
+  active?: boolean,
+  title?: string,
 };
 
 interface ButtonElementInternals extends ElementInternals {
-  readonly form?: HTMLFormElement;
+  readonly form: HTMLFormElement|null;
   readonly validity: ValidityState;
   readonly willValidate: boolean;
   readonly validationMessage: string;
@@ -100,10 +119,25 @@ export class Button extends HTMLElement {
   set data(data: ButtonData) {
     this.#props.variant = data.variant;
     this.#props.iconUrl = data.iconUrl;
-    this.#props.size = data.size || Size.MEDIUM;
+    this.#props.size = Size.MEDIUM;
+
+    if ('size' in data && data.size) {
+      this.#props.size = data.size;
+    }
+    if ('iconWidth' in data && data.iconWidth) {
+      this.#props.iconWidth = data.iconWidth;
+    }
+    if ('iconHeight' in data && data.iconHeight) {
+      this.#props.iconHeight = data.iconHeight;
+    }
+
     this.#props.active = Boolean(data.active);
-    this.#props.spinner = Boolean(data.spinner);
-    this.#props.type = data.type || 'button';
+    this.#props.spinner = Boolean('spinner' in data ? data.spinner : false);
+
+    this.#props.type = 'button';
+    if ('type' in data && data.type) {
+      this.#props.type = data.type;
+    }
     this.#setDisabledProperty(data.disabled || false);
     this.#props.title = data.title;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
@@ -121,6 +155,16 @@ export class Button extends HTMLElement {
 
   set size(size: Size) {
     this.#props.size = size;
+    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
+  }
+
+  set iconWidth(iconWidth: string) {
+    this.#props.iconWidth = iconWidth;
+    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
+  }
+
+  set iconHeight(iconHeight: string) {
+    this.#props.iconHeight = iconHeight;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
@@ -192,7 +236,7 @@ export class Button extends HTMLElement {
     if (!this.#props.variant) {
       throw new Error('Button requires a variant to be defined');
     }
-    if (this.#props.variant === Variant.TOOLBAR) {
+    if (this.#props.variant === Variant.TOOLBAR || this.#props.variant === Variant.UNIFIED_TOOLBAR_2022) {
       if (!this.#props.iconUrl) {
         throw new Error('Toolbar button requires an icon');
       }
@@ -211,12 +255,14 @@ export class Button extends HTMLElement {
     const classes = {
       primary: this.#props.variant === Variant.PRIMARY,
       secondary: this.#props.variant === Variant.SECONDARY,
-      toolbar: this.#props.variant === Variant.TOOLBAR,
+      toolbar: this.#props.variant === Variant.TOOLBAR || this.#props.variant === Variant.UNIFIED_TOOLBAR_2022,
+      'unified-toolbar-2022': this.#props.variant === Variant.UNIFIED_TOOLBAR_2022,
       round: this.#props.variant === Variant.ROUND,
       'text-with-icon': Boolean(this.#props.iconUrl) && !this.#isEmpty,
       'only-icon': Boolean(this.#props.iconUrl) && this.#isEmpty,
       small: Boolean(this.#props.size === Size.SMALL),
       active: this.#props.active,
+      'explicit-size': Boolean(this.#props.iconHeight || this.#props.iconWidth),
     };
     const spinnerClasses = {
       primary: this.#props.variant === Variant.PRIMARY,
@@ -232,6 +278,8 @@ export class Button extends HTMLElement {
             .data=${{
               iconPath: this.#props.iconUrl,
               color: 'var(--color-background)',
+              width: this.#props.iconWidth || undefined,
+              height: this.#props.iconHeight || undefined,
             } as IconButton.Icon.IconData}
           >
           </${IconButton.Icon.Icon.litTagName}>` : ''}
@@ -254,7 +302,7 @@ export class Button extends HTMLElement {
   // The following properties and methods aren't strictly required,
   // but browser-level form controls provide them. Providing them helps
   // ensure consistency with browser-provided controls.
-  get form(): HTMLFormElement|undefined {
+  get form(): HTMLFormElement|null {
     return this.#internals.form;
   }
   get name(): string|null {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
@@ -30,7 +31,7 @@ namespace blink {
 
 static bool StyleSheetTypeIsSupported(const String& type) {
   String trimmed_type = ContentType(type).GetType();
-  return trimmed_type.IsEmpty() ||
+  return trimmed_type.empty() ||
          MIMETypeRegistry::IsSupportedStyleSheetMIMEType(trimmed_type);
 }
 
@@ -61,8 +62,8 @@ void LinkStyle::NotifyFinished(Resource* resource) {
   // See the comment in pending_script.cc about why this check is necessary
   // here, instead of in the resource fetcher. https://crbug.com/500701.
   if ((!cached_style_sheet->ErrorOccurred() &&
-       !owner_->FastGetAttribute(html_names::kIntegrityAttr).IsEmpty() &&
-       !cached_style_sheet->IntegrityMetadata().IsEmpty()) ||
+       !owner_->FastGetAttribute(html_names::kIntegrityAttr).empty() &&
+       !cached_style_sheet->IntegrityMetadata().empty()) ||
       resource->IsLinkPreload()) {
     ResourceIntegrityDisposition disposition =
         cached_style_sheet->IntegrityDisposition();
@@ -176,7 +177,8 @@ void LinkStyle::AddPendingSheet(PendingSheetType type) {
 
   if (pending_sheet_type_ == PendingSheetType::kNonBlocking)
     return;
-  GetDocument().GetStyleEngine().AddPendingSheet(*owner_);
+  GetDocument().GetStyleEngine().AddPendingBlockingSheet(*owner_,
+                                                         pending_sheet_type_);
 }
 
 void LinkStyle::RemovePendingSheet() {
@@ -192,7 +194,7 @@ void LinkStyle::RemovePendingSheet() {
     return;
   }
 
-  GetDocument().GetStyleEngine().RemovePendingSheet(*owner_);
+  GetDocument().GetStyleEngine().RemovePendingBlockingSheet(*owner_, type);
 }
 
 void LinkStyle::SetDisabledState(bool disabled) {
@@ -239,7 +241,7 @@ void LinkStyle::SetDisabledState(bool disabled) {
   }
 
   if (disabled_state_ == kEnabledViaScript && owner_->ShouldProcessStyle())
-    Process();
+    Process(LinkLoadParameters::Reason::kDefault);
 }
 
 LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
@@ -261,32 +263,28 @@ LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
   loading_ = true;
 
   String title = owner_->title();
-  if (!title.IsEmpty() && !owner_->IsAlternate() &&
+  if (!title.empty() && !owner_->IsAlternate() &&
       disabled_state_ != kEnabledViaScript && owner_->IsInDocumentTree()) {
     GetDocument().GetStyleEngine().SetPreferredStylesheetSetNameIfNotSet(title);
   }
 
   bool media_query_matches = true;
   LocalFrame* frame = LoadingFrame();
-  if (!owner_->Media().IsEmpty() && frame) {
-    scoped_refptr<MediaQuerySet> media =
+  if (!owner_->Media().empty() && frame) {
+    MediaQuerySet* media =
         MediaQuerySet::Create(owner_->Media(), GetExecutionContext());
     MediaQueryEvaluator evaluator(frame);
     media_query_matches = evaluator.Eval(*media);
   }
 
-  bool is_in_body = owner_->IsDescendantOf(owner_->GetDocument().body());
-
   // Don't hold up layout tree construction and script execution on
   // stylesheets that are not needed for the layout at the moment.
   bool critical_style = media_query_matches && !owner_->IsAlternate();
-  bool render_blocking =
-      critical_style && (owner_->IsCreatedByParser() ||
-                         (RuntimeEnabledFeatures::BlockingAttributeEnabled() &&
-                          owner_->blocking().IsRenderBlocking()));
+  auto type_and_behavior = ComputePendingSheetTypeAndRenderBlockingBehavior(
+      *owner_, critical_style, owner_->IsCreatedByParser());
+  PendingSheetType type = type_and_behavior.first;
 
-  AddPendingSheet(render_blocking ? PendingSheetType::kBlocking
-                                  : PendingSheetType::kNonBlocking);
+  AddPendingSheet(type);
 
   // Load stylesheets that are not needed for the layout immediately with low
   // priority.  When the link element is created by scripts, load the
@@ -294,14 +292,7 @@ LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
   FetchParameters::DeferOption defer_option =
       !critical_style ? FetchParameters::kLazyLoad : FetchParameters::kNoDefer;
 
-  render_blocking_behavior_ =
-      !critical_style
-          ? RenderBlockingBehavior::kNonBlocking
-          : (render_blocking
-                 ? (is_in_body ? RenderBlockingBehavior::kInBodyParserBlocking
-                               : RenderBlockingBehavior::kBlocking)
-                 : RenderBlockingBehavior::kNonBlockingDynamic);
-
+  render_blocking_behavior_ = type_and_behavior.second;
   owner_->LoadStylesheet(params, charset, defer_option, this,
                          render_blocking_behavior_);
 
@@ -318,7 +309,7 @@ LinkStyle::LoadReturnValue LinkStyle::LoadStylesheetIfNeeded(
   return kLoaded;
 }
 
-void LinkStyle::Process() {
+void LinkStyle::Process(LinkLoadParameters::Reason reason) {
   DCHECK(owner_->ShouldProcessStyle());
   const LinkLoadParameters params(
       owner_->RelAttribute(),
@@ -332,7 +323,7 @@ void LinkStyle::Process() {
       owner_->GetNonEmptyURLAttribute(html_names::kHrefAttr),
       owner_->FastGetAttribute(html_names::kImagesrcsetAttr),
       owner_->FastGetAttribute(html_names::kImagesizesAttr),
-      owner_->FastGetAttribute(html_names::kBlockingAttr));
+      owner_->FastGetAttribute(html_names::kBlockingAttr), reason);
 
   WTF::TextEncoding charset = GetCharset();
 
@@ -373,7 +364,7 @@ void LinkStyle::SetSheetTitle(const String& title) {
   if (sheet_)
     sheet_->SetTitle(title);
 
-  if (title.IsEmpty() || !IsUnset() || owner_->IsAlternate())
+  if (title.empty() || !IsUnset() || owner_->IsAlternate())
     return;
 
   const KURL& href = owner_->GetNonEmptyURLAttribute(html_names::kHrefAttr);
@@ -387,6 +378,15 @@ void LinkStyle::OwnerRemoved() {
 
   if (sheet_)
     ClearSheet();
+}
+
+void LinkStyle::UnblockRenderingForPendingSheet() {
+  DCHECK(StyleSheetIsLoading());
+  if (pending_sheet_type_ == PendingSheetType::kDynamicRenderBlocking) {
+    GetDocument().GetStyleEngine().RemovePendingBlockingSheet(
+        *owner_, pending_sheet_type_);
+    pending_sheet_type_ = PendingSheetType::kNonBlocking;
+  }
 }
 
 void LinkStyle::Trace(Visitor* visitor) const {

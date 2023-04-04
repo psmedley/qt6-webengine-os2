@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,6 +81,7 @@ class ANIMATION_EXPORT Tween {
     ACCEL_LIN_DECEL_100_3,
     ACCEL_20_DECEL_60,  // Moving a small, low emphasis or responsive elements.
     ACCEL_20_DECEL_100,
+    ACCEL_30_DECEL_20_85,
     ACCEL_40_DECEL_20,
     // Moderate acceleration and soft deceleration. Used for elements that are
     // visible at the beginning and end of a transition.
@@ -106,6 +107,9 @@ class ANIMATION_EXPORT Tween {
   static double CalculateValue(Type type, double state);
 
   // Conveniences for getting a value between a start and end point.
+  static SkColor4f ColorValueBetween(double value,
+                                     SkColor4f start,
+                                     SkColor4f target);
   static SkColor ColorValueBetween(double value, SkColor start, SkColor target);
   static double DoubleValueBetween(double value, double start, double target);
   static float FloatValueBetween(double value, float start, float target);

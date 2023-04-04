@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -135,6 +135,12 @@ class MESSAGE_CENTER_PUBLIC_EXPORT RichNotificationData {
   // retain VectorIcon reference.  https://crbug.com/760866
   const gfx::VectorIcon* vector_small_image = &gfx::kNoneIcon;
 
+  // Vector image to display on the parent notification of this notification,
+  // illustrating the source of the group notification that this notification
+  // belongs to. Optional. Note that all notification belongs to the same group
+  // should have the same `parent_vector_small_image`.
+  const gfx::VectorIcon* parent_vector_small_image = &gfx::kNoneIcon;
+
   // Items to display on the notification. Only applicable for notifications
   // that have type NOTIFICATION_TYPE_MULTIPLE.
   std::vector<NotificationItem> items;
@@ -184,6 +190,12 @@ class MESSAGE_CENTER_PUBLIC_EXPORT RichNotificationData {
   // For system notification, ash::CreateSystemNotification with
   // SystemNotificationWarningLevel should be used.
   absl::optional<SkColor> accent_color;
+
+  // Similar to `accent_color`, but store a ColorId instead of SkColor so that
+  // the notification view can use this id to correctly handle theme change. In
+  // CrOS notification, if `accent_color_id` is provided, `accent_color` will
+  // not be used.
+  absl::optional<ui::ColorId> accent_color_id;
 
   // Controls whether a settings button should appear on the notification. See
   // enum definition. TODO(estade): turn this into a boolean. See
@@ -385,6 +397,13 @@ class MESSAGE_CENTER_PUBLIC_EXPORT Notification {
     optional_fields_.vector_small_image = &image;
   }
 
+  const gfx::VectorIcon& parent_vector_small_image() const {
+    return *optional_fields_.parent_vector_small_image;
+  }
+  void set_parent_vector_small_image(const gfx::VectorIcon& image) {
+    optional_fields_.parent_vector_small_image = &image;
+  }
+
   // Mask the color of |small_image| to the given |color|.
   // If |vector_small_image| is available, it returns the vector image
   // filled by the |color|.
@@ -439,6 +458,13 @@ class MESSAGE_CENTER_PUBLIC_EXPORT Notification {
   }
   void set_accent_color(SkColor accent_color) {
     optional_fields_.accent_color = accent_color;
+  }
+
+  absl::optional<ui::ColorId> accent_color_id() const {
+    return optional_fields_.accent_color_id;
+  }
+  void set_accent_color_id(ui::ColorId accent_color_id) {
+    optional_fields_.accent_color_id = accent_color_id;
   }
 
   bool should_show_settings_button() const {

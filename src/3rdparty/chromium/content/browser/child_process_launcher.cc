@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,22 +12,52 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/i18n/icu_util.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/process/launch.h"
-#include "base/process/process_metrics.h"
 #include "base/time/time.h"
 #include "base/tracing/protos/chrome_track_event.pbzero.h"
 #include "build/build_config.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_launcher_utils.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/child_process_binding_types.h"
+#endif
 
 #if BUILDFLAG(IS_MAC)
 #include "content/browser/child_process_task_port_provider_mac.h"
 #endif
 
 namespace content {
+
+namespace {
+
+#if !BUILDFLAG(IS_ANDROID)
+// Returns the cumulative CPU usage for the specified process.
+base::TimeDelta GetCPUUsage(base::ProcessHandle process_handle) {
+#if BUILDFLAG(IS_MAC)
+  std::unique_ptr<base::ProcessMetrics> process_metrics =
+      base::ProcessMetrics::CreateProcessMetrics(
+          process_handle, ChildProcessTaskPortProvider::GetInstance());
+#else
+  std::unique_ptr<base::ProcessMetrics> process_metrics =
+      base::ProcessMetrics::CreateProcessMetrics(process_handle);
+#endif
+
+#if BUILDFLAG(IS_WIN)
+  // Use the precise version which is Windows specific.
+  // TODO(pmonette): Clean up this code when the precise version becomes the
+  //                 default.
+  return process_metrics->GetPreciseCumulativeCPUUsage();
+#else
+  return process_metrics->GetCumulativeCPUUsage();
+#endif
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+}  // namespace
 
 using internal::ChildProcessLauncherHelper;
 
@@ -52,6 +82,10 @@ void ChildProcessLauncherPriority::WriteIntoTrace(
 #endif
 }
 
+ChildProcessLauncherFileData::ChildProcessLauncherFileData() = default;
+
+ChildProcessLauncherFileData::~ChildProcessLauncherFileData() = default;
+
 #if BUILDFLAG(IS_ANDROID)
 bool ChildProcessLauncher::Client::CanUseWarmUpConnection() {
   return true;
@@ -65,7 +99,7 @@ ChildProcessLauncher::ChildProcessLauncher(
     Client* client,
     mojo::OutgoingInvitation mojo_invitation,
     const mojo::ProcessErrorCallback& process_error_callback,
-    std::map<std::string, base::FilePath> files_to_preload,
+    std::unique_ptr<ChildProcessLauncherFileData> file_data,
     bool terminate_on_shutdown)
     : client_(client),
       starting_(true),
@@ -77,7 +111,11 @@ ChildProcessLauncher::ChildProcessLauncher(
       terminate_child_on_shutdown_(terminate_on_shutdown)
 #endif
 {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+#if BUILDFLAG(IS_WIN)
+  should_launch_elevated_ = delegate->ShouldLaunchElevated();
+#endif
 
   helper_ = base::MakeRefCounted<ChildProcessLauncherHelper>(
       child_process_id, std::move(command_line), std::move(delegate),
@@ -85,13 +123,12 @@ ChildProcessLauncher::ChildProcessLauncher(
 #if BUILDFLAG(IS_ANDROID)
       client_->CanUseWarmUpConnection(),
 #endif
-      std::move(mojo_invitation), process_error_callback,
-      std::move(files_to_preload));
+      std::move(mojo_invitation), process_error_callback, std::move(file_data));
   helper_->StartLaunchOnClientThread();
 }
 
 ChildProcessLauncher::~ChildProcessLauncher() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (process_.process.IsValid() && terminate_child_on_shutdown_) {
     // Client has gone away, so just kill the process.
     ChildProcessLauncherHelper::ForceNormalProcessTerminationAsync(
@@ -101,7 +138,7 @@ ChildProcessLauncher::~ChildProcessLauncher() {
 
 void ChildProcessLauncher::SetProcessPriority(
     const ChildProcessLauncherPriority& priority) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::Process to_pass = process_.process.Duplicate();
   GetProcessLauncherTaskRunner()->PostTask(
       FROM_HERE,
@@ -115,7 +152,7 @@ void ChildProcessLauncher::Notify(ChildProcessLauncherHelper::Process process,
                                   DWORD last_error,
 #endif
                                   int error_code) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   starting_ = false;
   process_ = std::move(process);
 
@@ -135,19 +172,19 @@ void ChildProcessLauncher::Notify(ChildProcessLauncherHelper::Process process,
 }
 
 bool ChildProcessLauncher::IsStarting() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return starting_;
 }
 
 const base::Process& ChildProcessLauncher::GetProcess() const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!starting_);
   return process_.process;
 }
 
 ChildProcessTerminationInfo ChildProcessLauncher::GetChildTerminationInfo(
     bool known_dead) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!process_.process.IsValid()) {
     // Make sure to avoid using the default termination status if the process
@@ -160,17 +197,19 @@ ChildProcessTerminationInfo ChildProcessLauncher::GetChildTerminationInfo(
   }
 
 #if !BUILDFLAG(IS_ANDROID)
-  // GetTerminationInfo() invokes base::GetTerminationStatus() which reaps the
-  // zombie process info, after which it's not longer readable. This is why
-  // RecordProcessLifetimeMetrics() needs to called before that happens.
-  //
-  // Not done on Android since there sandboxed child processes run under a
-  // different user/uid, and the browser doesn't have permission to access
-  // the /proc dirs for the child processes. For the Android solution look at
-  // content/common/android/cpu_time_metrics.h.
-  RecordProcessLifetimeMetrics();
+  base::TimeDelta cpu_usage;
+  if (!should_launch_elevated_)
+    cpu_usage = GetCPUUsage(process_.process.Handle());
 #endif
+
   termination_info_ = helper_->GetTerminationInfo(process_, known_dead);
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Get the cumulative CPU usage. This needs to be done before closing the
+  // process handle (on Windows) or reaping the zombie process (on MacOS, Linux,
+  // ChromeOS).
+  termination_info_.cpu_usage = cpu_usage;
+#endif
 
   // POSIX: If the process crashed, then the kernel closed the socket for it and
   // so the child has already died by the time we get here. Since
@@ -192,47 +231,6 @@ bool ChildProcessLauncher::Terminate(int exit_code) {
                             GetProcess(), exit_code);
 }
 
-void ChildProcessLauncher::RecordProcessLifetimeMetrics() {
-  // TODO(https://crbug.com/1224378): Record the lifetime of all child
-  // processes.
-  if (helper_->GetProcessType() != switches::kRendererProcess)
-    return;
-#if BUILDFLAG(IS_MAC)
-  std::unique_ptr<base::ProcessMetrics> process_metrics =
-      base::ProcessMetrics::CreateProcessMetrics(
-          process_.process.Handle(),
-          ChildProcessTaskPortProvider::GetInstance());
-#else
-  std::unique_ptr<base::ProcessMetrics> process_metrics =
-      base::ProcessMetrics::CreateProcessMetrics(process_.process.Handle());
-#endif
-
-  const base::TimeDelta process_lifetime =
-      base::TimeTicks::Now() - process_start_time_;
-  const base::TimeDelta process_total_cpu_use =
-      process_metrics->GetCumulativeCPUUsage();
-
-  constexpr base::TimeDelta kShortLifetime = base::Minutes(1);
-  if (process_lifetime <= kShortLifetime) {
-    // Bucketing chosen by looking at AverageCPU2.RendererProcess in UMA. Only
-    // a renderer at the 99.9th percentile of this metric would overflow.
-    UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.TotalCPUUse2.ShortLived",
-                               process_total_cpu_use, base::Milliseconds(1),
-                               base::Seconds(30), 100);
-  } else {
-    // Bucketing chosen by looking at AverageCPU2.RendererProcess and
-    // Renderer.ProcessLifetime values in UMA. Only a renderer at the 99th
-    // percentile of both of those values combined will overflow.
-    UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.TotalCPUUse2.LongLived",
-                               process_total_cpu_use, base::Milliseconds(1),
-                               base::Hours(3), 100);
-  }
-
-  // Global measurement. Bucketing identical to LongLivedRenders.
-  UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.TotalCPUUse2", process_total_cpu_use,
-                             base::Milliseconds(1), base::Hours(3), 100);
-}
-
 // static
 bool ChildProcessLauncher::TerminateProcess(const base::Process& process,
                                             int exit_code) {
@@ -240,6 +238,11 @@ bool ChildProcessLauncher::TerminateProcess(const base::Process& process,
 }
 
 #if BUILDFLAG(IS_ANDROID)
+base::android::ChildBindingState
+ChildProcessLauncher::GetEffectiveChildBindingState() {
+  return helper_->GetEffectiveChildBindingState();
+}
+
 void ChildProcessLauncher::DumpProcessStack() {
   base::Process to_pass = process_.process.Duplicate();
   GetProcessLauncherTaskRunner()->PostTask(

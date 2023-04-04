@@ -31,12 +31,12 @@
 #include "build/build_config.h"
 #include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/policy_disposition.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/policy_value.mojom-blink.h"
 #include "third_party/blink/public/mojom/v8_cache_options.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/events/error_event.h"
@@ -53,6 +53,7 @@
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -71,16 +72,13 @@ ExecutionContext::ExecutionContext(v8::Isolate* isolate, Agent* agent)
       circular_sequential_id_(0),
       in_dispatch_error_event_(false),
       lifecycle_state_(mojom::FrameLifecycleState::kRunning),
-      is_context_destroyed_(false),
       csp_delegate_(MakeGarbageCollected<ExecutionContextCSPDelegate>(*this)),
       window_interaction_tokens_(0),
       origin_trial_context_(MakeGarbageCollected<OriginTrialContext>(this)) {
   DCHECK(agent_);
 }
 
-ExecutionContext::~ExecutionContext() {
-  DCHECK(is_context_destroyed_);
-}
+ExecutionContext::~ExecutionContext() = default;
 
 // static
 ExecutionContext* ExecutionContext::From(const ScriptState* script_state) {
@@ -178,7 +176,6 @@ void ExecutionContext::SetLifecycleState(mojom::FrameLifecycleState state) {
 }
 
 void ExecutionContext::NotifyContextDestroyed() {
-  is_context_destroyed_ = true;
   ContextLifecycleNotifier::NotifyContextDestroyed();
 }
 
@@ -307,7 +304,7 @@ void ExecutionContext::DispatchErrorEvent(
   if (!DispatchErrorEventInternal(error_event, sanitize_script_errors))
     ExceptionThrown(error_event);
 
-  if (pending_exceptions_.IsEmpty())
+  if (pending_exceptions_.empty())
     return;
   for (ErrorEvent* e : pending_exceptions_)
     ExceptionThrown(e);
@@ -529,18 +526,11 @@ void ExecutionContext::SetReferrerPolicy(
   policy_container_->UpdateReferrerPolicy(referrer_policy);
 }
 
-network::mojom::IPAddressSpace ExecutionContext::AddressSpace() const {
-  return policy_container_->GetIPAddressSpace();
-}
-
-void ExecutionContext::SetAddressSpace(
-    network::mojom::blink::IPAddressSpace ip_address_space) {
-  GetPolicyContainer()->SetIPAddressSpace(ip_address_space);
-}
-
 void ExecutionContext::SetPolicyContainer(
     std::unique_ptr<PolicyContainer> container) {
   policy_container_ = std::move(container);
+  security_context_.SetSandboxFlags(
+      policy_container_->GetPolicies().sandbox_flags);
 }
 
 std::unique_ptr<PolicyContainer> ExecutionContext::TakePolicyContainer() {
@@ -548,7 +538,7 @@ std::unique_ptr<PolicyContainer> ExecutionContext::TakePolicyContainer() {
 }
 
 void ExecutionContext::RemoveURLFromMemoryCache(const KURL& url) {
-  GetMemoryCache()->RemoveURLFromCache(url);
+  MemoryCache::Get()->RemoveURLFromCache(url);
 }
 
 void ExecutionContext::Trace(Visitor* visitor) const {
@@ -668,8 +658,7 @@ bool ExecutionContext::IsFeatureEnabled(
 }
 
 bool ExecutionContext::RequireTrustedTypes() const {
-  return require_safe_types_ &&
-         RuntimeEnabledFeatures::TrustedDOMTypesEnabled(this);
+  return require_safe_types_;
 }
 
 }  // namespace blink

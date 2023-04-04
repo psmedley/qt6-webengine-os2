@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,7 +93,7 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   // This color is usually obtained from the background color of the <body>
   // element. It can be used for filling in gutter areas around the frame when
   // it's too small to fill the box the parent reserved for it.
-  SkColor root_background_color = SK_ColorWHITE;
+  SkColor4f root_background_color = SkColors::kWhite;
 
   std::vector<ui::LatencyInfo> latency_info;
 
@@ -164,9 +164,8 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   //   2. This frame will not be submitted to the root surface - The browser UI
   //     does not use this, and the frame must be contained within a
   //     SurfaceDrawQuad.
-  // The ink trail created with this metadata will only last for a single frame
-  // before it disappears, regardless of whether or not the next frame contains
-  // delegated ink metadata.
+  // This metadata will be copied when an aggregated frame is made, and will be
+  // used until this Compositor Frame Metadata is replaced.
   std::unique_ptr<gfx::DelegatedInkMetadata> delegated_ink_metadata;
 
   // This represents a list of directives to execute in order to support the

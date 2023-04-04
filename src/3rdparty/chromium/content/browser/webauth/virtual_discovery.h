@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "device/fido/fido_transport_protocol.h"
 
 namespace device {
-class FidoDevice;
+class VirtualFidoDevice;
 }
 
 namespace content {
@@ -33,7 +33,7 @@ class VirtualFidoDiscovery
   // Notifies the AuthenticatorEnvironment of this instance being destroyed.
   ~VirtualFidoDiscovery() override;
 
-  void AddVirtualDevice(std::unique_ptr<::device::FidoDevice> device);
+  void AddVirtualDevice(std::unique_ptr<device::VirtualFidoDevice> device);
   bool RemoveVirtualDevice(base::StringPiece device_id);
 
  protected:
@@ -41,7 +41,7 @@ class VirtualFidoDiscovery
   void StartInternal() override;
 
  private:
-  std::vector<std::unique_ptr<::device::FidoDevice>>
+  std::vector<std::unique_ptr<device::VirtualFidoDevice>>
       devices_pending_discovery_start_;
 };
 

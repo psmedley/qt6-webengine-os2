@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,11 @@
 #include <ostream>
 #include <vector>
 
-#include "base/notreached.h"
 #include "base/threading/thread_restrictions.h"
-#include "skia/ext/skia_utils_base.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/base/clipboard/clipboard_sequence_number_token.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/skia_util.h"
 
 namespace ui {
@@ -30,9 +28,10 @@ std::vector<uint8_t> ClipboardData::EncodeBitmapData(const SkBitmap& bitmap) {
   return data;
 }
 
-ClipboardData::ClipboardData() : web_smart_paste_(false), format_(0) {}
+ClipboardData::ClipboardData() = default;
 
 ClipboardData::ClipboardData(const ClipboardData& other) {
+  sequence_number_token_ = other.sequence_number_token_;
   format_ = other.format_;
   text_ = other.text_;
   markup_data_ = other.markup_data_;
@@ -54,11 +53,19 @@ ClipboardData::ClipboardData(const ClipboardData& other) {
 #endif  // BUILDFLAG(IS_CHROMEOS)
 }
 
-ClipboardData::~ClipboardData() = default;
-
 ClipboardData::ClipboardData(ClipboardData&&) = default;
 
+ClipboardData& ClipboardData::operator=(ClipboardData&& rhs) = default;
+
+ClipboardData::~ClipboardData() = default;
+
 bool ClipboardData::operator==(const ClipboardData& that) const {
+  // Two `ClipboardData` instances are equal if they have the same contents.
+  // Their sequence number tokens need not be the same, but if they are, we
+  // can be sure the data contents will be the same as well.
+  if (sequence_number_token_ == that.sequence_number_token_)
+    return true;
+
   bool equal_except_images =
       format_ == that.format() && text_ == that.text() &&
       markup_data_ == that.markup_data() && url_ == that.url() &&
@@ -104,36 +111,59 @@ bool ClipboardData::operator!=(const ClipboardData& that) const {
   return !(*this == that);
 }
 
-absl::optional<size_t> ClipboardData::size() const {
-  if (format_ & static_cast<int>(ClipboardInternalFormat::kFilenames))
-    return absl::nullopt;
+absl::optional<size_t> ClipboardData::size(
+    const absl::optional<ClipboardInternalFormat>& format) const {
   size_t total_size = 0;
-  if (format_ & static_cast<int>(ClipboardInternalFormat::kText))
+  if (format_ & static_cast<int>(ClipboardInternalFormat::kText)) {
+    if (format.has_value() && *format == ClipboardInternalFormat::kText)
+      return text_.size();
     total_size += text_.size();
-  if (format_ & static_cast<int>(ClipboardInternalFormat::kHtml)) {
-    total_size += markup_data_.size();
-    total_size += url_.size();
   }
-  if (format_ & static_cast<int>(ClipboardInternalFormat::kSvg))
+  if (format_ & static_cast<int>(ClipboardInternalFormat::kHtml)) {
+    if (format.has_value() && *format == ClipboardInternalFormat::kHtml)
+      return markup_data_.size() + url_.size();
+    total_size += markup_data_.size() + url_.size();
+  }
+  if (format_ & static_cast<int>(ClipboardInternalFormat::kSvg)) {
+    if (format.has_value() && *format == ClipboardInternalFormat::kSvg)
+      return svg_data_.size();
     total_size += svg_data_.size();
-  if (format_ & static_cast<int>(ClipboardInternalFormat::kRtf))
+  }
+  if (format_ & static_cast<int>(ClipboardInternalFormat::kRtf)) {
+    if (format.has_value() && *format == ClipboardInternalFormat::kRtf)
+      return rtf_data_.size();
     total_size += rtf_data_.size();
+  }
   if (format_ & static_cast<int>(ClipboardInternalFormat::kBookmark)) {
-    total_size += bookmark_title_.size();
-    total_size += bookmark_url_.size();
+    if (format.has_value() && *format == ClipboardInternalFormat::kBookmark)
+      return bookmark_title_.size() + bookmark_url_.size();
+    total_size += bookmark_title_.size() + bookmark_url_.size();
   }
   if (format_ & static_cast<int>(ClipboardInternalFormat::kPng)) {
     // If there is an unencoded image, use the bitmap's size. This will be
     // inaccurate by a few bytes.
+    size_t image_size;
     if (maybe_png_.has_value()) {
-      total_size += maybe_png_.value().size();
+      image_size = maybe_png_.value().size();
     } else {
       DCHECK(maybe_bitmap_.has_value());
-      total_size += maybe_bitmap_.value().computeByteSize();
+      image_size = maybe_bitmap_.value().computeByteSize();
     }
+    if (format.has_value() && *format == ClipboardInternalFormat::kPng)
+      return image_size;
+    total_size += image_size;
   }
-  if (format_ & static_cast<int>(ClipboardInternalFormat::kCustom))
+  if (format_ & static_cast<int>(ClipboardInternalFormat::kCustom)) {
+    if (format.has_value() && *format == ClipboardInternalFormat::kCustom)
+      return custom_data_data_.size();
     total_size += custom_data_data_.size();
+  }
+
+  if (format.has_value() ||
+      (format_ & static_cast<int>(ClipboardInternalFormat::kFilenames))) {
+    return absl::nullopt;
+  }
+
   return total_size;
 }
 

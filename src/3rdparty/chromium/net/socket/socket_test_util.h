@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,6 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool.h"
-#include "net/socket/connection_attempts.h"
 #include "net/socket/datagram_client_socket.h"
 #include "net/socket/socket_performance_watcher.h"
 #include "net/socket/socket_tag.h"
@@ -56,8 +55,8 @@ class NetLog;
 struct NetworkTrafficAnnotationTag;
 class X509Certificate;
 
-const NetworkChangeNotifier::NetworkHandle kDefaultNetworkForTests = 1;
-const NetworkChangeNotifier::NetworkHandle kNewNetworkForTests = 2;
+const handles::NetworkHandle kDefaultNetworkForTests = 1;
+const handles::NetworkHandle kNewNetworkForTests = 2;
 
 enum {
   // A private network error code used by the socket test utility classes.
@@ -410,9 +409,9 @@ class StaticSocketDataHelper {
   const MockWrite& PeekRealWrite() const;
 
   const base::span<const MockRead> reads_;
-  size_t read_index_;
+  size_t read_index_ = 0;
   const base::span<const MockWrite> writes_;
-  size_t write_index_;
+  size_t write_index_ = 0;
 };
 
 // SocketDataProvider which responds based on static tables of mock reads and
@@ -484,7 +483,7 @@ struct SSLSocketDataProvider {
   base::RepeatingClosure confirm_callback;
 
   // Result for GetNegotiatedProtocol().
-  NextProto next_proto;
+  NextProto next_proto = kProtoUnknown;
 
   // Result for GetPeerApplicationSettings().
   absl::optional<std::string> peer_application_settings;
@@ -493,7 +492,7 @@ struct SSLSocketDataProvider {
   SSLInfo ssl_info;
 
   // Result for GetSSLCertRequestInfo().
-  SSLCertRequestInfo* cert_request_info;
+  SSLCertRequestInfo* cert_request_info = nullptr;
 
   // Result for GetECHRetryConfigs().
   std::vector<uint8_t> ech_retry_configs;
@@ -505,7 +504,7 @@ struct SSLSocketDataProvider {
   absl::optional<bool> expected_send_client_cert;
   scoped_refptr<X509Certificate> expected_client_cert;
   absl::optional<HostPortPair> expected_host_and_port;
-  absl::optional<NetworkIsolationKey> expected_network_isolation_key;
+  absl::optional<NetworkAnonymizationKey> expected_network_anonymization_key;
   absl::optional<bool> expected_disable_legacy_crypto;
   absl::optional<std::vector<uint8_t>> expected_ech_config_list;
 
@@ -593,11 +592,11 @@ class SequencedSocketData : public SocketDataProvider {
 
   StaticSocketDataHelper helper_;
   raw_ptr<SocketDataPrinter> printer_ = nullptr;
-  int sequence_number_;
-  IoState read_state_;
-  IoState write_state_;
+  int sequence_number_ = 0;
+  IoState read_state_ = IoState::kIdle;
+  IoState write_state_ = IoState::kIdle;
 
-  bool busy_before_sync_reads_;
+  bool busy_before_sync_reads_ = false;
 
   // Used by RunUntilPaused.  NULL at all other times.
   std::unique_ptr<base::RunLoop> run_until_paused_run_loop_;
@@ -611,7 +610,7 @@ class SequencedSocketData : public SocketDataProvider {
 template <typename T>
 class SocketDataProviderArray {
  public:
-  SocketDataProviderArray() : next_index_(0) {}
+  SocketDataProviderArray() = default;
 
   T* GetNext() {
     DCHECK_LT(next_index_, data_providers_.size());
@@ -640,7 +639,7 @@ class SocketDataProviderArray {
  private:
   // Index of the next |data_providers_| element to use. Not an iterator
   // because those are invalidated on vector reallocation.
-  size_t next_index_;
+  size_t next_index_ = 0;
 
   // SocketDataProviders to be returned.
   std::vector<T*> data_providers_;
@@ -714,7 +713,7 @@ class MockClientSocketFactory : public ClientSocketFactory {
 
   // If true, ReadIfReady() is enabled; otherwise ReadIfReady() returns
   // ERR_READ_IF_READY_NOT_IMPLEMENTED.
-  bool enable_read_if_ready_;
+  bool enable_read_if_ready_ = false;
 };
 
 class MockClientSocket : public TransportClientSocket {
@@ -753,9 +752,6 @@ class MockClientSocket : public TransportClientSocket {
   const NetLogWithSource& NetLog() const override;
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const SocketTag& tag) override {}
 
@@ -765,7 +761,7 @@ class MockClientSocket : public TransportClientSocket {
   void RunCallback(CompletionOnceCallback callback, int result);
 
   // True if Connect completed successfully and Disconnect hasn't been called.
-  bool connected_;
+  bool connected_ = false;
 
   IPEndPoint local_addr_;
   IPEndPoint peer_addr_;
@@ -818,9 +814,6 @@ class MockTCPClientSocket : public MockClientSocket, public AsyncSocket {
   int GetPeerAddress(IPEndPoint* address) const override;
   bool WasEverUsed() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override;
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override;
 
   // AsyncSocket:
   void OnReadComplete(const MockRead& data) override;
@@ -844,18 +837,18 @@ class MockTCPClientSocket : public MockClientSocket, public AsyncSocket {
   AddressList addresses_;
 
   raw_ptr<SocketDataProvider> data_;
-  int read_offset_;
+  int read_offset_ = 0;
   MockRead read_data_;
-  bool need_read_data_;
+  bool need_read_data_ = true;
 
   // True if the peer has closed the connection.  This allows us to simulate
   // the recv(..., MSG_PEEK) call in the IsConnectedAndIdle method of the real
   // TCPClientSocket.
-  bool peer_closed_connection_;
+  bool peer_closed_connection_ = false;
 
   // While an asynchronous read is pending, we save our user-buffer state.
-  scoped_refptr<IOBuffer> pending_read_buf_;
-  int pending_read_buf_len_;
+  scoped_refptr<IOBuffer> pending_read_buf_ = nullptr;
+  int pending_read_buf_len_ = 0;
   CompletionOnceCallback pending_read_callback_;
 
   // Non-null when a ReadIfReady() is pending.
@@ -863,15 +856,13 @@ class MockTCPClientSocket : public MockClientSocket, public AsyncSocket {
 
   CompletionOnceCallback pending_connect_callback_;
   CompletionOnceCallback pending_write_callback_;
-  bool was_used_to_convey_data_;
+  bool was_used_to_convey_data_ = false;
 
   // If true, ReadIfReady() is enabled; otherwise ReadIfReady() returns
   // ERR_READ_IF_READY_NOT_IMPLEMENTED.
-  bool enable_read_if_ready_;
+  bool enable_read_if_ready_ = false;
 
   BeforeConnectCallback before_connect_callback_;
-
-  ConnectionAttempts connection_attempts_;
 };
 
 class MockSSLClientSocket : public AsyncSocket, public SSLClientSocket {
@@ -916,9 +907,6 @@ class MockSSLClientSocket : public AsyncSocket, public SSLClientSocket {
       SSLCertRequestInfo* cert_request_info) const override;
   void ApplySocketTag(const SocketTag& tag) override;
   const NetLogWithSource& NetLog() const override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
@@ -965,8 +953,8 @@ class MockSSLClientSocket : public AsyncSocket, public SSLClientSocket {
 
 class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
  public:
-  MockUDPClientSocket(SocketDataProvider* data = nullptr,
-                      net::NetLog* net_log = nullptr);
+  explicit MockUDPClientSocket(SocketDataProvider* data = nullptr,
+                               net::NetLog* net_log = nullptr);
 
   MockUDPClientSocket(const MockUDPClientSocket&) = delete;
   MockUDPClientSocket& operator=(const MockUDPClientSocket&) = delete;
@@ -981,16 +969,6 @@ class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
             int buf_len,
             CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override;
-  int WriteAsync(
-      DatagramBuffers buffers,
-      CompletionOnceCallback callback,
-      const NetworkTrafficAnnotationTag& traffic_annotation) override;
-  int WriteAsync(
-      const char* buffer,
-      size_t buf_len,
-      CompletionOnceCallback callback,
-      const NetworkTrafficAnnotationTag& traffic_annotation) override;
-  DatagramBuffers GetUnwrittenBuffers() override;
 
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
@@ -1001,21 +979,22 @@ class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
   int GetPeerAddress(IPEndPoint* address) const override;
   int GetLocalAddress(IPEndPoint* address) const override;
   void UseNonBlockingIO() override;
-  void SetWriteAsyncEnabled(bool enabled) override;
-  void SetMaxPacketSize(size_t max_packet_size) override;
-  bool WriteAsyncEnabled() override;
-  void SetWriteMultiCoreEnabled(bool enabled) override;
-  void SetSendmmsgEnabled(bool enabled) override;
-  void SetWriteBatchingActive(bool active) override;
   int SetMulticastInterface(uint32_t interface_index) override;
   const NetLogWithSource& NetLog() const override;
 
   // DatagramClientSocket implementation.
   int Connect(const IPEndPoint& address) override;
-  int ConnectUsingNetwork(NetworkChangeNotifier::NetworkHandle network,
+  int ConnectUsingNetwork(handles::NetworkHandle network,
                           const IPEndPoint& address) override;
   int ConnectUsingDefaultNetwork(const IPEndPoint& address) override;
-  NetworkChangeNotifier::NetworkHandle GetBoundNetwork() const override;
+  int ConnectAsync(const IPEndPoint& address,
+                   CompletionOnceCallback callback) override;
+  int ConnectUsingNetworkAsync(handles::NetworkHandle network,
+                               const IPEndPoint& address,
+                               CompletionOnceCallback callback) override;
+  int ConnectUsingDefaultNetworkAsync(const IPEndPoint& address,
+                                      CompletionOnceCallback callback) override;
+  handles::NetworkHandle GetBoundNetwork() const override;
   void ApplySocketTag(const SocketTag& tag) override;
   void SetMsgConfirm(bool confirm) override {}
 
@@ -1045,23 +1024,23 @@ class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
   void RunCallbackAsync(CompletionOnceCallback callback, int result);
   void RunCallback(CompletionOnceCallback callback, int result);
 
-  bool connected_;
+  bool connected_ = false;
   raw_ptr<SocketDataProvider> data_;
-  int read_offset_;
+  int read_offset_ = 0;
   MockRead read_data_;
-  bool need_read_data_;
+  bool need_read_data_ = true;
   IPAddress source_host_;
-  uint16_t source_port_;  // Ephemeral source port.
+  uint16_t source_port_ = 123;  // Ephemeral source port.
 
   // Address of the "remote" peer we're connected to.
   IPEndPoint peer_addr_;
 
   // Network that the socket is bound to.
-  NetworkChangeNotifier::NetworkHandle network_;
+  handles::NetworkHandle network_ = handles::kInvalidNetworkHandle;
 
   // While an asynchronous IO is pending, we save our user-buffer state.
-  scoped_refptr<IOBuffer> pending_read_buf_;
-  int pending_read_buf_len_;
+  scoped_refptr<IOBuffer> pending_read_buf_ = nullptr;
+  int pending_read_buf_len_ = 0;
   CompletionOnceCallback pending_read_callback_;
   CompletionOnceCallback pending_write_callback_;
 
@@ -1166,7 +1145,7 @@ class ClientSocketPoolTest {
  private:
   std::vector<std::unique_ptr<TestSocketRequest>> requests_;
   std::vector<TestSocketRequest*> request_order_;
-  size_t completion_count_;
+  size_t completion_count_ = 0;
 };
 
 class MockTransportSocketParams
@@ -1178,7 +1157,7 @@ class MockTransportSocketParams
 
  private:
   friend class base::RefCounted<MockTransportSocketParams>;
-  ~MockTransportSocketParams() {}
+  ~MockTransportSocketParams() = default;
 };
 
 class MockTransportClientSocketPool : public TransportClientSocketPool {
@@ -1261,9 +1240,9 @@ class MockTransportClientSocketPool : public TransportClientSocketPool {
  private:
   raw_ptr<ClientSocketFactory> client_socket_factory_;
   std::vector<std::unique_ptr<MockConnectJob>> job_list_;
-  RequestPriority last_request_priority_;
-  int release_count_;
-  int cancel_count_;
+  RequestPriority last_request_priority_ = DEFAULT_PRIORITY;
+  int release_count_ = 0;
+  int cancel_count_ = 0;
 };
 
 // WrappedStreamSocket is a base class that wraps an existing StreamSocket,
@@ -1290,9 +1269,6 @@ class WrappedStreamSocket : public TransportClientSocket {
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override;
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override;
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const SocketTag& tag) override;
 
@@ -1324,7 +1300,7 @@ class MockTaggingStreamSocket : public WrappedStreamSocket {
   MockTaggingStreamSocket(const MockTaggingStreamSocket&) = delete;
   MockTaggingStreamSocket& operator=(const MockTaggingStreamSocket&) = delete;
 
-  ~MockTaggingStreamSocket() override {}
+  ~MockTaggingStreamSocket() override = default;
 
   // StreamSocket implementation.
   int Connect(CompletionOnceCallback callback) override;
@@ -1374,7 +1350,8 @@ class MockTaggingClientSocketFactory : public MockClientSocketFactory {
   MockUDPClientSocket* GetLastProducedUDPSocket() const { return udp_socket_; }
 
  private:
-  raw_ptr<MockTaggingStreamSocket> tcp_socket_ = nullptr;
+  // TODO(crbug.com/1298696): Breaks net_unittests.
+  raw_ptr<MockTaggingStreamSocket, DegradeToNoOpWhenMTE> tcp_socket_ = nullptr;
   raw_ptr<MockUDPClientSocket> udp_socket_ = nullptr;
 };
 
@@ -1419,7 +1396,7 @@ int64_t CountWriteBytes(base::span<const MockWrite> writes);
 bool CanGetTaggedBytes();
 
 // Query the system to find out how many bytes were received with tag
-// |expected_tag| for our UID.  Return the count of recieved bytes.
+// |expected_tag| for our UID.  Return the count of received bytes.
 uint64_t GetTaggedBytes(int32_t expected_tag);
 #endif
 

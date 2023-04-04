@@ -23,9 +23,7 @@ class CPDF_Number final : public CPDF_Object {
   float GetNumber() const override;
   int GetInteger() const override;
   void SetString(const ByteString& str) override;
-  bool IsNumber() const override;
-  CPDF_Number* AsNumber() override;
-  const CPDF_Number* AsNumber() const override;
+  CPDF_Number* AsMutableNumber() override;
   bool WriteTo(IFX_ArchiveStream* archive,
                const CPDF_Encryptor* encryptor) const override;
 
@@ -42,11 +40,15 @@ class CPDF_Number final : public CPDF_Object {
 };
 
 inline CPDF_Number* ToNumber(CPDF_Object* obj) {
-  return obj ? obj->AsNumber() : nullptr;
+  return obj ? obj->AsMutableNumber() : nullptr;
 }
 
 inline const CPDF_Number* ToNumber(const CPDF_Object* obj) {
   return obj ? obj->AsNumber() : nullptr;
+}
+
+inline RetainPtr<CPDF_Number> ToNumber(RetainPtr<CPDF_Object> obj) {
+  return RetainPtr<CPDF_Number>(ToNumber(obj.Get()));
 }
 
 inline RetainPtr<const CPDF_Number> ToNumber(RetainPtr<const CPDF_Object> obj) {

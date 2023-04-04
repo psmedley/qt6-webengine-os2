@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 
 namespace content {
 
-class GpuProcess;
+class ChildProcess;
 
 // This class creates a GPU thread (instead of a GPU process), when running
 // with --in-process-gpu or --single-process.
@@ -36,8 +36,7 @@ class InProcessGpuThread : public base::Thread {
   InProcessChildThreadParams params_;
 
   // Deleted in CleanUp() on the gpu thread, so don't use smart pointers.
-  raw_ptr<GpuProcess> gpu_process_;
-
+  std::unique_ptr<ChildProcess> gpu_process_;
   gpu::GpuPreferences gpu_preferences_;
 };
 

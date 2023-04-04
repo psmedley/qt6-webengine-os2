@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     EXPECT_EQ(blink::WebInputEvent::kControlKey | blink::WebInputEvent::kIsLeft,
               webkit_event.GetModifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_LEFT), webkit_event.dom_code);
-    EXPECT_EQ(static_cast<int>(DomKey::CONTROL), webkit_event.dom_key);
+    EXPECT_EQ(DomKey::CONTROL, webkit_event.dom_key);
   }
   {
     // Release left Ctrl.
@@ -46,7 +46,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     // However, modifier bit for Control in |webkit_event| shouldn't be set.
     EXPECT_EQ(blink::WebInputEvent::kIsLeft, webkit_event.GetModifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_LEFT), webkit_event.dom_code);
-    EXPECT_EQ(static_cast<int>(DomKey::CONTROL), webkit_event.dom_key);
+    EXPECT_EQ(DomKey::CONTROL, webkit_event.dom_key);
   }
   {
     // Press right Ctrl.
@@ -67,7 +67,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     // However, modifier bit for Control in |webkit_event| shouldn't be set.
     EXPECT_EQ(blink::WebInputEvent::kIsRight, webkit_event.GetModifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_RIGHT), webkit_event.dom_code);
-    EXPECT_EQ(static_cast<int>(DomKey::CONTROL), webkit_event.dom_key);
+    EXPECT_EQ(DomKey::CONTROL, webkit_event.dom_key);
   }
 }
 
@@ -382,7 +382,8 @@ TEST(WebInputEventTest, TestMakeWebMouseWheelEvent) {
 #if !BUILDFLAG(IS_MAC)
 TEST(WebInputEventTest, TestPercentMouseWheelScroll) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kPercentBasedScrolling);
+  scoped_feature_list.InitAndEnableFeature(
+      features::kWindowsScrollingPersonality);
 
   base::TimeTicks timestamp = EventTimeForNow();
   MouseWheelEvent ui_event(gfx::Vector2d(0, -MouseWheelEvent::kWheelDelta),
@@ -427,6 +428,9 @@ TEST(WebInputEventTest, KeyEvent) {
 }
 
 TEST(WebInputEventTest, WheelEvent) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      features::kWindowsScrollingPersonality);
   const int kDeltaX = 14;
   const int kDeltaY = -3;
   ui::MouseWheelEvent ui_event(

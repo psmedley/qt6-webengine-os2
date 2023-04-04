@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,9 +22,7 @@
 #include "services/network/cors/cors_util.h"
 #include "services/network/public/cpp/cors/cors.h"
 
-namespace network {
-
-namespace cors {
+namespace network::cors {
 
 namespace {
 
@@ -154,7 +152,7 @@ absl::optional<CorsErrorStatus> PreflightResult::EnsureAllowedCrossOriginMethod(
 
   // This should be consistent with `NetworkServiceCorsPreflightMethodAllowed`
   // in `tools/metrics/histograms/enums.xml`.
-  enum CorsPreflightMethodAllowed {
+  enum CorsPreflightMethodAllowed : uint8_t {
     kBothDisallowed = 0,
     kNormalizedMethodAllowed = 1,
     kMethodAllowed = 2,
@@ -283,6 +281,4 @@ base::Value PreflightResult::NetLogParams() const {
   return dict;
 }
 
-}  // namespace cors
-
-}  // namespace network
+}  // namespace network::cors

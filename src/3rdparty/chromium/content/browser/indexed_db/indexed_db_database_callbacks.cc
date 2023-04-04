@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,7 @@ void IndexedDBDatabaseCallbacks::OnComplete(
     return;
 
   indexed_db_context_->TransactionComplete(
-      transaction.database()->storage_key());
+      transaction.database()->bucket_locator());
   if (callbacks_)
     callbacks_->Complete(transaction.id());
 }

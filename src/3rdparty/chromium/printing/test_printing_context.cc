@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "printing/mojom/print.mojom.h"
 #include "printing/print_settings.h"
 #include "printing/printing_context.h"
+#include "printing/units.h"
 #include "ui/gfx/geometry/size.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -103,8 +104,11 @@ mojom::ResultCode TestPrintingContext::UseDefaultSettings() {
 }
 
 gfx::Size TestPrintingContext::GetPdfPaperSizeDeviceUnits() {
-  NOTIMPLEMENTED();
-  return gfx::Size();
+  // Default to A4 paper size, which is an alternative to Letter size that is
+  // often used as the fallback size for some platform-specific
+  // implementations.
+  return gfx::Size(kA4WidthInch * settings_->device_units_per_inch(),
+                   kA4HeightInch * settings_->device_units_per_inch());
 }
 
 mojom::ResultCode TestPrintingContext::UpdatePrinterSettings(
@@ -143,6 +147,9 @@ mojom::ResultCode TestPrintingContext::NewDocument(
     const std::u16string& document_name) {
   DCHECK(!in_print_job_);
 
+  if (!new_document_called_.is_null())
+    new_document_called_.Run();
+
   abort_printing_ = false;
   in_print_job_ = true;
 
@@ -163,6 +170,11 @@ mojom::ResultCode TestPrintingContext::RenderPage(const PrintedPage& page,
 
   if (render_page_blocked_by_permissions_)
     return mojom::ResultCode::kAccessDenied;
+
+  if (render_page_fail_for_page_number_.has_value() &&
+      *render_page_fail_for_page_number_ == page.page_number()) {
+    return mojom::ResultCode::kFailed;
+  }
 
   // No-op.
   return mojom::ResultCode::kSuccess;

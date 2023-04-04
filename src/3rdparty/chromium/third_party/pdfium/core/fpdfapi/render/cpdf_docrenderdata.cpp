@@ -6,11 +6,12 @@
 
 #include "core/fpdfapi/render/cpdf_docrenderdata.h"
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <array>
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "core/fpdfapi/font/cpdf_type3font.h"
 #include "core/fpdfapi/page/cpdf_dib.h"
@@ -19,6 +20,7 @@
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/render/cpdf_type3cache.h"
+#include "core/fxcrt/fixed_uninit_data_vector.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "core/fxge/win32/cfx_psfonttracker.h"
@@ -52,7 +54,7 @@ RetainPtr<CPDF_Type3Cache> CPDF_DocRenderData::GetCachedType3(
 }
 
 RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::GetTransferFunc(
-    const CPDF_Object* pObj) {
+    RetainPtr<const CPDF_Object> pObj) {
   if (!pObj)
     return nullptr;
 
@@ -74,7 +76,7 @@ CFX_PSFontTracker* CPDF_DocRenderData::GetPSFontTracker() {
 #endif
 
 RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::CreateTransferFunc(
-    const CPDF_Object* pObj) const {
+    RetainPtr<const CPDF_Object> pObj) const {
   std::unique_ptr<CPDF_Function> pFuncs[3];
   const CPDF_Array* pArray = pObj->AsArray();
   if (pArray) {
@@ -96,17 +98,18 @@ RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::CreateTransferFunc(
   std::fill(std::begin(output), std::end(output), 0.0f);
 
   bool bIdentity = true;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> samples_r(
+  FixedUninitDataVector<uint8_t> samples_r(
       CPDF_TransferFunc::kChannelSampleSize);
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> samples_g(
+  FixedUninitDataVector<uint8_t> samples_g(
       CPDF_TransferFunc::kChannelSampleSize);
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> samples_b(
+  FixedUninitDataVector<uint8_t> samples_b(
       CPDF_TransferFunc::kChannelSampleSize);
-  std::array<pdfium::span<uint8_t>, 3> samples = {samples_r, samples_g,
-                                                  samples_b};
-  for (size_t v = 0; v < CPDF_TransferFunc::kChannelSampleSize; ++v) {
-    float input = static_cast<float>(v) / 255.0f;
-    if (pArray) {
+  std::array<pdfium::span<uint8_t>, 3> samples = {samples_r.writable_span(),
+                                                  samples_g.writable_span(),
+                                                  samples_b.writable_span()};
+  if (pArray) {
+    for (size_t v = 0; v < CPDF_TransferFunc::kChannelSampleSize; ++v) {
+      float input = static_cast<float>(v) / 255.0f;
       for (int i = 0; i < 3; ++i) {
         if (pFuncs[i]->CountOutputs() > kMaxOutputs) {
           samples[i][v] = v;
@@ -118,15 +121,18 @@ RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::CreateTransferFunc(
           bIdentity = false;
         samples[i][v] = o;
       }
-      continue;
     }
-    if (pFuncs[0]->CountOutputs() <= kMaxOutputs)
-      pFuncs[0]->Call(pdfium::make_span(&input, 1), output);
-    size_t o = FXSYS_roundf(output[0] * 255);
-    if (o != v)
-      bIdentity = false;
-    for (auto& channel : samples)
-      channel[v] = o;
+  } else {
+    for (size_t v = 0; v < CPDF_TransferFunc::kChannelSampleSize; ++v) {
+      float input = static_cast<float>(v) / 255.0f;
+      if (pFuncs[0]->CountOutputs() <= kMaxOutputs)
+        pFuncs[0]->Call(pdfium::make_span(&input, 1), output);
+      size_t o = FXSYS_roundf(output[0] * 255);
+      if (o != v)
+        bIdentity = false;
+      for (auto& channel : samples)
+        channel[v] = o;
+    }
   }
 
   return pdfium::MakeRetain<CPDF_TransferFunc>(bIdentity, std::move(samples_r),

@@ -147,6 +147,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             'vkCreateInstance',
             'vkCreateDevice',
             'vkEnumeratePhysicalDevices',
+            #'vkEnumeratePhysicalDeviceGroups',            
             'vkGetPhysicalDeviceQueueFamilyProperties',
             'vkGetPhysicalDeviceQueueFamilyProperties2',
             'vkGetPhysicalDeviceQueueFamilyProperties2KHR',
@@ -181,6 +182,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             'vkCmdBuildAccelerationStructuresIndirectKHR',
             'vkBuildAccelerationStructuresKHR',
             'vkCreateRayTracingPipelinesKHR',
+            'vkExportMetalObjectsEXT'
             ]
         # These VUIDS are not implicit, but are best handled in this layer. Codegen for vkDestroy calls will generate a key
         # which is translated here into a good VU.  Saves ~40 checks.
@@ -743,6 +745,13 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
                 indent = self.decIndent(indent)
                 create_obj_code += '%s}\n' % indent
             indent = self.decIndent(indent)
+        # Physical device groups are not handles, but a set of handles, they need to be tracked as well
+        elif handle_type.text == 'VkPhysicalDeviceGroupProperties':
+            create_obj_code += f"""{indent}if ({cmd_info[-1].name}) {{
+{indent}{indent}for (uint32_t device_group_index = 0; device_group_index < *{cmd_info[-2].name}; device_group_index++) {{
+{indent}{indent}{indent}PostCallRecordEnumeratePhysicalDevices({cmd_info[0].name}, &{cmd_info[-1].name}[device_group_index].physicalDeviceCount, {cmd_info[-1].name}[device_group_index].physicalDevices, VK_SUCCESS);
+{indent}{indent}}}
+{indent}}}\n"""
 
         return create_obj_code
 
@@ -1008,7 +1017,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             (pre_call_validate, pre_call_record, post_call_record) = self.generate_wrapping_code(cmdinfo.elem)
 
             feature_extra_protect = cmddata.extra_protect
-            if (feature_extra_protect is not None):
+            if (feature_extra_protect is not None and not (cmdname in self.no_autogen_list and 'object_tracker.cpp' in self.genOpts.filename)):
                 self.appendSection('command', '')
                 self.appendSection('command', '#ifdef '+ feature_extra_protect)
                 self.prototypes += [ '#ifdef %s' % feature_extra_protect ]
@@ -1079,9 +1088,13 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
 
                     if result_type.text == 'VkResult':
                         post_cr_func_decl = post_cr_func_decl.replace(')', ',\n    VkResult                                    result)')
+                        failure_condition = 'result != VK_SUCCESS'
+                        # VK_INCOMPLETE is considered a success
+                        if 'EnumeratePhysicalDeviceGroups' in cmdname:
+                            failure_condition += ' && result != VK_INCOMPLETE'
                         # The two createpipelines APIs may create on failure -- skip the success result check
                         if 'CreateGraphicsPipelines' not in cmdname and 'CreateComputePipelines' not in cmdname and 'CreateRayTracingPipelines' not in cmdname:
-                            post_cr_func_decl = post_cr_func_decl.replace('{', '{\n    if (result != VK_SUCCESS) return;')
+                            post_cr_func_decl = post_cr_func_decl.replace('{', '{\n    if (%s) return;' % failure_condition)
                     elif result_type.text == 'VkDeviceAddress':
                         post_cr_func_decl = post_cr_func_decl.replace(')', ',\n    VkDeviceAddress                             result)')
                     self.appendSection('command', post_cr_func_decl)
@@ -1089,6 +1102,6 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
                     self.appendSection('command', post_call_record)
                     self.appendSection('command', '}')
 
-            if (feature_extra_protect is not None):
+            if (feature_extra_protect is not None and not (cmdname in self.no_autogen_list and 'object_tracker.cpp' in self.genOpts.filename)):
                 self.appendSection('command', '#endif // '+ feature_extra_protect)
                 self.prototypes += [ '#endif' ]

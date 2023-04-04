@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,15 +92,15 @@ void BoxLayoutExample::UpdateLayoutManager() {
   int child_spacing;
   base::StringToInt(between_child_spacing_->GetText(), &child_spacing);
   layout_ = panel->SetLayoutManager(std::make_unique<BoxLayout>(
-      orientation_->GetSelectedIndex() == 0
+      orientation_->GetSelectedIndex() == 0u
           ? BoxLayout::Orientation::kHorizontal
           : BoxLayout::Orientation::kVertical,
       gfx::Insets(), child_spacing, collapse_margins_->GetChecked()));
 
   layout_->set_cross_axis_alignment(static_cast<BoxLayout::CrossAxisAlignment>(
-      cross_axis_alignment_->GetSelectedIndex()));
+      cross_axis_alignment_->GetSelectedIndex().value()));
   layout_->set_main_axis_alignment(static_cast<BoxLayout::MainAxisAlignment>(
-      main_axis_alignment_->GetSelectedIndex()));
+      main_axis_alignment_->GetSelectedIndex().value()));
 
   int default_flex;
   base::StringToInt(default_flex_->GetText(), &default_flex);
@@ -127,13 +127,13 @@ void BoxLayoutExample::UpdateBorderInsets() {
 
 void BoxLayoutExample::MainAxisAlignmentChanged() {
   layout_->set_main_axis_alignment(static_cast<BoxLayout::MainAxisAlignment>(
-      main_axis_alignment_->GetSelectedIndex()));
+      main_axis_alignment_->GetSelectedIndex().value()));
   RefreshLayoutPanel(false);
 }
 
 void BoxLayoutExample::CrossAxisAlignmentChanged() {
   layout_->set_cross_axis_alignment(static_cast<BoxLayout::CrossAxisAlignment>(
-      cross_axis_alignment_->GetSelectedIndex()));
+      cross_axis_alignment_->GetSelectedIndex().value()));
   RefreshLayoutPanel(false);
 }
 

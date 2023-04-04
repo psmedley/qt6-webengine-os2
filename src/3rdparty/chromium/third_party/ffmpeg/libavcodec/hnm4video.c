@@ -29,7 +29,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 #define HNM4_CHUNK_ID_PL 19536
 #define HNM4_CHUNK_ID_IZ 23113
@@ -64,7 +64,7 @@ static int getbit(GetByteContext *gb, uint32_t *bitbuf, int *bits)
     return ret;
 }
 
-static void unpack_intraframe(AVCodecContext *avctx, uint8_t *src,
+static void unpack_intraframe(AVCodecContext *avctx, const uint8_t *src,
                               uint32_t size)
 {
     Hnm4VideoContext *hnm = avctx->priv_data;
@@ -147,7 +147,7 @@ static void copy_processed_frame(AVCodecContext *avctx, AVFrame *frame)
     }
 }
 
-static int decode_interframe_v4(AVCodecContext *avctx, uint8_t *src, uint32_t size)
+static int decode_interframe_v4(AVCodecContext *avctx, const uint8_t *src, uint32_t size)
 {
     Hnm4VideoContext *hnm = avctx->priv_data;
     GetByteContext gb;
@@ -276,7 +276,7 @@ static int decode_interframe_v4(AVCodecContext *avctx, uint8_t *src, uint32_t si
     return 0;
 }
 
-static void decode_interframe_v4a(AVCodecContext *avctx, uint8_t *src,
+static void decode_interframe_v4a(AVCodecContext *avctx, const uint8_t *src,
                                   uint32_t size)
 {
     Hnm4VideoContext *hnm = avctx->priv_data;
@@ -355,7 +355,7 @@ static void decode_interframe_v4a(AVCodecContext *avctx, uint8_t *src,
     }
 }
 
-static void hnm_update_palette(AVCodecContext *avctx, uint8_t *src,
+static void hnm_update_palette(AVCodecContext *avctx, const uint8_t *src,
                                uint32_t size)
 {
     Hnm4VideoContext *hnm = avctx->priv_data;
@@ -388,10 +388,9 @@ static void hnm_update_palette(AVCodecContext *avctx, uint8_t *src,
     }
 }
 
-static int hnm_decode_frame(AVCodecContext *avctx, void *data,
+static int hnm_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                             int *got_frame, AVPacket *avpkt)
 {
-    AVFrame *frame = data;
     Hnm4VideoContext *hnm = avctx->priv_data;
     int ret;
     uint16_t chunk_id;
@@ -500,13 +499,13 @@ static av_cold int hnm_decode_end(AVCodecContext *avctx)
 
 const FFCodec ff_hnm4_video_decoder = {
     .p.name         = "hnm4video",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("HNM 4 video"),
+    CODEC_LONG_NAME("HNM 4 video"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_HNM4_VIDEO,
     .priv_data_size = sizeof(Hnm4VideoContext),
     .init           = hnm_decode_init,
     .close          = hnm_decode_end,
-    .decode         = hnm_decode_frame,
+    FF_CODEC_DECODE_CB(hnm_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

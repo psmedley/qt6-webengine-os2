@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,6 +75,7 @@ StabilityMetricsHelper::StabilityMetricsHelper(PrefService* local_state)
 
 StabilityMetricsHelper::~StabilityMetricsHelper() {}
 
+#if BUILDFLAG(IS_ANDROID)
 void StabilityMetricsHelper::ProvideStabilityMetrics(
     SystemProfileProto* system_profile_proto) {
   SystemProfileProto_Stability* stability_proto =
@@ -85,60 +86,32 @@ void StabilityMetricsHelper::ProvideStabilityMetrics(
     stability_proto->set_page_load_count(count);
     local_state_->SetInteger(prefs::kStabilityPageLoadCount, 0);
   }
-
-  count = local_state_->GetInteger(prefs::kStabilityGpuCrashCount);
-  if (count) {
-    stability_proto->set_gpu_crash_count(count);
-    local_state_->SetInteger(prefs::kStabilityGpuCrashCount, 0);
-  }
-
-  count = local_state_->GetInteger(prefs::kStabilityRendererCrashCount);
-  if (count) {
-    stability_proto->set_renderer_crash_count(count);
-    local_state_->SetInteger(prefs::kStabilityRendererCrashCount, 0);
-  }
-
   count = local_state_->GetInteger(prefs::kStabilityRendererLaunchCount);
   if (count) {
     stability_proto->set_renderer_launch_count(count);
     local_state_->SetInteger(prefs::kStabilityRendererLaunchCount, 0);
   }
-
-  count =
-      local_state_->GetInteger(prefs::kStabilityExtensionRendererCrashCount);
-  if (count) {
-    stability_proto->set_extension_renderer_crash_count(count);
-    local_state_->SetInteger(prefs::kStabilityExtensionRendererCrashCount, 0);
-  }
 }
 
 void StabilityMetricsHelper::ClearSavedStabilityMetrics() {
-  // Clear all the prefs used in this class in UMA reports.
-  local_state_->SetInteger(prefs::kStabilityExtensionRendererCrashCount, 0);
-  local_state_->SetInteger(prefs::kStabilityGpuCrashCount, 0);
   local_state_->SetInteger(prefs::kStabilityPageLoadCount, 0);
-  local_state_->SetInteger(prefs::kStabilityRendererCrashCount, 0);
   local_state_->SetInteger(prefs::kStabilityRendererLaunchCount, 0);
 }
+#endif  // BUILDFLAG(IS_ANDROID)
 
 // static
 void StabilityMetricsHelper::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterIntegerPref(prefs::kStabilityExtensionRendererCrashCount,
-                                0);
-  registry->RegisterIntegerPref(prefs::kStabilityGpuCrashCount, 0);
+#if BUILDFLAG(IS_ANDROID)
   registry->RegisterIntegerPref(prefs::kStabilityPageLoadCount, 0);
-  registry->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityRendererLaunchCount, 0);
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void StabilityMetricsHelper::IncreaseRendererCrashCount() {
-  IncrementPrefValue(prefs::kStabilityRendererCrashCount);
   RecordStabilityEvent(StabilityEventType::kRendererCrash);
 }
 
 void StabilityMetricsHelper::IncreaseGpuCrashCount() {
-  IncrementPrefValue(prefs::kStabilityGpuCrashCount);
-  local_state_->CommitPendingWrite();  // Schedule a Local State write.
   RecordStabilityEvent(StabilityEventType::kGpuCrash);
 }
 
@@ -181,7 +154,9 @@ void StabilityMetricsHelper::BrowserUtilityProcessLaunchFailed(
 }
 
 void StabilityMetricsHelper::LogLoadStarted() {
+#if BUILDFLAG(IS_ANDROID)
   IncrementPrefValue(prefs::kStabilityPageLoadCount);
+#endif
   RecordStabilityEvent(StabilityEventType::kPageLoad);
 }
 
@@ -202,14 +177,11 @@ void StabilityMetricsHelper::LogRendererCrash(bool was_extension_process,
 #if !BUILDFLAG(ENABLE_EXTENSIONS)
         NOTREACHED();
 #endif
-        IncrementPrefValue(prefs::kStabilityExtensionRendererCrashCount);
         RecordStabilityEvent(StabilityEventType::kExtensionCrash);
-
         base::UmaHistogramSparse("CrashExitCodes.Extension",
                                  MapCrashExitCodeForHistogram(exit_code));
       } else {
         IncreaseRendererCrashCount();
-
         base::UmaHistogramSparse("CrashExitCodes.Renderer",
                                  MapCrashExitCodeForHistogram(exit_code));
       }
@@ -264,8 +236,10 @@ void StabilityMetricsHelper::LogRendererLaunched(bool was_extension_process) {
                     ? StabilityEventType::kExtensionRendererLaunch
                     : StabilityEventType::kRendererLaunch;
   RecordStabilityEvent(metric);
+#if BUILDFLAG(IS_ANDROID)
   if (!was_extension_process)
     IncrementPrefValue(prefs::kStabilityRendererLaunchCount);
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void StabilityMetricsHelper::LogRendererLaunchFailed(

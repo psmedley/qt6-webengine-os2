@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,11 +38,8 @@ const NGLayoutResult* NGMathTokenLayoutAlgorithm::Layout() {
   LayoutUnit ascent = BorderScrollbarPadding().block_start + ink_ascent;
   LayoutUnit descent = ink_descent + BorderScrollbarPadding().block_end;
 
-  NGInlineChildLayoutContext context;
-  NGFragmentItemsBuilder items_builder(
-      To<NGInlineNode>(child), container_builder_.GetWritingDirection());
-  container_builder_.SetItemsBuilder(&items_builder);
-  context.SetItemsBuilder(&items_builder);
+  NGInlineChildLayoutContext context(To<NGInlineNode>(child),
+                                     &container_builder_);
   const NGLayoutResult* child_layout_result = To<NGInlineNode>(child).Layout(
       ConstraintSpace(), /* break_token */ nullptr,
       /* column_spanner_path */ nullptr, &context);
@@ -58,7 +55,7 @@ const NGLayoutResult* NGMathTokenLayoutAlgorithm::Layout() {
   LayoutUnit block_size = ComputeBlockSizeForFragment(
       ConstraintSpace(), Style(), BorderPadding(), intrinsic_block_size,
       container_builder_.InitialBorderBoxSize().inline_size);
-  container_builder_.SetBaseline(ascent);
+  container_builder_.SetBaselines(ascent);
   container_builder_.SetIntrinsicBlockSize(intrinsic_block_size);
   container_builder_.SetFragmentsTotalBlockSize(block_size);
 

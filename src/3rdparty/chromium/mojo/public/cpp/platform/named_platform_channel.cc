@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,15 @@ void NamedPlatformChannel::PassServerNameOnCommandLine(
 PlatformChannelEndpoint NamedPlatformChannel::ConnectToServer(
     const ServerName& server_name) {
   DCHECK(!server_name.empty());
-  return CreateClientEndpoint(server_name);
+  Options options = {/*.server_name =*/ server_name};
+  return CreateClientEndpoint(options);
+}
+
+// static
+PlatformChannelEndpoint NamedPlatformChannel::ConnectToServer(
+    const Options& options) {
+  DCHECK(!options.server_name.empty());
+  return CreateClientEndpoint(options);
 }
 
 // static

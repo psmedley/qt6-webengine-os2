@@ -17,7 +17,9 @@
 #include "src/core/SkSafeMath.h"
 
 SkEdgeBuilder::Combine SkBasicEdgeBuilder::combineVertical(const SkEdge* edge, SkEdge* last) {
-    if (last->fCurveCount || last->fDX || edge->fX != last->fX) {
+    // We only consider edges that were originally lines to be vertical to avoid numerical issues
+    // (crbug.com/1154864).
+    if (last->fEdgeType != SkEdge::kLine_Type || last->fDX || edge->fX != last->fX) {
         return kNo_Combine;
     }
     if (edge->fWinding == last->fWinding) {
@@ -63,7 +65,9 @@ SkEdgeBuilder::Combine SkAnalyticEdgeBuilder::combineVertical(const SkAnalyticEd
         return SkAbs32(a - b) < 0x100;
     };
 
-    if (last->fCurveCount || last->fDX || edge->fX != last->fX) {
+    // We only consider edges that were originally lines to be vertical to avoid numerical issues
+    // (crbug.com/1154864).
+    if (last->fEdgeType != SkAnalyticEdge::kLine_Type || last->fDX || edge->fX != last->fX) {
         return kNo_Combine;
     }
     if (edge->fWinding == last->fWinding) {
@@ -109,8 +113,10 @@ SkEdgeBuilder::Combine SkAnalyticEdgeBuilder::combineVertical(const SkAnalyticEd
 
 template <typename Edge>
 static bool is_vertical(const Edge* edge) {
-    return edge->fDX         == 0
-        && edge->fCurveCount == 0;
+    // We only consider edges that were originally lines to be vertical to avoid numerical issues
+    // (crbug.com/1154864).
+    return edge->fDX       == 0
+        && edge->fEdgeType == Edge::kLine_Type;
 }
 
 // TODO: we can deallocate the edge if edge->setFoo() fails
@@ -120,11 +126,11 @@ void SkBasicEdgeBuilder::addLine(const SkPoint pts[]) {
     SkEdge* edge = fAlloc.make<SkEdge>();
     if (edge->setLine(pts[0], pts[1], fClipShift)) {
         Combine combine = is_vertical(edge) && !fList.empty()
-            ? this->combineVertical(edge, (SkEdge*)fList.top())
+            ? this->combineVertical(edge, (SkEdge*)fList.back())
             : kNo_Combine;
 
         switch (combine) {
-            case kTotal_Combine:    fList.pop();           break;
+            case kTotal_Combine:    fList.pop_back();      break;
             case kPartial_Combine:                         break;
             case kNo_Combine:       fList.push_back(edge); break;
         }
@@ -135,11 +141,11 @@ void SkAnalyticEdgeBuilder::addLine(const SkPoint pts[]) {
     if (edge->setLine(pts[0], pts[1])) {
 
         Combine combine = is_vertical(edge) && !fList.empty()
-            ? this->combineVertical(edge, (SkAnalyticEdge*)fList.top())
+            ? this->combineVertical(edge, (SkAnalyticEdge*)fList.back())
             : kNo_Combine;
 
         switch (combine) {
-            case kTotal_Combine:    fList.pop();           break;
+            case kTotal_Combine:    fList.pop_back();      break;
             case kPartial_Combine:                         break;
             case kNo_Combine:       fList.push_back(edge); break;
         }
@@ -357,7 +363,7 @@ int SkEdgeBuilder::build(const SkPath& path, const SkIRect* iclip, bool canCullT
         }
     }
     fEdgeList = fList.begin();
-    return is_finite ? fList.count() : 0;
+    return is_finite ? fList.size() : 0;
 }
 
 int SkEdgeBuilder::buildEdges(const SkPath& path,

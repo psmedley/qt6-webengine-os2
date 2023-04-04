@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
@@ -28,9 +29,11 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/url_constants.h"
+#include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "ui/base/theme_provider.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/webui/color_change_listener/color_change_handler.h"
 
 // These data types must be in all lowercase.
 const char kWebUITabIdDataType[] = "application/vnd.chromium.tab";
@@ -50,16 +53,12 @@ TabStripUI::TabStripUI(content::WebUI* web_ui)
   webui::SetupWebUIDataSource(
       html_source, base::make_span(kTabStripResources, kTabStripResourcesSize),
       IDR_TAB_STRIP_TAB_STRIP_HTML);
+  html_source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::TrustedTypes,
+      "trusted-types static-types;");
 
   html_source->AddString("tabIdDataType", kWebUITabIdDataType);
   html_source->AddString("tabGroupIdDataType", kWebUITabGroupIdDataType);
-
-  // Add a load time string for the frame color to allow the tab strip to paint
-  // a background color that matches the frame before any content loads.
-  const auto& color_provider = web_ui->GetWebContents()->GetColorProvider();
-  const SkColor frame_color = color_provider.GetColor(ui::kColorFrameActive);
-  html_source->AddString("frameColor",
-                         color_utils::SkColorToRgbaString(frame_color));
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"tabListTitle", IDS_ACCNAME_TAB_LIST},
@@ -101,6 +100,12 @@ void TabStripUI::BindInterface(
   page_factory_receiver_.Bind(std::move(receiver));
 }
 
+void TabStripUI::BindInterface(
+    mojo::PendingReceiver<color_change_listener::mojom::PageHandler> receiver) {
+  color_provider_handler_ = std::make_unique<ui::ColorChangeHandler>(
+      web_ui()->GetWebContents(), std::move(receiver));
+}
+
 void TabStripUI::CreatePageHandler(
     mojo::PendingRemote<tab_strip::mojom::Page> page,
     mojo::PendingReceiver<tab_strip::mojom::PageHandler> receiver) {
@@ -118,6 +123,14 @@ void TabStripUI::Initialize(Browser* browser, TabStripUIEmbedder* embedder) {
   DCHECK_EQ(Profile::FromWebUI(web_ui), browser->profile());
   browser_ = browser;
   embedder_ = embedder;
+}
+
+void TabStripUI::Deinitialize() {
+  page_handler_.reset();
+  DCHECK(browser_);
+  DCHECK(embedder_);
+  browser_ = nullptr;
+  embedder_ = nullptr;
 }
 
 void TabStripUI::LayoutChanged() {

@@ -86,7 +86,7 @@ struct FontCacheKey {
       options_,
       device_scale_factor_hash,
 #if BUILDFLAG(IS_ANDROID)
-      (locale_.IsEmpty() ? 0 : AtomicStringHash::GetHash(locale_)) ^
+      (locale_.empty() ? 0 : AtomicStringHash::GetHash(locale_)) ^
 #endif  // BUILDFLAG(IS_ANDROID)
           (variation_settings_ ? variation_settings_->GetHash() : 0),
       palette_ ? palette_->GetHash() : 0,
@@ -183,5 +183,12 @@ struct HashTraits<blink::FontCacheKey>
 };
 
 }  // namespace WTF
+
+template <>
+struct std::hash<blink::FontCacheKey> {
+  std::size_t operator()(blink::FontCacheKey const& s) const noexcept {
+    return static_cast<size_t>(s.GetHash());
+  }
+};
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_CACHE_KEY_H_

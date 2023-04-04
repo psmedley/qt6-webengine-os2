@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,9 +41,9 @@ namespace {
 // When this is enabled, the browser will schedule
 // ServiceWorkerStorageControl's response in a kHighest priority
 // queue during startup. After startup, it has a normal priority.
-const base::Feature kServiceWorkerStorageControlResponseQueue{
-    "ServiceWorkerStorageControlResponseQueue",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kServiceWorkerStorageControlResponseQueue,
+             "ServiceWorkerStorageControlResponseQueue",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 blink::ServiceWorkerStatusCode DatabaseStatusToStatusCode(
     storage::mojom::ServiceWorkerDatabaseStatus status) {
@@ -184,37 +184,44 @@ ServiceWorkerRegistry::~ServiceWorkerRegistry() = default;
 void ServiceWorkerRegistry::CreateNewRegistration(
     blink::mojom::ServiceWorkerRegistrationOptions options,
     const blink::StorageKey& key,
+    blink::mojom::AncestorFrameType ancestor_frame_type,
     NewRegistrationCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (quota_manager_proxy_) {
     // Can be nullptr in tests.
-    quota_manager_proxy_->GetOrCreateBucket(
-        key, storage::kDefaultBucketName, base::ThreadTaskRunnerHandle::Get(),
+    quota_manager_proxy_->UpdateOrCreateBucket(
+        storage::BucketInitParams::ForDefaultBucket(key),
+        base::ThreadTaskRunnerHandle::Get(),
         base::BindOnce(
             &ServiceWorkerRegistry::CreateNewRegistrationWithBucketInfo,
             weak_factory_.GetWeakPtr(), std::move(options), key,
-            std::move(callback)));
+            ancestor_frame_type, std::move(callback)));
   } else {
     CreateInvokerAndStartRemoteCall(
         &storage::mojom::ServiceWorkerStorageControl::GetNewRegistrationId,
         base::BindOnce(&ServiceWorkerRegistry::DidGetNewRegistrationId,
                        weak_factory_.GetWeakPtr(), std::move(options), key,
-                       std::move(callback)));
+                       ancestor_frame_type, std::move(callback)));
   }
 }
 
 void ServiceWorkerRegistry::CreateNewRegistrationWithBucketInfo(
     blink::mojom::ServiceWorkerRegistrationOptions options,
     const blink::StorageKey& key,
+    blink::mojom::AncestorFrameType ancestor_frame_type,
     NewRegistrationCallback callback,
     storage::QuotaErrorOr<storage::BucketInfo> result) {
-  DCHECK(result.ok());
+  // Return nullptr if `UpdateOrCreateBucket` fails.
+  if (!result.ok()) {
+    std::move(callback).Run(nullptr);
+    return;
+  }
   CreateInvokerAndStartRemoteCall(
       &storage::mojom::ServiceWorkerStorageControl::GetNewRegistrationId,
       base::BindOnce(&ServiceWorkerRegistry::DidGetNewRegistrationId,
                      weak_factory_.GetWeakPtr(), std::move(options), key,
-                     std::move(callback)));
+                     ancestor_frame_type, std::move(callback)));
 }
 
 void ServiceWorkerRegistry::CreateNewVersion(
@@ -386,8 +393,7 @@ void ServiceWorkerRegistry::StoreRegistration(
   data->script = version->script_url();
   data->script_type = version->script_type();
   data->update_via_cache = registration->update_via_cache();
-  data->has_fetch_handler = version->fetch_handler_existence() ==
-                            ServiceWorkerVersion::FetchHandlerExistence::EXISTS;
+  data->fetch_handler_type = version->fetch_handler_type();
   data->version_id = version->version_id();
   data->last_update_check = registration->last_update_check();
   data->is_active = (version == registration->active_version());
@@ -401,12 +407,20 @@ void ServiceWorkerRegistry::StoreRegistration(
   data->script_response_time = version->GetInfo().script_response_time;
   for (const blink::mojom::WebFeature feature : version->used_features())
     data->used_features.push_back(feature);
+  data->ancestor_frame_type = registration->ancestor_frame_type();
 
   // The ServiceWorkerVersion's COEP might be null if it is stored before
   // loading the main script. This happens in many unittests.
   if (version->cross_origin_embedder_policy()) {
     data->cross_origin_embedder_policy =
         *version->cross_origin_embedder_policy();
+  }
+  data->policy_container_policies =
+      blink::mojom::PolicyContainerPolicies::New();
+  if (version->policy_container_host()) {
+    data->policy_container_policies = version->policy_container_host()
+                                          ->policies()
+                                          .ToMojoPolicyContainerPolicies();
   }
 
   ResourceList resources;
@@ -547,6 +561,21 @@ void ServiceWorkerRegistry::UpdateNavigationPreloadHeader(
       base::BindOnce(&ServiceWorkerRegistry::DidUpdateRegistration,
                      weak_factory_.GetWeakPtr(), std::move(callback)),
       static_cast<const int64_t>(registration_id), key, value);
+}
+
+void ServiceWorkerRegistry::UpdateFetchHandlerType(
+    int64_t registration_id,
+    const blink::StorageKey& key,
+    blink::mojom::ServiceWorkerFetchHandlerType fetch_handler_type,
+    StatusCallback callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CreateInvokerAndStartRemoteCall(
+      &storage::mojom::ServiceWorkerStorageControl::UpdateFetchHandlerType,
+      base::BindOnce(&ServiceWorkerRegistry::DidUpdateRegistration,
+                     weak_factory_.GetWeakPtr(), std::move(callback)),
+      static_cast<const int64_t>(registration_id), key,
+      static_cast<const blink::mojom::ServiceWorkerFetchHandlerType>(
+          fetch_handler_type));
 }
 
 void ServiceWorkerRegistry::StoreUncommittedResourceId(
@@ -863,7 +892,8 @@ ServiceWorkerRegistry::GetOrCreateRegistration(
   blink::mojom::ServiceWorkerRegistrationOptions options(
       data.scope, data.script_type, data.update_via_cache);
   registration = base::MakeRefCounted<ServiceWorkerRegistration>(
-      options, data.key, data.registration_id, context_->AsWeakPtr());
+      options, data.key, data.registration_id, context_->AsWeakPtr(),
+      data.ancestor_frame_type);
   registration->SetStored();
   registration->set_resources_total_size_bytes(data.resources_total_size_bytes);
   registration->set_last_update_check(data.last_update_check);
@@ -875,10 +905,7 @@ ServiceWorkerRegistry::GetOrCreateRegistration(
     version = base::MakeRefCounted<ServiceWorkerVersion>(
         registration.get(), data.script, data.script_type, data.version_id,
         std::move(version_reference), context_->AsWeakPtr());
-    version->set_fetch_handler_existence(
-        data.has_fetch_handler
-            ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
-            : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST);
+    version->set_fetch_handler_type(data.fetch_handler_type);
     version->SetStatus(data.is_active ? ServiceWorkerVersion::ACTIVATED
                                       : ServiceWorkerVersion::INSTALLED);
     version->script_cache_map()->SetResources(resources);
@@ -890,6 +917,12 @@ ServiceWorkerRegistry::GetOrCreateRegistration(
     version->set_used_features(std::move(used_features));
     version->set_cross_origin_embedder_policy(
         data.cross_origin_embedder_policy);
+    // policy_container_host could be null for registration restored from old DB
+    if (data.policy_container_policies) {
+      version->set_policy_container_host(
+          base::MakeRefCounted<PolicyContainerHost>(
+              PolicyContainerPolicies(*data.policy_container_policies)));
+    }
   }
   version->set_script_response_time_for_devtools(data.script_response_time);
 
@@ -1185,10 +1218,8 @@ void ServiceWorkerRegistry::DidGetAllRegistrations(
       info.active_version.registration_id = registration_data->registration_id;
       info.active_version.script_response_time =
           registration_data->script_response_time;
-      info.active_version.fetch_handler_existence =
-          registration_data->has_fetch_handler
-              ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
-              : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST;
+      info.active_version.fetch_handler_type =
+          registration_data->fetch_handler_type;
       info.active_version.navigation_preload_state.enabled =
           registration_data->navigation_preload_state->enabled;
       info.active_version.navigation_preload_state.header =
@@ -1200,10 +1231,8 @@ void ServiceWorkerRegistry::DidGetAllRegistrations(
       info.waiting_version.registration_id = registration_data->registration_id;
       info.waiting_version.script_response_time =
           registration_data->script_response_time;
-      info.waiting_version.fetch_handler_existence =
-          registration_data->has_fetch_handler
-              ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
-              : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST;
+      info.waiting_version.fetch_handler_type =
+          registration_data->fetch_handler_type;
       info.waiting_version.navigation_preload_state.enabled =
           registration_data->navigation_preload_state->enabled;
       info.waiting_version.navigation_preload_state.header =
@@ -1421,6 +1450,7 @@ void ServiceWorkerRegistry::DidGetUserDataForAllRegistrations(
 void ServiceWorkerRegistry::DidGetNewRegistrationId(
     blink::mojom::ServiceWorkerRegistrationOptions options,
     const blink::StorageKey& key,
+    blink::mojom::AncestorFrameType ancestor_frame_type,
     NewRegistrationCallback callback,
     int64_t registration_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -1429,7 +1459,8 @@ void ServiceWorkerRegistry::DidGetNewRegistrationId(
     return;
   }
   std::move(callback).Run(base::MakeRefCounted<ServiceWorkerRegistration>(
-      std::move(options), key, registration_id, context_->AsWeakPtr()));
+      std::move(options), key, registration_id, context_->AsWeakPtr(),
+      ancestor_frame_type));
 }
 
 void ServiceWorkerRegistry::DidGetNewVersionId(

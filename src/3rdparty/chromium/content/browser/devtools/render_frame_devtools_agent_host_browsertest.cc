@@ -1,14 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
+
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_agent_host_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_base.h"
@@ -205,6 +207,10 @@ class RenderFrameDevToolsAgentHostFencedFrameBrowserTest
     return fenced_frame_helper_;
   }
 
+  bool IsCrashed(RenderFrameDevToolsAgentHost* rfh_devtools_agent) {
+    return rfh_devtools_agent->render_frame_crashed_;
+  }
+
  private:
   content::test::FencedFrameTestHelper fenced_frame_helper_;
 };
@@ -226,11 +232,61 @@ IN_PROC_BROWSER_TEST_F(RenderFrameDevToolsAgentHostFencedFrameBrowserTest,
   content::RenderFrameHostImpl* fenced_frame_host =
       static_cast<content::RenderFrameHostImpl*>(
           fenced_frame_test_helper().CreateFencedFrame(
-              shell()->web_contents()->GetMainFrame(), fenced_frame_url));
+              shell()->web_contents()->GetPrimaryMainFrame(),
+              fenced_frame_url));
   ASSERT_TRUE(fenced_frame_host);
   // The client should be detached by the fenced frame calling
   // OnNavigationRequestWillBeSent through the outer document.
   EXPECT_FALSE(devtools_agent_host->IsAttached());
+}
+
+IN_PROC_BROWSER_TEST_F(RenderFrameDevToolsAgentHostFencedFrameBrowserTest,
+                       PageCrashInFencedFrame) {
+  // Ensure all sites get dedicated processes during the test.
+  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
+
+  GURL url = embedded_test_server()->GetURL("a.com", "/title1.html");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Create a fenced frame.
+  const GURL fenced_frame_url =
+      embedded_test_server()->GetURL("b.com", "/fenced_frames/title1.html");
+
+  RenderFrameHostImpl* fenced_frame_host =
+      static_cast<content::RenderFrameHostImpl*>(
+          fenced_frame_test_helper().CreateFencedFrame(
+              shell()->web_contents()->GetPrimaryMainFrame(),
+              fenced_frame_url));
+  ASSERT_TRUE(fenced_frame_host);
+
+  // Terminate the fenced frame process.
+  {
+    RenderProcessHostWatcher termination_observer(
+        fenced_frame_host->GetProcess(),
+        RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
+    EXPECT_TRUE(
+        fenced_frame_host->GetProcess()->Shutdown(content::RESULT_CODE_KILLED));
+    termination_observer.Wait();
+  }
+  EXPECT_FALSE(fenced_frame_host->IsRenderFrameLive());
+
+  // Open DevTools.
+  scoped_refptr<DevToolsAgentHost> devtools_agent =
+      RenderFrameDevToolsAgentHost::GetOrCreateFor(
+          static_cast<RenderFrameHostImpl*>(
+              shell()->web_contents()->GetPrimaryMainFrame())
+              ->frame_tree_node());
+  RenderFrameDevToolsAgentHost* main_rfh_devtools_agent =
+      static_cast<RenderFrameDevToolsAgentHost*>(devtools_agent.get());
+
+  scoped_refptr<DevToolsAgentHost> ff_devtools_agent =
+      RenderFrameDevToolsAgentHost::GetOrCreateFor(
+          fenced_frame_host->frame_tree_node());
+  RenderFrameDevToolsAgentHost* ff_rfh_devtools_agent =
+      static_cast<RenderFrameDevToolsAgentHost*>(ff_devtools_agent.get());
+
+  EXPECT_FALSE(IsCrashed(main_rfh_devtools_agent));
+  EXPECT_TRUE(IsCrashed(ff_rfh_devtools_agent));
 }
 
 }  // namespace content

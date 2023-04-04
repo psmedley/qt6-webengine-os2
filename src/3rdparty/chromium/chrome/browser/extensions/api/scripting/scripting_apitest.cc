@@ -1,7 +1,8 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
 #include "chrome/browser/extensions/api/scripting/scripting_api.h"
 
 #include "base/test/bind.h"
@@ -16,7 +17,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/prerender_test_util.h"
 #include "content/public/test/test_navigation_observer.h"
+#include "extensions/browser/background_script_executor.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -244,9 +247,9 @@ IN_PROC_BROWSER_TEST_F(ScriptingAPITest, ExecuteScriptBeforeInitialCommit) {
 
     // Now we check the function call returned what we expected in the result.
     ASSERT_TRUE(result.get());
-    ASSERT_EQ(1u, result->GetListDeprecated().size());
+    ASSERT_EQ(1u, result->GetList().size());
     const std::string* result_returned =
-        result->GetListDeprecated()[0].FindStringKey("result");
+        result->GetList()[0].FindStringKey("result");
     EXPECT_EQ("Modified Title", *result_returned);
 
     // We also check that the tab itself was modified by the call.
@@ -391,25 +394,18 @@ IN_PROC_BROWSER_TEST_F(ScriptingAPITest, InjectImmediately) {
 
   // A helper function to run the script in the worker context.
   auto run_script_in_worker = [this, extension](const std::string& script) {
-    base::RunLoop run_loop;
-    base::Value value_out;
-    auto callback = [&run_loop, &value_out](base::Value value) {
-      value_out = std::move(value);
-      run_loop.Quit();
-    };
-
-    browsertest_util::ExecuteScriptInServiceWorker(
+    return BackgroundScriptExecutor::ExecuteScript(
         profile(), extension->id(), script,
-        base::BindLambdaForTesting(callback));
-    run_loop.Run();
-    return value_out;
+        BackgroundScriptExecutor::ResultCapture::kSendScriptResult);
   };
 
   auto get_default_result = [run_script_in_worker]() {
-    return run_script_in_worker("self.defaultResult;");
+    return run_script_in_worker(
+        "chrome.test.sendScriptResult(self.defaultResult);");
   };
   auto get_immediate_result = [run_script_in_worker]() {
-    return run_script_in_worker("self.immediateResult;");
+    return run_script_in_worker(
+        "chrome.test.sendScriptResult(self.immediateResult);");
   };
 
   // Send back some HTML for the request (this can only be done once the
@@ -421,11 +417,10 @@ IN_PROC_BROWSER_TEST_F(ScriptingAPITest, InjectImmediately) {
 
   EXPECT_TRUE(web_contents->IsLoading());
 
-  ExtensionTestMessageListener immediate_listener("immediate complete",
-                                                  /*will_reply=*/false);
-  ExtensionTestMessageListener default_listener("default complete",
-                                                /*will_reply=*/false);
-  run_script_in_worker(base::StringPrintf(kInjectScripts, tab_id));
+  ExtensionTestMessageListener immediate_listener("immediate complete");
+  ExtensionTestMessageListener default_listener("default complete");
+  BackgroundScriptExecutor::ExecuteScriptAsync(
+      profile(), extension->id(), base::StringPrintf(kInjectScripts, tab_id));
 
   // The script with immediate injection should finish (but it's still round
   // trips to the browser and renderer, so it won't be synchronous).
@@ -461,7 +456,8 @@ class PersistentScriptingAPITest : public ScriptingAPITest {
     // race condition where the extension loads (as part of browser startup) and
     // sends a message before a message listener in C++ has been initialized.
 
-    listener_ = std::make_unique<ExtensionTestMessageListener>("ready", true);
+    listener_ = std::make_unique<ExtensionTestMessageListener>(
+        "ready", ReplyBehavior::kWillReply);
     ScriptingAPITest::SetUp();
   }
 
@@ -512,6 +508,25 @@ IN_PROC_BROWSER_TEST_F(PersistentScriptingAPITest,
   listener_->Reply(
       testing::UnitTest::GetInstance()->current_test_info()->name());
   EXPECT_TRUE(result_catcher_.GetNextResult()) << result_catcher_.message();
+}
+
+class ScriptingAPIPrerenderingTest : public ScriptingAPITest {
+ protected:
+  ScriptingAPIPrerenderingTest() = default;
+  ~ScriptingAPIPrerenderingTest() override = default;
+
+ private:
+  content::test::ScopedPrerenderFeatureList scoped_feature_list_;
+};
+
+// TODO(crbug.com/1351648): disabled on Mac due to flakiness.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_Basic DISABLED_Basic
+#else  // BUILDFLAG(IS_MAC)
+#define MAYBE_Basic Basic
+#endif  // BUILDFLAG(IS_MAC)
+IN_PROC_BROWSER_TEST_F(ScriptingAPIPrerenderingTest, MAYBE_Basic) {
+  ASSERT_TRUE(RunExtensionTest("scripting/prerendering")) << message_;
 }
 
 }  // namespace extensions

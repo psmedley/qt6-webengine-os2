@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,16 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
+
+// Subclass PrintJob to allow construction without supplying a PrintJobManager
+// instance.
+class PrintJobForTesting : public printing::PrintJob {
+ public:
+  PrintJobForTesting() = default;
+
+ private:
+  ~PrintJobForTesting() override = default;
+};
 
 FakePrintJobControllerAsh::FakePrintJobControllerAsh(
     ash::TestCupsPrintJobManager* print_job_manager,
@@ -60,7 +70,7 @@ scoped_refptr<printing::PrintJob> FakePrintJobControllerAsh::StartPrintJob(
     const std::string& extension_id,
     std::unique_ptr<printing::MetafileSkia> metafile,
     std::unique_ptr<printing::PrintSettings> settings) {
-  auto job = base::MakeRefCounted<printing::PrintJob>();
+  auto job = base::MakeRefCounted<PrintJobForTesting>();
   content::GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE, base::BindOnce(&FakePrintJobControllerAsh::StartPrinting,
                                 weak_ptr_factory_.GetWeakPtr(), job,

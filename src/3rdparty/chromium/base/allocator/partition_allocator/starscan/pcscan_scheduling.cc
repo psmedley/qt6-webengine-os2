@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 #include <algorithm>
 #include <atomic>
 
+#include "base/allocator/partition_allocator/partition_alloc_base/compiler_specific.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/time/time.h"
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "base/allocator/partition_allocator/partition_alloc_hooks.h"
 #include "base/allocator/partition_allocator/partition_lock.h"
 #include "base/allocator/partition_allocator/starscan/logging.h"
 #include "base/allocator/partition_allocator/starscan/pcscan.h"
-#include "base/bind.h"
-#include "base/time/time.h"
 
 namespace partition_alloc::internal {
 
@@ -33,8 +33,7 @@ void PCScanSchedulingBackend::EnableScheduling() {
   scheduling_enabled_.store(true, std::memory_order_relaxed);
   // Check if *Scan needs to be run immediately.
   if (NeedsToImmediatelyScan())
-    ::base::internal::PCScan::PerformScan(
-        ::base::internal::PCScan::InvocationMode::kNonBlocking);
+    PCScan::PerformScan(PCScan::InvocationMode::kNonBlocking);
 }
 
 size_t PCScanSchedulingBackend::ScanStarted() {
@@ -107,13 +106,13 @@ bool MUAwareTaskBasedBackend::LimitReached() {
 
       // 2. Unlikely case: If also above hard limit, start scan right away. This
       // ignores explicit PCScan disabling.
-      if (UNLIKELY(data.current_size.load(std::memory_order_relaxed) >
-                   data.size_limit.load(std::memory_order_relaxed))) {
+      if (PA_UNLIKELY(data.current_size.load(std::memory_order_relaxed) >
+                      data.size_limit.load(std::memory_order_relaxed))) {
         return true;
       }
 
       // 3. Check if PCScan was explicitly disabled.
-      if (UNLIKELY(!is_scheduling_enabled())) {
+      if (PA_UNLIKELY(!is_scheduling_enabled())) {
         return false;
       }
 

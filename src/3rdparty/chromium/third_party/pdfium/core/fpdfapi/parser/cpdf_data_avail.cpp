@@ -29,30 +29,26 @@
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/stl_util.h"
 #include "third_party/base/check.h"
-#include "third_party/base/compiler_specific.h"
 #include "third_party/base/containers/contains.h"
 #include "third_party/base/notreached.h"
 #include "third_party/base/numerics/safe_conversions.h"
 
 namespace {
 
-// static
-CPDF_Object* GetResourceObject(CPDF_Dictionary* pDict) {
+RetainPtr<CPDF_Object> GetResourceObject(RetainPtr<CPDF_Dictionary> pDict) {
   constexpr size_t kMaxHierarchyDepth = 64;
   size_t depth = 0;
 
-  CPDF_Dictionary* dictionary_to_check = pDict;
-  while (dictionary_to_check) {
-    CPDF_Object* result = dictionary_to_check->GetObjectFor("Resources");
+  while (pDict) {
+    RetainPtr<CPDF_Object> result = pDict->GetMutableObjectFor("Resources");
     if (result)
       return result;
-    CPDF_Object* parent = dictionary_to_check->GetObjectFor("Parent");
-    dictionary_to_check = parent ? parent->GetDict() : nullptr;
-
     if (++depth > kMaxHierarchyDepth) {
       // We have cycle in parents hierarchy.
       return nullptr;
     }
+    RetainPtr<CPDF_Object> parent = pDict->GetMutableObjectFor("Parent");
+    pDict = parent ? parent->GetMutableDict() : nullptr;
   }
   return nullptr;
 }
@@ -144,7 +140,7 @@ bool CPDF_DataAvail::CheckDocStatus() {
       return LoadAllFile();
     case InternalStatus::kPageLaterLoad:
       m_internalStatus = InternalStatus::kPage;
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       m_bDocAvail = true;
       return true;
@@ -260,8 +256,13 @@ bool CPDF_DataAvail::CheckRoot() {
   if (GetValidator()->has_read_problems())
     return false;
 
-  const CPDF_Reference* pRef =
-      ToReference(m_pRoot ? m_pRoot->GetObjectFor("Pages") : nullptr);
+  if (!m_pRoot) {
+    m_internalStatus = InternalStatus::kError;
+    return false;
+  }
+
+  RetainPtr<const CPDF_Reference> pRef =
+      ToReference(m_pRoot->GetObjectFor("Pages"));
   if (!pRef) {
     m_internalStatus = InternalStatus::kError;
     return false;
@@ -274,8 +275,13 @@ bool CPDF_DataAvail::CheckRoot() {
 
 bool CPDF_DataAvail::PreparePageItem() {
   const CPDF_Dictionary* pRoot = m_pDocument->GetRoot();
-  const CPDF_Reference* pRef =
-      ToReference(pRoot ? pRoot->GetObjectFor("Pages") : nullptr);
+  if (!pRoot) {
+    m_internalStatus = InternalStatus::kError;
+    return false;
+  }
+
+  RetainPtr<const CPDF_Reference> pRef =
+      ToReference(pRoot->GetObjectFor("Pages"));
   if (!pRef) {
     m_internalStatus = InternalStatus::kError;
     return false;
@@ -345,8 +351,11 @@ bool CPDF_DataAvail::CheckPage() {
 }
 
 bool CPDF_DataAvail::GetPageKids(CPDF_Object* pPages) {
-  const CPDF_Dictionary* pDict = pPages->GetDict();
-  const CPDF_Object* pKids = pDict ? pDict->GetObjectFor("Kids") : nullptr;
+  RetainPtr<const CPDF_Dictionary> pDict = pPages->GetDict();
+  if (!pDict)
+    return true;
+
+  RetainPtr<const CPDF_Object> pKids = pDict->GetObjectFor("Kids");
   if (!pKids)
     return true;
 
@@ -544,7 +553,7 @@ bool CPDF_DataAvail::CheckArrayPageNode(uint32_t dwPageNo,
   if (!pPages)
     return false;
 
-  CPDF_Array* pArray = pPages->AsArray();
+  const CPDF_Array* pArray = pPages->AsArray();
   if (!pArray) {
     m_internalStatus = InternalStatus::kError;
     return false;
@@ -552,7 +561,7 @@ bool CPDF_DataAvail::CheckArrayPageNode(uint32_t dwPageNo,
 
   pPageNode->m_type = PageNode::Type::kPages;
   for (size_t i = 0; i < pArray->size(); ++i) {
-    CPDF_Reference* pKid = ToReference(pArray->GetObjectAt(i));
+    RetainPtr<const CPDF_Reference> pKid = ToReference(pArray->GetObjectAt(i));
     if (!pKid)
       continue;
 
@@ -587,7 +596,7 @@ bool CPDF_DataAvail::CheckUnknownPageNode(uint32_t dwPageNo,
   }
 
   pPageNode->m_dwPageNo = dwPageNo;
-  CPDF_Dictionary* pDict = pPage->GetDict();
+  RetainPtr<CPDF_Dictionary> pDict = pPage->GetMutableDict();
   const ByteString type = pDict->GetNameFor("Type");
   if (type == "Page") {
     pPageNode->m_type = PageNode::Type::kPage;
@@ -600,7 +609,7 @@ bool CPDF_DataAvail::CheckUnknownPageNode(uint32_t dwPageNo,
   }
 
   pPageNode->m_type = PageNode::Type::kPages;
-  CPDF_Object* pKids = pDict->GetObjectFor("Kids");
+  RetainPtr<CPDF_Object> pKids = pDict->GetMutableObjectFor("Kids");
   if (!pKids) {
     m_internalStatus = InternalStatus::kPage;
     return true;
@@ -608,16 +617,17 @@ bool CPDF_DataAvail::CheckUnknownPageNode(uint32_t dwPageNo,
 
   switch (pKids->GetType()) {
     case CPDF_Object::kReference: {
-      CPDF_Reference* pKid = pKids->AsReference();
+      const CPDF_Reference* pKid = pKids->AsReference();
       auto pNode = std::make_unique<PageNode>();
       pNode->m_dwPageNo = pKid->GetRefObjNum();
       pPageNode->m_ChildNodes.push_back(std::move(pNode));
       break;
     }
     case CPDF_Object::kArray: {
-      CPDF_Array* pKidsArray = pKids->AsArray();
+      const CPDF_Array* pKidsArray = pKids->AsArray();
       for (size_t i = 0; i < pKidsArray->size(); ++i) {
-        CPDF_Reference* pKid = ToReference(pKidsArray->GetObjectAt(i));
+        RetainPtr<const CPDF_Reference> pKid =
+            ToReference(pKidsArray->GetObjectAt(i));
         if (!pKid)
           continue;
 
@@ -709,7 +719,7 @@ bool CPDF_DataAvail::CheckPageCount() {
   if (!pPages)
     return false;
 
-  CPDF_Dictionary* pPagesDict = pPages->GetDict();
+  RetainPtr<const CPDF_Dictionary> pPagesDict = pPages->GetDict();
   if (!pPagesDict) {
     m_internalStatus = InternalStatus::kError;
     return false;
@@ -812,7 +822,8 @@ CPDF_DataAvail::DocAvailStatus CPDF_DataAvail::IsPageAvail(
   const HintsScope hints_scope(GetValidator(), pHints);
   if (m_pLinearized) {
     if (dwPage == m_pLinearized->GetFirstPageNo()) {
-      auto* pPageDict = m_pDocument->GetPageDictionary(iPage);
+      RetainPtr<const CPDF_Dictionary> pPageDict =
+          m_pDocument->GetPageDictionary(iPage);
       if (!pPageDict)
         return kDataError;
 
@@ -863,7 +874,8 @@ CPDF_DataAvail::DocAvailStatus CPDF_DataAvail::IsPageAvail(
   if (CheckAcroForm() == kFormNotAvailable)
     return kDataNotAvailable;
 
-  auto* pPageDict = m_pDocument->GetPageDictionary(iPage);
+  RetainPtr<CPDF_Dictionary> pPageDict =
+      m_pDocument->GetMutablePageDictionary(iPage);
   if (!pPageDict)
     return kDataError;
 
@@ -878,7 +890,7 @@ CPDF_DataAvail::DocAvailStatus CPDF_DataAvail::IsPageAvail(
       return status;
   }
 
-  const DocAvailStatus resources_status = CheckResources(pPageDict);
+  const DocAvailStatus resources_status = CheckResources(std::move(pPageDict));
   if (resources_status != kDataAvailable)
     return resources_status;
 
@@ -889,10 +901,10 @@ CPDF_DataAvail::DocAvailStatus CPDF_DataAvail::IsPageAvail(
 }
 
 CPDF_DataAvail::DocAvailStatus CPDF_DataAvail::CheckResources(
-    CPDF_Dictionary* page) {
+    RetainPtr<CPDF_Dictionary> page) {
   DCHECK(page);
   CPDF_ReadValidator::ScopedSession read_session(GetValidator());
-  CPDF_Object* resources = GetResourceObject(page);
+  RetainPtr<CPDF_Object> resources = GetResourceObject(std::move(page));
   if (GetValidator()->has_read_problems())
     return kDataNotAvailable;
 
@@ -923,10 +935,11 @@ int CPDF_DataAvail::GetPageCount() const {
   return m_pDocument ? m_pDocument->GetPageCount() : 0;
 }
 
-CPDF_Dictionary* CPDF_DataAvail::GetPageDictionary(int index) const {
+RetainPtr<const CPDF_Dictionary> CPDF_DataAvail::GetPageDictionary(
+    int index) const {
   if (!m_pDocument || index < 0 || index >= GetPageCount())
     return nullptr;
-  CPDF_Dictionary* page = m_pDocument->GetPageDictionary(index);
+  RetainPtr<const CPDF_Dictionary> page = m_pDocument->GetPageDictionary(index);
   if (page)
     return page;
   if (!m_pLinearized || !m_pHintTables)
@@ -973,16 +986,16 @@ CPDF_DataAvail::DocFormStatus CPDF_DataAvail::CheckAcroForm() {
   }
 
   if (!m_pFormAvail) {
-    CPDF_Dictionary* pRoot = m_pDocument->GetRoot();
+    const CPDF_Dictionary* pRoot = m_pDocument->GetRoot();
     if (!pRoot)
       return kFormAvailable;
 
-    CPDF_Object* pAcroForm = pRoot->GetObjectFor("AcroForm");
+    RetainPtr<const CPDF_Object> pAcroForm = pRoot->GetObjectFor("AcroForm");
     if (!pAcroForm)
       return kFormNotExist;
 
     m_pFormAvail = std::make_unique<CPDF_PageObjectAvail>(
-        GetValidator(), m_pDocument.Get(), pAcroForm);
+        GetValidator(), m_pDocument.Get(), std::move(pAcroForm));
   }
   switch (m_pFormAvail->CheckAvail()) {
     case kDataError:
@@ -999,10 +1012,13 @@ CPDF_DataAvail::DocFormStatus CPDF_DataAvail::CheckAcroForm() {
 
 bool CPDF_DataAvail::ValidatePage(uint32_t dwPage) const {
   int iPage = pdfium::base::checked_cast<int>(dwPage);
-  auto* pPageDict = m_pDocument->GetPageDictionary(iPage);
+  RetainPtr<const CPDF_Dictionary> pPageDict =
+      m_pDocument->GetPageDictionary(iPage);
   if (!pPageDict)
     return false;
-  CPDF_PageObjectAvail obj_avail(GetValidator(), m_pDocument.Get(), pPageDict);
+
+  CPDF_PageObjectAvail obj_avail(GetValidator(), m_pDocument.Get(),
+                                 std::move(pPageDict));
   return obj_avail.CheckAvail() == kDataAvailable;
 }
 

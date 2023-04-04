@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -280,10 +280,10 @@ void RemoteFrameView::PropagateFrameRects() {
   // any remote frames, if any, is accounted for by the embedder.
   needs_frame_rect_propagation_ = false;
   gfx::Rect frame_rect(FrameRect());
-  gfx::Rect screen_space_rect = frame_rect;
+  gfx::Rect rect_in_local_root = frame_rect;
 
   if (LocalFrameView* parent = ParentFrameView()) {
-    screen_space_rect = parent->ConvertToRootFrame(screen_space_rect);
+    rect_in_local_root = parent->ConvertToRootFrame(rect_in_local_root);
   }
 
   gfx::Size frame_size = frame_rect.size();
@@ -293,7 +293,7 @@ void RemoteFrameView::PropagateFrameRects() {
           gfx::Size(frozen_size->width.Ceil(), frozen_size->height.Ceil());
     }
   }
-  remote_frame_->FrameRectsChanged(frame_size, screen_space_rect);
+  remote_frame_->FrameRectsChanged(frame_size, rect_in_local_root);
 }
 
 void RemoteFrameView::Paint(GraphicsContext& context,

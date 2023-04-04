@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,6 @@ public class Starter implements AssistantTabObserver, UserData {
 
     private final AssistantStaticDependencies mStaticDependencies;
     private final AssistantIsGsaFunction mIsGsaFunction;
-    private final AssistantIsMsbbEnabledFunction mIsMsbbEnabledFunction;
     private final AssistantModuleInstallUi.Provider mModuleInstallUiProvider;
 
     /**
@@ -70,12 +69,10 @@ public class Starter implements AssistantTabObserver, UserData {
      */
     public Starter(Supplier<Activity> activitySupplier, @Nullable WebContents webContents,
             AssistantStaticDependencies staticDependencies, AssistantIsGsaFunction isGsaFunction,
-            AssistantIsMsbbEnabledFunction isMsbbEnabledFunction,
             AssistantModuleInstallUi.Provider moduleInstallUiProvider) {
         mActivitySupplier = activitySupplier;
         mStaticDependencies = staticDependencies;
         mIsGsaFunction = isGsaFunction;
-        mIsMsbbEnabledFunction = isMsbbEnabledFunction;
         mModuleInstallUiProvider = moduleInstallUiProvider;
         detectWebContentsChange(webContents);
     }
@@ -224,41 +221,16 @@ public class Starter implements AssistantTabObserver, UserData {
     }
 
     @CalledByNative
-    private static boolean getIsFirstTimeUser() {
-        return AutofillAssistantPreferencesUtil.isAutofillAssistantFirstTimeTriggerScriptUser();
-    }
-
-    @CalledByNative
-    private static void setIsFirstTimeUser(boolean firstTimeUser) {
-        AutofillAssistantPreferencesUtil.setFirstTimeTriggerScriptUserPreference(firstTimeUser);
-    }
-
-    @CalledByNative
-    private static boolean getOnboardingAccepted() {
-        return !AutofillAssistantPreferencesUtil.getShowOnboarding();
-    }
-
-    @CalledByNative
-    private static void setOnboardingAccepted(boolean accepted) {
-        AutofillAssistantPreferencesUtil.setInitialPreferences(accepted);
-    }
-
-    @CalledByNative
     private void showOnboarding(AssistantOnboardingHelper onboardingHelper,
             boolean useDialogOnboarding, String experimentIds, String[] parameterKeys,
-            String[] parameterValues) {
-        if (!AutofillAssistantPreferencesUtil.getShowOnboarding()) {
-            safeNativeOnOnboardingFinished(
-                    /* shown = */ false, 3 /* AssistantOnboardingResult.ACCEPTED*/);
-            return;
-        }
-
+            String[] parameterValues, boolean hideBottomSheetOnOnboardingAccepted) {
         assert parameterKeys.length == parameterValues.length;
         Map<String, String> parameters = new HashMap<>();
         for (int i = 0; i < parameterKeys.length; i++) {
             parameters.put(parameterKeys[i], parameterValues[i]);
         }
         onboardingHelper.showOnboarding(useDialogOnboarding, experimentIds, parameters,
+                hideBottomSheetOnOnboardingAccepted,
                 result -> safeNativeOnOnboardingFinished(true, result));
     }
 
@@ -272,21 +244,6 @@ public class Starter implements AssistantTabObserver, UserData {
             return;
         }
         StarterJni.get().onOnboardingFinished(mNativeStarter, Starter.this, shown, result);
-    }
-
-    @CalledByNative
-    static boolean getProactiveHelpSettingEnabled() {
-        return AutofillAssistantPreferencesUtil.isProactiveHelpOn();
-    }
-
-    @CalledByNative
-    private static void setProactiveHelpSettingEnabled(boolean enabled) {
-        AutofillAssistantPreferencesUtil.setProactiveHelpPreference(enabled);
-    }
-
-    @CalledByNative
-    private boolean getMakeSearchesAndBrowsingBetterSettingEnabled() {
-        return mIsMsbbEnabledFunction.getAsBoolean();
     }
 
     private AutofillAssistantModuleEntry getModuleOrThrow() {

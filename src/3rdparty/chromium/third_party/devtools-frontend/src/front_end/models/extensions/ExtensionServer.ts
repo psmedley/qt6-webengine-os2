@@ -31,8 +31,6 @@
 // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
 /* eslint-disable @typescript-eslint/naming-convention */
 
-// TODO(crbug.com/1253323): Casts to UrlString will be removed from this file when migration to branded types is complete.
-
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
@@ -51,12 +49,15 @@ import * as Workspace from '../workspace/workspace.js';
 import type * as Protocol from '../../generated/protocol.js';
 
 import {ExtensionButton, ExtensionPanel, ExtensionSidebarPane} from './ExtensionPanel.js';
-import type {TracingSession} from './ExtensionTraceProvider.js';
-import {ExtensionTraceProvider} from './ExtensionTraceProvider.js';
-import {LanguageExtensionEndpoint} from './LanguageExtensionEndpoint.js';
-import {PrivateAPI} from './ExtensionAPI.js';
 
-const extensionOrigins: WeakMap<MessagePort, string> = new WeakMap();
+import {ExtensionTraceProvider, type TracingSession} from './ExtensionTraceProvider.js';
+import {LanguageExtensionEndpoint} from './LanguageExtensionEndpoint.js';
+import {RecorderExtensionEndpoint} from './RecorderExtensionEndpoint.js';
+import {PrivateAPI} from './ExtensionAPI.js';
+import {RecorderPluginManager} from './RecorderPluginManager.js';
+import {type Chrome} from '../../../extension-api/ExtensionAPI.js';  // eslint-disable-line rulesdir/es_modules_import
+
+const extensionOrigins: WeakMap<MessagePort, Platform.DevToolsPath.UrlString> = new WeakMap();
 
 declare global {
   interface Window {
@@ -140,6 +141,12 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     this.registerHandler(PrivateAPI.Commands.UpdateButton, this.onUpdateButton.bind(this));
     this.registerHandler(
         PrivateAPI.Commands.RegisterLanguageExtensionPlugin, this.registerLanguageExtensionEndpoint.bind(this));
+    this.registerHandler(PrivateAPI.Commands.GetWasmLinearMemory, this.onGetWasmLinearMemory.bind(this));
+    this.registerHandler(PrivateAPI.Commands.GetWasmGlobal, this.onGetWasmGlobal.bind(this));
+    this.registerHandler(PrivateAPI.Commands.GetWasmLocal, this.onGetWasmLocal.bind(this));
+    this.registerHandler(PrivateAPI.Commands.GetWasmOp, this.onGetWasmOp.bind(this));
+    this.registerHandler(
+        PrivateAPI.Commands.RegisterRecorderExtensionPlugin, this.registerRecorderExtensionEndpoint.bind(this));
     window.addEventListener('message', this.onWindowMessage.bind(this), false);  // Only for main window.
 
     const existingTabId =
@@ -202,7 +209,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
   private registerLanguageExtensionEndpoint(
       message: PrivateAPI.ExtensionServerRequestMessage, _shared_port: MessagePort): Record {
     if (message.command !== PrivateAPI.Commands.RegisterLanguageExtensionPlugin) {
-      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.Subscribe}`);
+      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.RegisterLanguageExtensionPlugin}`);
     }
     const {pluginManager} = Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance();
     if (!pluginManager) {
@@ -214,6 +221,73 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
         (Array.isArray(symbol_types) && symbol_types.every(e => typeof e === 'string') ? symbol_types : []);
     const endpoint = new LanguageExtensionEndpoint(pluginName, {language, symbol_types: symbol_types_array}, port);
     pluginManager.addPlugin(endpoint);
+    return this.status.OK();
+  }
+
+  private async loadWasmValue<T>(expression: string, stopId: unknown): Promise<Record|T> {
+    const {pluginManager} = Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance();
+    if (!pluginManager) {
+      return this.status.E_FAILED('WebAssembly DWARF support needs to be enabled to use this extension');
+    }
+
+    const callFrame = pluginManager.callFrameForStopId(stopId as Bindings.DebuggerLanguagePlugins.StopId);
+    if (!callFrame) {
+      return this.status.E_BADARG('stopId', 'Unknown stop id');
+    }
+    const result = await callFrame.debuggerModel.agent.invoke_evaluateOnCallFrame({
+      callFrameId: callFrame.id,
+      expression,
+      silent: true,
+      returnByValue: true,
+      throwOnSideEffect: true,
+    });
+
+    if (!result.exceptionDetails && !result.getError()) {
+      return result.result.value;
+    }
+
+    return this.status.E_FAILED('Failed');
+  }
+
+  private async onGetWasmLinearMemory(message: PrivateAPI.ExtensionServerRequestMessage): Promise<Record|number[]> {
+    if (message.command !== PrivateAPI.Commands.GetWasmLinearMemory) {
+      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.GetWasmLinearMemory}`);
+    }
+    return await this.loadWasmValue<number[]>(
+        `[].slice.call(new Uint8Array(memories[0].buffer, ${Number(message.offset)}, ${Number(message.length)}))`,
+        message.stopId);
+  }
+
+  private async onGetWasmGlobal(message: PrivateAPI.ExtensionServerRequestMessage):
+      Promise<Record|Chrome.DevTools.WasmValue> {
+    if (message.command !== PrivateAPI.Commands.GetWasmGlobal) {
+      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.GetWasmGlobal}`);
+    }
+    return this.loadWasmValue(`globals[${Number(message.global)}]`, message.stopId);
+  }
+
+  private async onGetWasmLocal(message: PrivateAPI.ExtensionServerRequestMessage):
+      Promise<Record|Chrome.DevTools.WasmValue> {
+    if (message.command !== PrivateAPI.Commands.GetWasmLocal) {
+      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.GetWasmLocal}`);
+    }
+    return this.loadWasmValue(`locals[${Number(message.local)}]`, message.stopId);
+  }
+  private async onGetWasmOp(message: PrivateAPI.ExtensionServerRequestMessage):
+      Promise<Record|Chrome.DevTools.WasmValue> {
+    if (message.command !== PrivateAPI.Commands.GetWasmOp) {
+      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.GetWasmOp}`);
+    }
+    return this.loadWasmValue(`stack[${Number(message.op)}]`, message.stopId);
+  }
+
+  private registerRecorderExtensionEndpoint(
+      message: PrivateAPI.ExtensionServerRequestMessage, _shared_port: MessagePort): Record {
+    if (message.command !== PrivateAPI.Commands.RegisterRecorderExtensionPlugin) {
+      return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.RegisterRecorderExtensionPlugin}`);
+    }
+    const {pluginName, mediaType, port} = message;
+    RecorderPluginManager.instance().addPlugin(new RecorderExtensionEndpoint(pluginName, mediaType, port));
     return this.status.OK();
   }
 
@@ -344,7 +418,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     return undefined;
   }
 
-  private getExtensionOrigin(port: MessagePort): string {
+  private getExtensionOrigin(port: MessagePort): Platform.DevToolsPath.UrlString {
     const origin = extensionOrigins.get(port);
     if (!origin) {
       throw new Error('Received a message from an unregistered extension');
@@ -363,7 +437,10 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
       return this.status.E_EXISTS(id);
     }
 
-    const page = this.expandResourcePath(this.getExtensionOrigin(port), message.page) as string;
+    const page = ExtensionServer.expandResourcePath(this.getExtensionOrigin(port), message.page);
+    if (page === undefined) {
+      return this.status.E_BADARG('page', 'Resources paths cannot point to non-extension resources');
+    }
     let persistentId = this.getExtensionOrigin(port) + message.title;
     persistentId = persistentId.replace(/\s/g, '');
     const panelView = new ExtensionServerPanelView(
@@ -395,9 +472,11 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     if (!panelView || !(panelView instanceof ExtensionServerPanelView)) {
       return this.status.E_NOTFOUND(message.panel);
     }
-    const button = new ExtensionButton(
-        this, message.id, this.expandResourcePath(this.getExtensionOrigin(port), message.icon), message.tooltip,
-        message.disabled);
+    const resourcePath = ExtensionServer.expandResourcePath(this.getExtensionOrigin(port), message.icon);
+    if (resourcePath === undefined) {
+      return this.status.E_BADARG('icon', 'Resources paths cannot point to non-extension resources');
+    }
+    const button = new ExtensionButton(this, message.id, resourcePath, message.tooltip, message.disabled);
     this.clientObjects.set(message.id, button);
 
     void panelView.widget().then(appendButton);
@@ -417,9 +496,12 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     if (!button || !(button instanceof ExtensionButton)) {
       return this.status.E_NOTFOUND(message.id);
     }
-    button.update(
-        message.icon && this.expandResourcePath(this.getExtensionOrigin(port), message.icon), message.tooltip,
-        message.disabled);
+    const resourcePath =
+        message.icon && ExtensionServer.expandResourcePath(this.getExtensionOrigin(port), message.icon);
+    if (message.icon && resourcePath === undefined) {
+      return this.status.E_BADARG('icon', 'Resources paths cannot point to non-extension resources');
+    }
+    button.update(resourcePath, message.tooltip, message.disabled);
     return this.status.OK();
   }
 
@@ -495,7 +577,11 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     if (!sidebar || !(sidebar instanceof ExtensionSidebarPane)) {
       return this.status.E_NOTFOUND(message.id);
     }
-    sidebar.setPage(this.expandResourcePath(this.getExtensionOrigin(port), message.page));
+    const resourcePath = ExtensionServer.expandResourcePath(this.getExtensionOrigin(port), message.page);
+    if (resourcePath === undefined) {
+      return this.status.E_BADARG('page', 'Resources paths cannot point to non-extension resources');
+    }
+    sidebar.setPage(resourcePath);
     return undefined;
   }
 
@@ -503,8 +589,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     if (message.command !== PrivateAPI.Commands.OpenResource) {
       return this.status.E_BADARG('command', `expected ${PrivateAPI.Commands.OpenResource}`);
     }
-    const uiSourceCode =
-        Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURL(message.url as Platform.DevToolsPath.UrlString);
+    const uiSourceCode = Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURL(message.url);
     if (uiSourceCode) {
       void Common.Revealer.reveal(uiSourceCode.uiLocation(message.lineNumber, message.columnNumber));
       return this.status.OK();
@@ -657,9 +742,8 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
   private async getResourceContent(
       contentProvider: TextUtils.ContentProvider.ContentProvider, message: PrivateAPI.ExtensionServerRequestMessage,
       port: MessagePort): Promise<void> {
-    const {content} = await contentProvider.requestContent();
-    const encoded = await contentProvider.contentEncoded();
-    this.dispatchCallback(message.requestId, port, {encoding: encoded ? 'base64' : '', content: content});
+    const {content, isEncoded} = await contentProvider.requestContent();
+    this.dispatchCallback(message.requestId, port, {encoding: isEncoded ? 'base64' : '', content: content});
   }
 
   private onGetRequestContent(message: PrivateAPI.ExtensionServerRequestMessage, port: MessagePort): Record|undefined {
@@ -840,7 +924,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     this.postNotification(PrivateAPI.Events.PanelObjectSelected + 'elements');
   }
 
-  sourceSelectionChanged(url: string, range: TextUtils.TextRange.TextRange): void {
+  sourceSelectionChanged(url: Platform.DevToolsPath.UrlString, range: TextUtils.TextRange.TextRange): void {
     this.postNotification(PrivateAPI.Events.PanelObjectSelected + 'sources', {
       startLine: range.startLine,
       startColumn: range.startColumn,
@@ -857,6 +941,13 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
       // Run deferred init
       this.initializeExtensions();
     }
+  }
+
+  addExtensionForTest(extensionInfo: Host.InspectorFrontendHostAPI.ExtensionDescriptor, origin: string): boolean
+      |undefined {
+    const name = extensionInfo.name || `Extension ${origin}`;
+    this.registeredExtensions.set(origin, {name});
+    return true;
   }
 
   private addExtension(extensionInfo: Host.InspectorFrontendHostAPI.ExtensionDescriptor): boolean|undefined {
@@ -896,7 +987,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     return true;
   }
 
-  private registerExtension(origin: string, port: MessagePort): void {
+  private registerExtension(origin: Platform.DevToolsPath.UrlString, port: MessagePort): void {
     if (!this.registeredExtensions.has(origin)) {
       if (origin !== window.location.origin) {  // Just ignore inspector frames.
         console.error('Ignoring unauthorized client request from ' + origin);
@@ -910,7 +1001,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
 
   private onWindowMessage(event: MessageEvent): void {
     if (event.data === 'registerExtension') {
-      this.registerExtension(event.origin, event.ports[0]);
+      this.registerExtension(event.origin as Platform.DevToolsPath.UrlString, event.ports[0]);
     }
   }
 
@@ -984,8 +1075,14 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
         removeLastEventListener.bind(this));
   }
 
-  private expandResourcePath(extensionPath: string, resourcePath: string): string {
-    return extensionPath + '/' + Common.ParsedURL.normalizePath(resourcePath);
+  static expandResourcePath(extensionOrigin: Platform.DevToolsPath.UrlString, resourcePath: string):
+      Platform.DevToolsPath.UrlString|undefined {
+    const strippedOrigin = new URL(extensionOrigin).origin;
+    const resourceURL = new URL(Common.ParsedURL.normalizePath(resourcePath), strippedOrigin);
+    if (resourceURL.origin !== strippedOrigin) {
+      return undefined;
+    }
+    return resourceURL.href as Platform.DevToolsPath.UrlString;
   }
 
   evaluate(
@@ -995,7 +1092,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
       |undefined {
     let context;
 
-    function resolveURLToFrame(url: string): SDK.ResourceTreeModel.ResourceTreeFrame|null {
+    function resolveURLToFrame(url: Platform.DevToolsPath.UrlString): SDK.ResourceTreeModel.ResourceTreeFrame|null {
       let found = null;
       function hasMatchingURL(frame: SDK.ResourceTreeModel.ResourceTreeFrame): SDK.ResourceTreeModel.ResourceTreeFrame|
           null {
@@ -1009,7 +1106,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     options = options || {};
     let frame;
     if (options.frameURL) {
-      frame = resolveURLToFrame(options.frameURL);
+      frame = resolveURLToFrame(options.frameURL as Platform.DevToolsPath.UrlString);
     } else {
       const target = SDK.TargetManager.TargetManager.instance().mainTarget();
       const resourceTreeModel = target && target.model(SDK.ResourceTreeModel.ResourceTreeModel);
@@ -1088,7 +1185,7 @@ export class ExtensionServer extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     return undefined;
   }
 
-  private canInspectURL(url: string): boolean {
+  private canInspectURL(url: Platform.DevToolsPath.UrlString): boolean {
     let parsedURL;
     // This is only to work around invalid URLs we're occasionally getting from some tests.
     // TODO(caseq): make sure tests supply valid URLs or we specifically handle invalid ones.

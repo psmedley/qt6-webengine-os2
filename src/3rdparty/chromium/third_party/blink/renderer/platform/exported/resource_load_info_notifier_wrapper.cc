@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,6 +40,23 @@ ResourceLoadInfoNotifierWrapper::ResourceLoadInfoNotifierWrapper(
 }
 
 ResourceLoadInfoNotifierWrapper::~ResourceLoadInfoNotifierWrapper() = default;
+
+#if BUILDFLAG(IS_ANDROID)
+void ResourceLoadInfoNotifierWrapper::NotifyUpdateUserGestureCarryoverInfo() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (task_runner_->BelongsToCurrentThread()) {
+    if (weak_wrapper_resource_load_info_notifier_) {
+      weak_wrapper_resource_load_info_notifier_
+          ->NotifyUpdateUserGestureCarryoverInfo();
+    }
+    return;
+  }
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&mojom::ResourceLoadInfoNotifier::
+                                    NotifyUpdateUserGestureCarryoverInfo,
+                                weak_wrapper_resource_load_info_notifier_));
+}
+#endif
 
 void ResourceLoadInfoNotifierWrapper::NotifyResourceLoadInitiated(
     int64_t request_id,
@@ -114,7 +131,8 @@ void ResourceLoadInfoNotifierWrapper::NotifyResourceResponseReceived(
   if (task_runner_->BelongsToCurrentThread()) {
     if (weak_wrapper_resource_load_info_notifier_) {
       weak_wrapper_resource_load_info_notifier_->NotifyResourceResponseReceived(
-          resource_load_info_->request_id, resource_load_info_->final_url,
+          resource_load_info_->request_id,
+          url::SchemeHostPort(resource_load_info_->final_url),
           std::move(response_head), resource_load_info_->request_destination);
     }
     return;
@@ -130,7 +148,8 @@ void ResourceLoadInfoNotifierWrapper::NotifyResourceResponseReceived(
       base::BindOnce(
           &mojom::ResourceLoadInfoNotifier::NotifyResourceResponseReceived,
           weak_wrapper_resource_load_info_notifier_,
-          resource_load_info_->request_id, resource_load_info_->final_url,
+          resource_load_info_->request_id,
+          url::SchemeHostPort(resource_load_info_->final_url),
           std::move(response_head), resource_load_info_->request_destination));
 }
 
@@ -161,6 +180,8 @@ void ResourceLoadInfoNotifierWrapper::NotifyResourceLoadCompleted(
                        status.error_code);
 
   resource_load_info_->was_cached = status.exists_in_cache;
+  resource_load_info_->was_in_network_service_memory_cache =
+      status.exists_in_memory_cache;
   resource_load_info_->net_error = status.error_code;
   resource_load_info_->total_received_bytes = status.encoded_data_length;
   resource_load_info_->raw_body_bytes = status.encoded_body_length;

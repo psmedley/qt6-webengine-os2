@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,7 @@ void NGFragmentItemsBuilder::AddLine(
   const wtf_size_t estimated_size = size_before + line_items->size() + 1;
   const wtf_size_t old_capacity = items_.capacity();
   if (estimated_size > old_capacity)
-    items_.ReserveCapacity(std::max(estimated_size, old_capacity * 2));
+    items_.reserve(std::max(estimated_size, old_capacity * 2));
 
   // Add an empty item so that the start of the line can be set later.
   const wtf_size_t line_start_index = items_.size();
@@ -232,11 +232,11 @@ NGFragmentItemsBuilder::AddPreviousItems(
     first_line_text_content_ = items.FirstLineText();
   }
 
-  DCHECK(items_.IsEmpty());
+  DCHECK(items_.empty());
   const NGFragmentItems::Span source_items = items.Items();
   const wtf_size_t estimated_size =
       base::checked_cast<wtf_size_t>(source_items.size());
-  items_.ReserveCapacity(estimated_size);
+  items_.reserve(estimated_size);
 
   // Convert offsets to logical. The logic is opposite to |ConvertToPhysical|.
   // This is needed because the container size may be different, in that case,
@@ -297,7 +297,15 @@ NGFragmentItemsBuilder::AddPreviousItems(
       for (NGInlineCursor line = cursor.CursorForDescendants(); line;
            line.MoveToNext()) {
         const NGFragmentItem& line_child = *line.Current().Item();
-        DCHECK(line_child.CanReuse());
+        if (end_item) {
+          // If |end_item| is given, the caller has computed the range safe to
+          // reuse by calling |EndOfReusableItems|. All children should be safe
+          // to reuse.
+          DCHECK(line_child.CanReuse());
+        } else if (!line_child.CanReuse()) {
+          // Abort and report the failure if any child is not reusable.
+          return AddPreviousItemsResult();
+        }
 #if DCHECK_IS_ON()
         // |RebuildFragmentTreeSpine| does not rebuild spine if |NeedsLayout|.
         // Such block needs to copy PostLayout fragment while running simplified
@@ -312,6 +320,13 @@ NGFragmentItemsBuilder::AddPreviousItems(
                 line_child.OffsetInContainerFragment() - line_box_bounds.offset,
                 line_child.Size()),
             line_child);
+
+        // Be sure to pick the post-layout fragment.
+        const NGFragmentItem& new_item = items_.back().item;
+        if (const NGPhysicalBoxFragment* box = new_item.BoxFragment()) {
+          box = box->PostLayout();
+          new_item.GetMutableForCloning().ReplaceBoxFragment(*box);
+        }
       }
       if (++line_count == max_lines)
         break;
@@ -404,15 +419,18 @@ void NGFragmentItemsBuilder::MoveChildrenInBlockDirection(LayoutUnit delta) {
   }
 }
 
-void NGFragmentItemsBuilder::ToFragmentItems(const PhysicalSize& outer_size,
-                                             void* data) {
+absl::optional<PhysicalSize> NGFragmentItemsBuilder::ToFragmentItems(
+    const PhysicalSize& outer_size,
+    void* data) {
   DCHECK(text_content_);
   ConvertToPhysical(outer_size);
+  absl::optional<PhysicalSize> new_size;
   if (node_.IsSvgText()) {
-    NGSvgTextLayoutAlgorithm(node_, GetWritingMode())
-        .Layout(TextContent(false), items_);
+    new_size = NGSvgTextLayoutAlgorithm(node_, GetWritingMode())
+                   .Layout(TextContent(false), items_);
   }
   new (data) NGFragmentItems(this);
+  return new_size;
 }
 
 }  // namespace blink

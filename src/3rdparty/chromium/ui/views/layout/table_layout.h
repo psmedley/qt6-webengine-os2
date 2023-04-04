@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -181,7 +181,8 @@ class VIEWS_EXPORT TableLayout : public LayoutManagerBase {
   // target width.
   void ResizeUsingMin(int delta) const;
 
-  // Only use the minimum size if all the columns the view is in are resizable.
+  // Only use the minimum size if any of the columns the view is in
+  // is resizable. Fixed columns will retain their fixed width.
   bool CanUseMinimum(const ViewState& view_state) const;
 
   // Columns.

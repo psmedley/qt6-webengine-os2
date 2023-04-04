@@ -30,7 +30,10 @@ GrStagingBufferManager::Slice GrStagingBufferManager::allocateStagingBufferSlice
         GrResourceProvider* resourceProvider = fGpu->getContext()->priv().resourceProvider();
         size_t bufferSize = std::max(size, kMinStagingBufferSize);
         sk_sp<GrGpuBuffer> newBuffer = resourceProvider->createBuffer(
-            bufferSize, GrGpuBufferType::kXferCpuToGpu, kDynamic_GrAccessPattern, nullptr);
+                bufferSize,
+                GrGpuBufferType::kXferCpuToGpu,
+                kDynamic_GrAccessPattern,
+                GrResourceProvider::ZeroInit::kNo);
         if (!newBuffer) {
             return {}; // invalid slice
         }

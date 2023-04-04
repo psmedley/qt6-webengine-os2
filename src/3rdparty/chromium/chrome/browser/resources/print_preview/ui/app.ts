@@ -1,25 +1,22 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
-import './print_preview_vars_css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import './print_preview_vars.css.js';
 import '../strings.m.js';
 import '../data/document_info.js';
 import './sidebar.js';
 
-import {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
+import {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
 import {isMac, isWindows} from 'chrome://resources/js/cr.m.js';
-import {FocusOutlineManager} from 'chrome://resources/js/cr/ui/focus_outline_manager.m.js';
-import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
-import {hasKeyModifiers} from 'chrome://resources/js/util.m.js';
-import {WebUIListenerMixin} from 'chrome://resources/js/web_ui_listener_mixin.js';
+import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
+import {hasKeyModifiers} from 'chrome://resources/js/util.js';
+import {WebUIListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {Destination, PrinterType} from '../data/destination.js';
-// <if expr="chromeos_ash or chromeos_lacros">
-import {DestinationOrigin} from '../data/destination.js';
-// </if>
 import {DocumentSettings, PrintPreviewDocumentInfoElement} from '../data/document_info.js';
 import {Margins} from '../data/margins.js';
 import {MeasurementSystem} from '../data/measurement_system.js';
@@ -27,11 +24,7 @@ import {DuplexMode, PrintPreviewModelElement, whenReady} from '../data/model.js'
 import {PrintableArea} from '../data/printable_area.js';
 import {Size} from '../data/size.js';
 import {Error, PrintPreviewStateElement, State} from '../data/state.js';
-import {MetricsContext, PrintPreviewInitializationEvents} from '../metrics.js';
 import {NativeInitialSettings, NativeLayer, NativeLayerImpl} from '../native_layer.js';
-// <if expr="chromeos_ash or chromeos_lacros">
-import {NativeLayerCros, NativeLayerCrosImpl} from '../native_layer_cros.js';
-// </if>
 
 import {getTemplate} from './app.html.js';
 import {DestinationState} from './destination_settings.js';
@@ -131,9 +124,6 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
   private maxSheets_: number;
 
   private nativeLayer_: NativeLayer|null = null;
-  // <if expr="chromeos_ash or chromeos_lacros">
-  private nativeLayerCros_: NativeLayerCros|null = null;
-  // </if>
   private tracker_: EventTracker = new EventTracker();
   private cancelled_: boolean = false;
   private printRequested_: boolean = false;
@@ -167,9 +157,6 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
 
     document.documentElement.classList.remove('loading');
     this.nativeLayer_ = NativeLayerImpl.getInstance();
-    // <if expr="chromeos_ash or chromeos_lacros">
-    this.nativeLayerCros_ = NativeLayerCrosImpl.getInstance();
-    // </if>
     this.addWebUIListener('cr-dialog-open', this.onCrDialogOpen_.bind(this));
     this.addWebUIListener('close', this.onCrDialogClose_.bind(this));
     this.addWebUIListener('print-failed', this.onPrintFailed_.bind(this));
@@ -180,8 +167,6 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
     this.whenReady_ = whenReady();
     this.nativeLayer_.getInitialSettings().then(
         this.onInitialSettingsSet_.bind(this));
-    MetricsContext.getInitialSettings().record(
-        PrintPreviewInitializationEvents.FUNCTION_INITIATED);
   }
 
   override disconnectedCallback() {
@@ -221,13 +206,6 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
         e.preventDefault();
       }
 
-      // <if expr="chromeos_ash or chromeos_lacros">
-      if (this.destination_ &&
-          this.destination_.origin === DestinationOrigin.CROS) {
-        this.nativeLayerCros_!.recordPrinterStatusHistogram(
-            this.destination_.printerStatusReason, false);
-      }
-      // </if>
       return;
     }
 
@@ -242,7 +220,7 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
     // On Linux/Windows, shift + p means that e.key will be 'P' with caps lock
     // off or 'p' with caps lock on.
     // On Mac, alt + p means that e.key will be unicode 03c0 (pi).
-    // <if expr="not chromeos_ash and not chromeos_lacros">
+    // <if expr="not is_chromeos">
     if (e.key === 'P' || e.key === 'p' || e.key === '\u03c0') {
       if ((isMac && e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey) ||
           (!isMac && e.shiftKey && e.ctrlKey && !e.altKey && !e.metaKey)) {
@@ -296,8 +274,6 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
   }
 
   private onInitialSettingsSet_(settings: NativeInitialSettings) {
-    MetricsContext.getInitialSettings().record(
-        PrintPreviewInitializationEvents.FUNCTION_SUCCESSFUL);
     if (!this.whenReady_) {
       // This element and its corresponding model were detached while waiting
       // for the callback. This can happen in tests; return early.
@@ -360,7 +336,7 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
         break;
       case DestinationState.ERROR:
         let newState = State.ERROR;
-        // <if expr="chromeos_ash or chromeos_lacros">
+        // <if expr="is_chromeos">
         if (this.error_ === Error.NO_DESTINATIONS) {
           newState = State.FATAL_ERROR;
         }
@@ -424,25 +400,12 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
       this.printRequested_ = true;
       return;
     }
-    // <if expr="chromeos_ash or chromeos_lacros">
-    if (this.destination_ &&
-        this.destination_.origin === DestinationOrigin.CROS) {
-      this.nativeLayerCros_!.recordPrinterStatusHistogram(
-          this.destination_.printerStatusReason, true);
-    }
-    // </if>
+
     this.$.state.transitTo(
         this.$.previewArea.previewLoaded() ? State.PRINTING : State.HIDDEN);
   }
 
   private onCancelRequested_() {
-    // <if expr="chromeos_ash or chromeos_lacros">
-    if (this.destination_ &&
-        this.destination_.origin === DestinationOrigin.CROS) {
-      this.nativeLayerCros_!.recordPrinterStatusHistogram(
-          this.destination_.printerStatusReason, false);
-    }
-    // </if>
     this.cancelled_ = true;
     this.$.state.transitTo(State.CLOSING);
   }
@@ -463,7 +426,7 @@ export class PrintPreviewAppElement extends PrintPreviewAppElementBase {
     this.$.state.transitTo(State.READY);
   }
 
-  // <if expr="not chromeos_ash and not chromeos_lacros">
+  // <if expr="not is_chromeos">
   private onPrintWithSystemDialog_() {
     // <if expr="is_win">
     this.showSystemDialogBeforePrint_ = true;

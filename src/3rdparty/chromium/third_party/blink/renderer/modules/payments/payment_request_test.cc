@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -322,9 +322,6 @@ TEST(PaymentRequestTest, CannotShowAfterAborted) {
 }
 
 TEST(PaymentRequestTest, CannotShowWithoutUserActivation) {
-  ScopedCapabilityDelegationPaymentRequestForTest capability_delegation(true);
-  ScopedPaymentRequestRequiresUserActivationForTest
-      payment_request_requires_user_activation(true);
   PaymentRequestV8TestingScope scope;
   MockFunctionScope funcs(scope.GetScriptState());
   PaymentRequest* request = PaymentRequest::Create(
@@ -341,9 +338,6 @@ TEST(PaymentRequestTest, CannotShowWithoutUserActivation) {
 }
 
 TEST(PaymentRequestTest, ShowConsumesUserActivation) {
-  ScopedCapabilityDelegationPaymentRequestForTest capability_delegation(true);
-  ScopedPaymentRequestRequiresUserActivationForTest
-      payment_request_requires_user_activation(true);
   PaymentRequestV8TestingScope scope;
   MockFunctionScope funcs(scope.GetScriptState());
   PaymentRequest* request = PaymentRequest::Create(
@@ -376,7 +370,7 @@ TEST(PaymentRequestTest, RejectShowPromiseOnErrorPaymentMethodNotSupported) {
       payments::mojom::blink::PaymentErrorReason::NOT_SUPPORTED,
       "The payment method \"foo\" is not supported");
 
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetScriptState()->GetIsolate());
+  scope.PerformMicrotaskCheckpoint();
   EXPECT_EQ("NotSupportedError: The payment method \"foo\" is not supported",
             error_message);
 }
@@ -398,7 +392,7 @@ TEST(PaymentRequestTest, RejectShowPromiseOnErrorCancelled) {
       payments::mojom::blink::PaymentErrorReason::USER_CANCEL,
       "Request cancelled");
 
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetScriptState()->GetIsolate());
+  scope.PerformMicrotaskCheckpoint();
   EXPECT_EQ("AbortError: Request cancelled", error_message);
 }
 
@@ -419,7 +413,7 @@ TEST(PaymentRequestTest, RejectShowPromiseOnUpdateDetailsFailure) {
       ->OnShippingAddressChange(BuildPaymentAddressForTest());
   request->OnUpdatePaymentDetailsFailure("oops");
 
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetScriptState()->GetIsolate());
+  scope.PerformMicrotaskCheckpoint();
   EXPECT_EQ("AbortError: oops", error_message);
 }
 

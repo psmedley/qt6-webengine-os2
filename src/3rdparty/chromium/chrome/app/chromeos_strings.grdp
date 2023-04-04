@@ -44,81 +44,8 @@
     Family Link
   </message>
 
-  <!-- Wallpaper Manager (Deprecated Chrome App Version) -->
-  <message name="IDS_WALLPAPER_MANAGER_APP_NAME" desc="Name of the app which allows users to pick their wallpaper.">
-    Wallpaper Picker
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_ALL_CATEGORY_LABEL" desc="Wallpaper category label.">
-    All
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_DELETE_COMMAND_LABEL" desc="Wallpaper delete command label.">
-    Delete
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_MY_IMAGES_CATEGORY_LABEL" desc="Wallpaper category label, the equivalent of the Custom category on the new wallpaper picker.">
-    My Images
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_SELECT_CUSTOM_LABEL" desc="Selects custom wallpaper label.">
-    Custom Image:
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_POSITION_LABEL" desc="Custom wallpaper position label.">
-    Position:
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_COLOR_LABEL" desc="Custom wallpaper color label.">
-    Color:
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_REFRESH_LABEL" desc="The label of the refresh option in the top bar. Upon click, the wallpaper picker will fetch the online wallpapers again.">
-    Refresh
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_EXPLORE_LABEL" desc="The label of the explore option in the top bar. Upon click, a link with more information on the selected wallpaper will open.">
-    Explore
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_SHOW_CUSTOM_WALLPAPER_ON_START_WARNING" desc="The string displayed to user when set custom wallpaper.">
-    Wallpapers appear on the Sign-in Screen.
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_DAILY_REFRESH_LABEL" desc="Wallpaper daily refresh checkbox label. It is the equivalent of surprise me on the new wallpaper picker.">
-    Daily Refresh
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_NETWORK_ERROR" desc="The string displayed when user can't use wallpaper picker because they're not connected to the internet.">
-    The images are currently not available. Please reconnect to the internet to see wallpaper collections.
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_IMAGE_ERROR" desc="The string displayed to user when downloading the wallpaper failed on the new wallpaper picker.">
-    There's an error. Please try again by choosing other images.
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_DOWNLOAD_CANCEL" desc="The string displayed to user when downloading the wallpaper canceled.">
-    Download was canceled.
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_ACCESS_FILE_FAILURE" desc="The string displayed to user when accessing custom wallpaper on disk failed.">
-    Chrome cannot access the image.
-  </message>
   <message name="IDS_WALLPAPER_MANAGER_INVALID_WALLPAPER" desc="The string displayed to user when user selected wallpaper can not be set as a wallpaper.">
     Chrome cannot set wallpaper.
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_NO_IMAGES_AVAILABLE" desc="The string displayed to user when there're no local files that can be used as wallpaper.">
-    No images available
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_LAYOUT_CENTER" desc="Label for option to center a customized wallpaper.">
-    Center
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_LAYOUT_CENTER_CROPPED" desc="Label for option to center crop a customized wallpaper.">
-    Center Cropped
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_LAYOUT_STRETCH" desc="Label for option to stretch a customized wallpaper.">
-    Stretch
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_CURRENTLY_SET_LABEL" desc="The string displayed before the title of the currently set wallpaper.">
-    Currently set
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_CONFIRM_PREVIEW_WALLPAPER_LABEL" desc="Label for the button that confirms setting the preview wallpaper.">
-    Set Wallpaper
-  </message>
-  <message name="IDS_WALLPAPER_MANAGER_SET_SUCCESSFULLY_MESSAGE" desc="Message shown to user after setting wallpaper is done.">
-    Wallpaper set successfully
-  </message>
-  <message name="IDS_CURRENT_WALLPAPER_SET_BY_MESSAGE" desc="The string displayed to user if the current wallpaper is set by a third party wallpaper app/extension.">
-    The current wallpaper is set by '<ph name="APP_NAME">$1</ph>'. You may need to uninstall '<ph name="APP_NAME">$1</ph>' before selecting a different wallpaper.
-  </message>
-  <message name="IDS_DEFAULT_WALLPAPER_ACCESSIBLE_LABEL" desc="Accessibility text read by chromevox when the default wallpaper is focused.">
-    Default wallpaper
   </message>
 
   <!-- MultiDevice setup dialog. -->
@@ -405,8 +332,14 @@
   <message name="IDS_UPDATE_SLIDE_UPDATE_TITLE" desc="Title of educative slide.">
     After this, no waiting for updates
   </message>
+  <message name="IDS_UPDATE_SLIDE_UPDATE_ADDITIONAL_SETTINGS_TITLE" desc="Title of educative slide.">
+    From here on out, no waiting required
+  </message>
   <message name="IDS_UPDATE_SLIDE_UPDATE_TEXT" desc="Text of educative slide.">
     This is the only time you’ll wait for an update. On Chromebooks, software updates happen in the background.
+  </message>
+  <message name="IDS_UPDATE_SLIDE_UPDATE_ADDITIONAL_SETTINGS_TEXT" desc="Text of educative slide.">
+    After this, software updates will happen in the background. You can review update preferences in Settings.
   </message>
   <message name="IDS_UPDATE_SLIDE_ANTIVIRUS_TITLE" desc="Title of educative slide.">
     Built-in virus protection
@@ -431,6 +364,12 @@
   </message>
   <message name="IDS_UPDATE_BATTERY_WARNING_TEXT" desc="Text of battery warning which is shown during update process if battery is running out.">
     Looks like your Chromebook will run out of power before the update is complete. Make sure it's charging correctly to avoid interruption.
+  </message>
+  <message name="IDS_UPDATE_NO_UPDATE_AVAILABLE_TITLE" desc="Title of the screen that is shown when there is no update available.">
+    Your device is up to date
+  </message>
+  <message name="IDS_UPDATE_NO_UPDATE_AVAILABLE_TEXT" desc="Text of the screen that is shown when there is no update available.">
+    Your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> updates automatically in the background to give you the latest features and security improvements. You can review update preferences in Settings.
   </message>
   <message name="IDS_UPDATE_SLIDE_LABEL" desc="Text of slide label for accessibility.">
     Extra content <ph name="CURRENT_ELEMENT">$1<ex>1</ex></ph> out of <ph name="TOTAL_ELEMENTS">$2<ex>2</ex></ph>
@@ -512,9 +451,6 @@
   </message>
   <message name="IDS_NETWORK_ADD_WI_FI_LIST_ITEM_NAME" desc="OOBE network screen list entry that opens 'Add New WiFi Network' dialog">
     Add other WiFi network
-  </message>
-  <message name="IDS_NETWORK_OFFLINE_DEMO_SETUP_LIST_ITEM_NAME" desc="OOBE network screen list entry that starts offline demo mode setup">
-    Offline demo mode
   </message>
   <message name="IDS_AUTOSTART_WARNING_TITLE" desc="Title of the kiosk autostart screen">
     Auto-launch permission requested
@@ -621,6 +557,12 @@
   <message name="IDS_HID_DETECTION_CONTINUE_BUTTON" desc="Text shown on continue button" meaning="Continue button label of HID detection screen.">
     Continue
   </message>
+   <message name="IDS_HID_DETECTION_A11Y_CONTINUE_BUTTON_ENABLED" desc="Accessibility label for enabled continue button in HID detection screen">
+    Continue button enabled
+  </message>
+   <message name="IDS_HID_DETECTION_A11Y_CONTINUE_BUTTON_DISABLED" desc="Accessibility label for disabled continue button in HID detection screen">
+    Continue button disabled
+  </message>
   <message name="IDS_WELCOME_SELECTION_CONTINUE_BUTTON" desc="Text shown on continue button" meaning="Continue button label of welcome screen.">
     Continue
   </message>
@@ -690,8 +632,8 @@
   <message name="IDS_LARGE_CURSOR_OPTION_ON" desc="A value for Large Mouse Cursor accessibility option when it is on.">
     Large
   </message>
-  <message name="IDS_OOBE_HIGH_CONTRAST_MODE_OPTION" desc="High contrast mode option shown on OOBE screens accessibility menu.">
-    High contrast mode
+  <message name="IDS_OOBE_HIGH_CONTRAST_MODE_OPTION" desc="Color inversion mode (formerly known as high contrast) option shown on OOBE screens accessibility menu.">
+    Color inversion mode
   </message>
   <message name="IDS_OOBE_SCREEN_MAGNIFIER_OPTION" desc="Screen magnifier option shown on OOBE screens accessibility menu.">
     Screen magnifier
@@ -759,77 +701,11 @@
   </message>
 
   <!-- Strings for the Bluetooth pairing dialog -->
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_WRITE_NOT_PERMITTED" desc="Bluetooth pairing dialog: Error message displayed when write operation is not permitted on Bluetooth device.">
-    Write operation is not permitted on: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_UNSUPPORTED_DEVICE" desc="Bluetooth pairing dialog: Error message displayed when Bluetooth device is not supported.">
-    Unsupported Bluetooth device: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_REQUEST_NOT_SUPPORTED" desc="Bluetooth pairing dialog: Error message displayed when Bluetooth pair request is not supported.">
-    The given request is not supported to: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_READ_NOT_PERMITTED" desc="Bluetooth pairing dialog: Error message displayed when read operation is not permitted on pairing Bluetooth device.">
-    Read operation is not permitted on: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_OFFSET_INVALID" desc="Bluetooth pairing dialog: Error message displayed during pairing operation when read or write has an invalid offset.">
-    Read or write operation was requested with an invalid offset on: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_INSUFFICIENT_ENCRYPTION" desc="Bluetooth pairing dialog: Error message displayed during Bluetooth pairing when operation is not sufficiently encrypted.">
-    Insufficient encryption for a given operation on: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_IN_PROGRESS" desc="Bluetooth pairing dialog: Message informing that current Bluetooth device is still being connected to.">
-    Connection to "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>" still in progress
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_FAILED" desc="Bluetooth pairing dialog: Error message informing that connection to Bluetooth device failed.">
-    Failed to connect to "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_CONNECTION_CONGESTED" desc="Bluetooth pairing dialog: Error message informing that connection to Bluetooth device is congested.">
-    Connection is congested to remote device: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_AUTH_TIMEOUT" desc="Bluetooth pairing dialog: Error message informing that Bluetooth authentication connection timed out.">
-    Authentication timeout while connecting to "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_AUTH_REJECTED" desc="Bluetooth pairing dialog: Error message informing that Bluetooth authentication code was rejected while connecting to a Bluetooth device.">
-    Authentication code rejected while connecting to "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_AUTH_FAILED" desc="Bluetooth pairing dialog: Error message informing that authentication failed while trying to connect to Bluetooth device">
-    Authentication failed while connecting to "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_AUTH_CANCELED" desc="Bluetooth pairing dialog: Error message informing that authentication was canceled while connecting a Bluetooth device.">
-    Authentication canceled while connecting to "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONNECT_ATTRIBUTE_LENGTH_INVALID" desc="Bluetooth pairing dialog: Error message informing that write operations exceeds the maximum length of attribute to a Bluetooth device.">
-    Write operation exceeds the maximum length of the attribute to: "<ph name="DEVICE_NAME">$1<ex>Nexus 4</ex></ph>".
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_CONFIRM_PASSKEY" desc="Bluetooth pairing dialog: Bluetooth pairing message typically shown when pairing with a device that has a display.">
-    Please confirm this passkey is shown on "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>":
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_DISPLAY_PASSKEY" desc="Bluetooth pairing dialog: Bluetooth pairing message typically displayed when pairing a Bluetooth 2.1 and later wireless keyboard.">
-    Please enter this passkey on "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>":
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_REQUEST_PASSKEY" desc="Bluetooth pairing dialog: Bluetooth pairing message typically displayed when the external Bluetooth 2.1 and later device has no display or means of input, and does not support SSP.">
-    Please enter the passkey for "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>":
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_DISPLAY_PINCODE" desc="Bluetooth pairing dialog: Bluetooth pairing message typically displayed when pairing a Bluetooth 2.0 and older wireless keyboard.">
-    Please enter this PIN code on "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>":
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_REQUEST_PINCODE" desc="Bluetooth pairing dialog: Bluetooth pairing message typically displayed when the external Bluetooth 2.0 and older device has no display or means of input.">
-    Please enter the PIN for "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>":
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_START_CONNECTING">
-    Connecting to "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>"
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_REJECT_PASSKEY" desc="Bluetooth pairing dialog: Text for button to reject pairing a device.">
-    Reject
-  </message>
   <message name="IDS_BLUETOOTH_PAIRING_PAIR" desc="Label for the settings button to pair a previously paired Bluetooth device.">
     Pair
   </message>
   <message name="IDS_BLUETOOTH_PAIRING_ENTER_KEY" desc="Bluetooth pairing dialog: Text for enter key when pairing keyboard devices." >
     enter
-  </message>
-  <message name="IDS_BLUETOOTH_PAIRING_ACCEPT_PASSKEY" desc="Bluetooth pairing dialog: Text for button to accept pairing code.">
-    Accept
   </message>
   <message name="IDS_BLUETOOTH_PAIRING_PAIR_NEW_DEVICES" desc="Message displayed describing how to pair a new Bluetooth device.">
     Pair new device
@@ -955,7 +831,24 @@
     Choose your demo preferences
   </message>
   <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_SCREEN_NEXT_BUTTON_LABEL" desc="The label of the button that is shown on preferences screen and that confirms chosen configuration and shows next demo setup screen.">
-    OK
+    Continue
+  </message>
+  <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_RETAILER_ID_INPUT_LABEL" desc="Label for retailer id input field on the demo mode setup screen. User should provide the retailer id if assigned.">
+    Retailer-store ID code (optional)
+  </message>
+  <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_RETAILER_ID_INPUT_PLACEHOLDER" desc="Placeholder for retailer id input field on the demo mode setup screen.">
+    Retailer-store ID code
+  </message>
+  <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_RETAILER_ID_INPUT_ERROR_TEXT" desc="Help text for retailer id input field on the demo mode setup screen.">
+    Invalid ID. The format you entered is incorrect. Please check the instructions you received to ensure you are entering the ID in the correct format. If you’re unable to resolve this issue, please leave the field blank and continue with installation.
+  </message>
+  <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_RETAILER_ID_INPUT_HELP_TEXT" desc="Help text for retailer id input field on the demo mode setup screen.">
+    The retailer-store ID format is ABC-1234
+  </message>
+  <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_RETAILER_ID_PRIVACY_DISCLAIMER" desc="Privacy disclaimer text for retailer id input field on the demo mode setup screen.">
+    <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>If you received instructions to enter a retailer-store ID code during Demo Mode installation, please enter it on the right*.  Otherwise, you can leave this field blank and continue.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
+    <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You will still be able to install Demo Mode without a code, but it’s important to enter this code if it’s applicable to your store.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
+    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>*Note: Google uses these codes to identify which version of Demo Mode the device should receive and to measure usage of Demo Mode.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
   </message>
   <message name="IDS_OOBE_DEMO_SETUP_PREFERENCES_SCREEN_COUNTRY_NOT_SELECTED_TITLE" desc="The title of country not selected option for demo mode preference screen.">
     Please select a country
@@ -1277,13 +1170,14 @@
     No thanks
   </message>
 
-  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_TITLE" desc="The title of the dialog that recommend apps to user">
+  <!-- TODO(crbug.com/1261902): Clean-up old strings once feature is launched. -->
+  <message name="IDS_LOGIN_RECOMMEND_APPS_OLD_SCREEN_TITLE" desc="The title of the dialog that recommend apps to user">
     Find apps for work and play
   </message>
-  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_DESCRIPTION" desc="The description of the 'Recommend Apps' section">
+  <message name="IDS_LOGIN_RECOMMEND_APPS_OLD_SCREEN_DESCRIPTION" desc="The description of the 'Recommend Apps' section">
     Get creative, be productive, and stay entertained with apps on the Google Play Store
   </message>
-  <message name="IDS_LOGIN_RECOMMEND_APPS_SELECT_ALL" desc="The label on the button that selects all recommended apps">
+  <message name="IDS_LOGIN_RECOMMEND_APPS_OLD_SELECT_ALL" desc="The label on the button that selects all recommended apps">
     Select all
   </message>
   <message name="IDS_LOGIN_RECOMMEND_APPS_DO_IT_LATER" desc="The label on the button that skips installing any recomended apps">
@@ -1292,9 +1186,38 @@
   <message name="IDS_LOGIN_RECOMMEND_APPS_DONE" desc="The label on the button that installs the user selected apps">
     Done
   </message>
+
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_TITLE" desc="The title of the dialog that recommend apps to user">
+    Install apps for your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> from the Google Play Store
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_DESCRIPTION" desc="The description of the 'Recommend Apps' section">
+    Find the apps you need, from productivity to entertainment, on the Google Play Store. You can install apps anytime.
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SELECT_ALL" desc="The label on the button that selects all recommended apps">
+    Select and install popular apps
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_IN_APP_PURCHASES" desc="Part of an app description message.">
+    In-app purchases
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_WAS_INSTALLED" desc="Part of an app description message.">
+    Installed on your other devices
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_CONTAINS_ADS" desc="Part of an app description message.">
+    Contains ads
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_DESCRIPTION_EXPAND_BUTTON" desc="An expand button description message announced to ChromeVox users.">
+    More about <ph name="APP_NAME">$1<ex>Google Maps</ex></ph>
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_SKIP" desc="The label on the button that skips installing any recomended apps">
+    Skip
+  </message>
+  <message name="IDS_LOGIN_RECOMMEND_APPS_INSTALL" desc="The label on the button that installs the user selected apps">
+    Install
+  </message>
   <message name="IDS_LOGIN_RECOMMEND_APPS_SCREEN_LOADING" desc="Message shown while the recommended app list is being downloaded.">
     Please wait...
   </message>
+
   <message name="IDS_LOGIN_APP_DOWNLOADING_SCREEN_TITLE" desc="The title of the dialog that tells the user the selected Android Apps are downloading.">
     Apps downloading
   </message>
@@ -1310,6 +1233,12 @@
   <message name="IDS_LOGIN_MARKETING_OPT_IN_SCREEN_SUBTITLE" desc="The sub-title of the dialog that allows user to opt-in into several Google marketing options.">
     Get <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> tips, offers, and updates, and share feedback.
   </message>
+  <message name="IDS_LOGIN_MARKETING_OPT_IN_SCREEN_WITH_CLOUDGAMINGDEVICE_TITLE" desc="An alternate title for the last dialog the marketing opt-in for cloud gaming devices.">
+    Setup is complete! Get your device ready for gaming next
+  </message>
+  <message name="IDS_LOGIN_MARKETING_OPT_IN_SCREEN_WITH_CLOUDGAMINGDEVICE_SUBTITLE" desc="An alternate subtitle for the last dialog the marketing opt-in for cloud gaming devices.">
+    Your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> is built for gaming. The Explore app will open next where you can access hundreds of the latest games, see gaming offers, and discover gaming features that come with your device.
+  </message>
   <message name="IDS_LOGIN_MARKETING_OPT_IN_SCREEN_UNSUBSCRIBE_SHORT" desc="Disclaimer about being able to unsubscribe">
     Unsubscribe anytime.
   </message>
@@ -1324,6 +1253,9 @@
   </message>
   <message name="IDS_LOGIN_MARKETING_OPT_IN_SCREEN_GET_CHROMEBOOK_UPDATES_SIGN_ME_UP" desc="A lablel next to the checkbox that controls user subscription to marketing updates and useful information about the user's Chrome device.">
     Sign me up
+  </message>
+  <message name="IDS_LOGIN_MARKETING_OPT_IN_SCREEN_WITH_CLOUDGAMINGDEVICE_SIGN_ME_UP" desc="Alternate the lablel next to the checkbox that controls user subscription to marketing updates and useful information about the user's Chrome device for gaming device.">
+    Sign up for <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> emails
   </message>
   <message name="IDS_LOGIN_GET_STARTED" desc="A label on the button. Used on the welcome screen (the first one on OOBE) and on the marketing optin screen (the last one in OOBE).">
     Get started
@@ -1444,8 +1376,26 @@
   <message name="IDS_LOGIN_PASSWORD_CHANGED_TRY_AGAIN" desc="Label for the retry button on the proceed anyway step in the the GAIA password changed flow">
     Try again
   </message>
-  <message name="IDS_LOGIN_SAML_NOTICE" desc="Text message displayed above SAML portal to early indicate that the user is being redirected to another sign-in provider. This is the version of the string used in the GAIA flow.">
-    This sign-in service is hosted by <ph name="SAML_DOMAIN">$1<ex>saml.com</ex></ph>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_DATA_LOSS_WARNING_TITLE" desc="Title for the data loss warning screen if the user decided not to recover local data">
+    Local data will be deleted
+  </message>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_DATA_LOSS_WARNING_SUBTITLE_P1" desc="First paragraph of subtitle message for the data loss warning screen if the user decided not to recover local data">
+    Local data is protected by your old password. If you recently changed your password, try your old password again.
+  </message>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_DATA_LOSS_WARNING_SUBTITLE_P2" desc="Second paragraph of subtitle message for the data loss warning screen if the user decided not to recover local data">
+    If you continue without entering your old password, your local data will be deleted. You’ll sign in with your Google Account to set up this user again.
+  </message>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_RECOVER_DATA_TITLE" desc="Title for the screen to recover local data by entering old password.">
+    Restore your local data
+  </message>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_RECOVER_DATA_SUBTITLE" desc="Subtitle for the screen to recover local data by entering old password.">
+    Your password has changed. To restore your local data, you need to enter your old password.
+  </message>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_CONTINUE_AND_DELETE_BUTTON" desc="Button to continue and delete data without providing old password on the data loss warning dialog.">
+    Continue and delete data
+  </message>
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_CONTINUE_WITHOUT_LOCAL_DATA_BUTTON" desc="Button to confirm continue without local data on the recover local data dialog.">
+    Continue without local data
   </message>
   <message name="IDS_LOGIN_SAML_NOTICE_SHORT" desc="Text message displayed above SAML portal to early indicate that the user is being redirected to another sign-in provider. This is the version of the string used in the GAIA flow.">
     Sign-in hosted by <ph name="SAML_DOMAIN">$1<ex>saml.com</ex></ph>
@@ -1977,9 +1927,6 @@
     Skip for now
   </message>
 
-  <message name="IDS_AUTO_ENROLLMENT_CHECK_SCREEN_HEADER" desc="Header of message only used for accessibility label in the current design,  notifying about pending auto-enrollment check completion.">
-    Determining device configuration.
-  </message>
   <message name="IDS_AUTO_ENROLLMENT_CHECK_SCREEN_MESSAGE" desc="Warning message shown on screen notifying about pending auto-enrollment check completion.">
     Determining device configuration...
   </message>
@@ -2296,6 +2243,9 @@
   <message name="IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_TITLE" desc="An offline message title shown when we suggest that user may be behind the captive portal.">
     Network not available
   </message>
+  <message name="IDS_LOGIN_AUTO_ENROLLMENT_OFFLINE_TITLE" desc="A message title shown when we suggest that user can't reach proper servers during auto-enrollment.">
+    Can't reach Google
+  </message>
   <message name="IDS_LOGIN_MAYBE_CAPTIVE_PORTAL" desc="An offline message shown when we suggest that user may be behind the captive portal. Translation note: enter as Guest - could also be said enter as Guest user. Word user may be added to the translation if needed.">
     To use <ph name="NETWORK_ID">$1<ex>&gt;b&lt;Public Wifi&gt;/b&lt;</ex></ph> you may first need to <ph name="LINK_START">$2<ex>&gt;a&lt;</ex></ph>visit the network's sign-in page<ph name="LINK_END">$3<ex>&gt;/a&lt;</ex></ph>, which will open automatically in a few seconds. If it doesn't happen, the network can't be used.
   </message>
@@ -2324,7 +2274,7 @@
     Please connect to the Internet to update your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>.
   </message>
   <message name="IDS_LOGIN_AUTO_ENROLLMENT_OFFLINE_MESSAGE" desc="An offline message that shows in the error screen when auto-enrollment state failed to be downloaded.">
-    Your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> is unable to connect to the Internet using <ph name="NETWORK_NAME">$2<ex>Ethernet</ex></ph>. Please choose another network. <ph name="LEARN_MORE_LINK_START">$3<ex>&gt;a&lt;</ex></ph>Learn more<ph name="LEARN_MORE_LINK_END">$4<ex>&gt;/a&lt;</ex></ph>
+    We can't reach Google through the connected network. Try choosing a different network or checking your network settings or proxy settings (if you are using a proxy).
   </message>
   <message name="IDS_UPDATE_PROXY_ERROR_MESSAGE" desc="An offline message that shows up when a proxy error has appeared in the OOBE update screen.">
     The update check failed using the current proxy settings. Please adjust your <ph name="PROXY_SETTINGS_LINK_START">$1<ex>&gt;a&lt;</ex></ph>proxy settings<ph name="PROXY_SETTINGS_LINK_END">$2<ex>&gt;/a&lt;</ex></ph>.
@@ -2660,6 +2610,27 @@
   </if>
 
   <!-- Network portal notification -->
+  <message name="IDS_NEW_PORTAL_DETECTION_NOTIFICATION_TITLE_WIRED" desc="Title for the new system notification that current wired network is behind captive portal">
+    Network Found
+  </message>
+  <message name="IDS_NEW_PORTAL_DETECTION_NOTIFICATION_TITLE_WIFI" desc="Title for the new system notification that current Wi-Fi network is behind captive portal">
+    WiFi Network Found
+  </message>
+  <message name="IDS_NEW_PORTAL_DETECTION_NOTIFICATION_MESSAGE" desc="Body of the new system notification that current wired network is behind captive portal">
+    Sign in to "<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>"
+  </message>
+  <message name="IDS_NEW_PORTAL_PROXY_AUTH_REQUIRED_DETECTION_NOTIFICATION_MESSAGE" desc="Body of the new system notification that current wired network is behind captive portal">
+    Proxy authentication is required for "<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>"
+  </message>
+  <message name="IDS_NEW_PORTAL_SUSPECTED_DETECTION_NOTIFICATION_MESSAGE" desc="Body of the new system notification that current wired network is behind captive portal">
+    Connectivity on "<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>" may be limited
+  </message>
+  <message name="IDS_NEW_PORTAL_DETECTION_NOTIFICATION_BUTTON" desc="The text to display on the button when the user needs to sign in to the captive portal">
+    Sign in
+  </message>
+  <message name="IDS_NEW_PORTAL_SUSPECTED_DETECTION_NOTIFICATION_BUTTON" desc="The text to display on the button when the user needs to open a new tab for a suspected portal">
+    Open a new tab
+  </message>
   <message name="IDS_PORTAL_DETECTION_NOTIFICATION_TITLE_WIRED" desc="Title for the system notification that current wired network is behind captive portal">
     Connect to network
   </message>
@@ -2904,6 +2875,9 @@
   <message name="IDS_ENTERPRISE_ENROLLMENT_ILLEGAL_ACCOUNT_FOR_PACKAGED_EDU_LICENSE" desc="Error message to show when the user tries to enroll a CBEdu device into non-EDU account.">
     You must enroll this Chrome Education device into an education account. To sign up for a new account, please visit g.co/workspace/edusignup.
   </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_INVALID_PACKAGED_DEVICE_FOR_KIOSK" desc="Error message to show when the user tries to enroll an enterprise license packaged device into KIOSK.">
+    This is a bundled device and can not be enrolled with Kiosk &amp; Signage Upgrade.
+  </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_ERROR" desc="Error message shown when successfully enrolled, but the device attribute update has failed.">
     Your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> has successfully been enrolled for enterprise management, but failed to send its asset and location information. Please manually enter this information from your Admin console for this device.
   </message>
@@ -2924,6 +2898,9 @@
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_SCREEN_TITLE" desc="The title on the enterprise enrollment dialog.">
     Enterprise enrollment
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_SCREEN_PROGRESS_LABEL" desc="The a11y label for enrollment in progress dialog with spinner.">
+    Enterprise enrollment in progress
   </message>
   <message name="IDS_ENTERPRISE_ACCOUNT_CHECK_TITLE" desc="The title of spinner dialog shown during account check.">
     Checking eligibility
@@ -2974,10 +2951,13 @@
     Confirm kiosk and signage device enrollment?
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_KIOSK_CONFIRM_MESSAGE" desc="Message of kiosk confirm enrollment screen.">
-    You will use a Kiosk &amp; Signage Upgrade which only allows the device to run in kiosk or signage mode. If you would like users to sign into the device, please go back and enroll using Chrome Enterpirse Upgrade.
+    You will use a Kiosk &amp; Signage Upgrade which only allows the device to run in kiosk or signage mode. If you would like users to sign into the device, please go back and enroll using Chrome Enterprise Upgrade.
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_KIOSK_CONFIRM_POWERWASH_MESSAGE" desc="Message of kiosk confirm enrollment screen.">
     If you want to switch after enrollment, you will need to factory reset (powerwash) your device.
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_KIOSK_CANCEL_BUTTON" desc="Label for the decline button on the cofirm kiosk enrollment screen in the enterprise enrollment dialog.">
+    Decline
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_KIOSK_CONFIRM_BUTTON" desc="Label for the confirm button on the cofirm kiosk enrollment screen in the enterprise enrollment dialog.">
     Confirm
@@ -2995,6 +2975,21 @@
   <message name="IDS_TPM_CHECK_SUBTITLE" desc="The subtitle of loading dialog shown during TPM status check.">
     Checking TPM status...
   </message>
+
+    <!-- Skip Enrollment confirmation dialog -->
+  <message name="IDS_SKIP_ENROLLMENT_DIALOG_TITLE" desc="The title for the modal dialog shown when skipping enrollment. Only displayed if the device is License Packaged device.">
+    Skip enterprise enrollment?
+  </message>
+  <message name="IDS_SKIP_ENROLLMENT_DIALOG_TEXT" desc="The message for the modal dialog shown when skipping enrollment. Only displayed if the device is License Packaged device.">
+    You will have to factory reset this device to use enterprise features.
+  </message>
+   <message name="IDS_SKIP_ENROLLMENT_DIALOG_GO_BACK_BUTTON" desc="Cancel button for skipping enrollment">
+    Go back
+  </message>
+   <message name="IDS_SKIP_ENROLLMENT_DIALOG_SKIP_BUTTON" desc="Confirmation button for skipping enrollment">
+    Skip
+  </message>
+
   <!-- Administrator facing strings for Active Directory screens. -->
   <message name="IDS_AD_DEVICE_NAME_INPUT_LABEL" desc="Admin-facing. Label for device name input field on the Active Directory domain join screen. User should tell us the name of their device.">
     Chromebook device name
@@ -3172,6 +3167,12 @@
   <message name="IDS_NETWORK_UI_TAB_NETWORK_SELECT" desc="Network Select tab name">
     Network Select
   </message>
+  <message name="IDS_NETWORK_UI_TAB_NETWORK_METRICS" desc="Network metrics tab name">
+    Network Metrics
+  </message>
+  <message name="IDS_NETWORK_UI_TAB_NETWORK_HOTSPOT" desc="Hotspot tab name">
+    Hotspot
+  </message>
   <message name="IDS_NETWORK_UI_AUTO_REFRESH" desc="Instructions for how to auto-refresh the page">
     Add a query param in URL to auto-refresh the page: chrome://network/?refresh=&lt;sec&gt;
   </message>
@@ -3295,6 +3296,54 @@
   <message name="IDS_NETWORK_UI_NETWORK_LOGS_DEBUGGING_UNKNOWN" desc="Text displayed when the Shill debugging mode is unknown.">
     Unknown
   </message>
+  <message name="IDS_NETWORK_UI_NETWORK_METRICS_LABEL" desc="Title for the section for displaying WiFi performance metrics.">
+    WiFi Performance Metrics
+  </message>
+  <message name="IDS_NETWORK_UI_NETWORK_METRICS_RENDER_BUTTON" desc="Text displayed on the button for rendering graph.">
+    Render
+  </message>
+  <message name="IDS_NETWORK_UI_NETWORK_METRICS_START_BUTTON" desc="Text displayed on the button for starting plots.">
+    Start
+  </message>
+  <message name="IDS_NETWORK_UI_NETWORK_METRICS_STOP_BUTTON" desc="Text displayed on the button for stopping plots.">
+    Stop
+  </message>
+  <message name="IDS_NETWORK_UI_NETWORK_METRICS_INCREASE_RATE_BUTTON" desc="Text displayed on the button for increasing the sample rate of plots.">
+    Increase rate
+  </message>
+  <message name="IDS_NETWORK_UI_NETWORK_METRICS_DECREASE_RATE_BUTTON" desc="Text displayed on the button for decreasing the sample rate of plots.">
+    Decrease rate
+  </message>
+  <message name="IDS_NETWORK_UI_TETHERING_CAPABILITIES_LABEL" desc="Title for the section for displaying and refreshing tethering capabilities.">
+    Tethering Capabilities:
+  </message>
+  <message name="IDS_NETWORK_UI_REFRESH_TETHERING_CAPABILITIES_BUTTON_TEXT" desc="Text for button which, when pressed, refreshing the tethering capabilities.">
+    Refresh Tethering Capabilities
+  </message>
+  <message name="IDS_NETWORK_UI_TETHERING_STATUS_LABEL" desc="Title for the section for displaying and refreshing tethering status.">
+    Tethering Status:
+  </message>
+  <message name="IDS_NETWORK_UI_REFRESH_TETHERING_STATUS_BUTTON_TEXT" desc="Text for button which, when pressed, refresh the tethering status.">
+    Refresh Tethering Status
+  </message>
+  <message name="IDS_NETWORK_UI_TETHERING_CONFIG_LABEL" desc="Title for the section for displaying and refreshing tethering configuration.">
+    Tethering Configuration:
+  </message>
+  <message name="IDS_NETWORK_UI_REFRESH_TETHERING_CONFIG_BUTTON_TEXT" desc="Text for button which, when pressed, refresh the tethering configuration.">
+    Refresh Tethering Configuration
+  </message>
+  <message name="IDS_NETWORK_UI_SET_TETHERING_CONFIG_BUTTON_TEXT" desc="Text for button which, when pressed, set the tethering configuration.">
+    Set Tethering Configuration
+  </message>
+  <message name="IDS_NETWORK_UI_TETHERING_READINESS_LABEL" desc="Title for the section for displaying and checking tethering readiness.">
+    Tethering Readiness:
+  </message>
+  <message name="IDS_NETWORK_UI_CHECK_TETHERING_READINESS_BUTTON_TEXT" desc="Text for button which, when pressed, check the tethering readiness.">
+    Check Tethering Readiness
+  </message>
+  <message name="IDS_NETWORK_UI_SET_TETHERING_ENABLED_LABEL" desc="Title for the section for enabling or disabling tethering.">
+    Enable/Disable Tethering
+  </message>
 
   <message name="IDS_DEVICE_LOG_LINK_TEXT" desc="Message preceeding link to chrome://device-log">
     To view network UI logs, see: <ph name="DEVICE_LOG_LINK">&lt;a href="chrome://device-log"&gt;chrome://device-log&lt;/a&gt;</ph>
@@ -3315,28 +3364,6 @@
   </message>
   <message name="IDS_SET_TIME_TIMEZONE_LABEL" desc="Label for the set time dialog timezone select element.">
     Timezone
-  </message>
-
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_TITLE" desc="Title of a prompt dialog for granting permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name. Only used for screen readers (a11y); not visible.">
-    Permission requested
-  </message>
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_MESSAGE" desc="Message in a prompt dialog for granting read-only permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
-    <ph name="APP_NAME">$1<ex>Super Kiosk app</ex></ph> wants to copy files from <ph name="VOLUME_NAME">$2<ex>FooBar 4GB</ex></ph>.
-  </message>
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_WRITABLE_MESSAGE" desc="Message in a prompt dialog for granting full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
-    <ph name="APP_NAME">$1<ex>Super Kiosk app</ex></ph> wants to access <ph name="VOLUME_NAME">$2<ex>FooBar 4GB</ex></ph>. It may modify or delete your files.
-  </message>
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_ALLOW_BUTTON" desc="Label on the button to grant permissions.">
-    Allow
-  </message>
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_DENY_BUTTON" desc="Label on the button to reject permissions.">
-    Deny
-  </message>
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_MESSAGE" desc="Message in a notification about granted read-only pemissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
-    Read-only access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
-  </message>
-  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_WRITABLE_MESSAGE" desc="Message in a notification about granted full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
-    Read and write access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
   </message>
 
   <!-- Webstore widget -->
@@ -3652,6 +3679,18 @@
   </message>
   <message name="IDS_ARC_LOW_DISK_SPACE_ERROR" desc="Android sign-in failed due to low disk space">
     Disk space is critically low. Please free up disk space.
+  </message>
+  <message name="IDS_ARC_LOW_DISK_SPACE_PRE_STOP_NOTIFICATION_TITLE" desc="Title of the notification warning Android users that they are critically low on disk space">
+    Device disk space critically low
+  </message>
+  <message name="IDS_ARC_LOW_DISK_SPACE_PRE_STOP_NOTIFICATION_MESSAGE" desc="Message in the notification warning Android users that they are critically low on disk space">
+    Free up space to avoid losing access to Android.
+  </message>
+  <message name="IDS_ARC_LOW_DISK_SPACE_POST_STOP_NOTIFICATION_TITLE" desc="Title of the notification shown when Android is stopped due to low disk space">
+    Android apps were stopped
+  </message>
+  <message name="IDS_ARC_LOW_DISK_SPACE_POST_STOP_NOTIFICATION_MESSAGE" desc="Message in the notification shown when Android is stopped due to low disk space">
+    Free up disk space to launch Android apps.
   </message>
   <message name="IDS_ARC_SIGN_IN_UNKNOWN_ERROR" desc="Android sign-in error because of unknown error">
     Something went wrong. Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
@@ -3980,25 +4019,10 @@
     I have read and agree to the <ph name="BEGIN_LINK1">&lt;a id="googleEulaLinkArcDisabled"&gt;</ph>Google Terms of Service<ph name="END_LINK1">&lt;/a&gt;</ph> and <ph name="BEGIN_LINK2">&lt;a id="crosEulaLinkArcDisabled"&gt;</ph>Chrome and ChromeOS Additional Terms of Service<ph name="END_LINK2">&lt;/a&gt;</ph>.
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_TITLE" desc="Title for the message in the consolidated consent screen to opt-in for metrics for accounts.">
-    Send usage and diagnostic data.
+    Send diagnostic and usage data.
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_OWNER" desc="Message in the consolidated consent screen to opt-in for metrics when the user is the device owner.">
-    Help improve Chrome and ChromeOS features and performance by automatically sending crash reports as well as diagnostic and usage data to Google. Some aggregate data will also help Android apps and Google partners. If the Web &amp; App Activity setting is turned on for your Google Account, your Android data may be saved to your Google Account.
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN" desc="Message in the consolidated consent screen to opt-in for metrics.">
-    Help improve Chrome and ChromeOS features and performance by automatically sending diagnostic and usage data to Google. Some aggregate data will also help Android apps and Google partners. If the Web &amp; App Activity setting is turned on for your Google Account, your Android data may be saved to your Google Account.
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_CHILD_OWNER" desc="Message in the consolidated consent screen to opt-in for metrics for a child device owner account.">
-    Help improve Chrome and ChromeOS features and performance by automatically sending crash reports as well as diagnostic and usage data to Google. Some aggregate data will also help Android apps and Google partners. If the Web &amp; App Activity setting is turned on for your child's Google Account, your child's Android data may be saved to your child's Google Account.
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_CHILD" desc="Message in the consolidated consent screen to opt-in for metrics for a child account.">
-    Help improve Chrome and ChromeOS features and performance by automatically sending diagnostic and usage data to Google. Some aggregate data will also help Android apps and Google partners. If the Web &amp; App Activity setting is turned on for your child's Google Account, your child's Android data may be saved to your child's Google Account.
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_ARC_DISABLED_OWNER" desc="Message in the consolidated consent screen to opt-in for metrics when ARC is disabled for device owner.">
     Help improve Chrome and ChromeOS features and performance by automatically sending crash reports as well as diagnostic and usage data to Google.
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_ARC_DISABLED" desc="Message in the consolidated consent screen to opt-in for metrics when ARC is disabled.">
-    Help improve Chrome and ChromeOS features and performance by automatically sending diagnostic and usage data to Google.
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_LINK" desc="Learn more about usage opt in">
     Learn more about diagnostic and usage data
@@ -4008,46 +4032,18 @@
     <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your ChromeOS device settings. If you’re a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
     <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>If the Web &amp; App Activity setting is turned on for your Google Account, your Android data may be saved to your Google Account. You can see your data, delete it, and change your account settings at account.google.com.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
   </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE" desc="Text shown in a pop-up dialog in the consolidated consent screen when the user clicks on the learn more for metrics opt-in.">
-    <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing your ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like which features you use, how much memory you typically use, Android app diagnostic and usage data, and errors. Some aggregate data will also help Google apps and partners, such as Android developers.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your ChromeOS device settings. If you’re a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>If the Web &amp; App Activity setting is turned on for your Google Account, your Android data may be saved to your Google Account. You can see your data, delete it, and change your account settings at account.google.com.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH4">&lt;p&gt;</ph>If the device owner turns on "Send usage and diagnostic data", crash reports might also be uploaded to Google.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-  </message>
   <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_CHILD_OWNER" desc="Text shown in a pop-up dialog in the consolidated consent screen when the user clicks on the learn more for metrics opt-in for a child device owner account.">
     <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like when ChromeOS crashes, which features were used, how much memory was typically used, and Android app diagnostic and usage data. Some aggregate data will also help Google apps and partners, such as Android developers.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
     <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your child's ChromeOS device settings. If you're a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect this device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
     <ph name="BEGIN_PARAGRAPH4">&lt;p&gt;</ph>If the Web &amp; App Activity setting is turned on for your child's Google Account, your child's data may be saved to their Google Account. Learn more about these settings and how to adjust them at families.google.com.<ph name="END_PARAGRAPH4">&lt;/p&gt;</ph>
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_CHILD" desc="Text shown in a pop-up dialog in the consolidated consent screen when the user clicks on the learn more for metrics opt-in for a child account.">
-    <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like which features were used, how much memory was typically used, and Android app diagnostic and usage data. Some aggregate data will also help Google apps and partners, such as Android developers.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your child's ChromeOS device settings. If you're a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect this device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH4">&lt;p&gt;</ph>If the Web &amp; App Activity setting is turned on for your child's Google Account, your child's data may be saved to their Google Account. Learn more about these settings and how to adjust them at families.google.com.<ph name="END_PARAGRAPH4">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH4">&lt;p&gt;</ph>If the device owner turns on "Send usage and diagnostic data", crash reports might also be uploaded to Google.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_ARC_DISABLED_OWNER" desc="Text shown in a pop-up dialog in the consolidated consent screen when the device owner clicks on the learn more for metrics opt-in when ARC is disabled.">
     <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing your ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like when ChromeOS crashes, which features you use and how much memory you typically use.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
     <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your Chrome device settings. If you’re a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect your device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_ARC_DISABLED" desc="Text shown in a pop-up dialog in the consolidated consent screen when the user clicks on the learn more for metrics opt-in when ARC is disabled.">
-    <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing your ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like which features you use and how much memory you typically use.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your Chrome device settings. If you’re a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect your device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH4">&lt;p&gt;</ph>If the device owner turns on "Send usage and diagnostic data", crash reports might also be uploaded to Google.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_ARC_DISABLED_CHILD_OWNER" desc="Text shown in a pop-up dialog in the consolidated consent screen when the user clicks on the learn more for metrics opt-in when ARC is disabled in a child account.">
     <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like when ChromeOS crashes, which features were used, and how much memory was typically used.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
     <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your child's ChromeOS device settings. If you're a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect this device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-  </message>
-  <message name="IDS_CONSOLIDATED_CONSENT_USAGE_OPT_IN_LEARN_MORE_ARC_DISABLED_CHILD" desc="Text shown in a pop-up dialog in the consolidated consent screen when the user clicks on the learn more for metrics opt-in when ARC is disabled in a child account.">
-    <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like when which features were used, and how much memory was typically used.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your child's ChromeOS device settings. If you're a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect this device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH4">&lt;p&gt;</ph>If the device owner turns on "Send usage and diagnostic data", crash reports might also be uploaded to Google.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_BACKUP_OPT_IN_TITLE" desc="Title for the message in the consolidated consent screen to opt-in for back-up.">
     Back up Android apps to Google Drive.
@@ -4068,6 +4064,12 @@
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_BACKUP_OPT_IN_LEARN_MORE_LINK" desc="Learn more about backup opt in">
     Learn more about backing up your apps
+  </message>
+  <message name="IDS_CONSOLIDATED_CONSENT_RECOVERY_OPT_IN_TITLE" desc="Title for the message in the consolidated consent screen to opt-in for setting up recovery.">
+    Enable data recovery service.
+  </message>
+  <message name="IDS_CONSOLIDATED_CONSENT_RECOVERY_OPT_IN" desc="Message in the consolidated consent screen to opt-in for setting up recovery.">
+    If you forget your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> password, you can still restore your local data. You'll need to sign in to your Google Account or use account recovery.
   </message>
   <message name="IDS_CONSOLIDATED_CONSENT_LOCATION_OPT_IN_TITLE" desc="Title for the message in the consolidated consent screen to opt-in for location services.">
     Use location for Android apps and services.
@@ -4155,7 +4157,7 @@
     Google Chrome and ChromeOS Additional Terms
   </message>
   <message name="IDS_GUEST_TOS_USAGE_OPT_IN_TITLE" desc="Title for the message in the guest terms of service screen to opt-in for metrics during the guest session.">
-    Send usage and diagnostic data.
+    Send diagnostic and usage data.
   </message>
   <message name="IDS_GUEST_TOS_USAGE_OPT_IN" desc="Message in the guest terms of service screen to opt-in for metrics during the guest session.">
     Help improve Chrome and ChromeOS features and performance by automatically sending crash reports as well as diagnostic and usage data to Google.
@@ -4166,7 +4168,6 @@
   <message name="IDS_GUEST_TOS_USAGE_OPT_IN_LEARN_MORE" desc="Text shown in a pop-up dialog in the guest terms of service screen when the user clicks on the learn more for metrics opt-in.">
     <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph>Allowing ChromeOS devices to send automatic reports helps us prioritize what to fix and improve in ChromeOS. These reports can include things like when ChromeOS crashes, which features were used, and how much memory was typically used.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
     <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>You can start or stop allowing these reports any time in your Chrome device settings. If you’re a domain administrator, you can change this setting in the admin console.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
-    <ph name="BEGIN_PARAGRAPH3">&lt;p&gt;</ph>Turning off this feature doesn't affect your device's ability to send the information needed for essential services such as system updates and security.<ph name="END_PARAGRAPH3">&lt;/p&gt;</ph>
   </message>
 
   <!-- HW data collection screen -->
@@ -4238,9 +4239,8 @@
   </message>
 
   <!-- Lacros data migration screen. -->
-  <!-- TODO(crbug.com/1266669): Remove translateable tag when the string is finalized. -->
   <message translateable="false" name="IDS_LACROS_DATA_MIGRATION_SCREEN_TITLE" desc="Title of the data migration screen.">
-    Updating Chrome browser (alpha)
+    Updating Chrome browser
   </message>
   <message name="IDS_LACROS_DATA_MIGRATION_SCREEN_SUBTITLE" desc="Shows the % of progress.">
     <ph name="PERCENT">$1<ex>100</ex></ph>% completed
@@ -4346,20 +4346,6 @@
   </message>
   <message name="IDS_USB_PRINTER_NOTIFICATION_CONFIGURATION_REQUIRED_MESSAGE" desc="Message displayed when the USB printer is connected but needs configuration.">
     <ph name="PRINTER_NAME">$1<ex> Google InkJet 1234</ex></ph> is connected but needs configuration
-  </message>
-
-  <!-- RequestPin dialog messages -->
-  <message name="IDS_REQUEST_PIN_DIALOG_HEADER" desc="The text displayed in the certificate provider PIN request dialog.">
-    "<ph name="EXTENSION_NAME">$1<ex>My Extension</ex></ph>" is requesting your <ph name="CODE_TYPE">$2<ex>PIN</ex></ph>
-  </message>
-  <message name="IDS_REQUEST_PIN_DIALOG_PROCESSING" desc="The text displayed while the certificate provider API is waiting for response from extension.">
-    Processing request...
-  </message>
-  <message name="IDS_REQUEST_PIN_DIALOG_PIN" desc="The Provider Identification Number abbreviation">
-    PIN
-  </message>
-  <message name="IDS_REQUEST_PIN_DIALOG_PUK" desc="The Personal Unlocking Key (as used in mobile phones) abbreviation">
-    PUK
   </message>
 
   <message name="IDS_USB_PRINTER_UNKNOWN_DISPLAY_NAME" desc="Display string used for USB printers where we have identified neither the correct manufactuer nor model strings. USB stands for Universal Serial Bus, it indicates how the printer is attached to the computer.">
@@ -4731,13 +4717,13 @@
     Configuring Linux
   </message>
   <message name="IDS_CROSTINI_ANSIBLE_SOFTWARE_CONFIG_SUBTEXT" desc="Description for dialog warning user of unavailable Linux container until software configurations are applied.">
-    Linux is being configured by your administrator. Configuration will take a few minutes.
+    Linux is currently being configured. Configuration will take a few minutes.
   </message>
   <message name="IDS_CROSTINI_ANSIBLE_SOFTWARE_CONFIG_ERROR_LABEL" desc="Label for Crostini software config dialog when there is an error in Ansible playbook application or installation.">
     Error configuring Linux
   </message>
   <message name="IDS_CROSTINI_ANSIBLE_SOFTWARE_CONFIG_ERROR_SUBTEXT" desc="Text shown for Crostini software config dialog when there is an error in Ansible playbook application or installation.">
-    There was an error while configuring Linux. Please contact your administrator.
+    There was an error while configuring Linux.
   </message>
   <message name="IDS_CROSTINI_ANSIBLE_SOFTWARE_CONFIG_ERROR_OFFLINE_LABEL" desc="Label for dialog warning user of missing internet connection required for container configuration.">
     <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> is offline
@@ -4938,6 +4924,11 @@
     Resize Linux disk
   </message>
 
+  <!-- Bruschetta -->
+  <message name="IDS_BRUSCHETTA_NAME" desc="Bruschetta" translateable="false">
+    Bruschetta
+  </message>
+
   <!-- Time limit notification -->
   <message name="IDS_SCREEN_TIME_NOTIFICATION_TITLE" desc="The title of the notification when screen usage limit reaches before locking the device.">
     Almost time for a break
@@ -5037,6 +5028,12 @@
   <message name="IDS_EASY_UNLOCK_SCREENLOCK_TOOLTIP_LOGIN_DISABLED" desc="Tooltip for an icon on user's sign-in screen pod shown by EasyUnlock when the feature is only enabled for unlock, not sign-in.">
     To use Smart Lock to sign in to your Google Account, go to Settings &gt; Connected devices &gt; Your phone &gt; Smart Lock.
   </message>
+  <message name="IDS_SMART_LOCK_SIGN_IN_REMOVED_NOTIFICATION_TITLE" desc="Title for notification shown to users who had Sign in with Smart Lock enabled after the Sign in with Smart Lock subfeature is deprecated.">
+    Smart Lock has changed
+  </message>
+  <message name="IDS_SMART_LOCK_SIGN_IN_REMOVED_NOTIFICATION_MESSAGE" desc="Message for notification shown to users who had Sign in with Smart Lock enabled after the Sign in with Smart Lock subfeature is deprecated.">
+    Signing in with Smart Lock is no longer available. You can still unlock with Smart Lock.
+  </message>
   <message name="IDS_SMART_LOCK_SCREENLOCK_TOOLTIP_HARDLOCK_REAUTH_USER" desc="Tooltip text shown on a user's lock screen pod to reauthenticate the user before setting up Smart Lock. A password has to be entered to unlock the device.">
     To set up Smart Lock for Chromebook, Google needs to make sure it’s you—type your password to get started.
   </message>
@@ -5055,22 +5052,16 @@
 
   <!-- Strings for EcheApp -->
   <message name="IDS_ECHE_APP_SCREEN_LOCK_SETTINGS_BUTTON" desc="Label for the button in the screen lock notification of EcheApp to open the settings app.">
-    Open Settings
-  </message>
-  <message name="IDS_ECHE_APP_SCREEN_LOCK_LEARN_MORE" desc="Learn more link text in screen lock notification of EcheApp.">
-    Learn more
+    Settings
   </message>
   <message name="IDS_ECHE_APP_NOTIFICATION_TRY_AGAIN_BUTTON" desc="Label for the connection lost button of EcheApp to try again.">
     Try again
   </message>
-  <message name="IDS_ECHE_APP_NOTIFICATION_HELP_BUTTON" desc="Help link text in connection lost notification of EcheApp.">
-    Help
-  </message>
   <message name="IDS_ECHE_APP_SCREEN_LOCK_NOTIFICATION_TITLE" desc="Title for notification shown when screen lock is not enabled while using app stream of EcheApp.">
-    Couldn’t open <ph name="APP_NAME">$1<ex>the app</ex></ph>
+    Can't open <ph name="APP_NAME">$1<ex>the app</ex></ph>
   </message>
   <message name="IDS_ECHE_APP_SCREEN_LOCK_NOTIFICATION_MESSAGE" desc="Message for the notification shown when screen lock is not enabled while using app stream of EcheApp.">
-    Set a pin or password on this Chromebook to protect access to your phone’s apps.
+    Turn on "Show lock screen when waking from sleep" and try again
   </message>
   <message name="IDS_ECHE_APP_NOTIFICATION_OPEN_AGAIN_BUTTON" desc="Label for the inactivity notification button of EcheApp to open open.">
     Open again
@@ -5104,6 +5095,12 @@
   </message>
   <message name="IDS_OOBE_FINGERPINT_SETUP_SCREEN_SENSOR_GENERAL_DESCRIPTION_CHILD" desc="The label that explains the location of the fingerprint sensor on the device, when a child account is in use.">
     To set up fingerprint, have your child touch the fingerprint sensor. Your child’s fingerprint data is stored securely and never leaves this <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>.
+  </message>
+  <message name="IDS_OOBE_FINGERPINT_SETUP_SCREEN_SENSOR_LEFT_OF_POWER_BUTTON_TOP_RIGHT" desc="The label that explains the location of the fingerprint sensor for devices with fingerprint sensor located left to the power button on the top right corner of the keyboard.">
+    Touch the fingerprint sensor at the top right corner of your keyboard, next to the Power button. Your fingerprint data is stored securely and never leaves your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>.
+  </message>
+  <message name="IDS_OOBE_FINGERPINT_SETUP_SCREEN_SENSOR_LEFT_OF_POWER_BUTTON_TOP_RIGHT_CHILD" desc="The label that explains the location of the fingerprint sensor for devices with fingerprint sensor located left to the power button on the top right corner of the keyboard, when a child account is in use.">
+    To set up fingerprint, have your child touch the fingerprint sensor at the top right corner of the keyboard, next to the Power button. Your child’s fingerprint data is stored securely and never leaves this <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>.
   </message>
   <message name="IDS_OOBE_FINGERPINT_SETUP_SCREEN_ENROLLMENT_PROGRESS_TITLE" desc="The title of the dialog that shows where the fingerprint sensor is.">
     Lift, then touch again
@@ -5406,9 +5403,6 @@
   </message>
 
   <!-- Strings for Plugin VM -->
-  <message name="IDS_PLUGIN_VM_APP_NAME" desc="Product name for 'Parallels Desktop'. Should not be translated as it is a third party name." translateable="false">
-    Parallels Desktop
-  </message>
   <message name="IDS_PLUGIN_VM_INSTALLER_CONFIRMATION_TITLE" desc="Title of the Plugin VM installer when asking user to start installation.">
     Set up <ph name="APP_NAME">$1<ex>Plugin VM</ex></ph> on your Chromebook
   </message>
@@ -5595,15 +5589,6 @@
   </message>
 
   <!-- Strings for Account Manager screens -->
-  <message name="IDS_ACCOUNT_MANAGER_WELCOME_TITLE" desc="Title for the ChromeOS Account Manager Welcome screen.">
-    Sign-in has changed
-  </message>
-  <message name="IDS_ACCOUNT_MANAGER_WELCOME_TEXT" desc="Text body for the ChromeOS Account Manager Welcome screen.">
-    You can now manage all of your Google Accounts in one place. Access and permissions you've granted to apps, websites, and extensions in Chrome and Google Play may now apply to all of your signed-in accounts. <ph name="LINK_BEGIN">&lt;a target="_blank" href="$1<ex>https://support.google.com/chromebook/?p=google_accounts</ex>"&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
-  </message>
-  <message name="IDS_ACCOUNT_MANAGER_WELCOME_BUTTON" desc="Label for the button to view accounts on the ChromeOS Account Manager Welcome screen.">
-    View accounts
-  </message>
   <message name="IDS_ACCOUNT_MANAGER_DIALOG_TITLE" desc="Title for the ChromeOS 'Add account' dialog.">
     Sign in to add a Google account
   </message>
@@ -5636,6 +5621,9 @@ Permissions you've already given to apps may apply to this account. You can cont
   <message name="IDS_ACCOUNT_MANAGER_DIALOG_ADD_ACCOUNT_LABEL" desc="Label of the Add account button on Account picker screen.">
     Add Google Account
   </message>
+  <message name="IDS_ACCOUNT_MANAGER_DIALOG_ADD_SCHOOL_ACCOUNT_LABEL" desc="Label of the button to add a school/EDU account on Account picker screen.">
+    Add school account
+  </message>
   <message name="IDS_ACCOUNT_MANAGER_DIALOG_WELCOME_CHECKBOX" desc="Checkbox text for the Welcome screen in ChromeOS 'Add account' dialog. If user checks this checkbox, this screen will not be shown the next time they open the dialog.">
     Don't remind me next time
   </message>
@@ -5657,13 +5645,23 @@ Permissions you've already given to apps may apply to this account. You can cont
     Please try again later.
   </message>
   <message name="IDS_ACCOUNT_MANAGER_DIALOG_SIGNIN_BLOCKED_BY_POLICY_TITLE" desc="Title for the sign-in blocked by policy screen in ChromeOS 'Add account' dialog.">
-    Sign-in blocked by your admin
+    Can't sign in with this account
   </message>
   <message name="IDS_ACCOUNT_MANAGER_DIALOG_SIGNIN_BLOCKED_BY_POLICY_BODY" desc="Text body for the sign-in blocked by policy screen in ChromeOS 'Add account' dialog.">
-    <ph name="USER_EMAIL">$1<ex>john.doe@example.com</ex></ph> is managed by <ph name="MANAGER">$2<ex>example.com</ex></ph> and your admin has blocked sign-in as a secondary account
+    <ph name="BEGIN_PARAGRAPH1">&lt;p&gt;</ph><ph name="USER_EMAIL">$1<ex>john.doe@example.com</ex></ph> is managed by <ph name="MANAGER">$2<ex>example.com</ex></ph>. You can't add this email as an additional account.<ph name="END_PARAGRAPH1">&lt;/p&gt;</ph>
+    <ph name="BEGIN_PARAGRAPH2">&lt;p&gt;</ph>To use <ph name="USER_EMAIL">$1<ex>john.doe@example.com</ex></ph>, first sign out of your <ph name="DEVICE_TYPE">$3<ex>Chromebook</ex></ph>. Then at the bottom of the login screen, select Add Person.<ph name="END_PARAGRAPH2">&lt;/p&gt;</ph>
   </message>
   <message name="IDS_ACCOUNT_MANAGER_DIALOG_SIGNIN_BLOCKED_BY_POLICY_IMAGE_ALT" desc="Alternate text for image on the sign-in blocked by policy screen in ChromeOS 'Add account' dialog.">
    Restriction image
+  </message>
+  <message name="IDS_ACCOUNT_MANAGER_DIALOG_SIGNIN_ERROR_TITLE" desc="Title for the sign-in error screen in ChromeOS 'Add account' dialog.">
+    Something went wrong
+  </message>
+  <message name="IDS_ACCOUNT_MANAGER_DIALOG_SIGNIN_ERROR_BODY" desc="Text body for the sign-in error screen in ChromeOS 'Add account' dialog.">
+    Your email address or password couldn't be verified. Try signing in again.
+  </message>
+  <message name="IDS_ACCOUNT_MANAGER_DIALOG_SIGNIN_SPINNER_TEXT" desc="Text for the spinner during sign-in flow on ChromeOS 'Add account' dialog.">
+    Verifying account...
   </message>
 
   <!-- Strings for per-account Migration welcome screen -->
@@ -5749,8 +5747,41 @@ Permissions you've already given to apps may apply to this account. You can cont
   <message name="IDS_BOREALIS_CREDITS_PLACEHOLDER" desc="Shown to users who navigate to about://borealis-credits when the real credits file can't be shown (e.g. because borealis is not running)" translateable="false">
     Steam is either not installed or not running. Please run Steam to view credits.
   </message>
+  <message name="IDS_BOREALIS_DISALLOWED_TITLE" desc="Title of the dialog shown to users who are unable to install Steam on Chromebook (Steam is a video game distribution service)">
+    Steam cannot be installed
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_DISABLED" desc="Message shown to the user when Steam on Chromebook is disabled on their device">
+    This device does not currently support Steam on Chromebook
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_FAILED" desc="Message shown to the user when Steam on Chromebook failed to determine whether it should be allowed">
+    Please restart your device and try again
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_IRREGULAR" desc="Message shown to users when they try to install Steam on Chromebook on an irregular (incognito, kiosk, etc) profile">
+    Please sign in to a user account and try again
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_PRIMARY" desc="Message shown to users when they try to install Steam on Chromebook on a secondary profile">
+    Please install using your primary profile
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_CHILD" desc="Message shown to the users when they try to install Steam on Chromebook on a child account">
+    Accounts managed by Family Link are not yet supported
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_ADMIN" desc="Message shown to the user when Steam on Chromebook is blocked by their admin">
+    Please contact your administrator
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_CHANNEL" desc="Message shown to the user when they try to install Steam on Chromebook without setting their updates to the correct channel">
+    Device must be in Beta Channel
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_FLAG" desc="Message shown to the user when Steam on Chromebook doesn't have the correct chrome://flags setting enabled">
+    #borealis-enabled must be enabled in chrome://flags
+  </message>
+  <message name="IDS_BOREALIS_DISALLOWED_BUTTON" desc="Button label used to dismiss the Steam on Chromebook disallowed dialog">
+    Got it
+  </message>
+  <message name="IDS_BOREALIS_INSTALLER_APP_NAME" desc="Name of a utility which is used to install the Steam application (Steam is a video game distribution service)">
+    Steam Installer
+  </message>
   <message name="IDS_BOREALIS_INSTALLER_CONFIRMATION_TITLE" desc="Title for installer for Steam (noun, name of app).">
-    Welcome to Steam for Chromebook
+    Welcome to Steam on Chromebook
   </message>
   <message name="IDS_BOREALIS_INSTALLER_CONFIRMATION_MESSAGE" desc="Body for installer for Steam (noun, name of app).">
     Let’s get started
@@ -5758,61 +5789,62 @@ Permissions you've already given to apps may apply to this account. You can cont
   <message name="IDS_BOREALIS_INSTALLER_INSTALL_BUTTON" desc="Button on installer to install Steam (noun, name of app).">
     Install
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_ENVIRONMENT_SETTING_TITLE" desc="Title for installer while Steam (noun, name of app) is installing.">
-    Setting up Steam
+  <message name="IDS_BOREALIS_INSTALLER_ONGOING_TITLE" desc="Title for installer while Steam (noun, name of app) is installing.">
+    Setting up Steam on Chromebook
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_ERROR_TITLE" desc="Title for installer when Steam (noun, name of app) fails to install.">
-    There was a problem with Steam setup
+  <message name="IDS_BOREALIS_INSTALLER_ONGOING_MESSAGE" desc="Body for Steam (noun, name of app) installer while Steam is installing.">
+    This may take a few minutes
+  </message>
+  <message name="IDS_BOREALIS_INSTALLER_ONGOING_INACTIVE" desc="Message shown while the steam installer is initializing.">
+    Starting installation
+  </message>
+  <message name="IDS_BOREALIS_INSTALLER_ONGOING_DLC" desc="Message shown while the steam installer is downloading its content.">
+    Downloading
+  </message>
+  <message name="IDS_BOREALIS_INSTALLER_ONGOING_DRYRUN" desc="Message shown while the steam installer is performing a post-installation trial.">
+    Performing setup
   </message>
   <message name="IDS_BOREALIS_INSTALLER_FINISHED_TITLE" desc="Title for installer when installation for Steam (noun, name of app) completes succesfully.">
     You’re all set!
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_IMPORTING_MESSAGE" desc="Body for Steam (noun, name of app) installer while Steam is installing.">
-    This may take a few minutes
-  </message>
-  <message name="IDS_BOREALIS_INSTALLER_IMPORTED_MESSAGE" desc="Title for Steam (noun, name of app) installer when installation suceeded.">
-    Enjoy your gaming on your Chromebook
-  </message>
-  <message name="IDS_BOREALIS_INSTALLER_RETRY_BUTTON" desc="Button for Steam (noun, name of app) installer to retry after failing.">
-    Retry
+  <message name="IDS_BOREALIS_INSTALLER_FINISHED_MESSAGE" desc="Title for Steam (noun, name of app) installer when installation suceeded.">
+    Enjoy gaming on your Chromebook
   </message>
   <message name="IDS_BOREALIS_INSTALLER_LAUNCH_BUTTON" desc="Button in Steam (noun, name of app) installer to launch Steam.">
-    Launch
+    Launch Steam
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_NOT_ALLOWED_TITLE" desc="Title for Steam (noun, name of app) installer when it does not have permission to install.">
-    Steam does not have permission to run
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_TITLE" desc="Title for installer when Steam (noun, name of app) fails to install.">
+    There was a problem setting up Steam on Chromebook
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_NOT_ALLOWED_MESSAGE" desc="Body for Steam (noun, name of app) installer when it does not have permission to install. Error code is an integer.">
-    Steam isn't allowed on this device. Contact your administrator to get permission
-    Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_DISALLOWED" desc="Title for Steam (noun, name of app) installer when it does not have permission to install.">
+    Steam could not be installed on this device
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_OFFLINE_MESSAGE" desc="Body for Steam (noun, name of app)  installer when installation fails due to being offline.">
-    Please ensure that your device is connected to the internet.
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_PROGRESS" desc="Body for Steam (noun, name of app) when installation fails due to another process already running.">
+    Another Steam setup is running. Please wait for it to complete before trying again
   </message>
-  <message name="IDS_BOREALIS_DLC_INTERNAL_FAILED_MESSAGE" desc="Body for Steam (noun, name of app) installer when installation fails due to device being out of date.">
-    Ensure that your device is up to date and please try again
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_DLC_INTERNAL" desc="Body for Steam (noun, name of app) installer when installation fails due to device being out of date.">
+    Ensure that your device is up to date and try again
   </message>
-  <message name="IDS_BOREALIS_DLC_BUSY_FAILED_MESSAGE" desc="Body for Steam (noun, name of app) installer when installation fails with suggestion to try again.">
-    Please wait a few minutes and run Steam again
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_DLC_BUSY" desc="Body for Steam (noun, name of app) installer when installation fails with suggestion to try again.">
+    Please wait a few minutes and try again
   </message>
-  <message name="IDS_BOREALIS_DLC_NEED_REBOOT_FAILED_MESSAGE" desc="Body for Steam (noun, name of app) installer when a restart is needed.">
-    Please restart your device to use Steam
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_REBOOT" desc="Body for Steam (noun, name of app) installer when a restart is needed.">
+    Please restart your device to use Steam on Chromebook
   </message>
-  <message name="IDS_BOREALIS_DLC_NEED_UPDATE_FAILED_MESSAGE" desc="Body for Steam (noun, name of app) installer when installation fails due to device being out of date.">
-    Please ensure that your device is up to date and try again
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_SPACE" desc="Body for Steam (noun, name of app) installer when installation fails due to low space.">
+    There is not enough available storage to complete setup. Please free up storage and try again
   </message>
-  <message name="IDS_BOREALIS_INSUFFICIENT_DISK_SPACE_TITLE" desc="Title for Steam (noun, name of app) installer when installation fails due to low space.">
-    Your available device storage is too low to finish setup
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_DLC_UNKNOWN" desc="Body for Steam (noun, name of app) installer when installation fails due to an unknown dlc-related reason">
+    Please restart your device and try again
   </message>
-  <message name="IDS_BOREALIS_INSUFFICIENT_DISK_SPACE_MESSAGE" desc="Body for Steam (noun, name of app) installer when installation fails due to low space.">
-    To increase free space, delete files from device
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_OFFLINE" desc="Body for Steam (noun, name of app) installer when installation fails due to being offline.">
+    Please ensure that your device is connected to the internet
   </message>
-  <message name="IDS_BOREALIS_GENERIC_ERROR_MESSAGE" desc="Body for Steam (noun, name of app) installer when installation fails. Error code is an integer.">
-    If the problem persists, try restarting your device
-    Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_STARTUP" desc="Body for Steam (noun, name of app) installer when installation fails trying to start up after installing">
+    Couldn't launch Steam on Chromebook. Please try again
   </message>
-  <message name="IDS_BOREALIS_INSTALLER_IN_PROGRESS_ERROR_MESSAGE" desc="Body for Steam (noun, name of app) when installation fails due to another process already running.">
-    Another Steam setup is running. Please wait for it to complete before running setup again.
+  <message name="IDS_BOREALIS_INSTALLER_ERROR_RETRY" desc="Button for Steam (noun, name of app) installer to retry after failing.">
+    Retry
   </message>
   <message name="IDS_BOREALIS_CLIENT_UNINSTALL_CONFIRM_BODY" desc="Confirmation dialog for uninstalling Steam (name of app).">
       Any games and apps installed via Steam will also be removed from this device
@@ -5828,6 +5860,9 @@ Permissions you've already given to apps may apply to this account. You can cont
   </message>
   <message name="IDS_BOREALIS_FEEDBACK_NOTIFICATION_SOURCE" desc="Source of notification that prompts users for feedback">
     Chromebook Gaming
+  </message>
+  <message name="IDS_BOREALIS_SPLASHSCREEN_MESSAGE" desc="Message on splashscreen when starting Steam on Chrome OS.">
+    starting up...
   </message>
 
   <!-- TPM firmware auto-update notifications -->
@@ -6030,6 +6065,15 @@ You can manage this account’s settings by installing the Family Link app on yo
   <message name="IDS_SUGGESTION_EMOJI_CHOSEN" desc="String announced by screenreader when users selected an emoji in the pop-up.">
     <ph name="EMOJI_NAME">$1<ex>Party popper</ex></ph>. <ph name="EMOJI_INDEX">$2<ex>5</ex></ph> of <ph name="EMOJI_COUNT">$3<ex>5</ex></ph>.
   </message>
+  <message name="IDS_SUGGESTION_DIACRITICS_OPEN" desc="String announced by screenreader when diacritics suggestion pops up.">
+    Accent marks menu open. Press left or right to navigate and enter to insert.
+  </message>
+  <message name="IDS_SUGGESTION_DIACRITICS_INSERTED" desc="String announced by screenreader when diacritics are inserted.">
+    Accent mark inserted.
+  </message>
+  <message name="IDS_SUGGESTION_DIACRITICS_DISMISSED" desc="String announced by screenreader when diacritics are dismissed.">
+    Accent marks menu dismissed.
+  </message>
   <message name="IDS_SUGGESTION_DISMISSED" desc="String announced by screenreader when suggestion pop-up disappears.">
     Suggestion dismissed
   </message>
@@ -6041,6 +6085,9 @@ You can manage this account’s settings by installing the Family Link app on yo
   </message>
   <message name="IDS_SUGGESTION_AUTOCORRECT_UNDONE" desc="String announced by screenreader when an autocorrected word is reverted. Example, user types 'hllo', system autocorrects to 'hello' but then that autocorrection is manually undone by the user.">
     correction undone
+  </message>
+  <message name="IDS_SUGGESTION_AUTOCORRECT_UNDO_TEXT" desc="Label for autocorrect undo button in undo window.">
+    Undo
   </message>
   <message name="IDS_SUGGESTION_AUTOCORRECT_UNDO_BUTTON" desc="String announced by screenreader when a button to undo an autocorrect is highlighted. Example, user types 'hllo', system autocorrects to 'hello', user then prepares to revert the autocorrect.">
     Undo autocorrect button. Revert to <ph name="TYPED_WORD">$1<ex>hllo</ex></ph>.  Press enter to activate, escape to dismiss.
@@ -6163,19 +6210,12 @@ Your <ph name="DEVICE_TYPE">{0}<ex>Chromebook</ex></ph> will be locked now.
     You can restore your previous apps
   </message>
 
-   <!-- Strings for Projector-->
-  <message name="IDS_SELFIE_CAM_TITLE" desc="The title for the selfie camera dialog.">
-    Selfie Camera
+  <!-- Strings for multi-capture -->
+  <message name="IDS_MULTI_CAPTURE_NOTIFICATION_MESSAGE" desc="This is the message of the notification when an application starts capturing multiple surfaces.">
+    Your system administrator has allowed <ph name="APP_ORIGIN">$1</ph> to record your screen
   </message>
 
-  <message name="IDS_SELFIE_CAMERA_BUBBLE_EXPANDED" desc="Tooltip for the selfie camera resize button in expanded state">
-    2x
-  </message>
-
-  <message name="IDS_SELFIE_CAMERA_BUBBLE_COLLAPSED" desc="Tooltip for the selfie camera resize button in collapsed state">
-    1x
-  </message>
-
+  <!-- Strings for Projector-->
   <message name="IDS_PROJECTOR_APP_NAME" desc="Name for the Projector app in the launcher">
     Screencast
   </message>
@@ -6198,27 +6238,30 @@ Your <ph name="DEVICE_TYPE">{0}<ex>Chromebook</ex></ph> will be locked now.
 
   <!-- Theme Selection -->
   <message name="IDS_THEME_SELECTION_TITLE" desc="Title of the theme selection screen.">
-    Before we let you go...
+    Personalize your display theme
   </message>
-  <message name="IDS_THEME_SELECTION_DESCRIPTION" desc="Description of the theme selection screen.">
-    You can adjust the schedule in Personalisation Hub, as well as set Wallpaper, Screensaver, and customize system colors.
+  <message name="IDS_THEME_SELECTION_DESCRIPTION_CLAMSHELL" desc="Description of the theme selection screen for clamshell devices.">
+    Choose the theme that fits your needs. To change your theme, wallpaper, screen saver, and more, just right-click on the desktop.
+  </message>
+  <message name="IDS_THEME_SELECTION_DESCRIPTION_TABLET" desc="Description of the theme selection screen for tablets.">
+    Choose the theme that fits your needs. To change your theme, wallpaper, screen saver, and more, just touch &amp; hold on the desktop.
   </message>
   <message name="IDS_THEME_LIGHT_LABEL" desc="Name of the light theme button">
-    Light mode
+    Light theme
   </message>
   <message name="IDS_THEME_LIGHT_DESCRIPTION" desc="Description of the light theme button">
-    Keep things light and airy.
+    Keep things bright and airy
   </message>
   <message name="IDS_THEME_DARK_LABEL" desc="Name of the dark theme button">
-    Dark mode
+    Dark theme
   </message>
   <message name="IDS_THEME_DARK_DESCRIPTION" desc="Description of the dark theme button">
-    For those low light rooms. Optimize for your battery life, too.
+    Helpful in low light and saves battery
   </message>
   <message name="IDS_THEME_AUTO_LABEL" desc="Name of the auto theme button">
-    Auto mode
+    Auto
   </message>
   <message name="IDS_THEME_AUTO_DESCRIPTION" desc="Description of the auto theme button">
-    Light mode at sunrise, and dark mode at sunset. It switches automatically for you.
+    Switch themes at sunrise and sunset
   </message>
 </grit-part>

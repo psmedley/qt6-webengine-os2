@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include <set>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
+#include "base/memory/raw_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "components/browsing_topics/common/common_types.h"
@@ -65,6 +67,7 @@ class BrowsingTopicsCalculator {
       history::HistoryService* history_service,
       content::BrowsingTopicsSiteDataManager* site_data_manager,
       optimization_guide::PageContentAnnotationsService* annotations_service,
+      const base::circular_deque<EpochTopics>& epochs,
       CalculateCompletedCallback callback);
 
   BrowsingTopicsCalculator(const BrowsingTopicsCalculator&) = delete;
@@ -83,15 +86,15 @@ class BrowsingTopicsCalculator {
   // Get the top `kBrowsingTopicsNumberOfTopTopicsPerEpoch` topics. If there
   // aren't enough topics, pad with random ones. Return the result topics, and
   // the starting index of the padded topics (or
-  // `kBrowsingTopicsNumberOfTopTopicsPerEpoch` if there's no padded topics).
-  // Precondition: the hosts in `history_hosts_count` should exist in
-  // `host_topics_map`.
+  // `kBrowsingTopicsNumberOfTopTopicsPerEpoch` if there's no padded topics),
+  // and the number of topics associated with `history_hosts_count`.
   void DeriveTopTopics(
       const std::map<HashedHost, size_t>& history_hosts_count,
       const std::map<HashedHost, std::set<Topic>>& host_topics_map,
       size_t taxonomy_size,
       std::vector<Topic>& top_topics,
-      size_t& padded_top_topics_start_index);
+      size_t& padded_top_topics_start_index,
+      size_t& history_topics_count);
 
   void OnGetRecentBrowsingTopicsApiUsagesCompleted(
       browsing_topics::ApiUsageContextQueryResult result);
@@ -102,23 +105,26 @@ class BrowsingTopicsCalculator {
                                bool successful);
 
   void OnGetTopicsForHostsCompleted(
-      std::vector<std::string> raw_hosts,
       const std::vector<optimization_guide::BatchAnnotationResult>& results);
 
   void OnCalculateCompleted(CalculatorResultStatus status,
-                            EpochTopics epoch_topics = EpochTopics());
+                            EpochTopics epoch_topics);
 
   // Those pointers are safe to hold and use throughout the lifetime of
   // `BrowsingTopicsService`, which owns this object.
-  privacy_sandbox::PrivacySandboxSettings* privacy_sandbox_settings_;
-  history::HistoryService* history_service_;
-  content::BrowsingTopicsSiteDataManager* site_data_manager_;
-  optimization_guide::PageContentAnnotationsService* annotations_service_;
+  raw_ptr<privacy_sandbox::PrivacySandboxSettings> privacy_sandbox_settings_;
+  raw_ptr<history::HistoryService> history_service_;
+  raw_ptr<content::BrowsingTopicsSiteDataManager> site_data_manager_;
+  raw_ptr<optimization_guide::PageContentAnnotationsService>
+      annotations_service_;
 
   CalculateCompletedCallback calculate_completed_callback_;
 
   // The calculation start time.
   base::Time calculation_time_;
+
+  base::Time history_data_start_time_;
+  base::Time api_usage_context_data_start_time_;
 
   // The history hosts over
   // `kBrowsingTopicsNumberOfEpochsOfObservationDataToUseForFiltering` epochs,

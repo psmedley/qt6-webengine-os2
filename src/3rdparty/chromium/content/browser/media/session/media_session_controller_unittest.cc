@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -195,7 +195,7 @@ class MediaSessionControllerTest : public RenderViewHostImplTestHarness {
   void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
 
-    id_ = MediaPlayerId(contents()->GetMainFrame()->GetGlobalId(), 0);
+    id_ = MediaPlayerId(contents()->GetPrimaryMainFrame()->GetGlobalId(), 0);
     controller_ = CreateController();
     media_player_ = CreateMediaPlayer(controller_.get());
 

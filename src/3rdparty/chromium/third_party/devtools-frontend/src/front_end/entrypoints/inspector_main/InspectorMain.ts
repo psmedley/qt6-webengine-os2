@@ -52,7 +52,10 @@ export class InspectorMainImpl implements Common.Runnable.Runnable {
   async run(): Promise<void> {
     let firstCall = true;
     await SDK.Connections.initMainConnection(async () => {
-      const type = Root.Runtime.Runtime.queryParam('v8only') ? SDK.Target.Type.Node : SDK.Target.Type.Frame;
+      const type = Root.Runtime.Runtime.queryParam('v8only') ?
+          SDK.Target.Type.Node :
+          (Root.Runtime.Runtime.queryParam('targetType') === 'tab' ? SDK.Target.Type.Tab : SDK.Target.Type.Frame);
+      // TODO(crbug.com/1348385): support waiting for debugger with tab target.
       const waitForDebuggerInPage =
           type === SDK.Target.Type.Frame && Root.Runtime.Runtime.queryParam('panel') === 'sources';
       const target = SDK.TargetManager.TargetManager.instance().createTarget(
@@ -224,7 +227,7 @@ export class BackendSettingsSync implements SDK.TargetManager.Observer {
   }
 
   #updateTarget(target: SDK.Target.Target): void {
-    if (target.type() !== SDK.Target.Type.Frame || target.parentTarget()) {
+    if (target.type() !== SDK.Target.Type.Frame || target.parentTarget()?.type() === SDK.Target.Type.Frame) {
       return;
     }
     void target.pageAgent().invoke_setAdBlockingEnabled({enabled: this.#adBlockEnabledSetting.get()});

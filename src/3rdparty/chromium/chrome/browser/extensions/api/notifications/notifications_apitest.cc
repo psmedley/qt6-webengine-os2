@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/interactive_test_utils.h"
+#include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/browser/api/test/test_api.h"
 #include "extensions/browser/app_window/app_window.h"
@@ -85,7 +86,7 @@ class NotificationsApiTest : public extensions::ExtensionApiTest {
 
   const Extension* LoadAppWithWindowState(
       const std::string& test_name, WindowState window_state) {
-    const char* window_state_string = NULL;
+    const char* window_state_string = nullptr;
     switch (window_state) {
       case WindowState::FULLSCREEN:
         window_state_string = "fullscreen";
@@ -100,7 +101,8 @@ class NotificationsApiTest : public extensions::ExtensionApiTest {
     const extensions::Extension* extension = LoadExtension(extdir);
     EXPECT_TRUE(extension);
 
-    ExtensionTestMessageListener launched_listener("launched", true);
+    ExtensionTestMessageListener launched_listener("launched",
+                                                   ReplyBehavior::kWillReply);
     LaunchPlatformApp(extension);
     EXPECT_TRUE(launched_listener.WaitUntilSatisfied());
     launched_listener.Reply(create_window_options);
@@ -116,7 +118,7 @@ class NotificationsApiTest : public extensions::ExtensionApiTest {
     if (iter != app_windows.end())
       return *iter;
 
-    return NULL;
+    return nullptr;
   }
 
   ExtensionNotificationDisplayHelper* GetDisplayHelper() {
@@ -165,9 +167,8 @@ class NotificationsApiTest : public extensions::ExtensionApiTest {
     apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
         ->BrowserAppLauncher()
         ->LaunchAppWithParamsForTesting(apps::AppLaunchParams(
-            extension->id(), apps::mojom::LaunchContainer::kLaunchContainerNone,
-            WindowOpenDisposition::NEW_WINDOW,
-            apps::mojom::LaunchSource::kFromTest));
+            extension->id(), apps::LaunchContainer::kLaunchContainerNone,
+            WindowOpenDisposition::NEW_WINDOW, apps::LaunchSource::kFromTest));
   }
 
   std::unique_ptr<NotificationDisplayServiceTester> display_service_tester_;
@@ -365,7 +366,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestUserGesture) {
   ASSERT_TRUE(notification);
 
   {
-    ExtensionTestMessageListener listener(false);
+    ExtensionTestMessageListener listener;
     // Action button event.
     display_service_tester_->SimulateClick(
         NotificationHandler::Type::EXTENSION, notification->id(),
@@ -375,7 +376,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestUserGesture) {
   }
 
   {
-    ExtensionTestMessageListener listener(false);
+    ExtensionTestMessageListener listener;
     // Click event.
     display_service_tester_->SimulateClick(
         NotificationHandler::Type::EXTENSION, notification->id(),
@@ -385,7 +386,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestUserGesture) {
   }
 
   {
-    ExtensionTestMessageListener listener(false);
+    ExtensionTestMessageListener listener;
     // Close event.
     display_service_tester_->RemoveNotification(
         NotificationHandler::Type::EXTENSION, notification->id(),
@@ -412,7 +413,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestRequireInteraction) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestShouldDisplayNormal) {
-  ExtensionTestMessageListener notification_created_listener("created", false);
+  ExtensionTestMessageListener notification_created_listener("created");
   const Extension* extension = LoadAppWithWindowState(
       "notifications/api/basic_app", WindowState::NORMAL);
   ASSERT_TRUE(extension) << message_;
@@ -436,7 +437,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestShouldDisplayNormal) {
 // screen decisions are done by the OS directly.
 #if !BUILDFLAG(IS_MAC)
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestShouldDisplayFullscreen) {
-  ExtensionTestMessageListener notification_created_listener("created", false);
+  ExtensionTestMessageListener notification_created_listener("created");
   const Extension* extension = LoadAppWithWindowState(
       "notifications/api/basic_app", WindowState::FULLSCREEN);
   ASSERT_TRUE(extension) << message_;
@@ -470,12 +471,12 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestShouldDisplayMultiFullscreen) {
   // Start a fullscreen app, and then start another fullscreen app on top of the
   // first. Notifications from the first should not be displayed because it is
   // not the app actually displaying on the screen.
-  ExtensionTestMessageListener notification_created_listener("created", false);
+  ExtensionTestMessageListener notification_created_listener("created");
   const Extension* extension1 = LoadAppWithWindowState(
       "notifications/api/notification_on_blur", WindowState::FULLSCREEN);
   ASSERT_TRUE(extension1) << message_;
 
-  ExtensionTestMessageListener window_visible_listener("visible", false);
+  ExtensionTestMessageListener window_visible_listener("visible");
   const Extension* extension2 = LoadAppWithWindowState(
       "notifications/api/other_app", WindowState::FULLSCREEN);
   ASSERT_TRUE(extension2) << message_;
@@ -501,7 +502,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestShouldDisplayMultiFullscreen) {
 // creates it is fullscreen.
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest,
                        TestShouldDisplayPopupNotification) {
-  ExtensionTestMessageListener notification_created_listener("created", false);
+  ExtensionTestMessageListener notification_created_listener("created");
   const Extension* extension = LoadAppWithWindowState(
       "notifications/api/basic_app", WindowState::FULLSCREEN);
   ASSERT_TRUE(extension) << message_;
@@ -528,7 +529,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest,
 #endif  // !BUILDFLAG(IS_MAC)
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestSmallImage) {
-  ExtensionTestMessageListener notification_created_listener("created", false);
+  ExtensionTestMessageListener notification_created_listener("created");
   const Extension* extension = LoadAppWithWindowState(
       "notifications/api/basic_app", WindowState::NORMAL);
   ASSERT_TRUE(extension) << message_;

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,7 +95,7 @@ int RecordPaintCanvas::saveLayer(const SkRect* bounds,
 }
 
 int RecordPaintCanvas::saveLayerAlpha(const SkRect* bounds, uint8_t alpha) {
-  push<SaveLayerAlphaOp>(bounds, alpha);
+  push<SaveLayerAlphaOp>(bounds, static_cast<float>(alpha / 255.0f));
   return GetCanvas()->saveLayerAlpha(bounds, alpha);
 }
 
@@ -227,11 +227,11 @@ bool RecordPaintCanvas::getDeviceClipBounds(SkIRect* bounds) const {
   return GetCanvas()->getDeviceClipBounds(bounds);
 }
 
-void RecordPaintCanvas::drawColor(SkColor color, SkBlendMode mode) {
+void RecordPaintCanvas::drawColor(SkColor4f color, SkBlendMode mode) {
   push<DrawColorOp>(color, mode);
 }
 
-void RecordPaintCanvas::clear(SkColor color) {
+void RecordPaintCanvas::clear(SkColor4f color) {
   push<DrawColorOp>(color, SkBlendMode::kSrc);
 }
 

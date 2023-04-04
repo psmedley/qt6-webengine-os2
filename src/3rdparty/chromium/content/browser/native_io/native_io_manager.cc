@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -161,8 +161,8 @@ void NativeIOManager::BindReceiver(
 
   // Ensure that the default bucket for the storage key exists on access and
   // bind receiver on retrieval.
-  quota_manager_proxy_->GetOrCreateBucket(
-      storage_key, storage::kDefaultBucketName,
+  quota_manager_proxy_->UpdateOrCreateBucket(
+      storage::BucketInitParams::ForDefaultBucket(storage_key),
       base::SequencedTaskRunnerHandle::Get(),
       base::BindOnce(&NativeIOManager::BindReceiverWithBucketInfo,
                      weak_factory_.GetWeakPtr(), storage_key,

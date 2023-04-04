@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,7 @@ ColorMatrixFilterOperation* ResolveColorMatrix(
   }
 
   return MakeGarbageCollected<ColorMatrixFilterOperation>(
-      *values, FilterOperation::kColorMatrix);
+      *values, FilterOperation::OperationType::kColorMatrix);
 }
 
 struct KernelMatrix {
@@ -303,17 +303,17 @@ FilterOperations CanvasFilterOperationResolver::CreateFilterOperations(
             filter_dict.Get<IDLDouble>("values", exception_state).value_or(0);
         operations.Operations().push_back(
             MakeGarbageCollected<BasicColorMatrixFilterOperation>(
-                amount, FilterOperation::kHueRotate));
+                amount, FilterOperation::OperationType::kHueRotate));
       } else if (type == "saturate") {
         double amount =
             filter_dict.Get<IDLDouble>("values", exception_state).value_or(0);
         operations.Operations().push_back(
             MakeGarbageCollected<BasicColorMatrixFilterOperation>(
-                amount, FilterOperation::kSaturate));
+                amount, FilterOperation::OperationType::kSaturate));
       } else if (type == "luminanceToAlpha") {
         operations.Operations().push_back(
             MakeGarbageCollected<BasicColorMatrixFilterOperation>(
-                0, FilterOperation::kLuminanceToAlpha));
+                0, FilterOperation::OperationType::kLuminanceToAlpha));
       } else if (auto* color_matrix_operation =
                      ResolveColorMatrix(filter_dict, exception_state)) {
         operations.Operations().push_back(color_matrix_operation);
@@ -337,15 +337,18 @@ FilterOperations CanvasFilterOperationResolver::CreateFilterOperations(
       num_canvas_filter_errors_to_console_allowed_--;
       if (num_canvas_filter_errors_to_console_allowed_ < 0)
         continue;
-      const String& message =
-          (!name.has_value())
-              ? "CanvasFilters require key 'filter' to specify filter type."
-              : String::Format(
-                    "\"%s\" is not among supported CanvasFilter types.",
-                    name->Utf8().c_str());
-      execution_context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-          mojom::blink::ConsoleMessageSource::kRendering,
-          mojom::blink::ConsoleMessageLevel::kWarning, message));
+      {
+        const String& message =
+            (!name.has_value())
+                ? "CanvasFilters require key 'filter' to specify filter type."
+                : String::Format(
+                      "\"%s\" is not among supported CanvasFilter types.",
+                      name->Utf8().c_str());
+        execution_context->AddConsoleMessage(
+            MakeGarbageCollected<ConsoleMessage>(
+                mojom::blink::ConsoleMessageSource::kRendering,
+                mojom::blink::ConsoleMessageLevel::kWarning, message));
+      }
       if (num_canvas_filter_errors_to_console_allowed_ == 0) {
         const String& message =
             "CanvasFilter: too many errors, no more errors will be reported to "

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,7 @@ class ContentBrowserClientImpl : public content::ContentBrowserClient {
 
   // ContentBrowserClient overrides.
   std::unique_ptr<content::BrowserMainParts> CreateBrowserMainParts(
-      content::MainFunctionParams parameters) override;
+      bool is_integration_test) override;
   std::string GetApplicationLocale() override;
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   content::AllowServiceWorkerResult AllowServiceWorker(
@@ -85,7 +85,7 @@ class ContentBrowserClientImpl : public content::ContentBrowserClient {
                            content::BrowserContext* browser_context,
                            const std::vector<content::GlobalRenderFrameHostId>&
                                render_frames) override;
-  content::WebContentsViewDelegate* GetWebContentsViewDelegate(
+  std::unique_ptr<content::WebContentsViewDelegate> GetWebContentsViewDelegate(
       content::WebContents* web_contents) override;
   bool CanShutdownGpuProcessNowOnIOThread() override;
   std::unique_ptr<content::DevToolsManagerDelegate>
@@ -220,6 +220,7 @@ class ContentBrowserClientImpl : public content::ContentBrowserClient {
 #endif  // BUILDFLAG(IS_ANDROID)
   content::SpeechRecognitionManagerDelegate*
   CreateSpeechRecognitionManagerDelegate() override;
+  bool ShouldSandboxNetworkService() override;
 #if BUILDFLAG(ENABLE_ARCORE)
   content::XrIntegrationClient* GetXrIntegrationClient() override;
 #endif  // BUILDFLAG(ENABLE_ARCORE)

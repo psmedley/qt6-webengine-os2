@@ -9,6 +9,7 @@
 #define SkottieTextAdapter_DEFINED
 
 #include "modules/skottie/src/animator/Animator.h"
+#include "modules/skottie/src/text/Font.h"
 #include "modules/skottie/src/text/SkottieShaper.h"
 #include "modules/skottie/src/text/TextAnimator.h"
 #include "modules/skottie/src/text/TextValue.h"
@@ -29,8 +30,11 @@ namespace internal {
 
 class TextAdapter final : public AnimatablePropertyContainer {
 public:
-    static sk_sp<TextAdapter> Make(const skjson::ObjectValue&, const AnimationBuilder*,
-                                   sk_sp<SkFontMgr>, sk_sp<Logger>);
+    static sk_sp<TextAdapter> Make(const skjson::ObjectValue&,
+                                   const AnimationBuilder*,
+                                   sk_sp<SkFontMgr>,
+                                   sk_sp<CustomFont::GlyphCompMapper>,
+                                   sk_sp<Logger>);
 
     ~TextAdapter() override;
 
@@ -50,7 +54,10 @@ private:
         kAll,
     };
 
-    TextAdapter(sk_sp<SkFontMgr>, sk_sp<Logger>, AnchorPointGrouping);
+    TextAdapter(sk_sp<SkFontMgr>,
+                sk_sp<CustomFont::GlyphCompMapper>,
+                sk_sp<Logger>,
+                AnchorPointGrouping);
 
     struct FragmentRec {
         SkPoint                      fOrigin; // fragment position
@@ -65,8 +72,9 @@ private:
     };
 
     void reshape();
-    void addFragment(const Shaper::Fragment&, float scale);
+    void addFragment(Shaper::Fragment&);
     void buildDomainMaps(const Shaper::Result&);
+    std::vector<sk_sp<sksg::RenderNode>> buildGlyphCompNodes(Shaper::Fragment&) const;
 
     void pushPropsToFragment(const TextAnimator::ResolvedProps&, const FragmentRec&,
                              const SkV2& frag_offset, const SkV2& grouping_alignment,
@@ -78,14 +86,15 @@ private:
 
     SkM44 fragmentMatrix(const TextAnimator::ResolvedProps&, const FragmentRec&, const SkV2&) const;
 
-    const sk_sp<sksg::Group>         fRoot;
-    const sk_sp<SkFontMgr>           fFontMgr;
-    sk_sp<Logger>                    fLogger;
-    const AnchorPointGrouping        fAnchorPointGrouping;
+    const sk_sp<sksg::Group>                 fRoot;
+    const sk_sp<SkFontMgr>                   fFontMgr;
+    const sk_sp<CustomFont::GlyphCompMapper> fCustomGlyphMapper;
+    sk_sp<Logger>                            fLogger;
+    const AnchorPointGrouping                fAnchorPointGrouping;
 
-    std::vector<sk_sp<TextAnimator>> fAnimators;
-    std::vector<FragmentRec>         fFragments;
-    TextAnimator::DomainMaps         fMaps;
+    std::vector<sk_sp<TextAnimator>>         fAnimators;
+    std::vector<FragmentRec>                 fFragments;
+    TextAnimator::DomainMaps                 fMaps;
 
     // Helps detect external value changes.
     struct TextValueTracker {
@@ -107,6 +116,7 @@ private:
 
     TextValueTracker          fText;
     Vec2Value                 fGroupingAlignment = {0,0};
+    float                     fTextShapingScale  = 1;     // size adjustment from auto-scaling
 
     // Optional text path.
     struct PathInfo;

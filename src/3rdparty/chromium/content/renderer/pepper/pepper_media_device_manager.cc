@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -215,7 +215,7 @@ void PepperMediaDeviceManager::CancelOpenDevice(int request_id) {
 
 void PepperMediaDeviceManager::CloseDevice(const std::string& label) {
 #if BUILDFLAG(ENABLE_WEBRTC)
-  if (!GetMediaStreamDeviceObserver()->RemoveStream(
+  if (!GetMediaStreamDeviceObserver()->RemoveStreams(
           blink::WebString::FromUTF8(label)))
     return;
 

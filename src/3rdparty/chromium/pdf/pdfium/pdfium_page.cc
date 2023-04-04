@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -560,6 +560,19 @@ gfx::RectF PDFiumPage::GetCroppedRect() {
                   raw_rect.right - raw_rect.left,
                   raw_rect.top - raw_rect.bottom);
   return FloatPageRectToPixelRect(page, rect);
+}
+
+bool PDFiumPage::IsCharInPageBounds(int char_index,
+                                    const gfx::RectF& page_bounds) {
+  gfx::RectF char_bounds = GetCharBounds(char_index);
+
+  // Make sure `char_bounds` has a minimum size so Intersects() works correctly.
+  if (char_bounds.IsEmpty()) {
+    static constexpr gfx::SizeF kMinimumSize(0.0001f, 0.0001f);
+    char_bounds.set_size(kMinimumSize);
+  }
+
+  return page_bounds.Intersects(char_bounds);
 }
 
 std::vector<AccessibilityLinkInfo> PDFiumPage::GetLinkInfo(

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/memory/shared_memory_mapping.h"
 #include "base/memory/unsafe_shared_memory_region.h"
+#include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/time/time.h"
@@ -17,7 +18,6 @@
 #include "services/test/echo/public/mojom/echo.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-
 
 namespace content {
 
@@ -39,11 +39,16 @@ class EchoServiceProcessObserver : public ServiceProcessHost::Observer {
   void WaitForDeath() { death_loop_.Run(); }
   void WaitForCrash() { crash_loop_.Run(); }
 
+  // Valid after WaitForLaunch.
+  base::ProcessId pid() const { return process_.Pid(); }
+
  private:
   // ServiceProcessHost::Observer:
   void OnServiceProcessLaunched(const ServiceProcessInfo& info) override {
-    if (info.IsService<echo::mojom::EchoService>())
+    if (info.IsService<echo::mojom::EchoService>()) {
+      process_ = info.GetProcess().Duplicate();
       launch_loop_.Quit();
+    }
   }
 
   void OnServiceProcessTerminatedNormally(
@@ -60,12 +65,25 @@ class EchoServiceProcessObserver : public ServiceProcessHost::Observer {
   base::RunLoop launch_loop_;
   base::RunLoop death_loop_;
   base::RunLoop crash_loop_;
+  base::Process process_;
 };
 
 IN_PROC_BROWSER_TEST_F(ServiceProcessHostBrowserTest, Launch) {
   EchoServiceProcessObserver observer;
-  auto echo_service = ServiceProcessHost::Launch<echo::mojom::EchoService>();
+  base::ProcessId pid_from_callback = base::kNullProcessId;
+  base::RunLoop pid_loop;
+  auto echo_service = ServiceProcessHost::Launch<echo::mojom::EchoService>(
+      ServiceProcessHost::Options()
+          .WithProcessCallback(
+              base::BindLambdaForTesting([&](const base::Process& process) {
+                pid_from_callback = process.Pid();
+                pid_loop.Quit();
+              }))
+          .Pass());
   observer.WaitForLaunch();
+  pid_loop.Run();
+  EXPECT_EQ(pid_from_callback, observer.pid());
+  EXPECT_NE(base::kNullProcessId, pid_from_callback);
 
   const std::string kTestString =
       "Aurora borealis! At this time of year? At this time of day? "

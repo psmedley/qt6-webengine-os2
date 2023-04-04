@@ -41,7 +41,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 #define BITMAPINFOHEADER_SIZE 0x28
 #define TDSF_HEADER_SIZE      0x56
@@ -522,11 +522,10 @@ static int tdsc_parse_dtsm(AVCodecContext *avctx)
     return 0;
 }
 
-static int tdsc_decode_frame(AVCodecContext *avctx, void *data,
+static int tdsc_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                              int *got_frame, AVPacket *avpkt)
 {
     TDSCContext *ctx = avctx->priv_data;
-    AVFrame *frame = data;
     int ret, tag_header, keyframe = 0;
     uLongf dlen;
 
@@ -624,14 +623,13 @@ static int tdsc_decode_frame(AVCodecContext *avctx, void *data,
 
 const FFCodec ff_tdsc_decoder = {
     .p.name         = "tdsc",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("TDSC"),
+    CODEC_LONG_NAME("TDSC"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_TDSC,
     .init           = tdsc_init,
-    .decode         = tdsc_decode_frame,
+    FF_CODEC_DECODE_CB(tdsc_decode_frame),
     .close          = tdsc_close,
     .priv_data_size = sizeof(TDSCContext),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
-                      FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

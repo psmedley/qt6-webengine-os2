@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,6 @@ scoped_refptr<TextureOwner> TextureOwner::Create(
     scoped_refptr<RefCountedLock> drdc_lock) {
   switch (mode) {
     case Mode::kAImageReaderInsecure:
-    case Mode::kAImageReaderInsecureMultithreaded:
     case Mode::kAImageReaderInsecureSurfaceControl:
     case Mode::kAImageReaderSecureSurfaceControl:
       return new ImageReaderGLOwner(std::move(texture), mode,

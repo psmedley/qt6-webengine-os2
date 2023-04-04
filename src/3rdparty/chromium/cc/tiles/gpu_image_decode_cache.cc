@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "cc/base/devtools_instrumentation.h"
+#include "cc/base/features.h"
 #include "cc/base/histograms.h"
 #include "cc/base/switches.h"
 #include "cc/paint/paint_flags.h"
@@ -320,12 +321,6 @@ bool DrawAndScaleImage(
   const SkSamplingOptions sampling(
       PaintFlags::FilterQualityToSkSamplingOptions(filter_quality));
 
-  bool decode_to_f16_using_n32_intermediate =
-      decode_info.colorType() == kRGBA_F16_SkColorType &&
-      !ImageDecodeCacheUtils::CanResizeF16Image(filter_quality);
-  if (decode_to_f16_using_n32_intermediate)
-    decode_info = decode_info.makeColorType(kN32_SkColorType);
-
   SkBitmap decode_bitmap;
   if (!decode_bitmap.tryAllocPixels(decode_info))
     return false;
@@ -346,10 +341,6 @@ bool DrawAndScaleImage(
   if (initial_decode_failed)
     return false;
 
-  if (decode_to_f16_using_n32_intermediate) {
-    return ImageDecodeCacheUtils::ScaleToHalfFloatPixmapUsingN32Intermediate(
-        decode_pixmap, &pixmap, filter_quality);
-  }
   if (do_yuv_decode) {
     const SkImageInfo y_info_scaled = info.makeColorType(yuva_color_type);
 
@@ -466,6 +457,44 @@ sk_sp<SkImage> MakeTextureImage(viz::RasterContextProvider* context,
   return uploaded_image;
 }
 
+// We use this below, instead of just a std::unique_ptr, so that we can run
+// a Finch experiment to check the impact of not using discardable memory on the
+// GPU decode path.
+class HeapDiscardableMemory : public base::DiscardableMemory {
+ public:
+  explicit HeapDiscardableMemory(size_t size)
+      : memory_(new char[size]), size_(size) {}
+  ~HeapDiscardableMemory() override = default;
+  [[nodiscard]] bool Lock() override {
+    // Locking only succeeds when we have not yet discarded the memory (i.e. if
+    // we have never called |Unlock()|.)
+    return memory_ != nullptr;
+  }
+  void Unlock() override { Discard(); }
+  void* data() const override {
+    DCHECK(memory_);
+    return static_cast<void*>(memory_.get());
+  }
+  void DiscardForTesting() override { Discard(); }
+  base::trace_event::MemoryAllocatorDump* CreateMemoryAllocatorDump(
+      const char* name,
+      base::trace_event::ProcessMemoryDump* pmd) const override {
+    auto* dump = pmd->CreateAllocatorDump(name);
+    dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                    base::trace_event::MemoryAllocatorDump::kUnitsBytes, size_);
+    return dump;
+  }
+
+ private:
+  void Discard() {
+    memory_.reset();
+    size_ = 0;
+  }
+
+  std::unique_ptr<char[]> memory_;
+  size_t size_;
+};
+
 }  // namespace
 
 // Extract the information to uniquely identify a DrawImage for the purposes of
@@ -513,7 +542,10 @@ class GpuImageDecodeTaskImpl : public TileTask {
                          const ImageDecodeCache::TracingInfo& tracing_info,
                          GpuImageDecodeCache::DecodeTaskType task_type)
       : TileTask(TileTask::SupportsConcurrentExecution::kYes,
-                 TileTask::SupportsBackgroundThreadPriority::kYes),
+                 (base::FeatureList::IsEnabled(
+                      features::kNormalPriorityImageDecoding)
+                      ? TileTask::SupportsBackgroundThreadPriority::kNo
+                      : TileTask::SupportsBackgroundThreadPriority::kYes)),
         cache_(cache),
         image_(draw_image),
         tracing_info_(tracing_info),
@@ -544,6 +576,13 @@ class GpuImageDecodeTaskImpl : public TileTask {
   // Overridden from TileTask:
   void OnTaskCompleted() override {
     cache_->OnImageDecodeTaskCompleted(image_, task_type_);
+  }
+
+  // Overridden from TileTask:
+  bool TaskContainsLCPCandidateImages() const override {
+    if (!HasCompleted() && image_.paint_image().may_be_lcp_candidate())
+      return true;
+    return TileTask::TaskContainsLCPCandidateImages();
   }
 
  protected:
@@ -939,13 +978,12 @@ GpuImageDecodeCache::GpuImageDecodeCache(
     SkColorType color_type,
     size_t max_working_set_bytes,
     int max_texture_size,
-    PaintImage::GeneratorClientId generator_client_id,
     RasterDarkModeFilter* const dark_mode_filter)
     : color_type_(color_type),
       use_transfer_cache_(use_transfer_cache),
       context_(context),
       max_texture_size_(max_texture_size),
-      generator_client_id_(generator_client_id),
+      generator_client_id_(PaintImage::GetNextGeneratorClientId()),
       enable_clipped_image_scaling_(
           base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kEnableClippedImageScaling)),
@@ -953,6 +991,7 @@ GpuImageDecodeCache::GpuImageDecodeCache(
       max_working_set_bytes_(max_working_set_bytes),
       max_working_set_items_(kMaxItemsInWorkingSet),
       dark_mode_filter_(dark_mode_filter) {
+  DCHECK_NE(generator_client_id_, PaintImage::kDefaultGeneratorClientId);
   // Note that to compute |allow_accelerated_jpeg_decodes_| and
   // |allow_accelerated_webp_decodes_|, the last thing we check is the feature
   // flag. That's because we want to ensure that we're in OOP-R mode and the
@@ -1543,6 +1582,8 @@ void GpuImageDecodeCache::OnImageDecodeTaskCompleted(
   // Decode task is complete, remove our reference to it.
   ImageData* image_data = GetImageDataForDrawImage(draw_image, cache_key);
   DCHECK(image_data);
+  UMA_HISTOGRAM_BOOLEAN("Compositing.DecodeLCPCandidateImage.Hardware",
+                        draw_image.paint_image().may_be_lcp_candidate());
   if (task_type == DecodeTaskType::kPartOfUploadTask) {
     DCHECK(image_data->decode.task);
     image_data->decode.task = nullptr;
@@ -1986,10 +2027,17 @@ void GpuImageDecodeCache::DecodeImageIfNecessary(
   sk_sp<SkImage> image_v;
   {
     base::AutoUnlock unlock(lock_);
-    auto* allocator = base::DiscardableMemoryAllocator::GetInstance();
-    backing_memory = allocator->AllocateLockedDiscardableMemoryWithRetryOrDie(
-        image_data->size, base::BindOnce(&GpuImageDecodeCache::ClearCache,
-                                         base::Unretained(this)));
+    if (base::FeatureList::IsEnabled(
+            features::kNoDiscardableMemoryForGpuDecodePath)) {
+      backing_memory =
+          std::make_unique<HeapDiscardableMemory>(image_data->size);
+    } else {
+      auto* allocator = base::DiscardableMemoryAllocator::GetInstance();
+      backing_memory = allocator->AllocateLockedDiscardableMemoryWithRetryOrDie(
+          image_data->size, base::BindOnce(&GpuImageDecodeCache::ClearCache,
+                                           base::Unretained(this)));
+    }
+
     sk_sp<SkColorSpace> color_space =
         ColorSpaceForImageDecode(draw_image, image_data->mode);
     auto release_proc = [](const void*, void*) {};
@@ -2136,7 +2184,7 @@ void GpuImageDecodeCache::UploadImageIfNecessary(const DrawImage& draw_image,
   sk_sp<SkColorSpace> decoded_target_colorspace =
       ColorSpaceForImageDecode(draw_image, image_data->mode);
   if (target_color_space && decoded_target_colorspace) {
-    if (!gfx::ColorSpace(*decoded_target_colorspace).IsPQOrHLG() &&
+    if (!gfx::ColorSpace(*decoded_target_colorspace).IsToneMappedByDefault() &&
         SkColorSpace::Equals(target_color_space.get(),
                              decoded_target_colorspace.get())) {
       target_color_space = nullptr;
@@ -2157,7 +2205,7 @@ void GpuImageDecodeCache::UploadImageIfNecessary(const DrawImage& draw_image,
     } else if (image_data->yuva_pixmap_info.has_value()) {
       const bool needs_tone_mapping =
           decoded_target_colorspace &&
-          gfx::ColorSpace(*decoded_target_colorspace).IsPQOrHLG();
+          gfx::ColorSpace(*decoded_target_colorspace).IsToneMappedByDefault();
       UploadImageIfNecessary_TransferCache_SoftwareDecode_YUVA(
           draw_image, image_data, decoded_target_colorspace,
           needs_tone_mapping ? target_color_params : absl::nullopt);
@@ -2729,15 +2777,25 @@ SkImageInfo GpuImageDecodeCache::CreateImageInfoForDrawImage(
   gfx::Size mip_size =
       CalculateSizeForMipLevel(draw_image, upload_scale_mip_level);
 
-  // Decode HDR images to half float when targeting HDR.
-  //
-  // TODO(crbug.com/1076568): Once we have access to the display's buffer format
-  // via gfx::DisplayColorSpaces, we should also do this for HBD images.
-  auto color_type = color_type_;
-  if (draw_image.paint_image().GetContentColorUsage() ==
-          gfx::ContentColorUsage::kHDR &&
-      draw_image.target_color_space().IsHDR()) {
-    color_type = kRGBA_F16_SkColorType;
+  // Decide the SkColorType for the buffer for the PaintImage to draw or
+  // decode into. Default to using the cache's color type.
+  SkColorType color_type = color_type_;
+
+  // The PaintImage will identify that its content is high bit depth by setting
+  // its SkColorType to kRGBA_F16_SkColorType. Only set the target SkColorType
+  // to this value if the PaintImage itself reports it. Otherwise, the content
+  // may not appear, see https://crbug.com/1266456.
+  const auto image_color_type = draw_image.paint_image().GetColorType();
+  if (image_color_type == kRGBA_F16_SkColorType) {
+    // Only set the target SkColorType to kRGBA_F16_SkColorType if the content
+    // is HDR and the target display is HDR capable. This is done to preserve
+    // existing behavior while fixing the above mentioned bug. See related
+    // discussions in https://crbug.com/1076568.
+    if (draw_image.paint_image().GetContentColorUsage() ==
+            gfx::ContentColorUsage::kHDR &&
+        draw_image.target_color_space().IsHDR()) {
+      color_type = kRGBA_F16_SkColorType;
+    }
   }
 
   return SkImageInfo::Make(mip_size.width(), mip_size.height(), color_type,
@@ -2861,8 +2919,17 @@ bool GpuImageDecodeCache::IsCompatible(const ImageData* image_data,
                              image_data->upload_scale_mip_level;
   bool quality_is_compatible =
       CalculateDesiredFilterQuality(draw_image) <= image_data->quality;
-  bool color_is_compatible =
-      image_data->target_color_params == draw_image.target_color_params();
+  sk_sp<SkColorSpace> decoded_target_colorspace =
+      ColorSpaceForImageDecode(draw_image, image_data->mode);
+  bool color_is_compatible = false;
+  if (!decoded_target_colorspace ||
+      !gfx::ColorSpace(*decoded_target_colorspace).IsToneMappedByDefault()) {
+    color_is_compatible = image_data->target_color_params.color_space ==
+                          draw_image.target_color_space();
+  } else {
+    color_is_compatible =
+        image_data->target_color_params == draw_image.target_color_params();
+  }
   if (!color_is_compatible)
     return false;
   if (is_scaled && (!scale_is_compatible || !quality_is_compatible))
@@ -2960,16 +3027,12 @@ bool GpuImageDecodeCache::NeedsDarkModeFilterForTesting(
 
 void GpuImageDecodeCache::OnMemoryPressure(
     base::MemoryPressureListener::MemoryPressureLevel level) {
+  if (!ImageDecodeCacheUtils::ShouldEvictCaches(level))
+    return;
+
   base::AutoLock lock(lock_);
-  switch (level) {
-    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
-    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
-      break;
-    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
-      base::AutoReset<bool> reset(&aggressively_freeing_resources_, true);
-      EnsureCapacity(0);
-      break;
-  }
+  base::AutoReset<bool> reset(&aggressively_freeing_resources_, true);
+  EnsureCapacity(0);
 }
 
 bool GpuImageDecodeCache::SupportsColorSpaceConversion() const {

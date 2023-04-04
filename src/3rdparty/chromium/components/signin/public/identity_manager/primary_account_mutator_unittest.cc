@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -516,14 +516,6 @@ TEST_F(PrimaryAccountMutatorTest,
 TEST_F(PrimaryAccountMutatorTest, RevokeSyncConsent_DiceConsistency) {
   RunRevokeSyncConsentTest(signin::AccountConsistencyMethod::kDice,
                            RemoveAccountExpectation::kKeepAll);
-}
-
-// Test that revoking the sync consent when DICE account consistency is
-// enabled clears the primary account if it uin auth error state.
-TEST_F(PrimaryAccountMutatorTest, RevokeSyncConsent_DiceConsistency_AuthError) {
-  RunRevokeSyncConsentTest(signin::AccountConsistencyMethod::kDice,
-                           RemoveAccountExpectation::kRemoveAll,
-                           AuthExpectation::kAuthError);
 }
 
 #else  //! BUILDFLAG(IS_CHROMEOS_ASH)

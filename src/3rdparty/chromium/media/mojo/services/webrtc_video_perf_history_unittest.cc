@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -118,12 +118,11 @@ class FakeWebrtcVideoStatsDB : public WebrtcVideoStatsDB {
 
     WebrtcVideoStatsDB::VideoStatsCollection collection;
     std::string key_filter = key.SerializeWithoutPixels();
-    for (auto const& entry : entries_) {
-      if (entry.first.rfind(key_filter, 0) == 0) {
-        absl::optional<int> pixels =
-            VideoDescKey::ParsePixelsFromKey(entry.first);
+    for (auto const& [str, video_stats_entry] : entries_) {
+      if (str.rfind(key_filter, 0) == 0) {
+        absl::optional<int> pixels = VideoDescKey::ParsePixelsFromKey(str);
         if (pixels) {
-          collection.insert({*pixels, std::move(entry.second)});
+          collection.insert({*pixels, std::move(video_stats_entry)});
         }
       }
     }

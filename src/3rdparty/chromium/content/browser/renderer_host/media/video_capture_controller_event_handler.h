@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,11 @@ class VideoCaptureControllerEventHandler {
       const VideoCaptureControllerID& id,
       const ReadyBuffer& buffer,
       const std::vector<ReadyBuffer>& scaled_buffers) = 0;
+
+  // All subsequent buffers are guaranteed to have a crop version whose value
+  // is at least |crop_version|.
+  virtual void OnNewCropVersion(const VideoCaptureControllerID& id,
+                                uint32_t crop_version) = 0;
 
   virtual void OnFrameWithEmptyRegionCapture(
       const VideoCaptureControllerID& id) = 0;

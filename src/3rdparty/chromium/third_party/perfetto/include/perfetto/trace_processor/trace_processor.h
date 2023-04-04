@@ -32,7 +32,7 @@ namespace trace_processor {
 
 // Extends TraceProcessorStorage to support execution of SQL queries on loaded
 // traces. See TraceProcessorStorage for parsing of trace files.
-class PERFETTO_EXPORT TraceProcessor : public TraceProcessorStorage {
+class PERFETTO_EXPORT_COMPONENT TraceProcessor : public TraceProcessorStorage {
  public:
   // For legacy API clients. Iterator used to be a nested class here. Many API
   // clients depends on it at this point.
@@ -111,7 +111,20 @@ class PERFETTO_EXPORT TraceProcessor : public TraceProcessorStorage {
   // Metatracing involves tracing trace processor itself to root-cause
   // performace issues in trace processor. See |DisableAndReadMetatrace| for
   // more information on the format of the metatrace.
-  virtual void EnableMetatrace() = 0;
+  enum MetatraceCategories {
+    TOPLEVEL = 1 << 0,
+    QUERY = 1 << 1,
+    FUNCTION = 1 << 2,
+
+    NONE = 0,
+    ALL = TOPLEVEL | QUERY | FUNCTION,
+  };
+  struct MetatraceConfig {
+    MetatraceConfig();
+
+    MetatraceCategories categories = MetatraceCategories::ALL;
+  };
+  virtual void EnableMetatrace(MetatraceConfig config = {}) = 0;
 
   // Disables "meta-tracing" of trace processor and writes the trace as a
   // sequence of |TracePackets| into |trace_proto| returning the status of this
@@ -127,7 +140,7 @@ class PERFETTO_EXPORT TraceProcessor : public TraceProcessorStorage {
 };
 
 // When set, logs SQLite actions on the console.
-void PERFETTO_EXPORT EnableSQLiteVtableDebugging();
+void PERFETTO_EXPORT_COMPONENT EnableSQLiteVtableDebugging();
 
 }  // namespace trace_processor
 }  // namespace perfetto

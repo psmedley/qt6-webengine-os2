@@ -31,52 +31,50 @@ namespace tint::transform {
 /// the bounds of the array. Any access before the start of the array will clamp
 /// to zero and any access past the end of the array will clamp to
 /// (array length - 1).
-class Robustness : public Castable<Robustness, Transform> {
- public:
-  /// Storage class to be skipped in the transform
-  enum class StorageClass {
-    kUniform,
-    kStorage,
-  };
+class Robustness final : public Castable<Robustness, Transform> {
+  public:
+    /// Address space to be skipped in the transform
+    enum class AddressSpace {
+        kUniform,
+        kStorage,
+    };
 
-  /// Configuration options for the transform
-  struct Config : public Castable<Config, Data> {
+    /// Configuration options for the transform
+    struct Config final : public Castable<Config, Data> {
+        /// Constructor
+        Config();
+
+        /// Copy constructor
+        Config(const Config&);
+
+        /// Destructor
+        ~Config() override;
+
+        /// Assignment operator
+        /// @returns this Config
+        Config& operator=(const Config&);
+
+        /// Address spacees to omit from apply the transform to.
+        /// This allows for optimizing on hardware that provide safe accesses.
+        std::unordered_set<AddressSpace> omitted_classes;
+    };
+
     /// Constructor
-    Config();
-
-    /// Copy constructor
-    Config(const Config&);
-
+    Robustness();
     /// Destructor
-    ~Config() override;
+    ~Robustness() override;
 
-    /// Assignment operator
-    /// @returns this Config
-    Config& operator=(const Config&);
+  protected:
+    /// Runs the transform using the CloneContext built for transforming a
+    /// program. Run() is responsible for calling Clone() on the CloneContext.
+    /// @param ctx the CloneContext primed with the input program and
+    /// ProgramBuilder
+    /// @param inputs optional extra transform-specific input data
+    /// @param outputs optional extra transform-specific output data
+    void Run(CloneContext& ctx, const DataMap& inputs, DataMap& outputs) const override;
 
-    /// Storage classes to omit from apply the transform to.
-    /// This allows for optimizing on hardware that provide safe accesses.
-    std::unordered_set<StorageClass> omitted_classes;
-  };
-
-  /// Constructor
-  Robustness();
-  /// Destructor
-  ~Robustness() override;
-
- protected:
-  /// Runs the transform using the CloneContext built for transforming a
-  /// program. Run() is responsible for calling Clone() on the CloneContext.
-  /// @param ctx the CloneContext primed with the input program and
-  /// ProgramBuilder
-  /// @param inputs optional extra transform-specific input data
-  /// @param outputs optional extra transform-specific output data
-  void Run(CloneContext& ctx,
-           const DataMap& inputs,
-           DataMap& outputs) const override;
-
- private:
-  struct State;
+  private:
+    struct State;
 };
 
 }  // namespace tint::transform

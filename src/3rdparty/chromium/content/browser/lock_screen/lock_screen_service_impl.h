@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,6 @@ class RenderFrameHost;
 class CONTENT_EXPORT LockScreenServiceImpl
     : public DocumentService<blink::mojom::LockScreenService> {
  public:
-  explicit LockScreenServiceImpl(
-      content::RenderFrameHost* render_frame_host,
-      mojo::PendingReceiver<blink::mojom::LockScreenService> receiver);
   LockScreenServiceImpl(const LockScreenServiceImpl&) = delete;
   LockScreenServiceImpl& operator=(const LockScreenServiceImpl&) = delete;
 
@@ -42,6 +39,10 @@ class CONTENT_EXPORT LockScreenServiceImpl
 
  private:
   friend class LockScreenServiceImplBrowserTest;
+
+  explicit LockScreenServiceImpl(
+      content::RenderFrameHost& render_frame_host,
+      mojo::PendingReceiver<blink::mojom::LockScreenService> receiver);
 
   // |this| can only be destructed as a DocumentService.
   ~LockScreenServiceImpl() override;

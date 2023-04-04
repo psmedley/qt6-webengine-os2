@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -540,14 +540,14 @@ class DownloadManagerTest : public testing::Test {
       download::DownloadItem::MixedContentStatus mixed_content_status,
       const base::FilePath& intermediate_path,
       const base::FilePath& display_name,
-      absl::optional<download::DownloadSchedule> download_schedule,
+      const std::string& mime_type,
       download::DownloadInterruptReason interrupt_reason) {
     callback_called_ = true;
     target_path_ = target_path;
     target_disposition_ = disposition;
     danger_type_ = danger_type;
     intermediate_path_ = intermediate_path;
-    download_schedule_ = std::move(download_schedule);
+    mime_type_ = mime_type;
     interrupt_reason_ = interrupt_reason;
   }
 
@@ -583,8 +583,8 @@ class DownloadManagerTest : public testing::Test {
   base::FilePath target_path_;
   download::DownloadItem::TargetDisposition target_disposition_;
   download::DownloadDangerType danger_type_;
+  std::string mime_type_;
   base::FilePath intermediate_path_;
-  absl::optional<download::DownloadSchedule> download_schedule_;
   download::DownloadInterruptReason interrupt_reason_;
 
   std::vector<GURL> download_urls_;
@@ -794,9 +794,8 @@ TEST_F(DownloadManagerTest, OnInProgressDownloadsLoaded) {
       download::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED, false, false, false,
       base::Time::Now(), true,
       std::vector<download::DownloadItem::ReceivedSlice>(),
-      download::DownloadItemRerouteInfo(), absl::nullopt /*download_schedule*/,
-      download::kInvalidRange, download::kInvalidRange,
-      nullptr /* download_entry */);
+      download::DownloadItemRerouteInfo(), download::kInvalidRange,
+      download::kInvalidRange, nullptr /* download_entry */);
   in_progress_manager->AddDownloadItem(std::move(in_progress_item));
   SetInProgressDownloadManager(std::move(in_progress_manager));
   EXPECT_CALL(GetMockObserver(), OnDownloadCreated(download_manager_.get(), _))

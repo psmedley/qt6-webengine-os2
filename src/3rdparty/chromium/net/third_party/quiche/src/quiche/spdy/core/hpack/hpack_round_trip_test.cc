@@ -12,7 +12,8 @@
 #include "quiche/spdy/core/hpack/hpack_constants.h"
 #include "quiche/spdy/core/hpack/hpack_decoder_adapter.h"
 #include "quiche/spdy/core/hpack/hpack_encoder.h"
-#include "quiche/spdy/core/spdy_test_utils.h"
+#include "quiche/spdy/core/http2_header_block.h"
+#include "quiche/spdy/test_tools/spdy_test_utils.h"
 
 namespace spdy {
 namespace test {
@@ -22,7 +23,8 @@ namespace {
 // Supports testing with the input split at every byte boundary.
 enum InputSizeParam { ALL_INPUT, ONE_BYTE, ZERO_THEN_ONE_BYTE };
 
-class HpackRoundTripTest : public QuicheTestWithParam<InputSizeParam> {
+class HpackRoundTripTest
+    : public quiche::test::QuicheTestWithParam<InputSizeParam> {
  protected:
   void SetUp() override {
     // Use a small table size to tickle eviction handling.
@@ -30,7 +32,7 @@ class HpackRoundTripTest : public QuicheTestWithParam<InputSizeParam> {
     decoder_.ApplyHeaderTableSizeSetting(256);
   }
 
-  bool RoundTrip(const SpdyHeaderBlock& header_set) {
+  bool RoundTrip(const Http2HeaderBlock& header_set) {
     std::string encoded = encoder_.EncodeHeaderBlock(header_set);
 
     bool success = true;
@@ -80,7 +82,7 @@ INSTANTIATE_TEST_SUITE_P(Tests, HpackRoundTripTest,
 
 TEST_P(HpackRoundTripTest, ResponseFixtures) {
   {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
     headers[":status"] = "302";
     headers["cache-control"] = "private";
     headers["date"] = "Mon, 21 Oct 2013 20:13:21 GMT";
@@ -88,7 +90,7 @@ TEST_P(HpackRoundTripTest, ResponseFixtures) {
     EXPECT_TRUE(RoundTrip(headers));
   }
   {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
     headers[":status"] = "200";
     headers["cache-control"] = "private";
     headers["date"] = "Mon, 21 Oct 2013 20:13:21 GMT";
@@ -96,7 +98,7 @@ TEST_P(HpackRoundTripTest, ResponseFixtures) {
     EXPECT_TRUE(RoundTrip(headers));
   }
   {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
     headers[":status"] = "200";
     headers["cache-control"] = "private";
     headers["content-encoding"] = "gzip";
@@ -112,7 +114,7 @@ TEST_P(HpackRoundTripTest, ResponseFixtures) {
 
 TEST_P(HpackRoundTripTest, RequestFixtures) {
   {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
     headers[":authority"] = "www.example.com";
     headers[":method"] = "GET";
     headers[":path"] = "/";
@@ -121,7 +123,7 @@ TEST_P(HpackRoundTripTest, RequestFixtures) {
     EXPECT_TRUE(RoundTrip(headers));
   }
   {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
     headers[":authority"] = "www.example.com";
     headers[":method"] = "GET";
     headers[":path"] = "/";
@@ -131,7 +133,7 @@ TEST_P(HpackRoundTripTest, RequestFixtures) {
     EXPECT_TRUE(RoundTrip(headers));
   }
   {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
     headers[":authority"] = "www.example.com";
     headers[":method"] = "GET";
     headers[":path"] = "/index.html";
@@ -165,7 +167,7 @@ TEST_P(HpackRoundTripTest, RandomizedExamples) {
   values.push_back("baz=bing; fizzle=fazzle; garbage");
 
   for (size_t i = 0; i != 2000; ++i) {
-    SpdyHeaderBlock headers;
+    Http2HeaderBlock headers;
 
     // Choose a random number of headers to add, and of these a random subset
     // will be HTTP/2 pseudo headers.

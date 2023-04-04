@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ struct wl_resource;
 struct wl_client;
 
 namespace exo {
-class Capabilities;
+class SecurityDelegate;
 class Display;
 
 namespace wayland {
@@ -47,7 +47,7 @@ class Server : public display::DisplayObserver {
   using StartCallback =
       base::OnceCallback<void(bool, const base::FilePath& path)>;
 
-  Server(Display* display, std::unique_ptr<Capabilities> capabilities);
+  Server(Display* display, std::unique_ptr<SecurityDelegate> security_delegate);
 
   Server(const Server&) = delete;
   Server& operator=(const Server&) = delete;
@@ -58,10 +58,10 @@ class Server : public display::DisplayObserver {
   // default socket name.
   static std::unique_ptr<Server> Create(Display* display);
 
-  // As above, but with the given set of |capabilities_.
+  // As above, but with the given |security_delegate|.
   static std::unique_ptr<Server> Create(
       Display* display,
-      std::unique_ptr<Capabilities> capabilities);
+      std::unique_ptr<SecurityDelegate> security_delegate);
 
   // In cases where the server was started asynchronously, this helper can be
   // used to delete it asynchronously as well.
@@ -78,7 +78,7 @@ class Server : public display::DisplayObserver {
 
   // This adds a Unix socket to the Wayland display server which can be used
   // by clients to connect to the display server.
-  bool AddSocket(const std::string name);
+  bool AddSocket(const std::string& name);
 
   // Returns the file descriptor associated with the server.
   int GetFileDescriptor() const;
@@ -119,7 +119,7 @@ class Server : public display::DisplayObserver {
   // This has the server's socket inside it, so it must be deleted last.
   base::ScopedTempDir socket_dir_;
   Display* const display_;
-  std::unique_ptr<Capabilities> capabilities_;
+  std::unique_ptr<SecurityDelegate> security_delegate_;
   // Deleting wl_display depends on SerialTracker.
   std::unique_ptr<SerialTracker> serial_tracker_;
   std::unique_ptr<wl_display, WlDisplayDeleter> wl_display_;
@@ -130,7 +130,6 @@ class Server : public display::DisplayObserver {
   std::unique_ptr<wayland::WaylandWatcher> wayland_watcher_;
   base::FilePath socket_path_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<WaylandKeyboardExtension> zcr_keyboard_extension_data_;
   std::unique_ptr<WaylandTextInputManager> zwp_text_manager_data_;
   std::unique_ptr<WaylandTextInputExtension> zcr_text_input_extension_data_;
@@ -138,7 +137,6 @@ class Server : public display::DisplayObserver {
   std::unique_ptr<WaylandXdgShell> xdg_shell_data_;
   std::unique_ptr<WaylandRemoteShellData> remote_shell_data_;
   std::unique_ptr<WestonTest> weston_test_holder_;
-#endif
 };
 
 }  // namespace wayland

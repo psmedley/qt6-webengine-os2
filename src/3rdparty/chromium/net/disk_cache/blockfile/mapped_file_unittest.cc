@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ void FileCallbackTest::OnFileIOComplete(int bytes_copied) {
 
 TEST_F(DiskCacheTest, MappedFile_SyncIO) {
   base::FilePath filename = cache_path_.AppendASCII("a_test");
-  scoped_refptr<disk_cache::MappedFile> file(new disk_cache::MappedFile);
+  auto file = base::MakeRefCounted<disk_cache::MappedFile>();
   ASSERT_TRUE(CreateCacheTestFile(filename));
   ASSERT_TRUE(file->Init(filename, 8192));
 
@@ -59,7 +59,7 @@ TEST_F(DiskCacheTest, MappedFile_SyncIO) {
 
 TEST_F(DiskCacheTest, MappedFile_AsyncIO) {
   base::FilePath filename = cache_path_.AppendASCII("a_test");
-  scoped_refptr<disk_cache::MappedFile> file(new disk_cache::MappedFile);
+  auto file = base::MakeRefCounted<disk_cache::MappedFile>();
   ASSERT_TRUE(CreateCacheTestFile(filename));
   ASSERT_TRUE(file->Init(filename, 8192));
 

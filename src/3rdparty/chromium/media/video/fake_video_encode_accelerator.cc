@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,6 +40,7 @@ FakeVideoEncodeAccelerator::GetSupportedProfiles() {
   profile.max_resolution.SetSize(1920, 1088);
   profile.max_framerate_numerator = 30;
   profile.max_framerate_denominator = 1;
+  profile.rate_control_modes = media::VideoEncodeAccelerator::kConstantMode;
 
   profile.profile = media::H264PROFILE_MAIN;
   profiles.push_back(profile);

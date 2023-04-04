@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,15 @@
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
+#include "components/commerce/core/shopping_service.h"
 
+using base::android::JavaParamRef;
 using base::android::ScopedJavaGlobalRef;
+using base::android::ScopedJavaLocalRef;
+
+class GURL;
 
 namespace commerce {
 
@@ -24,9 +30,39 @@ class ShoppingServiceAndroid : public base::SupportsUserData::Data {
   ShoppingServiceAndroid(ShoppingService* service);
   ~ShoppingServiceAndroid() override;
 
+  void GetProductInfoForUrl(JNIEnv* env,
+                            const JavaParamRef<jobject>& obj,
+                            const JavaParamRef<jobject>& j_gurl,
+                            const JavaParamRef<jobject>& j_callback);
+
+  ScopedJavaLocalRef<jobject> GetAvailableProductInfoForUrl(
+      JNIEnv* env,
+      const JavaParamRef<jobject>& obj,
+      const JavaParamRef<jobject>& j_gurl);
+
+  void GetMerchantInfoForUrl(JNIEnv* env,
+                             const JavaParamRef<jobject>& obj,
+                             const JavaParamRef<jobject>& j_gurl,
+                             const JavaParamRef<jobject>& j_callback);
+
+  void FetchPriceEmailPref(JNIEnv* env, const JavaParamRef<jobject>& obj);
+
+  void ScheduleSavedProductUpdate(JNIEnv* env,
+                                  const JavaParamRef<jobject>& obj);
+
   ScopedJavaGlobalRef<jobject> java_ref() { return java_ref_; }
 
  private:
+  void HandleProductInfoCallback(JNIEnv* env,
+                                 const ScopedJavaGlobalRef<jobject>& callback,
+                                 const GURL& url,
+                                 const absl::optional<ProductInfo>& info);
+
+  void HandleMerchantInfoCallback(JNIEnv* env,
+                                  const ScopedJavaGlobalRef<jobject>& callback,
+                                  const GURL& url,
+                                  absl::optional<MerchantInfo> info);
+
   // A handle to the backing shopping service. This is held as a raw pointer
   // since this object's lifecycle is tied to the service itself. This object
   // will always be destroyed before the service is.
@@ -34,6 +70,8 @@ class ShoppingServiceAndroid : public base::SupportsUserData::Data {
 
   // A handle to the java side of this object.
   ScopedJavaGlobalRef<jobject> java_ref_;
+
+  base::WeakPtrFactory<ShoppingServiceAndroid> weak_ptr_factory_;
 };
 
 }  // namespace commerce

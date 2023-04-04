@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_THEME_AURA_H_
 
 #include "base/gtest_prod_util.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 
 namespace blink {
@@ -75,6 +76,7 @@ class CORE_EXPORT ScrollbarThemeAura : public ScrollbarTheme {
   bool SupportsDragSnapBack() const override;
   bool ShouldSnapBackToDragOrigin(const Scrollbar&,
                                   const WebMouseEvent&) override;
+  virtual gfx::Size ButtonSize(const Scrollbar&) const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ScrollbarThemeAuraTest, ButtonSizeHorizontal);
@@ -82,7 +84,6 @@ class CORE_EXPORT ScrollbarThemeAura : public ScrollbarTheme {
   FRIEND_TEST_ALL_PREFIXES(ScrollbarThemeAuraTest, NoButtonsReturnsSize0);
 
   virtual bool HasScrollbarButtons(ScrollbarOrientation) const;
-  gfx::Size ButtonSize(const Scrollbar&);
 };
 
 }  // namespace blink

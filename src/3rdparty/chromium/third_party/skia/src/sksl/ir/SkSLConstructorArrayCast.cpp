@@ -7,15 +7,20 @@
 
 #include "src/sksl/ir/SkSLConstructorArrayCast.h"
 
+#include "include/core/SkSpan.h"
+#include "include/core/SkTypes.h"
+#include "include/private/SkSLDefines.h"
+#include "src/sksl/SkSLAnalysis.h"
 #include "src/sksl/SkSLConstantFolder.h"
-#include "src/sksl/SkSLProgramSettings.h"
 #include "src/sksl/ir/SkSLConstructorArray.h"
 #include "src/sksl/ir/SkSLConstructorCompoundCast.h"
 #include "src/sksl/ir/SkSLConstructorScalarCast.h"
+#include "src/sksl/ir/SkSLType.h"
 
 namespace SkSL {
 
 static std::unique_ptr<Expression> cast_constant_array(const Context& context,
+                                                       Position pos,
                                                        const Type& destType,
                                                        std::unique_ptr<Expression> constCtor) {
     const Type& scalarType = destType.componentType();
@@ -25,17 +30,17 @@ static std::unique_ptr<Expression> cast_constant_array(const Context& context,
     ExpressionArray typecastArgs;
     typecastArgs.reserve_back(inputArgs.size());
     for (std::unique_ptr<Expression>& arg : inputArgs) {
-        Position pos = arg->fPosition;
+        Position argPos = arg->fPosition;
         if (arg->type().isScalar()) {
-            typecastArgs.push_back(ConstructorScalarCast::Make(context, pos, scalarType,
+            typecastArgs.push_back(ConstructorScalarCast::Make(context, argPos, scalarType,
                                                                std::move(arg)));
         } else {
-            typecastArgs.push_back(ConstructorCompoundCast::Make(context, pos, scalarType,
+            typecastArgs.push_back(ConstructorCompoundCast::Make(context, argPos, scalarType,
                                                                  std::move(arg)));
         }
     }
 
-    return ConstructorArray::Make(context, constCtor->fPosition, destType, std::move(typecastArgs));
+    return ConstructorArray::Make(context, pos, destType, std::move(typecastArgs));
 }
 
 std::unique_ptr<Expression> ConstructorArrayCast::Make(const Context& context,
@@ -50,6 +55,7 @@ std::unique_ptr<Expression> ConstructorArrayCast::Make(const Context& context,
 
     // If this is a no-op cast, return the expression as-is.
     if (type.matches(arg->type())) {
+        arg->fPosition = pos;
         return arg;
     }
 
@@ -58,8 +64,8 @@ std::unique_ptr<Expression> ConstructorArrayCast::Make(const Context& context,
     arg = ConstantFolder::MakeConstantValueForVariable(pos, std::move(arg));
 
     // We can cast a vector of compile-time constants at compile-time.
-    if (arg->isCompileTimeConstant()) {
-        return cast_constant_array(context, type, std::move(arg));
+    if (Analysis::IsCompileTimeConstant(*arg)) {
+        return cast_constant_array(context, pos, type, std::move(arg));
     }
     return std::make_unique<ConstructorArrayCast>(pos, type, std::move(arg));
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,9 @@
 
 namespace ui {
 
-// This class manages AXTreeManager instances. It is a singleton wrapper
-// around a std::unordered_map. AXTreeID's are used as the key for the map.
-// Since AXTreeID's might refer to AXTreeIDUnknown, callers should not expect
+// This class manages AXTreeManager instances. It is a wrapper around a
+// std::unordered_map. AXTreeID's are used as the key for the map. Since
+// AXTreeID's might refer to AXTreeIDUnknown, callers should not expect
 // AXTreeIDUnknown to map to a particular AXTreeManager.
 class AX_EXPORT AXTreeManagerMap {
  public:
@@ -23,14 +23,9 @@ class AX_EXPORT AXTreeManagerMap {
   AXTreeManagerMap(const AXTreeManagerMap& map) = delete;
   AXTreeManagerMap& operator=(const AXTreeManagerMap& map) = delete;
 
-  static AXTreeManagerMap& GetInstance();
-  void AddTreeManager(AXTreeID tree_id, AXTreeManager* manager);
-  void RemoveTreeManager(AXTreeID tree_id);
-  AXTreeManager* GetManager(AXTreeID tree_id);
-
-  // If the child of `parent_node` exists in a separate child tree, return the
-  // tree manager for that child tree. Otherwise, return nullptr.
-  AXTreeManager* GetManagerForChildTree(const AXNode& parent_node);
+  void AddTreeManager(const AXTreeID& tree_id, AXTreeManager* manager);
+  void RemoveTreeManager(const AXTreeID& tree_id);
+  AXTreeManager* GetManager(const AXTreeID& tree_id);
 
  private:
   std::unordered_map<AXTreeID, AXTreeManager*, AXTreeIDHash> map_;

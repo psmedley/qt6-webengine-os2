@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,9 +31,9 @@ constexpr char kReportSenderHttpResponseOrNetErrorCodeHistogramName[] =
     "PrivacySandbox.AggregationService.ReportSender.HttpResponseOrNetErrorCode";
 
 base::Value GetExampleContents() {
-  base::Value contents(base::Value::Type::DICTIONARY);
-  contents.SetStringKey("id", "1234");
-  return contents;
+  base::Value::Dict contents;
+  contents.Set("id", "1234");
+  return base::Value(std::move(contents));
 }
 
 }  // namespace

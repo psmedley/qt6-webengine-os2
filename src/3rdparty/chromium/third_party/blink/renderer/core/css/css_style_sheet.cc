@@ -166,19 +166,15 @@ CSSStyleSheet::CSSStyleSheet(StyleSheetContents* contents,
   ClearOwnerNode();
   ClearOwnerRule();
   Contents()->RegisterClient(this);
-  scoped_refptr<MediaQuerySet> media_query_set;
   switch (options->media()->GetContentType()) {
     case V8UnionMediaListOrString::ContentType::kMediaList:
-      media_query_set = options->media()->GetAsMediaList()->Queries()->Copy();
+      media_queries_ = options->media()->GetAsMediaList()->Queries();
       break;
     case V8UnionMediaListOrString::ContentType::kString:
-      media_query_set = MediaQuerySet::Create(options->media()->GetAsString(),
-                                              document.GetExecutionContext());
+      media_queries_ = MediaQuerySet::Create(options->media()->GetAsString(),
+                                             document.GetExecutionContext());
       break;
   }
-  auto* media_list = MakeGarbageCollected<MediaList>(
-      media_query_set, const_cast<CSSStyleSheet*>(this));
-  SetMedia(media_list);
   if (options->alternate())
     SetAlternateFromConstructor(true);
   if (options->disabled())
@@ -190,9 +186,9 @@ CSSStyleSheet::CSSStyleSheet(StyleSheetContents* contents,
                              bool is_inline_stylesheet,
                              const TextPosition& start_position)
     : contents_(contents),
-      is_inline_stylesheet_(is_inline_stylesheet),
       owner_node_(&owner_node),
-      start_position_(start_position) {
+      start_position_(start_position),
+      is_inline_stylesheet_(is_inline_stylesheet) {
 #if DCHECK_IS_ON()
   DCHECK(IsAcceptableCSSStyleSheetParent(owner_node));
 #endif
@@ -232,7 +228,7 @@ void CSSStyleSheet::DidMutate(Mutation mutation) {
   Document* document = OwnerDocument();
   if (!document || !document->IsActive())
     return;
-  if (!custom_element_tag_names_.IsEmpty()) {
+  if (!custom_element_tag_names_.empty()) {
     document->GetStyleEngine().ScheduleCustomElementInvalidations(
         custom_element_tag_names_);
   }
@@ -241,7 +237,7 @@ void CSSStyleSheet::DidMutate(Mutation mutation) {
     document->GetStyleEngine().SetNeedsActiveStyleUpdate(
         ownerNode()->GetTreeScope());
     invalidate_matched_properties_cache = true;
-  } else if (!adopted_tree_scopes_.IsEmpty()) {
+  } else if (!adopted_tree_scopes_.empty()) {
     for (auto tree_scope : adopted_tree_scopes_) {
       // It is currently required that adopted sheets can not be moved between
       // documents.
@@ -292,25 +288,12 @@ void CSSStyleSheet::setDisabled(bool disabled) {
   DidMutate(Mutation::kSheet);
 }
 
-void CSSStyleSheet::SetMediaQueries(
-    scoped_refptr<MediaQuerySet> media_queries) {
-  media_queries_ = std::move(media_queries);
-  if (media_cssom_wrapper_ && media_queries_)
-    media_cssom_wrapper_->Reattach(media_queries_.get());
-}
-
 bool CSSStyleSheet::MatchesMediaQueries(const MediaQueryEvaluator& evaluator) {
-  viewport_dependent_media_query_results_.clear();
-  device_dependent_media_query_results_.clear();
-  media_query_unit_flags_ = 0;
+  media_query_result_flags_.Clear();
 
   if (!media_queries_)
     return true;
-  return evaluator.Eval(
-      *media_queries_,
-      MediaQueryEvaluator::Results{&viewport_dependent_media_query_results_,
-                                   &device_dependent_media_query_results_,
-                                   &media_query_unit_flags_});
+  return evaluator.Eval(*media_queries_, &media_query_result_flags_);
 }
 
 void CSSStyleSheet::AddedAdoptedToTreeScope(TreeScope& tree_scope) {
@@ -321,8 +304,12 @@ void CSSStyleSheet::RemovedAdoptedFromTreeScope(TreeScope& tree_scope) {
   adopted_tree_scopes_.erase(&tree_scope);
 }
 
+bool CSSStyleSheet::HasViewportDependentMediaQueries() const {
+  return media_query_result_flags_.is_viewport_dependent;
+}
+
 bool CSSStyleSheet::HasDynamicViewportDependentMediaQueries() const {
-  return media_query_unit_flags_ &
+  return media_query_result_flags_.unit_flags &
          MediaQueryExpValue::UnitFlags::kDynamicViewport;
 }
 
@@ -335,13 +322,13 @@ CSSRule* CSSStyleSheet::item(unsigned index) {
   if (index >= rule_count)
     return nullptr;
 
-  if (child_rule_cssom_wrappers_.IsEmpty())
+  if (child_rule_cssom_wrappers_.empty())
     child_rule_cssom_wrappers_.Grow(rule_count);
   DCHECK_EQ(child_rule_cssom_wrappers_.size(), rule_count);
 
   Member<CSSRule>& css_rule = child_rule_cssom_wrappers_[index];
   if (!css_rule)
-    css_rule = contents_->RuleAt(index)->CreateCSSOMWrapper(this);
+    css_rule = contents_->RuleAt(index)->CreateCSSOMWrapper(index, this);
   return css_rule.Get();
 }
 
@@ -369,7 +356,7 @@ unsigned CSSStyleSheet::insertRule(const String& rule_string,
     return 0;
   }
 
-  DCHECK(child_rule_cssom_wrappers_.IsEmpty() ||
+  DCHECK(child_rule_cssom_wrappers_.empty() ||
          child_rule_cssom_wrappers_.size() == contents_->RuleCount());
 
   if (index > length()) {
@@ -409,7 +396,7 @@ unsigned CSSStyleSheet::insertRule(const String& rule_string,
           "Failed to insert the rule.");
     return 0;
   }
-  if (!child_rule_cssom_wrappers_.IsEmpty())
+  if (!child_rule_cssom_wrappers_.empty())
     child_rule_cssom_wrappers_.insert(index, Member<CSSRule>(nullptr));
 
   return index;
@@ -423,7 +410,7 @@ void CSSStyleSheet::deleteRule(unsigned index,
     return;
   }
 
-  DCHECK(child_rule_cssom_wrappers_.IsEmpty() ||
+  DCHECK(child_rule_cssom_wrappers_.empty() ||
          child_rule_cssom_wrappers_.size() == contents_->RuleCount());
 
   if (index >= length()) {
@@ -448,7 +435,7 @@ void CSSStyleSheet::deleteRule(unsigned index,
     return;
   }
 
-  if (!child_rule_cssom_wrappers_.IsEmpty()) {
+  if (!child_rule_cssom_wrappers_.empty()) {
     if (child_rule_cssom_wrappers_[index])
       child_rule_cssom_wrappers_[index]->SetParentStyleSheet(nullptr);
     child_rule_cssom_wrappers_.EraseAt(index);
@@ -463,7 +450,7 @@ int CSSStyleSheet::addRule(const String& selector,
   text.Append(selector);
   text.Append(" { ");
   text.Append(style);
-  if (!style.IsEmpty())
+  if (!style.empty())
     text.Append(' ');
   text.Append('}');
   insertRule(text.ReleaseString(), index, exception_state);
@@ -531,16 +518,9 @@ bool CSSStyleSheet::IsLoading() const {
 MediaList* CSSStyleSheet::media() {
   if (!media_queries_)
     media_queries_ = MediaQuerySet::Create();
-
-  if (!media_cssom_wrapper_) {
-    media_cssom_wrapper_ = MakeGarbageCollected<MediaList>(
-        media_queries_.get(), const_cast<CSSStyleSheet*>(this));
-  }
+  if (!media_cssom_wrapper_)
+    media_cssom_wrapper_ = MakeGarbageCollected<MediaList>(this);
   return media_cssom_wrapper_.Get();
-}
-
-void CSSStyleSheet::SetMedia(MediaList* media_list) {
-  media_cssom_wrapper_ = media_list;
 }
 
 CSSStyleSheet* CSSStyleSheet::parentStyleSheet() const {
@@ -628,11 +608,11 @@ bool CSSStyleSheet::CanBeActivated(
   if (!owner_node_ ||
       owner_node_->getNodeType() == Node::kProcessingInstructionNode ||
       !html_link_element || !html_link_element->IsEnabledViaScript()) {
-    if (!title_.IsEmpty() && title_ != current_preferrable_name)
+    if (!title_.empty() && title_ != current_preferrable_name)
       return false;
   }
 
-  if (IsAlternate() && title_.IsEmpty())
+  if (IsAlternate() && title_.empty())
     return false;
 
   return true;
@@ -640,6 +620,7 @@ bool CSSStyleSheet::CanBeActivated(
 
 void CSSStyleSheet::Trace(Visitor* visitor) const {
   visitor->Trace(contents_);
+  visitor->Trace(media_queries_);
   visitor->Trace(owner_node_);
   visitor->Trace(owner_rule_);
   visitor->Trace(media_cssom_wrapper_);

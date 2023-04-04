@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@ class CSSNumericValue;
 class CSSRGB;
 class CSSHSL;
 class CSSHWB;
+class V8UnionCSSColorValueOrCSSStyleValue;
 
 class CORE_EXPORT CSSColorValue : public CSSStyleValue {
   DEFINE_WRAPPERTYPEINFO();
@@ -32,6 +33,10 @@ class CORE_EXPORT CSSColorValue : public CSSStyleValue {
   StyleValueType GetType() const override { return kColorType; }
 
   virtual Color ToColor() const = 0;
+
+  static V8UnionCSSColorValueOrCSSStyleValue* parse(const ExecutionContext*,
+                                                    const String&,
+                                                    ExceptionState&);
 
  protected:
   static CSSNumericValue* ToNumberOrPercentage(const V8CSSNumberish*);

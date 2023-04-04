@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,6 +97,10 @@ extern const char kMimeTypeImageURI[];
 // registering too many formats.
 COMPONENT_EXPORT(UI_BASE_CLIPBOARD_TYPES)
 extern const int kMaxRegisteredClipboardFormats;
+
+// Web prefix for web custom format types.
+COMPONENT_EXPORT(UI_BASE_CLIPBOARD_TYPES)
+extern const char kWebClipboardFormatPrefix[];
 
 }  // namespace ui
 

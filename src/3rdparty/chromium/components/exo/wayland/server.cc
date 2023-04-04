@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,16 @@
 
 #include <alpha-compositing-unstable-v1-server-protocol.h>
 #include <aura-shell-server-protocol.h>
+#include <content-type-v1-server-protocol.h>
 #include <cursor-shapes-unstable-v1-server-protocol.h>
 #include <extended-drag-unstable-v1-server-protocol.h>
 #include <gaming-input-unstable-v2-server-protocol.h>
 #include <grp.h>
+#include <idle-inhibit-unstable-v1-server-protocol.h>
 #include <input-timestamps-unstable-v1-server-protocol.h>
 #include <keyboard-configuration-unstable-v1-server-protocol.h>
 #include <keyboard-extension-unstable-v1-server-protocol.h>
+#include <keyboard-shortcuts-inhibit-unstable-v1-server-protocol.h>
 #include <linux-explicit-synchronization-unstable-v1-server-protocol.h>
 #include <notification-shell-unstable-v1-server-protocol.h>
 #include <overlay-prioritizer-server-protocol.h>
@@ -43,48 +46,38 @@
 #include <string>
 #include <utility>
 
+#include "ash/constants/ash_features.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/stringprintf.h"
+#include "base/system/sys_info.h"
 #include "base/task/thread_pool.h"
 #include "build/chromeos_buildflags.h"
 #include "components/exo/buildflags.h"
-#include "components/exo/capabilities.h"
 #include "components/exo/display.h"
+#include "components/exo/security_delegate.h"
+#include "components/exo/wayland/content_type.h"
 #include "components/exo/wayland/overlay_prioritizer.h"
 #include "components/exo/wayland/serial_tracker.h"
 #include "components/exo/wayland/server_util.h"
 #include "components/exo/wayland/surface_augmenter.h"
 #include "components/exo/wayland/wayland_display_output.h"
 #include "components/exo/wayland/wayland_watcher.h"
+#include "components/exo/wayland/weston_test.h"
 #include "components/exo/wayland/wl_compositor.h"
 #include "components/exo/wayland/wl_data_device_manager.h"
 #include "components/exo/wayland/wl_output.h"
 #include "components/exo/wayland/wl_seat.h"
+#include "components/exo/wayland/wl_shell.h"
 #include "components/exo/wayland/wl_shm.h"
 #include "components/exo/wayland/wl_subcompositor.h"
 #include "components/exo/wayland/wp_presentation.h"
 #include "components/exo/wayland/wp_viewporter.h"
+#include "components/exo/wayland/xdg_shell.h"
 #include "components/exo/wayland/zaura_shell.h"
 #include "components/exo/wayland/zcr_alpha_compositing.h"
-#include "components/exo/wayland/zcr_secure_output.h"
-#include "components/exo/wayland/zcr_stylus.h"
-#include "components/exo/wayland/zcr_vsync_feedback.h"
-#include "components/exo/wayland/zwp_linux_dmabuf.h"
-#include "components/exo/wayland/zwp_linux_explicit_synchronization.h"
-#include "ui/display/display.h"
-#include "ui/display/screen.h"
-#include "ui/ozone/public/ozone_platform.h"
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include <idle-inhibit-unstable-v1-server-protocol.h>
-#include "ash/constants/ash_features.h"
-#include "base/system/sys_info.h"
-#include "components/exo/wayland/weston_test.h"
-#include "components/exo/wayland/wl_shell.h"
-#include "components/exo/wayland/xdg_shell.h"
 #include "components/exo/wayland/zcr_cursor_shapes.h"
 #include "components/exo/wayland/zcr_extended_drag.h"
 #include "components/exo/wayland/zcr_gaming_input.h"
@@ -93,10 +86,16 @@
 #include "components/exo/wayland/zcr_notification_shell.h"
 #include "components/exo/wayland/zcr_remote_shell.h"
 #include "components/exo/wayland/zcr_remote_shell_v2.h"
+#include "components/exo/wayland/zcr_secure_output.h"
+#include "components/exo/wayland/zcr_stylus.h"
 #include "components/exo/wayland/zcr_stylus_tools.h"
 #include "components/exo/wayland/zcr_touchpad_haptics.h"
+#include "components/exo/wayland/zcr_vsync_feedback.h"
 #include "components/exo/wayland/zwp_idle_inhibit_manager.h"
 #include "components/exo/wayland/zwp_input_timestamps_manager.h"
+#include "components/exo/wayland/zwp_keyboard_shortcuts_inhibit_manager.h"
+#include "components/exo/wayland/zwp_linux_dmabuf.h"
+#include "components/exo/wayland/zwp_linux_explicit_synchronization.h"
 #include "components/exo/wayland/zwp_pointer_constraints.h"
 #include "components/exo/wayland/zwp_pointer_gestures.h"
 #include "components/exo/wayland/zwp_relative_pointer_manager.h"
@@ -104,17 +103,13 @@
 #include "components/exo/wayland/zxdg_decoration_manager.h"
 #include "components/exo/wayland/zxdg_output_manager.h"
 #include "components/exo/wayland/zxdg_shell.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
+#include "ui/ozone/public/ozone_platform.h"
 
 #if BUILDFLAG(ENABLE_COLOR_MANAGER)
 #include <chrome-color-management-server-protocol.h>
 #include "components/exo/wayland/zcr_color_manager.h"
-#endif
-
-#endif
-
-#if defined(USE_FULLSCREEN_SHELL)
-#include <fullscreen-shell-unstable-v1-server-protocol.h>
-#include "components/exo/wayland/zwp_fullscreen_shell.h"
 #endif
 
 namespace exo {
@@ -169,14 +164,14 @@ void wayland_log(const char* fmt, va_list argp) {
 //  - "socket" is the name of the wayland socket, usually "wayland-0"
 // This is documented in go/secure-exo-ids. Returns "true" if |out_temp_dir| was
 // successfully initialized.
-bool InitServerDirectory(const Capabilities& capabilities,
+bool InitServerDirectory(const SecurityDelegate& security_delegate,
                          base::ScopedTempDir& out_temp_dir) {
   char* xdg_dir_str = getenv("XDG_RUNTIME_DIR");
   if (!xdg_dir_str) {
     LOG(ERROR) << "XDG_RUNTIME_DIR is not set.";
     return false;
   }
-  std::string security_context = capabilities.GetSecurityContext();
+  std::string security_context = security_delegate.GetSecurityContext();
   if (security_context.empty()) {
     LOG(ERROR) << "Providing an empty security context is an error.";
     return false;
@@ -215,7 +210,7 @@ bool Server::Open(bool default_path) {
     }
     socket_path_ = base::FilePath(runtime_dir_str).Append(socket_name);
   } else {
-    if (!InitServerDirectory(*capabilities_, socket_dir_)) {
+    if (!InitServerDirectory(*security_delegate_, socket_dir_)) {
       return false;
     }
     socket_path_ = socket_dir_.GetPath().Append(socket_name);
@@ -226,7 +221,7 @@ bool Server::Open(bool default_path) {
                << socket_path_;
     return false;
   }
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+
   // On debugging chromeos-chrome on linux platform,
   // try to ensure the directory if missing.
   if (!base::SysInfo::IsRunningOnChromeOS()) {
@@ -235,7 +230,6 @@ bool Server::Open(bool default_path) {
           base::CreateDirectory(runtime_dir))
         << "Failed to create " << runtime_dir;
   }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   if (!AddSocket(socket_path_.MaybeAsASCII().c_str())) {
     LOG(ERROR) << "Failed to add socket: " << socket_path_;
@@ -271,12 +265,13 @@ bool Server::Open(bool default_path) {
 ////////////////////////////////////////////////////////////////////////////////
 // Server, public:
 
-Server::Server(Display* display, std::unique_ptr<Capabilities> capabilities)
-    : display_(display), capabilities_(std::move(capabilities)) {
+Server::Server(Display* display,
+               std::unique_ptr<SecurityDelegate> security_delegate)
+    : display_(display), security_delegate_(std::move(security_delegate)) {
   wl_log_set_handler_server(wayland_log);
 
   wl_display_.reset(wl_display_create());
-  SetCapabilities(wl_display_.get(), capabilities_.get());
+  SetSecurityDelegate(wl_display_.get(), security_delegate_.get());
 }
 
 void Server::Initialize() {
@@ -329,12 +324,13 @@ void Server::Initialize() {
   }
   wl_global_create(wl_display_.get(), &zaura_shell_interface,
                    kZAuraShellVersion, display_, bind_aura_shell);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
   wl_global_create(wl_display_.get(), &wl_shell_interface, 1, display_,
                    bind_shell);
+  wl_global_create(wl_display_.get(), &wp_content_type_manager_v1_interface, 1,
+                   display_, bind_content_type);
   wl_global_create(wl_display_.get(), &zcr_cursor_shapes_v1_interface, 1,
                    display_, bind_cursor_shapes);
-  wl_global_create(wl_display_.get(), &zcr_gaming_input_v2_interface, 2,
+  wl_global_create(wl_display_.get(), &zcr_gaming_input_v2_interface, 3,
                    display_, bind_gaming_input);
   wl_global_create(wl_display_.get(), &zcr_keyboard_configuration_v1_interface,
                    zcr_keyboard_configuration_v1_interface.version, display_,
@@ -375,10 +371,8 @@ void Server::Initialize() {
                    display_, bind_extended_drag);
   wl_global_create(wl_display_.get(), &zxdg_output_manager_v1_interface, 3,
                    display_, bind_zxdg_output_manager);
-  if (ash::features::IsIdleInhibitEnabled()) {
-    wl_global_create(wl_display_.get(), &zwp_idle_inhibit_manager_v1_interface,
-                     1, display_, bind_zwp_idle_inhibit_manager);
-  }
+  wl_global_create(wl_display_.get(), &zwp_idle_inhibit_manager_v1_interface, 1,
+                   display_, bind_zwp_idle_inhibit_manager);
 
   weston_test_holder_ = std::make_unique<WestonTest>(this);
 
@@ -387,6 +381,10 @@ void Server::Initialize() {
   wl_global_create(wl_display_.get(), &zcr_keyboard_extension_v1_interface, 2,
                    zcr_keyboard_extension_data_.get(), bind_keyboard_extension);
 
+  wl_global_create(wl_display_.get(),
+                   &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1,
+                   display_, bind_keyboard_shortcuts_inhibit_manager);
+
   zwp_text_manager_data_ = std::make_unique<WaylandTextInputManager>(
       display_->seat()->xkb_tracker(), serial_tracker_.get());
   wl_global_create(wl_display_.get(), &zwp_text_input_manager_v1_interface, 1,
@@ -394,7 +392,7 @@ void Server::Initialize() {
 
   zcr_text_input_extension_data_ =
       std::make_unique<WaylandTextInputExtension>();
-  wl_global_create(wl_display_.get(), &zcr_text_input_extension_v1_interface, 1,
+  wl_global_create(wl_display_.get(), &zcr_text_input_extension_v1_interface, 6,
                    zcr_text_input_extension_data_.get(),
                    bind_text_input_extension);
 
@@ -410,12 +408,6 @@ void Server::Initialize() {
 
   wl_global_create(wl_display_.get(), &zcr_touchpad_haptics_v1_interface, 1,
                    display_, bind_touchpad_haptics);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
-
-#if defined(USE_FULLSCREEN_SHELL)
-  wl_global_create(wl_display_.get(), &zwp_fullscreen_shell_v1_interface, 1,
-                   display_, bind_fullscreen_shell);
-#endif
 }
 
 void Server::Finalize(StartCallback callback, bool success) {
@@ -427,7 +419,7 @@ void Server::Finalize(StartCallback callback, bool success) {
 }
 
 Server::~Server() {
-  RemoveCapabilities(wl_display_.get());
+  RemoveSecurityDelegate(wl_display_.get());
   // TODO(https://crbug.com/1124106): Investigate if we can eliminate Shutdown
   // methods.
   serial_tracker_->Shutdown();
@@ -435,14 +427,15 @@ Server::~Server() {
 
 // static
 std::unique_ptr<Server> Server::Create(Display* display) {
-  return Create(display, Capabilities::GetDefaultCapabilities());
+  return Create(display, SecurityDelegate::GetDefaultSecurityDelegate());
 }
 
 // static
 std::unique_ptr<Server> Server::Create(
     Display* display,
-    std::unique_ptr<Capabilities> capabilities) {
-  std::unique_ptr<Server> server(new Server(display, std::move(capabilities)));
+    std::unique_ptr<SecurityDelegate> security_delegate) {
+  std::unique_ptr<Server> server(
+      new Server(display, std::move(security_delegate)));
   server->Initialize();
   return server;
 }
@@ -483,7 +476,7 @@ void Server::StartWithDefaultPath(StartCallback callback) {
   Finalize(std::move(callback), /*success=*/true);
 }
 
-bool Server::AddSocket(const std::string name) {
+bool Server::AddSocket(const std::string& name) {
   DCHECK(!name.empty());
   return !wl_display_add_socket(wl_display_.get(), name.c_str());
 }

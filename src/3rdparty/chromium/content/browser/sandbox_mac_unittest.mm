@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "content/browser/sandbox_parameters_mac.h"
 #include "content/common/mac/font_loader.h"
 #include "crypto/openssl_util.h"
+#include "ppapi/buildflags/buildflags.h"
 #include "sandbox/mac/seatbelt.h"
 #include "sandbox/mac/seatbelt_exec.h"
 #include "sandbox/policy/mac/sandbox_mac.h"
@@ -68,7 +69,11 @@ class SandboxMacTest : public base::MultiProcessTest {
     sandbox::SeatbeltExecClient client;
     client.SetProfile(profile);
     SetupSandboxParameters(sandbox_type,
-                           *base::CommandLine::ForCurrentProcess(), &client);
+                           *base::CommandLine::ForCurrentProcess(),
+#if BUILDFLAG(ENABLE_PPAPI)
+                           /*plugins=*/{},
+#endif
+                           &client);
 
     pipe_ = client.GetReadFD();
     ASSERT_GE(pipe_, 0);
@@ -93,7 +98,9 @@ class SandboxMacTest : public base::MultiProcessTest {
         sandbox::mojom::Sandbox::kCdm,
         sandbox::mojom::Sandbox::kGpu,
         sandbox::mojom::Sandbox::kNaClLoader,
+#if BUILDFLAG(ENABLE_PPAPI)
         sandbox::mojom::Sandbox::kPpapi,
+#endif
         sandbox::mojom::Sandbox::kPrintBackend,
         sandbox::mojom::Sandbox::kPrintCompositor,
         sandbox::mojom::Sandbox::kRenderer,
@@ -264,18 +271,10 @@ TEST_F(SandboxMacTest, FontLoadingTest) {
 MULTIPROCESS_TEST_MAIN(BuiltinAvailable) {
   CheckCreateSeatbeltServer();
 
-  if (__builtin_available(macOS 10.11, *)) {
+  if (__builtin_available(macOS 10.13, *)) {
     // Can't negate a __builtin_available condition. But success!
   } else {
-    return 11;
-  }
-
-  if (base::mac::IsAtLeastOS10_13()) {
-    if (__builtin_available(macOS 10.13, *)) {
-      // Can't negate a __builtin_available condition. But success!
-    } else {
-      return 13;
-    }
+    return 13;
   }
 
   return 0;

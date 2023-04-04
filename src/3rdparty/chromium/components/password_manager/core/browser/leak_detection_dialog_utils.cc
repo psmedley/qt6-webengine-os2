@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,6 @@ using metrics_util::LeakDialogType;
 
 constexpr char kPasswordCheckupURL[] =
     "https://passwords.google.com/checkup/start?hideExplanation=true";
-
-constexpr base::FeatureParam<bool> kPasswordChangeUseBasicCloseLabel{
-    &password_manager::features::kPasswordChange, "use_basic_close_label",
-    false};
 
 CredentialLeakType CreateLeakType(IsSaved is_saved,
                                   IsReused is_reused,
@@ -84,12 +80,6 @@ std::u16string GetAcceptButtonLabel(CredentialLeakType leak_type) {
 }
 
 std::u16string GetCancelButtonLabel(CredentialLeakType leak_type) {
-  if (ShouldShowAutomaticChangePasswordButton(leak_type) &&
-      !kPasswordChangeUseBasicCloseLabel.Get()) {
-    return l10n_util::GetStringUTF16(
-        IDS_CREDENTIAL_LEAK_DONT_CHANGE_AUTOMATICALLY);
-  }
-
   return l10n_util::GetStringUTF16(IDS_CLOSE);
 }
 
@@ -101,14 +91,15 @@ std::u16string GetDescription(CredentialLeakType leak_type) {
   const bool uses_password_manager_google_branding = true;
 #elif BUILDFLAG(IS_ANDROID)
   const bool uses_password_manager_updated_naming =
-      password_manager::features::UsesUnifiedPasswordManagerUi();
+      password_manager::features::UsesUnifiedPasswordManagerBranding();
   const bool uses_password_manager_google_branding =
       password_manager_util::UsesPasswordManagerGoogleBranding(
           IsSyncingPasswordsNormally(leak_type));
 #else
-  // TODO(crbug.com/1309480): Update to support Desktop branding.
-  const bool uses_password_manager_updated_naming = false;
-  const bool uses_password_manager_google_branding = false;
+  const bool uses_password_manager_updated_naming = true;
+  const bool uses_password_manager_google_branding =
+      password_manager_util::UsesPasswordManagerGoogleBranding(
+          IsSyncingPasswordsNormally(leak_type));
 #endif
   if (uses_password_manager_updated_naming) {
     if (ShouldShowAutomaticChangePasswordButton(leak_type)) {
@@ -161,10 +152,9 @@ std::u16string GetTitle(CredentialLeakType leak_type) {
           password_manager::features::kIOSEnablePasswordManagerBrandingUpdate);
 #elif BUILDFLAG(IS_ANDROID)
   const bool uses_password_manager_updated_naming =
-      password_manager::features::UsesUnifiedPasswordManagerUi();
+      password_manager::features::UsesUnifiedPasswordManagerBranding();
 #else
-  // TODO(crbug.com/1309480): Update to support Desktop branding.
-  const bool uses_password_manager_updated_naming = false;
+  const bool uses_password_manager_updated_naming = true;
 #endif
   if (uses_password_manager_updated_naming) {
     return l10n_util::GetStringUTF16(ShouldCheckPasswords(leak_type)
@@ -239,6 +229,45 @@ GURL GetPasswordCheckupURL(PasswordCheckupReferrer referrer) {
           : "password_settings";
 
   return net::AppendQueryParameter(url, "utm_campaign", campaign);
+}
+
+LeakDialogTraits::LeakDialogTraits(CredentialLeakType leak_type)
+    :
+#if BUILDFLAG(IS_IOS)
+      uses_password_manager_updated_naming_(base::FeatureList::IsEnabled(
+          password_manager::features::kIOSEnablePasswordManagerBrandingUpdate)),
+      uses_password_manager_google_branding_(true)
+#elif BUILDFLAG(IS_ANDROID)
+      uses_password_manager_updated_naming_(
+          password_manager::features::UsesUnifiedPasswordManagerBranding()),
+      uses_password_manager_google_branding_(
+          password_manager_util::UsesPasswordManagerGoogleBranding(
+              IsSyncingPasswordsNormally(leak_type)))
+#else
+      uses_password_manager_updated_naming_(true),
+      uses_password_manager_google_branding_(
+          password_manager_util::UsesPasswordManagerGoogleBranding(
+              IsSyncingPasswordsNormally(leak_type)))
+#endif
+{
+}
+
+std::unique_ptr<LeakDialogTraits> CreateDialogTraits(
+    CredentialLeakType leak_type) {
+  switch (password_manager::GetLeakDialogType(leak_type)) {
+    case LeakDialogType::kChange:
+      return std::make_unique<LeakDialogTraitsImp<LeakDialogType::kChange>>(
+          leak_type);
+    case LeakDialogType::kCheckup:
+      return std::make_unique<LeakDialogTraitsImp<LeakDialogType::kCheckup>>(
+          leak_type);
+    case LeakDialogType::kCheckupAndChange:
+      return std::make_unique<
+          LeakDialogTraitsImp<LeakDialogType::kCheckupAndChange>>(leak_type);
+    case LeakDialogType::kChangeAutomatically:
+      return std::make_unique<
+          LeakDialogTraitsImp<LeakDialogType::kChangeAutomatically>>(leak_type);
+  }
 }
 
 }  // namespace password_manager

@@ -1,13 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/gpu/v4l2/v4l2_device.h"
 
+#include <errno.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <linux/media.h>
+#include <poll.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <set>
@@ -20,6 +22,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/numerics/checked_math.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/string_number_conversions.h"
@@ -27,6 +30,7 @@
 #include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/color_plane_layout.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_types.h"
 #include "media/gpu/chromeos/fourcc.h"
 #include "media/gpu/chromeos/platform_video_frame_utils.h"
@@ -126,6 +130,20 @@ void V4L2ProcessingTrace(const struct v4l2_buffer* v4l2_buffer, bool start) {
                                     TRACE_ID_LOCAL(timestamp), "timestamp",
                                     timestamp);
   }
+}
+
+bool LibV4L2Exists() {
+#if BUILDFLAG(USE_LIBV4L2)
+  return true;
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  if (access(V4L2Device::kLibV4l2Path, F_OK) == 0)
+    return true;
+  PLOG_IF(FATAL, errno != ENOENT)
+      << "access() failed for a reason other than ENOENT";
+  return false;
+#else
+  return false;
+#endif
 }
 
 }  // namespace
@@ -591,8 +609,10 @@ bool V4L2WritableBufferRef::DoQueue(V4L2RequestRef* request_ref,
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(buffer_data_);
 
-  if (request_ref && buffer_data_->queue_->SupportsRequests())
-    request_ref->ApplyQueueBuffer(&(buffer_data_->v4l2_buffer_));
+  if (request_ref && buffer_data_->queue_->SupportsRequests() &&
+      !request_ref->ApplyQueueBuffer(&(buffer_data_->v4l2_buffer_))) {
+    return false;
+  }
 
   bool queued = buffer_data_->QueueBuffer(std::move(video_frame));
 
@@ -849,12 +869,15 @@ size_t V4L2WritableBufferRef::BufferId() const {
   return buffer_data_->v4l2_buffer_.index;
 }
 
+// ConfigStore is ChromeOS-specific legacy stuff
+#if BUILDFLAG(IS_CHROMEOS)
 void V4L2WritableBufferRef::SetConfigStore(uint32_t config_store) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(buffer_data_);
 
   buffer_data_->v4l2_buffer_.config_store = config_store;
 }
+#endif
 
 V4L2ReadableBuffer::V4L2ReadableBuffer(const struct v4l2_buffer& v4l2_buffer,
                                        base::WeakPtr<V4L2Queue> queue,
@@ -1007,7 +1030,8 @@ V4L2Queue::~V4L2Queue() {
 
   if (is_streaming_) {
     VQLOGF(1) << "Queue is still streaming, trying to stop it...";
-    Streamoff();
+    if (!Streamoff())
+      VQLOGF(1) << "Failed to stop queue";
   }
 
   DCHECK(queued_buffers_.empty());
@@ -1015,7 +1039,8 @@ V4L2Queue::~V4L2Queue() {
 
   if (!buffers_.empty()) {
     VQLOGF(1) << "Buffers are still allocated, trying to deallocate them...";
-    DeallocateBuffers();
+    if (!DeallocateBuffers())
+      VQLOGF(1) << "Failed to deallocate queue buffers";
   }
 
   std::move(destroy_cb_).Run();
@@ -1102,10 +1127,14 @@ absl::optional<gfx::Rect> V4L2Queue::GetVisibleRect() {
   return absl::nullopt;
 }
 
-size_t V4L2Queue::AllocateBuffers(size_t count, enum v4l2_memory memory) {
+size_t V4L2Queue::AllocateBuffers(size_t count,
+                                  enum v4l2_memory memory,
+                                  bool incoherent) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!free_buffers_);
   DCHECK(queued_buffers_.empty());
+
+  incoherent_ = incoherent;
 
   if (IsStreaming()) {
     VQLOGF(1) << "Cannot allocate buffers while streaming.";
@@ -1137,7 +1166,9 @@ size_t V4L2Queue::AllocateBuffers(size_t count, enum v4l2_memory memory) {
   reqbufs.count = count;
   reqbufs.type = type_;
   reqbufs.memory = memory;
+  reqbufs.flags = incoherent ? V4L2_MEMORY_FLAG_NON_COHERENT : 0;
   DVQLOGF(3) << "Requesting " << count << " buffers.";
+  DVQLOGF(3) << "Incoherent flag is " << incoherent << ".";
 
   int ret = device_->Ioctl(VIDIOC_REQBUFS, &reqbufs);
   if (ret) {
@@ -1155,7 +1186,8 @@ size_t V4L2Queue::AllocateBuffers(size_t count, enum v4l2_memory memory) {
     auto buffer = V4L2Buffer::Create(device_, type_, memory_, *format, i);
 
     if (!buffer) {
-      DeallocateBuffers();
+      if (!DeallocateBuffers())
+        VQLOGF(1) << "Failed to deallocate queue buffers";
 
       return 0;
     }
@@ -1195,6 +1227,7 @@ bool V4L2Queue::DeallocateBuffers() {
   reqbufs.count = 0;
   reqbufs.type = type_;
   reqbufs.memory = memory_;
+  reqbufs.flags = incoherent_ ? V4L2_MEMORY_FLAG_NON_COHERENT : 0;
 
   int ret = device_->Ioctl(VIDIOC_REQBUFS, &reqbufs);
   if (ret) {
@@ -1951,6 +1984,12 @@ size_t V4L2Device::GetNumPlanesOfV4L2PixFmt(uint32_t pix_fmt) {
   return 1u;
 }
 
+// static
+bool V4L2Device::UseLibV4L2() {
+  static const bool use_libv4l2 = LibV4L2Exists();
+  return use_libv4l2;
+}
+
 void V4L2Device::GetSupportedResolution(uint32_t pixelformat,
                                         gfx::Size* min_resolution,
                                         gfx::Size* max_resolution) {
@@ -1997,6 +2036,45 @@ void V4L2Device::GetSupportedResolution(uint32_t pixelformat,
              << "fourcc " << FourccToString(pixelformat) << ", fall back to "
              << min_resolution->ToString();
   }
+}
+
+VideoEncodeAccelerator::SupportedRateControlMode
+V4L2Device::GetSupportedRateControlMode() {
+  auto rate_control_mode = VideoEncodeAccelerator::kNoMode;
+  v4l2_queryctrl query_ctrl;
+  memset(&query_ctrl, 0, sizeof(query_ctrl));
+  query_ctrl.id = V4L2_CID_MPEG_VIDEO_BITRATE_MODE;
+  if (Ioctl(VIDIOC_QUERYCTRL, &query_ctrl)) {
+    DPLOG(WARNING) << "QUERYCTRL for bitrate mode failed";
+    return rate_control_mode;
+  }
+
+  v4l2_querymenu query_menu;
+  memset(&query_menu, 0, sizeof(query_menu));
+  query_menu.id = query_ctrl.id;
+  for (query_menu.index = query_ctrl.minimum;
+       base::checked_cast<int>(query_menu.index) <= query_ctrl.maximum;
+       query_menu.index++) {
+    if (Ioctl(VIDIOC_QUERYMENU, &query_menu) == 0) {
+      switch (query_menu.index) {
+        case V4L2_MPEG_VIDEO_BITRATE_MODE_CBR:
+          rate_control_mode |= VideoEncodeAccelerator::kConstantMode;
+          break;
+        case V4L2_MPEG_VIDEO_BITRATE_MODE_VBR:
+          if (!base::FeatureList::IsEnabled(kChromeOSHWVBREncoding)) {
+            DVLOGF(3) << "Skip VBR capability";
+            break;
+          }
+          rate_control_mode |= VideoEncodeAccelerator::kVariableMode;
+          break;
+        default:
+          DVLOGF(4) << "Skip bitrate mode: " << query_menu.index;
+          break;
+      }
+    }
+  }
+
+  return rate_control_mode;
 }
 
 std::vector<uint32_t> V4L2Device::EnumerateSupportedPixelformats(
@@ -2060,10 +2138,16 @@ V4L2Device::EnumerateSupportedEncodeProfiles() {
     VideoEncodeAccelerator::SupportedProfile profile;
     profile.max_framerate_numerator = 30;
     profile.max_framerate_denominator = 1;
+
+    profile.rate_control_modes = GetSupportedRateControlMode();
+    if (profile.rate_control_modes == VideoEncodeAccelerator::kNoMode) {
+      DLOG(ERROR) << "Skipped because no bitrate mode is supported for "
+                  << FourccToString(pixelformat);
+      continue;
+    }
     gfx::Size min_resolution;
     GetSupportedResolution(pixelformat, &min_resolution,
                            &profile.max_resolution);
-
     const auto video_codec_profiles =
         V4L2PixFmtToVideoCodecProfiles(pixelformat);
 

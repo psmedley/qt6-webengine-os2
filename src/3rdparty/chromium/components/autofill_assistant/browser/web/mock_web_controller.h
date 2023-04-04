@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,11 @@
 #include "components/autofill_assistant/browser/web/element_finder.h"
 #include "components/autofill_assistant/browser/web/element_rect_getter.h"
 #include "components/autofill_assistant/browser/web/web_controller.h"
+#include "components/autofill_assistant/core/public/autofill_assistant_intent.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace autofill_assistant {
+class ElementFinderResult;
 struct RectF;
 
 class MockWebController : public WebController {
@@ -50,12 +52,14 @@ class MockWebController : public WebController {
   MOCK_METHOD2(CheckOnTop,
                void(const ElementFinderResult&,
                     base::OnceCallback<void(const ClientStatus&)>));
-  MOCK_METHOD3(FillAddressForm,
+  MOCK_METHOD4(FillAddressForm,
                void(std::unique_ptr<autofill::AutofillProfile>,
+                    const autofill_assistant::AutofillAssistantIntent intent,
                     const ElementFinderResult&,
                     base::OnceCallback<void(const ClientStatus&)>));
-  MOCK_METHOD4(FillCardForm,
+  MOCK_METHOD5(FillCardForm,
                void(std::unique_ptr<autofill::CreditCard>,
+                    const autofill_assistant::AutofillAssistantIntent intent,
                     const std::u16string&,
                     const ElementFinderResult&,
                     base::OnceCallback<void(const ClientStatus&)>));
@@ -162,7 +166,7 @@ class MockWebController : public WebController {
                     const ElementFinderResult& element,
                     base::OnceCallback<void(const ClientStatus&)> callback));
 
-  base::WeakPtr<WebController> GetWeakPtr() const override {
+  base::WeakPtr<WebController> GetWeakPtr() override {
     return weak_ptr_factory_.GetWeakPtr();
   }
 

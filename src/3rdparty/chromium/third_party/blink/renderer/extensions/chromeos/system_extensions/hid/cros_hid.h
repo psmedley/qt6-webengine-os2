@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
 
@@ -20,12 +21,17 @@ class HIDDeviceRequestOptions;
 class ScriptPromiseResolver;
 
 class CrosHID : public ScriptWrappable,
+                public Supplement<ExecutionContext>,
                 public ExecutionContextClient,
                 public HIDDevice::ServiceInterface {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  explicit CrosHID(ExecutionContext* execution_context);
+  static const char kSupplementName[];
+
+  static CrosHID& From(ExecutionContext&);
+
+  explicit CrosHID(ExecutionContext&);
 
   void Trace(Visitor*) const override;
 

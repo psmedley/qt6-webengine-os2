@@ -1,14 +1,18 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
 
 #include "base/allocator/partition_allocator/partition_alloc.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/no_destructor.h"
+#include "base/allocator/partition_allocator/partition_alloc_buildflags.h"
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
+
+#if BUILDFLAG(STARSCAN)
 #include "base/allocator/partition_allocator/starscan/pcscan.h"
-#include "base/no_destructor.h"
+#endif  // BUILDFLAG(STARSCAN)
 
 // TODO(bikineev): Temporarily disable *Scan in MemoryReclaimer as it seems to
 // cause significant jank.
@@ -18,7 +22,7 @@ namespace partition_alloc {
 
 // static
 MemoryReclaimer* MemoryReclaimer::Instance() {
-  static base::NoDestructor<MemoryReclaimer> instance;
+  static internal::base::NoDestructor<MemoryReclaimer> instance;
   return instance.get();
 }
 
@@ -66,7 +70,7 @@ void MemoryReclaimer::Reclaim(int flags) {
   //
   // Lastly decommit empty slot spans and lastly try to discard unused pages at
   // the end of the remaining active slots.
-#if PA_STARSCAN_ENABLE_STARSCAN_ON_RECLAIM
+#if PA_STARSCAN_ENABLE_STARSCAN_ON_RECLAIM && BUILDFLAG(STARSCAN)
   {
     using PCScan = internal::PCScan;
     const auto invocation_mode = flags & PurgeFlags::kAggressiveReclaim

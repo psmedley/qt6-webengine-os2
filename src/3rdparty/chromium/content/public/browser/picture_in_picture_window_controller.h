@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,10 +50,15 @@ class PictureInPictureWindowController {
   // window was requested to be closed and destroyed by the system.
   virtual void OnWindowDestroyed(bool should_pause_video) = 0;
 
+  // Called to get the opener web contents for video or document PiP.
   virtual WebContents* GetWebContents() = 0;
 
   // Called to get the Picture-in-Picture window bounds.
   virtual absl::optional<gfx::Rect> GetWindowBounds() = 0;
+
+  // Called to get the child web contents to be PiP for document PiP. This will
+  // be null for video PiP.
+  virtual WebContents* GetChildWebContents() = 0;
 
  protected:
   // Use PictureInPictureWindowController::GetOrCreateForWebContents() to

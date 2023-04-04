@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "components/autofill_assistant/android/jni_headers/AssistantChip_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantColor_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantDateTime_jni.h"
+#include "components/autofill_assistant/android/jni_headers/AssistantDeviceConfig_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantDialogButton_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantDimension_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AssistantDrawable_jni.h"
@@ -25,7 +26,7 @@
 #include "components/autofill_assistant/android/jni_headers_public/AssistantAutofillCreditCard_jni.h"
 #include "components/autofill_assistant/android/jni_headers_public/AssistantAutofillProfile_jni.h"
 #include "components/autofill_assistant/browser/android/client_android.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/generic_ui_java_generated_enums.h"
 #include "components/autofill_assistant/browser/service/service.h"
 #include "components/autofill_assistant/browser/service/service_request_sender.h"
@@ -42,6 +43,8 @@ using ::base::android::ConvertJavaStringToUTF8;
 using ::base::android::ConvertUTF16ToJavaString;
 using ::base::android::ConvertUTF8ToJavaString;
 using ::base::android::JavaRef;
+
+constexpr char kNightModePrefix[] = "night-";
 
 DrawableIcon MapDrawableIcon(DrawableProto::Icon icon) {
   switch (icon) {
@@ -77,6 +80,8 @@ DrawableIcon MapDrawableIcon(DrawableProto::Icon icon) {
       return DrawableIcon::VISIBILITY_ON;
     case DrawableProto::VISIBILITY_OFF:
       return DrawableIcon::VISIBILITY_OFF;
+    case DrawableProto::INFO:
+      return DrawableIcon::INFO;
   }
 }
 
@@ -94,6 +99,81 @@ void MaybeSetRawInfo(autofill::AutofillProfile* profile,
                      const JavaRef<jstring>& value) {
   if (value) {
     profile->SetRawInfo(type, ConvertJavaStringToUTF16(value));
+  }
+}
+
+const std::pair<std::string, std::string> RemoveDarkQualifier(
+    std::string resource_qualifier,
+    std::string url) {
+  if (resource_qualifier.rfind(kNightModePrefix, 0) == 0) {
+    resource_qualifier =
+        resource_qualifier.substr(std::string(kNightModePrefix).length());
+  }
+  return {resource_qualifier, url};
+}
+
+std::map<std::string, std::string> FilterConfigBasedOnDayNightSetting(
+    bool is_dark_mode_enabled,
+    const ConfigBasedUrlProto& url_config) {
+  std::map<std::string, std::string> daynight_specific_config;
+  for (auto config_entry : url_config.url()) {
+    std::string resource_qualifier = config_entry.first;
+    std::string url = config_entry.second;
+    bool dark_mode_qualified =
+        resource_qualifier.rfind(kNightModePrefix, 0) == 0;
+    if (is_dark_mode_enabled == dark_mode_qualified) {
+      daynight_specific_config.insert(
+          RemoveDarkQualifier(resource_qualifier, url));
+    }
+  }
+  std::map<std::string, std::string> dpi_url_config;
+  if (daynight_specific_config.empty()) {
+    for (auto config_entry : url_config.url()) {
+      daynight_specific_config.insert(
+          RemoveDarkQualifier(config_entry.first, config_entry.second));
+    }
+  }
+  return daynight_specific_config;
+}
+
+const std::string GetBitmapImageUrlBasedOnDeviceConfig(
+    JNIEnv* env,
+    const JavaRef<jobject>& jcontext,
+    const ConfigBasedUrlProto& url_config) {
+  bool is_dark_mode_enabled =
+      Java_AssistantDeviceConfig_isDarkModeEnabled(env, jcontext);
+  std::map<std::string, std::string> daynight_specific_config =
+      FilterConfigBasedOnDayNightSetting(is_dark_mode_enabled, url_config);
+
+  // Return image for the device pixel density. If not available, fallback to
+  // mdpi. Caller has to specify mdpi image.
+  std::string device_density = ConvertJavaStringToUTF8(
+      Java_AssistantDeviceConfig_getDevicePixelDensity(env, jcontext));
+  auto pos_it = daynight_specific_config.find(device_density);
+  if (pos_it != daynight_specific_config.end()) {
+    return pos_it->second;
+  }
+  if (daynight_specific_config.find("mdpi") == daynight_specific_config.end()) {
+    return "";
+  }
+  return daynight_specific_config.find("mdpi")->second;
+}
+
+const std::string GetBitmapImageUrl(JNIEnv* env,
+                                    const JavaRef<jobject>& jcontext,
+                                    const BitmapDrawableProto& bitmap) {
+  switch (bitmap.image_url_case()) {
+    case BitmapDrawableProto::ImageUrlCase::kUrl: {
+      return bitmap.url();
+    }
+    case BitmapDrawableProto::ImageUrlCase::kConfigBasedUrl: {
+      return GetBitmapImageUrlBasedOnDeviceConfig(env, jcontext,
+                                                  bitmap.config_based_url());
+    }
+    case BitmapDrawableProto::ImageUrlCase::IMAGE_URL_NOT_SET: {
+      VLOG(1) << "Image url not set in bitmap image request.";
+      return "";
+    }
   }
 }
 
@@ -172,7 +252,7 @@ int GetPixelSizeOrDefault(JNIEnv* env,
 base::android::ScopedJavaLocalRef<jobject> CreateJavaDrawable(
     JNIEnv* env,
     const JavaRef<jobject>& jcontext,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const DrawableProto& proto,
     const UserModel* user_model) {
   switch (proto.drawable_case()) {
@@ -189,14 +269,21 @@ base::android::ScopedJavaLocalRef<jobject> CreateJavaDrawable(
           env, base::android::ConvertUTF8ToJavaString(
                    env, proto.resource_identifier()));
     case DrawableProto::kBitmap: {
-      int width_pixels = ui_controller_android_utils::GetPixelSizeOrDefault(
-          env, jcontext, proto.bitmap().width(), 0);
-      int height_pixels = ui_controller_android_utils::GetPixelSizeOrDefault(
-          env, jcontext, proto.bitmap().height(), 0);
-      return Java_AssistantDrawable_createFromUrl(
-          env, dependencies.CreateImageFetcher(),
-          base::android::ConvertUTF8ToJavaString(env, proto.bitmap().url()),
-          width_pixels, height_pixels);
+      std::string url = GetBitmapImageUrl(env, jcontext, proto.bitmap());
+      if (proto.bitmap().use_instrinsic_dimensions()) {
+        return Java_AssistantDrawable_createFromUrlWithIntrinsicDimensions(
+            env, dependencies.CreateImageFetcher(),
+            base::android::ConvertUTF8ToJavaString(env, url));
+      } else {
+        int width_pixels = ui_controller_android_utils::GetPixelSizeOrDefault(
+            env, jcontext, proto.bitmap().width(), 0);
+        int height_pixels = ui_controller_android_utils::GetPixelSizeOrDefault(
+            env, jcontext, proto.bitmap().height(), 0);
+        return Java_AssistantDrawable_createFromUrl(
+            env, dependencies.CreateImageFetcher(),
+            base::android::ConvertUTF8ToJavaString(env, url), width_pixels,
+            height_pixels);
+      }
     }
     case DrawableProto::kShape: {
       switch (proto.shape().shape_case()) {
@@ -356,11 +443,11 @@ ValueProto ToNativeValue(JNIEnv* env,
   if (jdatetimes) {
     auto* mutable_dates = proto.mutable_dates();
     for (int i = 0; i < Java_AssistantValue_getListSize(env, jdatetimes); ++i) {
-      auto jvalue = Java_AssistantValue_getListAt(env, jdatetimes, i);
+      auto jdatetimes_value = Java_AssistantValue_getListAt(env, jdatetimes, i);
       DateProto date;
-      date.set_year(Java_AssistantDateTime_getYear(env, jvalue));
-      date.set_month(Java_AssistantDateTime_getMonth(env, jvalue));
-      date.set_day(Java_AssistantDateTime_getDay(env, jvalue));
+      date.set_year(Java_AssistantDateTime_getYear(env, jdatetimes_value));
+      date.set_month(Java_AssistantDateTime_getMonth(env, jdatetimes_value));
+      date.set_day(Java_AssistantDateTime_getDay(env, jdatetimes_value));
       *mutable_dates->add_values() = date;
     }
     return proto;
@@ -395,7 +482,8 @@ base::android::ScopedJavaLocalRef<jobject> CreateJavaInfoPopup(
     JNIEnv* env,
     const InfoPopupProto& info_popup_proto,
     const JavaRef<jobject>& jinfo_page_util,
-    const std::string& close_display_str) {
+    const std::string& close_display_str,
+    const JavaRef<jobject>& jdelegate) {
   base::android::ScopedJavaLocalRef<jobject> jpositive_button = nullptr;
   base::android::ScopedJavaLocalRef<jobject> jnegative_button = nullptr;
   base::android::ScopedJavaLocalRef<jobject> jneutral_button = nullptr;
@@ -427,7 +515,7 @@ base::android::ScopedJavaLocalRef<jobject> CreateJavaInfoPopup(
       env,
       base::android::ConvertUTF8ToJavaString(env, info_popup_proto.title()),
       base::android::ConvertUTF8ToJavaString(env, info_popup_proto.text()),
-      jpositive_button, jnegative_button, jneutral_button);
+      jpositive_button, jnegative_button, jneutral_button, jdelegate);
 }
 
 void ShowJavaInfoPopup(JNIEnv* env,
@@ -472,8 +560,8 @@ int ToJavaBottomSheetState(BottomSheetState state) {
     case BottomSheetState::COLLAPSED:
       return 1;
     case BottomSheetState::UNDEFINED:
-      // The current assumption is that Autobot always starts with the bottom
-      // sheet expanded.
+      // The current assumption is that AutofillAssistant always starts with the
+      // bottom sheet expanded.
     case BottomSheetState::EXPANDED:
       return 2;
     default:
@@ -567,10 +655,14 @@ std::unique_ptr<TriggerContext> CreateTriggerContext(
       env, jdevice_only_parameter_names, jdevice_only_parameter_values));
   return std::make_unique<TriggerContext>(
       std::move(script_parameters),
-      SafeConvertJavaStringToNative(env, jexperiment_ids), is_custom_tab,
-      onboarding_shown, is_direct_action,
-      SafeConvertJavaStringToNative(env, jinitial_url),
-      /* is_in_chrome_triggered = */ false);
+      TriggerContext::Options(
+          SafeConvertJavaStringToNative(env, jexperiment_ids), is_custom_tab,
+          onboarding_shown, is_direct_action,
+          SafeConvertJavaStringToNative(env, jinitial_url),
+          /* is_in_chrome_triggered = */ false,
+          /* is_externally_triggered = */ false,
+          /* skip_autofill_assistant_onboarding = */ false,
+          /* suppress_browsing_features = */ true));
 }
 
 std::unique_ptr<Service> GetServiceToInject(JNIEnv* env,
@@ -724,7 +816,8 @@ base::android::ScopedJavaLocalRef<jobject> CreateAssistantAutofillCreditCard(
       credit_card.instrument_id(),
       ConvertUTF16ToJavaString(env, credit_card.nickname()),
       url::GURLAndroid::FromNativeGURL(env, credit_card.card_art_url()),
-      static_cast<jint>(credit_card.virtual_card_enrollment_state()));
+      static_cast<jint>(credit_card.virtual_card_enrollment_state()),
+      ConvertUTF16ToJavaString(env, credit_card.product_description()));
 }
 
 void PopulateAutofillCreditCardFromJava(
@@ -792,6 +885,9 @@ void PopulateAutofillCreditCardFromJava(
       static_cast<autofill::CreditCard::VirtualCardEnrollmentState>(
           Java_AssistantAutofillCreditCard_getVirtualCardEnrollmentState(
               env, jcredit_card)));
+  credit_card->set_product_description(ConvertJavaStringToUTF16(
+      Java_AssistantAutofillCreditCard_getProductDescription(env,
+                                                             jcredit_card)));
 }
 
 }  // namespace ui_controller_android_utils

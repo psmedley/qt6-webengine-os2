@@ -21,6 +21,7 @@ class CPDF_Dictionary;
 class CPDF_Encryptor;
 class CPDF_IndirectObjectHolder;
 class CPDF_Name;
+class CPDF_Null;
 class CPDF_Number;
 class CPDF_Reference;
 class CPDF_Stream;
@@ -42,13 +43,14 @@ class CPDF_Object : public Retainable {
     kReference
   };
 
-  virtual Type GetType() const = 0;
   uint32_t GetObjNum() const { return m_ObjNum; }
   void SetObjNum(uint32_t objnum) { m_ObjNum = objnum; }
   uint32_t GetGenNum() const { return m_GenNum; }
   void SetGenNum(uint32_t gennum) { m_GenNum = gennum; }
   bool IsInline() const { return m_ObjNum == 0; }
   uint64_t KeyForCache() const;
+
+  virtual Type GetType() const = 0;
 
   // Create a deep copy of the object.
   virtual RetainPtr<CPDF_Object> Clone() const = 0;
@@ -57,43 +59,24 @@ class CPDF_Object : public Retainable {
   // copied to the object it points to directly.
   virtual RetainPtr<CPDF_Object> CloneDirectObject() const;
 
-  virtual CPDF_Object* GetDirect();
-  virtual const CPDF_Object* GetDirect() const;
+  virtual RetainPtr<CPDF_Object> GetMutableDirect();
   virtual ByteString GetString() const;
   virtual WideString GetUnicodeText() const;
   virtual float GetNumber() const;
   virtual int GetInteger() const;
-  virtual CPDF_Dictionary* GetDict();
-  virtual const CPDF_Dictionary* GetDict() const;
+  virtual RetainPtr<const CPDF_Dictionary> GetDict() const;
 
   virtual void SetString(const ByteString& str);
 
-  virtual bool IsArray() const;
-  virtual bool IsBoolean() const;
-  virtual bool IsDictionary() const;
-  virtual bool IsName() const;
-  virtual bool IsNumber() const;
-  virtual bool IsReference() const;
-  virtual bool IsStream() const;
-  virtual bool IsString() const;
-  virtual bool IsNull() const;
-
-  virtual CPDF_Array* AsArray();
-  virtual const CPDF_Array* AsArray() const;
-  virtual CPDF_Boolean* AsBoolean();
-  virtual const CPDF_Boolean* AsBoolean() const;
-  virtual CPDF_Dictionary* AsDictionary();
-  virtual const CPDF_Dictionary* AsDictionary() const;
-  virtual CPDF_Name* AsName();
-  virtual const CPDF_Name* AsName() const;
-  virtual CPDF_Number* AsNumber();
-  virtual const CPDF_Number* AsNumber() const;
-  virtual CPDF_Reference* AsReference();
-  virtual const CPDF_Reference* AsReference() const;
-  virtual CPDF_Stream* AsStream();
-  virtual const CPDF_Stream* AsStream() const;
-  virtual CPDF_String* AsString();
-  virtual const CPDF_String* AsString() const;
+  virtual CPDF_Array* AsMutableArray();
+  virtual CPDF_Boolean* AsMutableBoolean();
+  virtual CPDF_Dictionary* AsMutableDictionary();
+  virtual CPDF_Name* AsMutableName();
+  virtual CPDF_Null* AsMutableNull();
+  virtual CPDF_Number* AsMutableNumber();
+  virtual CPDF_Reference* AsMutableReference();
+  virtual CPDF_Stream* AsMutableStream();
+  virtual CPDF_String* AsMutableString();
 
   virtual bool WriteTo(IFX_ArchiveStream* archive,
                        const CPDF_Encryptor* encryptor) const = 0;
@@ -110,8 +93,33 @@ class CPDF_Object : public Retainable {
 
   // Return a reference to itself.
   // The object must be direct (!IsInlined).
-  virtual RetainPtr<CPDF_Object> MakeReference(
+  virtual RetainPtr<CPDF_Reference> MakeReference(
       CPDF_IndirectObjectHolder* holder) const;
+
+  RetainPtr<const CPDF_Object> GetDirect() const;  // Wraps virtual method.
+  RetainPtr<CPDF_Dictionary> GetMutableDict();     // Wraps virtual method.
+
+  // Const methods wrapping non-const virtual As*() methods.
+  const CPDF_Array* AsArray() const;
+  const CPDF_Boolean* AsBoolean() const;
+  const CPDF_Dictionary* AsDictionary() const;
+  const CPDF_Name* AsName() const;
+  const CPDF_Null* AsNull() const;
+  const CPDF_Number* AsNumber() const;
+  const CPDF_Reference* AsReference() const;
+  const CPDF_Stream* AsStream() const;
+  const CPDF_String* AsString() const;
+
+  // Type-testing methods merely wrap As*() methods.
+  bool IsArray() const { return !!AsArray(); }
+  bool IsBoolean() const { return !!AsBoolean(); }
+  bool IsDictionary() const { return !!AsDictionary(); }
+  bool IsName() const { return !!AsName(); }
+  bool IsNull() const { return !!AsNull(); }
+  bool IsNumber() const { return !!AsNumber(); }
+  bool IsReference() const { return !!AsReference(); }
+  bool IsStream() const { return !!AsStream(); }
+  bool IsString() const { return !!AsString(); }
 
  protected:
   CPDF_Object() = default;

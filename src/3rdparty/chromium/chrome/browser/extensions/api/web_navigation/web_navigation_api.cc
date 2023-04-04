@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -437,17 +437,15 @@ void WebNavigationTabObserver::RenderFrameHostPendingDeletion(
   // The |pending_delete_rfh| and its children are now pending deletion.
   // Stop tracking them.
 
-  pending_delete_rfh->ForEachRenderFrameHost(base::BindRepeating(
-      [](WebNavigationTabObserver* observer,
-         content::RenderFrameHost* render_frame_host) {
+  pending_delete_rfh->ForEachRenderFrameHost(
+      [this](content::RenderFrameHost* render_frame_host) {
         auto* navigation_state =
             FrameNavigationState::GetForCurrentDocument(render_frame_host);
         if (navigation_state) {
-          observer->RenderFrameDeleted(render_frame_host);
+          RenderFrameDeleted(render_frame_host);
           FrameNavigationState::DeleteForCurrentDocument(render_frame_host);
         }
-      },
-      this));
+      });
 }
 
 ExtensionFunction::ResponseAction WebNavigationGetFrameFunction::Run() {
@@ -538,13 +536,13 @@ ExtensionFunction::ResponseAction WebNavigationGetFrameFunction::Run() {
   // Only set the parentDocumentId value if we have a parent.
   if (content::RenderFrameHost* parent_frame_host =
           render_frame_host->GetParentOrOuterDocument()) {
-    frame_details.parent_document_id = std::make_unique<std::string>(
-        ExtensionApiFrameIdMap::GetDocumentId(parent_frame_host).ToString());
+    frame_details.parent_document_id =
+        ExtensionApiFrameIdMap::GetDocumentId(parent_frame_host).ToString();
   }
   frame_details.frame_type =
-      ToString(ExtensionApiFrameIdMap::GetFrameType(render_frame_host));
+      ExtensionApiFrameIdMap::GetFrameType(render_frame_host);
   frame_details.document_lifecycle =
-      ToString(ExtensionApiFrameIdMap::GetDocumentLifecycle(render_frame_host));
+      ExtensionApiFrameIdMap::GetDocumentLifecycle(render_frame_host);
 
   return RespondNow(ArgumentList(GetFrame::Results::Create(frame_details)));
 }
@@ -565,51 +563,60 @@ ExtensionFunction::ResponseAction WebNavigationGetAllFramesFunction::Run() {
 
   std::vector<GetAllFrames::Results::DetailsType> result_list;
 
-  // We only iterate the frames in the active page. We currently do not
-  // expose back/forward cached frames or prerender frames in the GetAllFrames
-  // API.
-  web_contents->GetMainFrame()->ForEachRenderFrameHost(base::BindRepeating(
-      [](content::WebContents* web_contents,
-         std::vector<GetAllFrames::Results::DetailsType>& result_list,
-         content::RenderFrameHost* render_frame_host) {
-        // Don't expose inner WebContents for the getFrames API.
-        if (content::WebContents::FromRenderFrameHost(render_frame_host) !=
-            web_contents) {
-          return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
-        }
+  // We currently do not expose back/forward cached frames in the GetAllFrames
+  // API, but we do explicitly include prerendered frames.
+  web_contents
+      ->ForEachRenderFrameHostWithAction(
+          [web_contents,
+           &result_list](content::RenderFrameHost* render_frame_host) {
+            // Don't expose inner WebContents for the getFrames API.
+            if (content::WebContents::FromRenderFrameHost(render_frame_host) !=
+                web_contents) {
+              return content::RenderFrameHost::FrameIterationAction::
+                  kSkipChildren;
+            }
 
-        auto* navigation_state =
-            FrameNavigationState::GetForCurrentDocument(render_frame_host);
+            auto* navigation_state =
+                FrameNavigationState::GetForCurrentDocument(render_frame_host);
 
-        if (!navigation_state ||
-            !FrameNavigationState::IsValidUrl(navigation_state->GetUrl())) {
-          return content::RenderFrameHost::FrameIterationAction::kContinue;
-        }
+            if (!navigation_state ||
+                !FrameNavigationState::IsValidUrl(navigation_state->GetUrl())) {
+              return content::RenderFrameHost::FrameIterationAction::kContinue;
+            }
 
-        GetAllFrames::Results::DetailsType frame;
-        frame.url = navigation_state->GetUrl().spec();
-        frame.frame_id = ExtensionApiFrameIdMap::GetFrameId(render_frame_host);
-        frame.parent_frame_id =
-            ExtensionApiFrameIdMap::GetParentFrameId(render_frame_host);
-        frame.document_id =
-            ExtensionApiFrameIdMap::GetDocumentId(render_frame_host).ToString();
-        // Only set the parentDocumentId value if we have a parent.
-        if (content::RenderFrameHost* parent_frame_host =
-                render_frame_host->GetParentOrOuterDocument()) {
-          frame.parent_document_id = std::make_unique<std::string>(
-              ExtensionApiFrameIdMap::GetDocumentId(parent_frame_host)
-                  .ToString());
-        }
-        frame.frame_type =
-            ToString(ExtensionApiFrameIdMap::GetFrameType(render_frame_host));
-        frame.document_lifecycle = ToString(
-            ExtensionApiFrameIdMap::GetDocumentLifecycle(render_frame_host));
-        frame.process_id = render_frame_host->GetProcess()->GetID();
-        frame.error_occurred = navigation_state->GetErrorOccurredInFrame();
-        result_list.push_back(std::move(frame));
-        return content::RenderFrameHost::FrameIterationAction::kContinue;
-      },
-      web_contents, std::ref(result_list)));
+            // Skip back/forward cached frames.
+            if (render_frame_host->IsInLifecycleState(
+                    content::RenderFrameHost::LifecycleState::
+                        kInBackForwardCache)) {
+              return content::RenderFrameHost::FrameIterationAction::
+                  kSkipChildren;
+            }
+
+            GetAllFrames::Results::DetailsType frame;
+            frame.url = navigation_state->GetUrl().spec();
+            frame.frame_id =
+                ExtensionApiFrameIdMap::GetFrameId(render_frame_host);
+            frame.parent_frame_id =
+                ExtensionApiFrameIdMap::GetParentFrameId(render_frame_host);
+            frame.document_id =
+                ExtensionApiFrameIdMap::GetDocumentId(render_frame_host)
+                    .ToString();
+            // Only set the parentDocumentId value if we have a parent.
+            if (content::RenderFrameHost* parent_frame_host =
+                    render_frame_host->GetParentOrOuterDocument()) {
+              frame.parent_document_id =
+                  ExtensionApiFrameIdMap::GetDocumentId(parent_frame_host)
+                      .ToString();
+            }
+            frame.frame_type =
+                ExtensionApiFrameIdMap::GetFrameType(render_frame_host);
+            frame.document_lifecycle =
+                ExtensionApiFrameIdMap::GetDocumentLifecycle(render_frame_host);
+            frame.process_id = render_frame_host->GetProcess()->GetID();
+            frame.error_occurred = navigation_state->GetErrorOccurredInFrame();
+            result_list.push_back(std::move(frame));
+            return content::RenderFrameHost::FrameIterationAction::kContinue;
+          });
 
   return RespondNow(ArgumentList(GetAllFrames::Results::Create(result_list)));
 }

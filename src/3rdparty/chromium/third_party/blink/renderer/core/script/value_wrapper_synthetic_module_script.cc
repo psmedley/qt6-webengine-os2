@@ -1,11 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/script/value_wrapper_synthetic_module_script.h"
 
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -192,7 +192,8 @@ ValueWrapperSyntheticModuleScript::ValueWrapperSyntheticModuleScript(
                    record,
                    source_url,
                    base_url,
-                   fetch_options),
+                   fetch_options,
+                   start_position),
       export_value_(v8::Isolate::GetCurrent(), value) {}
 
 // This is the definition of [[EvaluationSteps]] As per the synthetic module
@@ -212,7 +213,8 @@ v8::MaybeLocal<v8::Value> ValueWrapperSyntheticModuleScript::EvaluationSteps(
           static_cast<const ValueWrapperSyntheticModuleScript*>(
               module_record_resolver->GetModuleScriptFromModuleRecord(module));
   v8::MicrotasksScope microtasks_scope(
-      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
+      isolate, context->GetMicrotaskQueue(),
+      v8::MicrotasksScope::kDoNotRunMicrotasks);
   v8::TryCatch try_catch(isolate);
   v8::Maybe<bool> result = module->SetSyntheticModuleExport(
       isolate, V8String(isolate, "default"),

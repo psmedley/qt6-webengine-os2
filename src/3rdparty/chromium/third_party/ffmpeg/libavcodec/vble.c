@@ -114,11 +114,10 @@ static void vble_restore_plane(VBLEContext *ctx, AVFrame *pic,
     }
 }
 
-static int vble_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                             AVPacket *avpkt)
+static int vble_decode_frame(AVCodecContext *avctx, AVFrame *pic,
+                             int *got_frame, AVPacket *avpkt)
 {
     VBLEContext *ctx = avctx->priv_data;
-    AVFrame *pic     = data;
     GetBitContext gb;
     const uint8_t *src = avpkt->data;
     int version;
@@ -204,13 +203,12 @@ static av_cold int vble_decode_init(AVCodecContext *avctx)
 
 const FFCodec ff_vble_decoder = {
     .p.name         = "vble",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("VBLE Lossless Codec"),
+    CODEC_LONG_NAME("VBLE Lossless Codec"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VBLE,
     .priv_data_size = sizeof(VBLEContext),
     .init           = vble_decode_init,
     .close          = vble_decode_close,
-    .decode         = vble_decode_frame,
+    FF_CODEC_DECODE_CB(vble_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

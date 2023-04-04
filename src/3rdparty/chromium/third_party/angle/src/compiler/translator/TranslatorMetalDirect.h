@@ -159,32 +159,33 @@ class TranslatorMetalDirect : public TCompiler
 
   protected:
     bool translate(TIntermBlock *root,
-                   ShCompileOptions compileOptions,
+                   const ShCompileOptions &compileOptions,
                    PerformanceDiagnostics *perfDiagnostics) override;
 
+    // The sample mask can't be in our fragment output struct if we read the framebuffer. Luckily,
+    // pixel local storage bans gl_SampleMask, so we can just not use it when PLS is active.
+    bool usesSampleMask() const { return !hasPixelLocalStorageUniforms(); }
+
     // Need to collect variables so that RemoveInactiveInterfaceVariables works.
-    bool shouldCollectVariables(ShCompileOptions compileOptions) override { return true; }
+    bool shouldCollectVariables(const ShCompileOptions &compileOptions) override { return true; }
 
-    ANGLE_NO_DISCARD bool translateImpl(TInfoSinkBase &sink,
-                                        TIntermBlock *root,
-                                        ShCompileOptions compileOptions,
-                                        PerformanceDiagnostics *perfDiagnostics,
-                                        SpecConst *specConst,
-                                        DriverUniformMetal *driverUniforms);
+    [[nodiscard]] bool translateImpl(TInfoSinkBase &sink,
+                                     TIntermBlock *root,
+                                     const ShCompileOptions &compileOptions,
+                                     PerformanceDiagnostics *perfDiagnostics,
+                                     SpecConst *specConst,
+                                     DriverUniformMetal *driverUniforms);
 
-    ANGLE_NO_DISCARD bool shouldFlattenPragmaStdglInvariantAll() override;
+    [[nodiscard]] bool shouldFlattenPragmaStdglInvariantAll() override;
 
-    ANGLE_NO_DISCARD bool transformDepthBeforeCorrection(TIntermBlock *root,
-                                                         const DriverUniformMetal *driverUniforms);
+    [[nodiscard]] bool transformDepthBeforeCorrection(TIntermBlock *root,
+                                                      const DriverUniformMetal *driverUniforms);
 
-    ANGLE_NO_DISCARD bool appendVertexShaderDepthCorrectionToMain(TIntermBlock *root);
+    [[nodiscard]] bool appendVertexShaderDepthCorrectionToMain(TIntermBlock *root);
 
-    ANGLE_NO_DISCARD bool insertSampleMaskWritingLogic(TIntermBlock &root,
-                                                       DriverUniformMetal &driverUniforms);
-    ANGLE_NO_DISCARD bool insertRasterizationDiscardLogic(TIntermBlock &root);
-
-    ANGLE_NO_DISCARD TIntermSwizzle *getDriverUniformNegFlipYRef(
-        DriverUniform &driverUniforms) const;
+    [[nodiscard]] bool insertSampleMaskWritingLogic(TIntermBlock &root,
+                                                    DriverUniformMetal &driverUniforms);
+    [[nodiscard]] bool insertRasterizationDiscardLogic(TIntermBlock &root);
 
     TranslatorMetalReflection translatorMetalReflection = {};
 };

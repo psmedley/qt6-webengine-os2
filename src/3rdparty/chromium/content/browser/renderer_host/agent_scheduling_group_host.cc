@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "content/browser/renderer_host/agent_scheduling_group_host.h"
@@ -9,6 +9,7 @@
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/feature_list.h"
 #include "base/no_destructor.h"
+#include "base/state_transitions.h"
 #include "base/supports_user_data.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/bad_message.h"
@@ -17,10 +18,9 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/agent_scheduling_group.mojom.h"
 #include "content/common/renderer.mojom.h"
-#include "content/common/state_transitions.h"
+#include "content/common/shared_storage_worklet_service.mojom.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/services/shared_storage_worklet/public/mojom/shared_storage_worklet_service.mojom.h"
 #include "ipc/ipc_channel_mojo.h"
 #include "ipc/ipc_message.h"
 
@@ -55,10 +55,10 @@ struct AgentSchedulingGroupHostUserData : public base::SupportsUserData::Data {
 #endif
 };
 
-static features::MBIMode GetMBIMode() {
-  return base::FeatureList::IsEnabled(features::kMBIMode)
-             ? features::kMBIModeParam.Get()
-             : features::MBIMode::kLegacy;
+static ::features::MBIMode GetMBIMode() {
+  return base::FeatureList::IsEnabled(::features::kMBIMode)
+             ? ::features::kMBIModeParam.Get()
+             : ::features::MBIMode::kLegacy;
 }
 
 }  // namespace
@@ -80,8 +80,8 @@ AgentSchedulingGroupHost* AgentSchedulingGroupHost::GetOrCreate(
 
   DCHECK(data);
 
-  if (GetMBIMode() == features::MBIMode::kLegacy ||
-      GetMBIMode() == features::MBIMode::kEnabledPerRenderProcessHost) {
+  if (GetMBIMode() == ::features::MBIMode::kLegacy ||
+      GetMBIMode() == ::features::MBIMode::kEnabledPerRenderProcessHost) {
     // We don't use |data->site_instance_groups| at all when
     // AgentSchedulingGroupHost is 1:1 with RenderProcessHost.
 #if DCHECK_IS_ON()
@@ -105,7 +105,7 @@ AgentSchedulingGroupHost* AgentSchedulingGroupHost::GetOrCreate(
     return data->owned_host_set.begin()->get();
   }
 
-  DCHECK_EQ(GetMBIMode(), features::MBIMode::kEnabledPerSiteInstance);
+  DCHECK_EQ(GetMBIMode(), ::features::MBIMode::kEnabledPerSiteInstance);
 
   // If we're in an MBI mode that creates multiple AgentSchedulingGroupHosts
   // per RenderProcessHost, then this will be called whenever SiteInstance needs
@@ -224,7 +224,7 @@ void AgentSchedulingGroupHost::AddFilter(BrowserMessageFilter* filter) {
   DCHECK(filter);
   // When MBI mode is disabled, we forward these kinds of requests straight to
   // the underlying `RenderProcessHost`.
-  if (GetMBIMode() == features::MBIMode::kLegacy) {
+  if (GetMBIMode() == ::features::MBIMode::kLegacy) {
     process_.AddFilter(filter);
     return;
   }
@@ -257,10 +257,15 @@ bool AgentSchedulingGroupHost::Init() {
   return process_.Init();
 }
 
+base::SafeRef<AgentSchedulingGroupHost> AgentSchedulingGroupHost::GetSafeRef()
+    const {
+  return weak_ptr_factory_.GetSafeRef();
+}
+
 ChannelProxy* AgentSchedulingGroupHost::GetChannel() {
   DCHECK_EQ(state_, LifecycleState::kBound);
 
-  if (GetMBIMode() == features::MBIMode::kLegacy)
+  if (GetMBIMode() == ::features::MBIMode::kLegacy)
     return process_.GetChannel();
 
   DCHECK(channel_);
@@ -272,7 +277,7 @@ bool AgentSchedulingGroupHost::Send(IPC::Message* message) {
 
   std::unique_ptr<IPC::Message> msg(message);
 
-  if (GetMBIMode() == features::MBIMode::kLegacy)
+  if (GetMBIMode() == ::features::MBIMode::kLegacy)
     return process_.Send(msg.release());
 
   // This DCHECK is too idealistic for now - messages that are handled by
@@ -319,30 +324,6 @@ void AgentSchedulingGroupHost::CreateView(mojom::CreateViewParamsPtr params) {
   mojo_remote_.get()->CreateView(std::move(params));
 }
 
-void AgentSchedulingGroupHost::DestroyView(int32_t routing_id) {
-  DCHECK_EQ(state_, LifecycleState::kBound);
-  if (!mojo_remote_.is_bound())
-    return;
-  mojo_remote_.get()->DestroyView(routing_id);
-}
-
-void AgentSchedulingGroupHost::CreateFrameProxy(
-    const blink::RemoteFrameToken& token,
-    int32_t routing_id,
-    const absl::optional<blink::FrameToken>& opener_frame_token,
-    int32_t view_routing_id,
-    int32_t parent_routing_id,
-    blink::mojom::TreeScopeType tree_scope_type,
-    blink::mojom::FrameReplicationStatePtr replicated_state,
-    const base::UnguessableToken& devtools_frame_token,
-    mojom::RemoteMainFrameInterfacesPtr remote_main_frame_interfaces) {
-  DCHECK_EQ(state_, LifecycleState::kBound);
-  mojo_remote_.get()->CreateFrameProxy(
-      token, routing_id, opener_frame_token, view_routing_id, parent_routing_id,
-      tree_scope_type, std::move(replicated_state), devtools_frame_token,
-      std::move(remote_main_frame_interfaces));
-}
-
 void AgentSchedulingGroupHost::CreateSharedStorageWorkletService(
     mojo::PendingReceiver<
         shared_storage_worklet::mojom::SharedStorageWorkletService> receiver) {
@@ -382,35 +363,11 @@ void AgentSchedulingGroupHost::DidUnloadRenderFrame(
   }
 }
 
-void AgentSchedulingGroupHost::GetRoute(
-    int32_t routing_id,
-    mojo::PendingAssociatedReceiver<blink::mojom::AssociatedInterfaceProvider>
-        receiver) {
-  DCHECK_EQ(state_, LifecycleState::kBound);
-  DCHECK(receiver.is_valid());
-  associated_interface_provider_receivers_.Add(this, std::move(receiver),
-                                               routing_id);
-}
-
-void AgentSchedulingGroupHost::GetAssociatedInterface(
-    const std::string& name,
-    mojo::PendingAssociatedReceiver<blink::mojom::AssociatedInterface>
-        receiver) {
-  DCHECK_EQ(state_, LifecycleState::kBound);
-  int32_t routing_id =
-      associated_interface_provider_receivers_.current_context();
-
-  if (auto* listener = GetListener(routing_id))
-    listener->OnAssociatedInterfaceRequest(name, receiver.PassHandle());
-}
-
 void AgentSchedulingGroupHost::ResetIPC() {
   DCHECK_EQ(state_, LifecycleState::kRenderProcessExited);
   receiver_.reset();
   mojo_remote_.reset();
   remote_route_provider_.reset();
-  route_provider_receiver_.reset();
-  associated_interface_provider_receivers_.Clear();
   broker_receiver_.reset();
   channel_ = nullptr;
 }
@@ -431,7 +388,6 @@ void AgentSchedulingGroupHost::SetUpIPC() {
   DCHECK(!mojo_remote_.is_bound());
   DCHECK(!receiver_.is_bound());
   DCHECK(!remote_route_provider_.is_bound());
-  DCHECK(!route_provider_receiver_.is_bound());
   DCHECK(!broker_receiver_.is_bound());
 
   // After this function returns, all of `this`'s mojo interfaces need to be
@@ -451,7 +407,7 @@ void AgentSchedulingGroupHost::SetUpIPC() {
   // 3. All the ASGH's other associated interfaces can now be initialized via
   //    `mojo_remote_`, and will be transitively associated with the appropriate
   //    IPC channel/pipe.
-  if (GetMBIMode() == features::MBIMode::kLegacy) {
+  if (GetMBIMode() == ::features::MBIMode::kLegacy) {
     process_.GetRendererInterface()->CreateAssociatedAgentSchedulingGroup(
         mojo_remote_.BindNewEndpointAndPassReceiver(),
         broker_receiver_.BindNewPipeAndPassRemote());
@@ -487,15 +443,14 @@ void AgentSchedulingGroupHost::SetUpIPC() {
 
   mojo_remote_.get()->BindAssociatedInterfaces(
       receiver_.BindNewEndpointAndPassRemote(),
-      route_provider_receiver_.BindNewEndpointAndPassRemote(),
       remote_route_provider_.BindNewEndpointAndPassReceiver());
   SetState(LifecycleState::kBound);
 }
 
 void AgentSchedulingGroupHost::SetState(
     AgentSchedulingGroupHost::LifecycleState state) {
-  static const base::NoDestructor<StateTransitions<LifecycleState>> transitions(
-      StateTransitions<LifecycleState>({
+  static const base::NoDestructor<base::StateTransitions<LifecycleState>>
+      transitions(base::StateTransitions<LifecycleState>({
           {LifecycleState::kNewborn, {LifecycleState::kBound}},
           {LifecycleState::kBound,
            {LifecycleState::kRenderProcessExited,

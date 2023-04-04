@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,12 @@ class BrowsingTopicsServiceImpl
 
   std::vector<blink::mojom::EpochTopicPtr> GetBrowsingTopicsForJsApi(
       const url::Origin& context_origin,
-      content::RenderFrameHost* main_frame) override;
+      content::RenderFrameHost* main_frame,
+      bool observe) override;
+
+  void GetBrowsingTopicsStateForWebUi(
+      bool calculate_now,
+      mojom::PageHandler::GetBrowsingTopicsStateCallback callback) override;
 
   std::vector<privacy_sandbox::CanonicalTopic> GetTopicsForSiteForDisplay(
       const url::Origin& top_origin) const override;
@@ -70,6 +75,7 @@ class BrowsingTopicsServiceImpl
       history::HistoryService* history_service,
       content::BrowsingTopicsSiteDataManager* site_data_manager,
       optimization_guide::PageContentAnnotationsService* annotations_service,
+      const base::circular_deque<EpochTopics>& epochs,
       BrowsingTopicsCalculator::CalculateCompletedCallback callback);
 
   // Allow tests to access `browsing_topics_state_`.
@@ -119,6 +125,9 @@ class BrowsingTopicsServiceImpl
   // KeyedService:
   void Shutdown() override;
 
+  mojom::WebUIGetBrowsingTopicsStateResultPtr
+  GetBrowsingTopicsStateForWebUiHelper();
+
   // These pointers are safe to hold and use throughout the lifetime of
   // `this`:
   // - For `privacy_sandbox_settings_`, `history_service_` and
@@ -143,7 +152,18 @@ class BrowsingTopicsServiceImpl
   // usage or data deletion won't happen at the browser start.
   bool browsing_topics_state_loaded_ = false;
 
+  // This is non-null if a calculation is in progress. A calculation can be
+  // triggered periodically, or due to the "Calculate Now" request from the
+  // WebUI.
   std::unique_ptr<BrowsingTopicsCalculator> topics_calculator_;
+
+  // This is populated when a request for the topics state arrives during an
+  // ongoing topics calculation, or for a request that requires "Calculate Now"
+  // in the first place. Callbacks will be invoked to return the latest topics
+  // state as soon as the ongoing calculation finishes, and
+  // `get_state_for_webui_callbacks_` will be cleared afterwards.
+  std::vector<mojom::PageHandler::GetBrowsingTopicsStateCallback>
+      get_state_for_webui_callbacks_;
 
   base::OneShotTimer schedule_calculate_timer_;
 

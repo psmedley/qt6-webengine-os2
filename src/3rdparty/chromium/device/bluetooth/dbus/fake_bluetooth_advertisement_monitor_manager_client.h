@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "dbus/object_path.h"
@@ -66,7 +67,7 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothAdvertisementMonitorManagerClient
   void OnPropertyChanged(const dbus::ObjectPath& object_path,
                          const std::string& property_name);
 
-  FakeBluetoothAdvertisementMonitorApplicationServiceProvider*
+  raw_ptr<FakeBluetoothAdvertisementMonitorApplicationServiceProvider>
       application_provider_ = nullptr;
   std::unique_ptr<Properties> properties_;
 

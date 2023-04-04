@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -297,7 +297,7 @@ TEST_F(EpochTopicsTest, FromEmptyDictionaryValue) {
 }
 
 TEST_F(EpochTopicsTest, EmptyEpochTopics_ToAndFromDictValue) {
-  EpochTopics epoch_topics;
+  EpochTopics epoch_topics(kCalculationTime);
 
   base::Value::Dict dict_value = epoch_topics.ToDictValue();
   EpochTopics read_epoch_topics = EpochTopics::FromDictValue(dict_value);
@@ -305,7 +305,7 @@ TEST_F(EpochTopicsTest, EmptyEpochTopics_ToAndFromDictValue) {
   EXPECT_TRUE(read_epoch_topics.empty());
   EXPECT_EQ(read_epoch_topics.taxonomy_version(), 0);
   EXPECT_EQ(read_epoch_topics.model_version(), 0);
-  EXPECT_EQ(read_epoch_topics.calculation_time(), base::Time());
+  EXPECT_EQ(read_epoch_topics.calculation_time(), kCalculationTime);
 
   bool output_is_true_topic = false;
   bool candidate_topic_filtered = false;

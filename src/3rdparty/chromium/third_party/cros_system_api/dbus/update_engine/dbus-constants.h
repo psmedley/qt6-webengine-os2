@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Copyright 2015 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,8 @@ const char kSetUpdateOverCellularPermission[] =
 const char kSetUpdateOverCellularTarget[] = "SetUpdateOverCellularTarget";
 const char kToggleFeature[] = "ToggleFeature";
 const char kIsFeatureEnabled[] = "IsFeatureEnabled";
+const char kApplyDeferredUpdate[] = "ApplyDeferredUpdate";
+const char kApplyDeferredUpdateAdvanced[] = "ApplyDeferredUpdateAdvanced";
 
 // Signals.
 const char kStatusUpdateAdvanced[] = "StatusUpdateAdvanced";
@@ -53,6 +55,8 @@ const char kUpdateStatusNeedPermissionToUpdate[] =
     "UPDATE_STATUS_NEED_PERMISSION_TO_UPDATE";
 const char kUpdateStatusCleanupPreviousUpdate[] =
     "UPDATE_STATUS_CLEANUP_PREVIOUS_UPDATE";
+const char kUpdateStatusUpdatedButDeferred[] =
+    "UPDATE_STATUS_UPDATED_BUT_DEFERRED";
 
 // Feature names.
 const char kFeatureRepeatedUpdates[] = "feature-repeated-updates";

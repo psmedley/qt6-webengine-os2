@@ -1,5 +1,5 @@
 <!--
-Copyright 2020 The Chromium Authors. All rights reserved.
+Copyright 2020 The Chromium Authors
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -23,7 +23,7 @@ chromium-metrics-reviews@google.com.
 <histograms>
 
 <histogram name="Login.AllowlistCOILFallback" enum="Boolean"
-    expires_after="2022-08-18">
+    expires_after="2023-03-19">
   <owner>emaamari@google.com</owner>
   <owner>cros-lurs@google.com</owner>
   <owner>cros-oac@google.com</owner>
@@ -38,7 +38,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.ArcBugReportBackupTime" units="ms"
-    expires_after="2022-10-04">
+    expires_after="2022-12-25">
   <owner>mhasank@google.com</owner>
   <owner>arc-core@google.com</owner>
   <summary>
@@ -48,7 +48,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.ArcContinueBootImpulseStatus"
-    enum="ArcContinueBootImpulseStatus" expires_after="2022-10-04">
+    enum="ArcContinueBootImpulseStatus" expires_after="2023-02-12">
   <owner>vsomani@google.com</owner>
   <owner>arc-core@google.com</owner>
   <summary>
@@ -71,13 +71,27 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.ArcContinueBootImpulseTime2" units="ms"
-    expires_after="2022-10-04">
+    expires_after="2023-02-12">
+  <obsolete>
+    Removed 2022/09, replaced with ArcContinueBootImpulseTime3.
+  </obsolete>
   <owner>mhasank@google.com</owner>
   <owner>arc-core@google.com</owner>
   <summary>
     Tracks the time to execute arc-boot-continue impulse. This is emitted when
     we successfully upgrade the ARC container from mini to full. This metrics
     increases the number of buckets to 50 and a maximum duration of 60 seconds.
+  </summary>
+</histogram>
+
+<histogram name="Login.ArcContinueBootImpulseTime3" units="ms"
+    expires_after="2023-09-12">
+  <owner>mhasank@google.com</owner>
+  <owner>arc-core@google.com</owner>
+  <summary>
+    Tracks the time to execute arc-boot-continue impulse. This is emitted when
+    we successfully upgrade the ARC container from mini to full. This metrics
+    increases the number of buckets to 50 and a maximum duration of 40 seconds.
   </summary>
 </histogram>
 
@@ -125,10 +139,31 @@ chromium-metrics-reviews@google.com.
   <summary>Chrome OS login failure reason.</summary>
 </histogram>
 
+<histogram name="Login.Flow.{UserVisibility}.{UserCount}"
+    enum="LoginFlowUserLoginType" expires_after="2022-12-15">
+  <owner>sherrilin@google.com</owner>
+  <owner>cros-lurs@google.com</owner>
+  <summary>
+    Report the type of user login and the number of it on a device. It is
+    triggered when a login is successful
+  </summary>
+  <token key="UserVisibility">
+    <variant name="HideUsers" summary="ShowUserOnSignin policy is set false"/>
+    <variant name="ShowUsers" summary="ShowUserOnSignin policy is set true"/>
+  </token>
+  <token key="UserCount">
+    <variant name="0" summary="0 users"/>
+    <variant name="1" summary="1 users"/>
+    <variant name="2" summary="2 users"/>
+    <variant name="Few" summary="3 to 5 users"/>
+    <variant name="Many" summary="More than 5 users"/>
+  </token>
+</histogram>
+
 <histogram name="Login.InvalidCombinationsOfAllowedUsersPolicies"
-    enum="AllowedUsersPoliciesInvalidState" expires_after="2022-10-17">
+    enum="AllowedUsersPoliciesInvalidState" expires_after="2023-04-17">
   <owner>emaamari@google.com</owner>
-  <owner>src/ash/components/policy/OWNERS</owner>
+  <owner>src/chromeos/ash/components/policy/OWNERS</owner>
   <summary>
     Chrome OS histogram that keeps track of cases where devices have an invalid
     combination of allow_new_users and user_allowlist policies. This is emitted
@@ -137,6 +172,9 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.LeastUsedAccountDays" units="days" expires_after="M77">
+  <obsolete>
+    Removed in M103.
+  </obsolete>
   <owner>achuith@chromium.org</owner>
   <owner>omrilio@chromium.org</owner>
   <summary>
@@ -161,7 +199,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.NumberOfUsersOnLoginScreen" units="units"
-    expires_after="2022-10-04">
+    expires_after="2023-02-12">
   <owner>mslus@chromium.org</owner>
   <owner>chromeos-commercial-identity@google.com</owner>
   <summary>
@@ -172,7 +210,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.OfflineLoginWithHiddenUserPods"
-    enum="ChromeOSHiddenUserPodsOfflineLogin" expires_after="2022-10-04">
+    enum="ChromeOSHiddenUserPodsOfflineLogin" expires_after="2023-02-19">
   <owner>mslus@chromium.org</owner>
   <owner>chromeos-commercial-identity@google.com</owner>
   <summary>
@@ -263,13 +301,16 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.ReauthToken.FetchDuration.{Result}" units="ms"
-    expires_after="2022-06-01">
-  <owner>yunkez@chromium.org</owner>
-  <owner>cros-oac@google.com</owner>
+    expires_after="2023-08-18">
+  <owner>yunkez@google.com</owner>
+  <owner>cros-lurs@google.com</owner>
   <summary>
     Records the fetch duration of the reauth request token from the recovery
     service when it {Result}. This is recorded on the GAIA reauth screen when
     Cryptohome recovery is deemed to be needed in high probablity.
+
+    Warning: this histogram was expired from 2022-06-02 to 2022-08-18; data may
+    be missing.
   </summary>
   <token key="Result">
     <variant name="Failure" summary="fails to fetch"/>
@@ -278,7 +319,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.SessionExitType" enum="LoginSessionExitType"
-    expires_after="2022-09-11">
+    expires_after="2023-03-19">
   <owner>iby@chromium.org</owner>
   <summary>
     Tracks whether a ChromeOS user was logged out because Chrome repeatedly
@@ -314,9 +355,9 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Login.TokenCheckResponseTime" units="ms"
-    expires_after="2022-05-01">
-  <owner>rsorokin@chromium.org</owner>
-  <owner>cros-oac@google.com</owner>
+    expires_after="2023-04-05">
+  <owner>antrim@chromium.org</owner>
+  <owner>cros-lurs@google.com</owner>
   <summary>
     Time between sending a request to, and receiving a reply from, GAIA token
     endpoint to validate TokenInfo.
@@ -337,6 +378,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Login.UsersActive28Days" units="users"
     expires_after="2022-04-10">
+  <obsolete>
+    Removed in M103.
+  </obsolete>
   <owner>alemate@chromium.org</owner>
   <owner>achuith@chromium.org</owner>
   <summary>
@@ -347,6 +391,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Login.UsersActiveDaily" units="users"
     expires_after="2022-04-03">
+  <obsolete>
+    Removed in M103.
+  </obsolete>
   <owner>alemate@chromium.org</owner>
   <owner>achuith@chromium.org</owner>
   <summary>
@@ -357,6 +404,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Login.UsersActiveWeekly" units="users"
     expires_after="2022-04-24">
+  <obsolete>
+    Removed in M103.
+  </obsolete>
   <owner>alemate@chromium.org</owner>
   <owner>achuith@chromium.org</owner>
   <summary>
@@ -367,6 +417,9 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Login.UsersActiveWeekly.Percent" units="%"
     expires_after="2020-12-01">
+  <obsolete>
+    Removed in M103.
+  </obsolete>
   <owner>alemate@chromium.org</owner>
   <owner>achuith@chromium.org</owner>
   <summary>

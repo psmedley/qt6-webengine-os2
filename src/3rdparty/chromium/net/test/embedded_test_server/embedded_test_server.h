@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
 #include "net/cert/ocsp_revocation_status.h"
+#include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/socket/stream_socket.h"
@@ -347,7 +348,7 @@ class EmbeddedTestServer {
 
   // Registers the EmbeddedTestServer's certs for the current process. See
   // constructor documentation for more information.
-  static void RegisterTestCerts();
+  [[nodiscard]] static ScopedTestRoot RegisterTestCerts();
 
   // Sets a connection listener, that would be notified when various connection
   // events happen. May only be called before the server is started. Caller
@@ -571,8 +572,9 @@ class EmbeddedTestServer {
   std::unique_ptr<TCPServerSocket> listen_socket_;
   std::unique_ptr<StreamSocket> accepted_socket_;
 
-  raw_ptr<EmbeddedTestServerConnectionListener> connection_listener_;
-  uint16_t port_;
+  raw_ptr<EmbeddedTestServerConnectionListener, DanglingUntriaged>
+      connection_listener_ = nullptr;
+  uint16_t port_ = 0;
   GURL base_url_;
   IPEndPoint local_endpoint_;
 
@@ -585,8 +587,9 @@ class EmbeddedTestServer {
 
   base::ThreadChecker thread_checker_;
 
+  ScopedTestRoot scoped_test_root_;
   net::SSLServerConfig ssl_config_;
-  ServerCertificate cert_;
+  ServerCertificate cert_ = CERT_OK;
   ServerCertificateConfig cert_config_;
   scoped_refptr<X509Certificate> x509_cert_;
   bssl::UniquePtr<EVP_PKEY> private_key_;

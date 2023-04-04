@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,6 @@ class COMPONENT_EXPORT(NETWORK_CPP) CSPContext {
   // without the round trip in the renderer process.
   // See https://crbug.com/721329
   virtual void SanitizeDataForUseInCspViolation(
-      bool has_followed_redirect,
       mojom::CSPDirectiveName directive,
       GURL* blocked_url,
       mojom::SourceLocation* source_location) const;

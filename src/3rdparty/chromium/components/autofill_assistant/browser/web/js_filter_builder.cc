@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,11 +20,11 @@ JsFilterBuilder::JsFilterBuilder() = default;
 JsFilterBuilder::~JsFilterBuilder() = default;
 
 std::unique_ptr<base::Value> JsFilterBuilder::BuildArgumentArray() const {
-  auto str_array_arg = std::make_unique<base::Value>(base::Value::Type::LIST);
+  base::Value::List str_array_arg;
   for (const std::string& str : arguments_) {
-    str_array_arg->Append(str);
+    str_array_arg.Append(str);
   }
-  return str_array_arg;
+  return std::make_unique<base::Value>(std::move(str_array_arg));
 }
 
 std::vector<std::unique_ptr<runtime::CallArgument>>
@@ -157,8 +157,15 @@ bool JsFilterBuilder::AddFilter(const SelectorProto::Filter& filter) {
       return true;
     }
 
+    case SelectorProto::Filter::kParent:
+      AddLine("elements = elements.flatMap((e) => {");
+      AddLine("  return e.parentElement ? [e.parentElement] : [];");
+      AddLine("});");
+      return true;
+
     case SelectorProto::Filter::kEnterFrame:
     case SelectorProto::Filter::kPseudoType:
+    case SelectorProto::Filter::kSemantic:
     case SelectorProto::Filter::FILTER_NOT_SET:
       return false;
   }
@@ -179,8 +186,8 @@ std::string JsFilterBuilder::AddRegexpInstance(const TextFilter& filter) {
 void JsFilterBuilder::AddRegexpFilter(const TextFilter& filter,
                                       const std::string& property) {
   std::string re_var = AddRegexpInstance(filter);
-  AddLine({"elements = elements.filter((e) => ", re_var, ".test(e.", property,
-           "));"});
+  AddLine({"elements = elements.filter((e) => ", re_var, ".test(e[",
+           AddArgument(property), "]));"});
 }
 
 std::string JsFilterBuilder::DeclareVariable() {

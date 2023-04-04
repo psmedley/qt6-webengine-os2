@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "url/gurl.h"
 
 namespace blink {
@@ -131,34 +130,29 @@ class CONTENT_EXPORT NavigationEarlyHintsManager {
 
   network::mojom::NetworkContext* GetNetworkContext();
 
-  bool IsPreloadForNavigationEnabledByOriginTrial(
-      const std::vector<std::string>& raw_tokens);
-
-  void MaybePreconnect(const network::mojom::LinkHeaderPtr& link,
-                       bool enabled_by_origin_trial);
+  void MaybePreconnect(const network::mojom::LinkHeaderPtr& link);
 
   void MaybePreloadHintedResource(
       const network::mojom::LinkHeaderPtr& link,
       const network::ResourceRequest& request_for_navigation,
       const std::vector<network::mojom::ContentSecurityPolicyPtr>&
           content_security_policies,
-      net::ReferrerPolicy referrer_policy,
-      bool enabled_by_origin_trial);
+      net::ReferrerPolicy referrer_policy);
 
   // Determines whether resource hints like preload and preconnect should be
-  // handled or not. Currently we are running two trials: The field trial and
-  // the origin trial. When the field trial forcibly disables preloads, always
-  // returns false. Otherwise, returns true when either of trials is enabled.
-  bool ShouldHandleResourceHints(const network::mojom::LinkHeaderPtr& link,
-                                 bool enabled_by_origin_trial);
+  // handled or not.
+  bool ShouldHandleResourceHints(const network::mojom::LinkHeaderPtr& link);
 
   void OnPreloadComplete(const GURL& url, const PreloadedResource& result);
 
   BrowserContext& browser_context_;
   StoragePartition& storage_partition_;
   const int frame_tree_node_id_;
-  scoped_refptr<network::SharedURLLoaderFactory> shared_loader_factory_;
   mojo::Remote<network::mojom::URLLoaderFactory> loader_factory_;
+  // This needs to be declared last because it holds a pointer on
+  // `loader_factory`, and thus needs to be destroyed before factory gets
+  // destroyed.
+  scoped_refptr<network::SharedURLLoaderFactory> shared_loader_factory_;
   const url::Origin origin_;
   const net::IsolationInfo isolation_info_;
 
@@ -173,8 +167,10 @@ class CONTENT_EXPORT NavigationEarlyHintsManager {
     InflightPreload(InflightPreload&&) = delete;
     InflightPreload& operator=(InflightPreload&&) = delete;
 
-    std::unique_ptr<blink::ThrottlingURLLoader> loader;
+    // `loader` holds a raw_ptr on `client`, so it needs to be declared last to
+    // avoid holding a dangling reference to `client` at destruction.
     std::unique_ptr<PreloadURLLoaderClient> client;
+    std::unique_ptr<blink::ThrottlingURLLoader> loader;
   };
   // Using flat_map because the number of preloads are expected to be small.
   // Early Hints preloads should be requested for critical subresources such as
@@ -191,11 +187,6 @@ class CONTENT_EXPORT NavigationEarlyHintsManager {
   // Set to true when preload or preconnect Link headers are received. Used for
   // metrics recording.
   bool was_resource_hints_received_ = false;
-  // Set to true when preload or preconnect are triggered by using origin trial
-  // tokens. Used for metrics recording.
-  bool was_resource_hints_triggered_by_origin_trial_ = false;
-
-  blink::TrialTokenValidator const trial_token_validator_;
 
   base::OnceCallback<void(PreloadedResources)>
       preloads_completion_callback_for_testing_;

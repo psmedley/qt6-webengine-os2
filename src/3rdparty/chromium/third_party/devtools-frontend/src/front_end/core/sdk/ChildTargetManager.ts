@@ -9,8 +9,8 @@ import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 import type * as Protocol from '../../generated/protocol.js';
 
 import {ParallelConnection} from './Connections.js';
-import type {Target} from './Target.js';
-import {Capability, Type} from './Target.js';
+
+import {Capability, Type, type Target} from './Target.js';
 import {SDKModel} from './SDKModel.js';
 import {Events as TargetManagerEvents, TargetManager} from './TargetManager.js';
 
@@ -40,7 +40,7 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
       void this.#targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
     }
 
-    if (!parentTarget.parentTarget() && !Host.InspectorFrontendHost.isUnderTest()) {
+    if (parentTarget.parentTarget()?.type() !== Type.Frame && !Host.InspectorFrontendHost.isUnderTest()) {
       void this.#targetAgent.invoke_setDiscoverTargets({discover: true});
       void this.#targetAgent.invoke_setRemoteLocations({locations: [{host: 'localhost', port: 9229}]});
     }
@@ -142,9 +142,6 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
     }
     const target = this.#targetManager.createTarget(
         targetInfo.targetId, targetName, type, this.#parentTarget, sessionId, undefined, undefined, targetInfo);
-    if (type === Type.Worker || type === Type.ServiceWorker || type === Type.SharedWorker) {
-      target.setInspectedURL(this.#parentTarget.inspectedURL());
-    }
     this.#childTargetsBySessionId.set(sessionId, target);
     this.#childTargetsById.set(target.id(), target);
 

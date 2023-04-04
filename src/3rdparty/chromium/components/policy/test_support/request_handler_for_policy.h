@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,13 @@ class PolicyFetchResponse;
 
 namespace policy {
 
+inline constexpr char kDefaultUsername[] = "username@example.com";
+
 // Handler for request type `policy`.
 class RequestHandlerForPolicy
     : public EmbeddedPolicyTestServer::RequestHandler {
  public:
-  RequestHandlerForPolicy(ClientStorage* client_storage,
-                          PolicyStorage* policy_storage);
+  explicit RequestHandlerForPolicy(EmbeddedPolicyTestServer* parent);
   RequestHandlerForPolicy(RequestHandlerForPolicy&& handler) = delete;
   RequestHandlerForPolicy& operator=(RequestHandlerForPolicy&& handler) =
       delete;

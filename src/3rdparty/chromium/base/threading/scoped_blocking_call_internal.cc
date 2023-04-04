@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ bool g_only_monitor_observed_threads = false;
 
 bool IsBackgroundPriorityWorker() {
   return GetTaskPriorityForCurrentThread() == TaskPriority::BEST_EFFORT &&
-         CanUseBackgroundPriorityForWorkerThread();
+         CanUseBackgroundThreadTypeForWorkerThread();
 }
 
 }  // namespace
@@ -340,7 +340,8 @@ UncheckedScopedBlockingCall::UncheckedScopedBlockingCall(
     // Also record the data for extended crash reporting.
     const TimeTicks now = TimeTicks::Now();
     auto& user_data = scoped_activity_.user_data();
-    user_data.SetUint("timestamp_us", now.since_origin().InMicroseconds());
+    user_data.SetUint("timestamp_us", static_cast<uint64_t>(
+                                          now.since_origin().InMicroseconds()));
     user_data.SetUint("blocking_type", static_cast<uint64_t>(blocking_type));
   }
 }

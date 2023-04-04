@@ -1,12 +1,17 @@
+load("//bazel:macros.bzl", "exports_files_legacy", "skia_cc_library")
+
 licenses(["notice"])
 
-cc_library(
+exports_files_legacy()
+
+skia_cc_library(
     name = "skunicode",
+    srcs = ["//modules/skunicode/src:srcs"],
     hdrs = ["//modules/skunicode/include:hdrs"],
+    defines = ["SK_UNICODE_AVAILABLE"],
     visibility = ["//:__subpackages__"],
     deps = [
-        "//modules/skunicode/src:SkUnicode_icu_src",
-        "//modules/skunicode/src:SkUnicode_icu_builtin_src",
-        # TODO(kjlubick,bungeman) make runtime available for Android
+        "//:skia_internal",
+        "@icu",
     ],
 )

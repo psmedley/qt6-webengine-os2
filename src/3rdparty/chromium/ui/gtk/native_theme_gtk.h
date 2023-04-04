@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,29 +29,6 @@ class NativeThemeGtk : public ui::NativeThemeBase {
   NativeThemeGtk& operator=(const NativeThemeGtk&) = delete;
 
   // ui::NativeThemeBase:
-  void PaintArrowButton(cc::PaintCanvas* canvas,
-                        const gfx::Rect& rect,
-                        Part direction,
-                        State state,
-                        ColorScheme color_scheme,
-                        const ScrollbarArrowExtraParams& arrow) const override;
-  void PaintScrollbarTrack(cc::PaintCanvas* canvas,
-                           Part part,
-                           State state,
-                           const ScrollbarTrackExtraParams& extra_params,
-                           const gfx::Rect& rect,
-                           ColorScheme color_scheme) const override;
-  void PaintScrollbarThumb(cc::PaintCanvas* canvas,
-                           const ui::ColorProvider* color_provider,
-                           Part part,
-                           State state,
-                           const gfx::Rect& rect,
-                           NativeTheme::ScrollbarOverlayColorTheme theme,
-                           ColorScheme color_scheme) const override;
-  void PaintScrollbarCorner(cc::PaintCanvas* canvas,
-                            State state,
-                            const gfx::Rect& rect,
-                            ColorScheme color_scheme) const override;
   void PaintMenuPopupBackground(
       cc::PaintCanvas* canvas,
       const ui::ColorProvider* color_provider,

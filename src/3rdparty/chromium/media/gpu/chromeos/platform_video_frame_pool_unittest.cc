@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@ namespace {
 
 template <uint64_t modifier>
 CroStatus::Or<scoped_refptr<VideoFrame>> CreateGpuMemoryBufferVideoFrame(
-    gpu::GpuMemoryBufferFactory* factory,
     VideoPixelFormat format,
     const gfx::Size& coded_size,
     const gfx::Rect& visible_rect,
@@ -50,7 +49,7 @@ class PlatformVideoFramePoolTest
  public:
   PlatformVideoFramePoolTest()
       : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
-        pool_(new PlatformVideoFramePool(nullptr)) {
+        pool_(new PlatformVideoFramePool()) {
     SetCreateFrameCB(
         base::BindRepeating(&CreateGpuMemoryBufferVideoFrame<
                             gfx::NativePixmapHandle::kNoModifier>));
@@ -294,10 +293,10 @@ TEST_P(PlatformVideoFramePoolTest, InitializeFail) {
   const auto fourcc = Fourcc::FromVideoPixelFormat(GetParam());
   ASSERT_TRUE(fourcc.has_value());
   SetCreateFrameCB(base::BindRepeating(
-      [](gpu::GpuMemoryBufferFactory* factory, VideoPixelFormat format,
-         const gfx::Size& coded_size, const gfx::Rect& visible_rect,
-         const gfx::Size& natural_size, bool use_protected,
-         bool use_linear_buffers, base::TimeDelta timestamp) {
+      [](VideoPixelFormat format, const gfx::Size& coded_size,
+         const gfx::Rect& visible_rect, const gfx::Size& natural_size,
+         bool use_protected, bool use_linear_buffers,
+         base::TimeDelta timestamp) {
         return CroStatus::Or<scoped_refptr<VideoFrame>>(
             CroStatus::Codes::kFailedToCreateVideoFrame);
       }));

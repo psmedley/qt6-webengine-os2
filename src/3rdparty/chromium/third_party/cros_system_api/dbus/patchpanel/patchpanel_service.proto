@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium OS Authors. All rights reserved.
+// Copyright 2019 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,6 +91,12 @@ message NetworkDevice {
 
   // The guest to which the device is bound, if applicable.
   GuestType guest_type = 4;
+
+  // The IPv4 and IPv6 addresses of the DNS proxy instance tied to the guest
+  // device, if applicable. The addresses are represented in network order as a
+  // byte array of size 4 and 16 respectively for IPv4 and IPv6.
+  bytes dns_proxy_ipv4_addr = 8;
+  bytes dns_proxy_ipv6_addr = 9;
 }
 
 // Request to obtain the list of virtual network devices that patchpanel
@@ -157,6 +163,7 @@ message PluginVmStartupRequest {
 
   // The 1-based index of the desired subnet to allocate for use.
   // Optional.
+  // TODO(b/236092161) Migrate to uint32.
   int32 subnet_index = 2;
 }
 
@@ -368,6 +375,7 @@ message ModifyPortRuleRequest {
   string input_dst_ip = 5;
 
   // A port value in-between 1 and 65535. This is required for all rule types.
+  // TODO(b/236092161) Migrate to uint16.
   uint32 input_dst_port = 6;
 
   // An IPv4 address, or empty if unspecified. This is required for FORWARDING,
@@ -376,6 +384,7 @@ message ModifyPortRuleRequest {
 
   // A port value between 1 and 65535. This is required for FORWARDING, and is
   // ignored for other rule types.
+  // TODO(b/236092161) Migrate to uint16.
   uint32 dst_port = 8;
 }
 
@@ -462,6 +471,9 @@ message SetDnsRedirectionRuleRequest {
     ARC = 2;
     // Rule for traffic associated with user traffic (e.g. chronos, cups).
     USER = 3;
+    // Rules to exclude traffic that is not using the underlying network's
+    // name server. This is only used for user traffic.
+    EXCLUDE_DESTINATION = 4;
   }
 
   RuleType type = 1;
@@ -476,9 +488,15 @@ message SetDnsRedirectionRuleRequest {
 
   // Nameservers are only necessary for Chrome redirect (USER type).
   repeated string nameservers = 4;
+
+  // Name of the "local" veth interface visible in the host namespace.
+  string host_ifname = 5;
 }
 
 // Response to a SetDnsRedirectionRuleRequest.
 message SetDnsRedirectionRuleResponse {
   bool success = 1;
 }
+
+// Signal that is emitted when a network configuration change happens.
+message NetworkConfigurationChangedSignal {}

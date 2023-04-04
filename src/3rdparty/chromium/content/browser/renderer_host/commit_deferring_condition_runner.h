@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "content/browser/prerender/prerender_commit_deferring_condition.h"
+#include "content/browser/preloading/prerender/prerender_commit_deferring_condition.h"
 #include "content/common/content_export.h"
 
 namespace content {

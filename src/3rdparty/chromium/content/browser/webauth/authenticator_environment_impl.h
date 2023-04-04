@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,7 @@ class CONTENT_EXPORT AuthenticatorEnvironmentImpl
   // descendants.
   // Does not have any effect if the |node| already has the virtual environment
   // enabled.
-  void EnableVirtualAuthenticatorFor(FrameTreeNode* node);
+  void EnableVirtualAuthenticatorFor(FrameTreeNode* node, bool enable_ui);
 
   // Disables the scoped virtual authenticator environment for this |node|,
   // resetting the state. If the environment is set on one of the |node|'s

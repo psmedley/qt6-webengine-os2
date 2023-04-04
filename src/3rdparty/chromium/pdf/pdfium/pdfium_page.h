@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,9 @@ class PDFiumPage {
 
   // Get the bounds of the page with the crop box applied, in page pixels.
   gfx::RectF GetCroppedRect();
+
+  // Returns if the character at `char_index` is within `page_bounds`.
+  bool IsCharInPageBounds(int char_index, const gfx::RectF& page_bounds);
 
   // For all the links on the page, get their urls, underlying text ranges and
   // bounding boxes.

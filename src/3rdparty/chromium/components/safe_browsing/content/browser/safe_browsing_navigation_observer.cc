@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -322,7 +322,7 @@ void SafeBrowsingNavigationObserver::SetNavigationSourceUrl(
     // frame.
     nav_event->source_url = SafeBrowsingNavigationObserverManager::ClearURLRef(
         navigation_handle->GetWebContents()
-            ->GetMainFrame()
+            ->GetPrimaryMainFrame()
             ->GetLastCommittedURL());
   } else {
     // If there was a URL previously committed in the current RenderFrameHost,

@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
- Copyright 2018 The Chromium Authors. All rights reserved.
- Use of this source code is governed by a BSD-style license that can be
- found in the LICENSE file.
+Copyright 2018 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
 -->
 
 <head>
+  <meta charset="utf-8">
   <title>Super Size Tiger View</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#4285f4">
@@ -282,6 +283,10 @@
         <label class="radio-label" for="uncompressedflag">Uncompressed .pak files</label>
       </div>
       <div class="radio-wrapper">
+        <input type="radio" id="nonoverheadflag" name="flag_filter" value="nonoverhead">
+        <label class="radio-label" for="nonoverheadflag">Non-overhead</label>
+      </div>
+      <div class="radio-wrapper">
         <input type="radio" id="disassemblyflag" name="flag_filter" value="disassembly">
         <label class="radio-label" for="disassemblyflag">Disassembly</label>
       </div>
@@ -295,8 +300,8 @@
         <path d="M9.17,6l2,2H20v10L4,18V6H9.17 M10,4H4C2.9,4,2.01,4.9,2.01,6L2,18c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2
                  h-8L10,4L10,4z" />
       </svg>
-      <svg class="icon componenticon" height="24" width="24" fill="#5f6368">
-        <title>Component</title>
+      <svg class="icon groupicon" height="24" width="24" fill="#5f6368">
+        <title>(Group)</title>
         <path d="M9,13.75c-2.34,0-7,1.17-7,3.5V19h14v-1.75C16,14.92,11.34,13.75,9,13.75z M4.34,17c0.84-0.58,2.87-1.25,4.66-1.25
                  s3.82,0.67,4.66,1.25H4.34z" />
         <path d="M9,12c1.93,0,3.5-1.57,3.5-3.5C12.5,6.57,10.93,5,9,5S5.5,6.57,5.5,8.5C5.5,10.43,7.07,12,9,12z M9,7
@@ -438,8 +443,12 @@
           <div></div>
         </div>
         <header class="header-info">
-          <h4 class="subhead size-info"></h4>
-          <p class="body-2 path-info"></p>
+          <h4 class="subhead">
+            <span class="size-info"></span>
+            <span class="address-info"></span>
+            <span class="padding-info"></span>
+          </h4>
+          <p class="body-2 details-info"></p>
           <p class="caption type-info-artifact">
             <span class="type-info"></span>
             <span class="flags-info"></span>
@@ -619,8 +628,12 @@
           <div></div>
         </div>
         <header class="header-info">
-          <h4 class="subhead size-info"></h4>
-          <p class="body-2 path-info"></p>
+          <h4 class="subhead">
+            <span class="size-info"></span>
+            <span class="address-info"></span>
+            <span class="padding-info"></span>
+          </h4>
+          <p class="body-2 details-info"></p>
         </header>
         <p class="caption type-info-artifact">
           <span class="type-info"></span>
@@ -631,7 +644,7 @@
   </div>
   <!-- Modal Sign in Dialog -->
   <div id="signin-modal" class="modal" style="display:none">
-    <div class="modal-content" style="width:600px; align-items: center;">
+    <div class="modal-content" style="width:600px">
       <div style="margin-bottom: 40px">You are trying to access a private size file. Please sign in with your @google.com
         account.
       </div>
@@ -642,7 +655,7 @@
   <div id="disassembly-modal" class="modal" style="display:none">
     <div class="modal-content">
       <div id='disassembly-code'>Sample</div>
-      <div style="margin-top: 10px; align-self: center;">
+      <div style="margin-top: 10px">
         <a title="Download unified diff" id="disassembly-download" download="disassembly.txt">Download</a>
         <button style="margin-left: 10px" id="disassembly-close" type="button"
           class="text-button filled-button">Close</button>

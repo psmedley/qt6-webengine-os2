@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "components/services/app_service/public/cpp/features.h"
 #include "components/services/app_service/public/cpp/intent_filter_util.h"
 #include "components/services/app_service/public/cpp/preferred_apps_list.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
@@ -30,11 +31,7 @@ namespace apps {
 AppServiceMojomImpl::AppServiceMojomImpl(
     const base::FilePath& profile_dir,
     base::OnceClosure read_completed_for_testing,
-    base::OnceClosure write_completed_for_testing)
-    : preferred_apps_(this,
-                      profile_dir,
-                      std::move(read_completed_for_testing),
-                      std::move(write_completed_for_testing)) {}
+    base::OnceClosure write_completed_for_testing) {}
 
 AppServiceMojomImpl::~AppServiceMojomImpl() = default;
 
@@ -78,33 +75,8 @@ void AppServiceMojomImpl::RegisterSubscriber(
     ::Connect(iter.second.get(), subscriber.get());
   }
 
-  // TODO: store the opts somewhere.
-
-  // Initialise the Preferred Apps in the Subscribers on register.
-  if (preferred_apps_.preferred_apps_list_.IsInitialized()) {
-    subscriber->InitializePreferredApps(
-        preferred_apps_.preferred_apps_list_.GetValue());
-  }
-
   // Add the new subscriber to the set.
   subscribers_.Add(std::move(subscriber));
-}
-
-void AppServiceMojomImpl::LoadIcon(apps::mojom::AppType app_type,
-                                   const std::string& app_id,
-                                   apps::mojom::IconKeyPtr icon_key,
-                                   apps::mojom::IconType icon_type,
-                                   int32_t size_hint_in_dip,
-                                   bool allow_placeholder_icon,
-                                   LoadIconCallback callback) {
-  auto iter = publishers_.find(app_type);
-  if (iter == publishers_.end()) {
-    std::move(callback).Run(apps::mojom::IconValue::New());
-    return;
-  }
-  iter->second->LoadIcon(app_id, std::move(icon_key), icon_type,
-                         size_hint_in_dip, allow_placeholder_icon,
-                         std::move(callback));
 }
 
 void AppServiceMojomImpl::Launch(apps::mojom::AppType app_type,
@@ -242,43 +214,6 @@ void AppServiceMojomImpl::OpenNativeSettings(apps::mojom::AppType app_type,
   iter->second->OpenNativeSettings(app_id);
 }
 
-void AppServiceMojomImpl::AddPreferredApp(
-    apps::mojom::AppType app_type,
-    const std::string& app_id,
-    apps::mojom::IntentFilterPtr intent_filter,
-    apps::mojom::IntentPtr intent,
-    bool from_publisher) {
-  preferred_apps_.AddPreferredApp(app_type, app_id, std::move(intent_filter),
-                                  std::move(intent), from_publisher);
-}
-
-void AppServiceMojomImpl::RemovePreferredApp(apps::mojom::AppType app_type,
-                                             const std::string& app_id) {
-  preferred_apps_.RemovePreferredApp(app_type, app_id);
-}
-
-void AppServiceMojomImpl::RemovePreferredAppForFilter(
-    apps::mojom::AppType app_type,
-    const std::string& app_id,
-    apps::mojom::IntentFilterPtr intent_filter) {
-  preferred_apps_.RemovePreferredAppForFilter(app_type, app_id,
-                                              std::move(intent_filter));
-}
-
-void AppServiceMojomImpl::SetSupportedLinksPreference(
-    apps::mojom::AppType app_type,
-    const std::string& app_id,
-    std::vector<apps::mojom::IntentFilterPtr> all_link_filters) {
-  preferred_apps_.SetSupportedLinksPreference(app_type, app_id,
-                                              std::move(all_link_filters));
-}
-
-void AppServiceMojomImpl::RemoveSupportedLinksPreference(
-    apps::mojom::AppType app_type,
-    const std::string& app_id) {
-  preferred_apps_.RemoveSupportedLinksPreference(app_type, app_id);
-}
-
 void AppServiceMojomImpl::SetResizeLocked(apps::mojom::AppType app_type,
                                           const std::string& app_id,
                                           mojom::OptionalBool locked) {
@@ -308,53 +243,6 @@ void AppServiceMojomImpl::SetRunOnOsLoginMode(
     return;
   }
   iter->second->SetRunOnOsLoginMode(app_id, run_on_os_login_mode);
-}
-
-void AppServiceMojomImpl::InitializePreferredAppsForAllSubscribers() {
-  for (auto& subscriber : subscribers_) {
-    subscriber->InitializePreferredApps(
-        preferred_apps_.preferred_apps_list_.GetValue());
-  }
-}
-
-void AppServiceMojomImpl::OnPreferredAppsChanged(
-    apps::mojom::PreferredAppChangesPtr changes) {
-  for (auto& subscriber : subscribers_) {
-    subscriber->OnPreferredAppsChanged(changes->Clone());
-  }
-}
-
-void AppServiceMojomImpl::OnPreferredAppSet(
-    const std::string& app_id,
-    apps::mojom::IntentFilterPtr intent_filter,
-    apps::mojom::IntentPtr intent,
-    apps::mojom::ReplacedAppPreferencesPtr replaced_app_preferences) {
-  for (const auto& iter : publishers_) {
-    iter.second->OnPreferredAppSet(app_id, intent_filter->Clone(),
-                                   intent->Clone(),
-                                   replaced_app_preferences->Clone());
-  }
-}
-
-void AppServiceMojomImpl::OnSupportedLinksPreferenceChanged(
-    const std::string& app_id,
-    bool open_in_app) {
-  for (const auto& iter : publishers_) {
-    iter.second->OnSupportedLinksPreferenceChanged(app_id, open_in_app);
-  }
-}
-
-apps::mojom::Publisher* AppServiceMojomImpl::GetPublisher(
-    apps::mojom::AppType app_type) {
-  auto iter = publishers_.find(app_type);
-  if (iter == publishers_.end()) {
-    return nullptr;
-  }
-  return iter->second.get();
-}
-
-PreferredAppsList& AppServiceMojomImpl::GetPreferredAppsListForTesting() {
-  return preferred_apps_.preferred_apps_list_;
 }
 
 void AppServiceMojomImpl::OnPublisherDisconnected(

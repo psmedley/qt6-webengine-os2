@@ -308,7 +308,7 @@ std::string DynamicHLSL::generateVertexShaderForInputLayout(
         angle::ReplaceSubstring(&vertexHLSL, VERTEX_ATTRIBUTE_STUB_STRING, structStream.str());
     ASSERT(success);
 
-    success = ReplaceShaderStorageDeclaration(shaderStorageBlocks, &vertexHLSL, inputLayout.size(),
+    success = ReplaceShaderStorageDeclaration(shaderStorageBlocks, &vertexHLSL, baseUAVRegister,
                                               gl::ShaderType::Vertex);
     ASSERT(success);
 
@@ -320,7 +320,8 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
     const std::vector<PixelShaderOutputVariable> &outputVariables,
     bool usesFragDepth,
     const std::vector<GLenum> &outputLayout,
-    const std::vector<ShaderStorageBlock> &shaderStorageBlocks) const
+    const std::vector<ShaderStorageBlock> &shaderStorageBlocks,
+    size_t baseUAVRegister) const
 {
     const int shaderModel      = mRenderer->getMajorShaderModel();
     std::string targetSemantic = (shaderModel >= 4) ? "SV_TARGET" : "COLOR";
@@ -394,7 +395,7 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
         angle::ReplaceSubstring(&pixelHLSL, PIXEL_OUTPUT_STUB_STRING, declarationStream.str());
     ASSERT(success);
 
-    success = ReplaceShaderStorageDeclaration(shaderStorageBlocks, &pixelHLSL, numOutputs,
+    success = ReplaceShaderStorageDeclaration(shaderStorageBlocks, &pixelHLSL, baseUAVRegister,
                                               gl::ShaderType::Fragment);
     ASSERT(success);
 
@@ -402,22 +403,22 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
 }
 
 std::string DynamicHLSL::generateShaderForImage2DBindSignature(
-    const d3d::Context *context,
     ProgramD3D &programD3D,
     const gl::ProgramState &programData,
     gl::ShaderType shaderType,
+    const std::string &shaderHLSL,
     std::vector<sh::ShaderVariable> &image2DUniforms,
-    const gl::ImageUnitTextureTypeMap &image2DBindLayout) const
+    const gl::ImageUnitTextureTypeMap &image2DBindLayout,
+    unsigned int baseUAVRegister) const
 {
-    std::string shaderHLSL(programData.getAttachedShader(shaderType)->getTranslatedSource());
-
     if (image2DUniforms.empty())
     {
         return shaderHLSL;
     }
 
-    return GenerateShaderForImage2DBindSignature(context, programD3D, programData, shaderType,
-                                                 image2DUniforms, image2DBindLayout);
+    return GenerateShaderForImage2DBindSignature(programD3D, programData, shaderType, shaderHLSL,
+                                                 image2DUniforms, image2DBindLayout,
+                                                 baseUAVRegister);
 }
 
 void DynamicHLSL::generateVaryingLinkHLSL(const VaryingPacking &varyingPacking,
@@ -515,7 +516,8 @@ void DynamicHLSL::generateVaryingLinkHLSL(const VaryingPacking &varyingPacking,
     hlslStream << "};\n";
 }
 
-void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
+void DynamicHLSL::generateShaderLinkHLSL(const gl::Context *context,
+                                         const gl::Caps &caps,
                                          const gl::ProgramState &programData,
                                          const ProgramD3DMetadata &programMetadata,
                                          const VaryingPacking &varyingPacking,
@@ -742,7 +744,7 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
 
     if (vertexShaderGL)
     {
-        std::string vertexSource = vertexShaderGL->getTranslatedSource();
+        std::string vertexSource = vertexShaderGL->getTranslatedSource(context);
         angle::ReplaceSubstring(&vertexSource, std::string(MAIN_PROLOGUE_STUB_STRING),
                                 "    initAttributes(input);\n");
         angle::ReplaceSubstring(&vertexSource, std::string(VERTEX_OUTPUT_STUB_STRING),
@@ -772,15 +774,20 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
         // Certain Shader Models (4_0+ and 3_0) allow reading from dx_Position in the pixel shader.
         // Other Shader Models (4_0_level_9_3 and 2_x) don't support this, so we emulate it using
         // dx_ViewCoords.
+        // DComp usually gives us an offset at (0, 0), but this is not always the case. It is
+        // valid for DComp to give us an offset into the texture atlas. In that scenario, we
+        // need to offset gl_FragCoord using dx_FragCoordOffset to point to the correct location
+        // of the pixel.
         if (shaderModel >= 4 && mRenderer->getShaderModelSuffix() == "")
         {
-            pixelPrologue << "    gl_FragCoord.x = input.dx_Position.x;\n"
-                          << "    gl_FragCoord.y = input.dx_Position.y;\n";
+            pixelPrologue << "    gl_FragCoord.x = input.dx_Position.x - dx_FragCoordOffset.x;\n"
+                          << "    gl_FragCoord.y = input.dx_Position.y - dx_FragCoordOffset.y;\n";
         }
         else if (shaderModel == 3)
         {
-            pixelPrologue << "    gl_FragCoord.x = input.dx_Position.x + 0.5;\n"
-                          << "    gl_FragCoord.y = input.dx_Position.y + 0.5;\n";
+            pixelPrologue
+                << "    gl_FragCoord.x = input.dx_Position.x + 0.5 - dx_FragCoordOffset.x;\n"
+                << "    gl_FragCoord.y = input.dx_Position.y + 0.5 - dx_FragCoordOffset.y;\n";
         }
         else
         {
@@ -788,9 +795,9 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
             // Renderer::setViewport()
             pixelPrologue
                 << "    gl_FragCoord.x = (input.gl_FragCoord.x * rhw) * dx_ViewCoords.x + "
-                   "dx_ViewCoords.z;\n"
+                   "dx_ViewCoords.z - dx_FragCoordOffset.x;\n"
                 << "    gl_FragCoord.y = (input.gl_FragCoord.y * rhw) * dx_ViewCoords.y + "
-                   "dx_ViewCoords.w;\n";
+                   "dx_ViewCoords.w - dx_FragCoordOffset.y;\n";
         }
 
         if (programMetadata.usesViewScale())
@@ -923,7 +930,7 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
 
     if (fragmentShaderGL)
     {
-        std::string pixelSource = fragmentShaderGL->getTranslatedSource();
+        std::string pixelSource = fragmentShaderGL->getTranslatedSource(context);
 
         if (fragmentShader->usesFrontFacing())
         {
@@ -1121,7 +1128,7 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(const gl::Caps &caps,
             shaderStream << "    float4 dx_ViewCoords : packoffset(c1);\n";
             if (useViewScale)
             {
-                shaderStream << "    float2 dx_ViewScale : packoffset(c3);\n";
+                shaderStream << "    float2 dx_ViewScale : packoffset(c3.z);\n";
             }
         }
 
@@ -1129,7 +1136,7 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(const gl::Caps &caps,
         {
             // We have to add a value which we can use to keep track of which multi-view code path
             // is to be selected in the GS.
-            shaderStream << "    float multiviewSelectViewportIndex : packoffset(c3.z);\n";
+            shaderStream << "    float multiviewSelectViewportIndex : packoffset(c4.x);\n";
         }
 
         shaderStream << "};\n\n";

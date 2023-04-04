@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 
 #include "base/callback_forward.h"
 #include "base/callback_helpers.h"
+#include "base/functional/function_ref.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
@@ -39,6 +40,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/favicon/favicon_url.mojom-forward.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom-forward.h"
+#include "third_party/blink/public/mojom/frame/remote_frame.mojom-forward.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
 #include "third_party/blink/public/mojom/media/capture_handle_config.mojom-forward.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
@@ -100,6 +102,7 @@ class WebContentsDelegate;
 class WebUI;
 struct DropData;
 struct MHTMLGenerationParams;
+class PreloadingAttempt;
 
 // WebContents is the core class in content/. A WebContents renders web content
 // (usually HTML) in a rectangular area.
@@ -219,11 +222,12 @@ class WebContents : public PageNavigator,
       kOkayToHaveRendererProcess,
 
       // Ensures that the created WebContents are backed by an OS process which
-      // has an initialized RenderView.
+      // has an initialized `blink::WebView`.
       //
       // TODO(lukasza): https://crbug.com/848366: Remove
       // kInitializeAndWarmupRendererProcess value - warming up the renderer by
-      // initializing the RenderView is redundant with the warm-up that can be
+      // initializing the `blink::WebView` is redundant with the warm-up that
+      // can be
       // achieved by either 1) warming up the spare renderer before creating
       // WebContents and/or 2) speculative RenderFrameHost used internally
       // during a navigation.
@@ -254,6 +258,10 @@ class WebContents : public PageNavigator,
     // Enables contents to hold wake locks, for example, to keep the screen on
     // while playing video.
     bool enable_wake_locks = true;
+
+    // Options specific to WebContents created for picture-in-picture windows.
+    float initial_picture_in_picture_aspect_ratio = 0;
+    bool lock_picture_in_picture_aspect_ratio = false;
   };
 
   // Creates a new WebContents.
@@ -357,11 +365,10 @@ class WebContents : public PageNavigator,
   // WebContents' main frame.
   virtual const GURL& GetLastCommittedURL() = 0;
 
-  // Returns the main frame for the currently active view. Always non-null
-  // except during WebContents destruction. With MPArch, this returns the
-  // primary main frame. This WebContents may have additional main frames for
-  // prerendered pages, bfcached pages, etc.
-  virtual RenderFrameHost* GetMainFrame() = 0;
+  // Returns the primary main frame for the currently active page. Always
+  // non-null except during WebContents destruction. This WebContents may
+  // have additional main frames for prerendered pages, bfcached pages, etc.
+  virtual RenderFrameHost* GetPrimaryMainFrame() = 0;
 
   // Returns the current page in the primary frame tree of this WebContents.
   // If this WebContents is associated with an omnibox, usually the URL of the
@@ -396,8 +403,8 @@ class WebContents : public PageNavigator,
   // be used instead of getting the primary page from the WebContents.
   virtual Page& GetPrimaryPage() = 0;
 
-  // Returns the focused frame for the currently active view. Might be nullptr
-  // if nothing is focused.
+  // Returns the focused frame for the primary page or an inner page thereof.
+  // Might be nullptr if nothing is focused.
   virtual RenderFrameHost* GetFocusedFrame() = 0;
 
   // Returns true if |frame_tree_node_id| refers to a frame in a prerendered
@@ -418,15 +425,6 @@ class WebContents : public PageNavigator,
   virtual RenderFrameHost* UnsafeFindFrameByFrameTreeNodeId(
       int frame_tree_node_id) = 0;
 
-  // TODO(1208438): Migrate to |ForEachRenderFrameHost|.
-  // Calls |on_frame| for each frame in the currently active view.
-  // Note: The RenderFrameHost parameter is not guaranteed to have a live
-  // RenderFrame counterpart in the renderer process. Callbacks should check
-  // IsRenderFrameLive(), as sending IPC messages to it in this case will fail
-  // silently.
-  virtual void ForEachFrame(
-      const base::RepeatingCallback<void(RenderFrameHost*)>& on_frame) = 0;
-
   // Calls |on_frame| for every RenderFrameHost in this WebContents. Note that
   // this includes RenderFrameHosts that are not descended from the primary main
   // frame (e.g. bfcached pages and prerendered pages). The order of traversal
@@ -436,10 +434,11 @@ class WebContents : public PageNavigator,
   // For callers only interested in the primary page,
   // |GetMainFrame()->ForEachRenderFrameHost()| can be used.
   // See |RenderFrameHost::ForEachRenderFrameHost| for details.
+  using FrameIterationAction = RenderFrameHost::FrameIterationAction;
+  virtual void ForEachRenderFrameHostWithAction(
+      base::FunctionRef<FrameIterationAction(RenderFrameHost*)> on_frame) = 0;
   virtual void ForEachRenderFrameHost(
-      RenderFrameHost::FrameIterationCallback on_frame) = 0;
-  virtual void ForEachRenderFrameHost(
-      RenderFrameHost::FrameIterationAlwaysContinueCallback on_frame) = 0;
+      base::FunctionRef<void(RenderFrameHost*)> on_frame) = 0;
 
   // Gets the current RenderViewHost for this tab.
   virtual RenderViewHost* GetRenderViewHost() = 0;
@@ -586,7 +585,7 @@ class WebContents : public PageNavigator,
   // Returns whether a navigation is currently in progress that should show
   // loading UI if such UI exists (progress bar, loading spinner, stop button,
   // etc.) True for different-document navigations and the navigation API's
-  // transitionWhile(). This being true implies that IsLoading() is also true.
+  // intercept(). This being true implies that IsLoading() is also true.
   virtual bool ShouldShowLoadingUI() = 0;
 
   // Returns whether the current primary main document has reached and finished
@@ -703,6 +702,10 @@ class WebContents : public PageNavigator,
   // device.
   virtual bool IsConnectedToHidDevice() = 0;
 
+  // Indicates whether any frame in the WebContents is connected to a USB
+  // device.
+  virtual bool IsConnectedToUsbDevice() = 0;
+
   // Indicates whether any frame in the WebContents has File System Access
   // handles.
   virtual bool HasFileSystemAccessHandles() = 0;
@@ -781,6 +784,9 @@ class WebContents : public PageNavigator,
   virtual void AttachInnerWebContents(
       std::unique_ptr<WebContents> inner_web_contents,
       RenderFrameHost* render_frame_host,
+      mojo::PendingAssociatedRemote<blink::mojom::RemoteFrame> remote_frame,
+      mojo::PendingAssociatedReceiver<blink::mojom::RemoteFrameHost>
+          remote_frame_host_receiver,
       bool is_full_page) = 0;
 
   // Returns whether this WebContents is an inner WebContents for a guest.
@@ -1061,20 +1067,18 @@ class WebContents : public PageNavigator,
 
   // Returns true if this WebContents was opened by another WebContents, even
   // if the opener was suppressed. In contrast to HasOpener/GetOpener, the
-  // original opener doesn't reflect window.opener which can be suppressed or
-  // updated. This traces all the way back, so if the original owner was closed,
-  // but _it_ had an original owner, this will return the original owner's
-  // original owner, etc.
-  virtual bool HasOriginalOpener() = 0;
+  // "original opener chain" doesn't reflect window.opener which can be
+  // suppressed or updated. The "original opener" is the main frame of the
+  // actual opener of this frame. This traces the all the way back, so if the
+  // original opener was closed (deleted or severed due to COOP), but _it_ had
+  // an original opener, this will return the original opener's original opener,
+  // etc.
+  virtual bool HasLiveOriginalOpenerChain() = 0;
 
-  // Returns the original opener's main frame if HasOriginalOpener() is true, or
-  // nullptr otherwise. NOTE: This will always be the main frame of the actual
-  // original opener's frame tree, so it might be different from the actual
-  // original opener if it is a subframe. See https://crbug.com/705316 for more
-  // context.
-  // TODO(https://crbug.com/1311820): Consider renaming this function and other
-  // things related to "original openers", to make the quirk more obvious.
-  virtual RenderFrameHost* GetOriginalOpener() = 0;
+  // Returns the "original opener WebContents" if HasLiveOriginalOpenerChain()
+  // is true, or nullptr otherwise. See the comment for
+  // `HasLiveOriginalOpenerChain()` for more details.
+  virtual WebContents* GetFirstWebContentsInLiveOriginalOpenerChain() = 0;
 
   // Returns the WakeLockContext accociated with this WebContents.
   virtual device::mojom::WakeLockContext* GetWakeLockContext() = 0;
@@ -1098,10 +1102,9 @@ class WebContents : public PageNavigator,
   // be called with the bitmaps received from the renderer.
   // If |is_favicon| is true, the cookies are not sent and not accepted during
   // download.
-  // Bitmaps with pixel sizes larger than |max_bitmap_size| are filtered out
-  // from the bitmap results. If there are no bitmap results <=
-  // |max_bitmap_size|, the smallest bitmap is resized to |max_bitmap_size| and
-  // is the only result. A |max_bitmap_size| of 0 means unlimited.
+  // If there are no bitmap results <= |max_bitmap_size|, the smallest bitmap
+  // is resized to |max_bitmap_size| and is the only result.
+  // A |max_bitmap_size| of 0 means unlimited.
   // For vector images, |preferred_size| will serve as a viewport into which
   // the image will be rendered. This would usually be the dimensions of the
   // rectangle where the bitmap will be rendered. If |preferred_size| is empty,
@@ -1285,8 +1288,8 @@ class WebContents : public PageNavigator,
   // that an action that requires a user gesture actually has one in the
   // trustworthy browser process, rather than relying on the untrustworthy
   // renderer. This should be eventually merged into and accounted for in the
-  // user activation work.
-  virtual bool HasRecentInteractiveInputEvent() = 0;
+  // user activation work: crbug.com/848778
+  virtual bool HasRecentInteraction() = 0;
 
   // Sets a flag that causes the WebContents to ignore input events.
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
@@ -1322,6 +1325,12 @@ class WebContents : public PageNavigator,
   // Returns the value from CreateParams::creator_location.
   virtual const base::Location& GetCreatorLocation() = 0;
 
+  // Returns the initial_aspect_ratio value from CreateParams.
+  virtual float GetPictureInPictureInitialAspectRatio() = 0;
+
+  // Returns the lock_aspect_ratio value from CreateParams.
+  virtual bool GetPictureInPictureLockAspectRatio() = 0;
+
   // Hide or show the browser controls for the given WebContents, based on
   // allowed states, desired state and whether the transition should be animated
   // or not.
@@ -1343,19 +1352,29 @@ class WebContents : public PageNavigator,
   // destruction. If the prerendering failed to start (e.g. if prerendering is
   // disabled, failure happened or because this URL is already being
   // prerendered), this function returns a nullptr.
-  // `url_match_predicate` allows embedders to define their own predicates for
-  // matching same-origin URLs during prerendering activation; it would be
-  // useful if embedders want Prerender2 to ignore some parameter mismatches.
-  // Note that if the mismatched prerender URL will be activated due to the
-  // predicate returning true, the last committed URL in the prerendered
-  // RenderFrameHost will be activated.
+  // PreloadingAttempt helps us to log various metrics associated with
+  // particular prerendering attempt. `url_match_predicate` allows embedders to
+  // define their own predicates for matching same-origin URLs during
+  // prerendering activation; it would be useful if embedders want Prerender2 to
+  // ignore some parameter mismatches. Note that if the mismatched prerender URL
+  // will be activated due to the predicate returning true, the last committed
+  // URL in the prerendered RenderFrameHost will be activated.
   virtual std::unique_ptr<PrerenderHandle> StartPrerendering(
       const GURL& prerendering_url,
       PrerenderTriggerType trigger_type,
       const std::string& embedder_histogram_suffix,
       ui::PageTransition page_transition,
+      PreloadingAttempt* preloading_attempt,
       absl::optional<base::RepeatingCallback<bool(const GURL&)>>
           url_match_predicate = absl::nullopt) = 0;
+
+  // Disables Prerender2 for this WebContents.
+  // See
+  // https://docs.google.com/document/d/1P2VKCLpmnNm_cRAjUeE-bqLL0bslL_zKqiNeCzNom_w/
+  virtual void DisablePrerender2() = 0;
+  // Set Prerender2 disabled = false, but this does not imply Prerender2 is
+  // enabled.
+  virtual void ResetPrerender2Disabled() = 0;
 
  private:
   // This interface should only be implemented inside content.

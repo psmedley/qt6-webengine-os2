@@ -84,7 +84,8 @@ sk_sp<GrGLRenderTarget> GrGLRenderTarget::MakeWrapped(GrGLGpu* gpu,
                                                       GrGLFormat format,
                                                       int sampleCount,
                                                       const IDs& idDesc,
-                                                      int stencilBits) {
+                                                      int stencilBits,
+                                                      std::string_view label) {
     sk_sp<GrGLAttachment> sb;
     if (stencilBits) {
         // We pick a "fake" actual format that matches the number of stencil bits. When wrapping
@@ -105,7 +106,7 @@ sk_sp<GrGLRenderTarget> GrGLRenderTarget::MakeWrapped(GrGLGpu* gpu,
                                                      sFmt);
     }
     return sk_sp<GrGLRenderTarget>(new GrGLRenderTarget(
-            gpu, dimensions, format, sampleCount, idDesc, std::move(sb), /*label=*/{}));
+            gpu, dimensions, format, sampleCount, idDesc, std::move(sb), label));
 }
 
 GrBackendRenderTarget GrGLRenderTarget::getBackendRenderTarget() const {
@@ -131,6 +132,11 @@ GrBackendFormat GrGLRenderTarget::backendFormat() const {
 size_t GrGLRenderTarget::onGpuMemorySize() const {
     return GrSurface::ComputeSize(this->backendFormat(), this->dimensions(),
                                   fTotalMemorySamplesPerPixel, GrMipmapped::kNo);
+}
+
+void GrGLRenderTarget::onSetLabel() {
+    SkASSERT(fMSColorRenderbufferID);
+    SkASSERT(fRTFBOOwnership == GrBackendObjectOwnership::kOwned);
 }
 
 bool GrGLRenderTarget::completeStencilAttachment(GrAttachment* stencil, bool useMultisampleFBO) {
@@ -199,14 +205,15 @@ void GrGLRenderTarget::bindInternal(GrGLenum fboTarget, bool useMultisampleFBO) 
                                          0 /*mipMapLevel*/));
         }
         if (useMultisampleFBO) {
-            int internalSampleCount =
+            int sampleCount = this->numSamples() > 1 ?
+                    this->numSamples() :
                     this->getGpu()->caps()->internalMultisampleCount(this->backendFormat());
             GL_CALL(FramebufferTexture2DMultisample(fboTarget,
                                                     GR_GL_COLOR_ATTACHMENT0,
                                                     glTex->target(),
                                                     glTex->textureID(),
                                                     0 /*mipMapLevel*/,
-                                                    internalSampleCount));
+                                                    sampleCount));
         } else {
             GL_CALL(FramebufferTexture2D(fboTarget,
                                          GR_GL_COLOR_ATTACHMENT0,

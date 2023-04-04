@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,8 +50,8 @@ scoped_refptr<base::RefCountedMemory> CreateNotFoundResponse() {
 
 // DevToolsDataSource ---------------------------------------------------------
 
-std::string GetMimeTypeForPath(const std::string& path) {
-  std::string filename = PathWithoutParams(path);
+std::string GetMimeTypeForUrl(const GURL& url) {
+  std::string filename = url.ExtractFileName();
   if (base::EndsWith(filename, ".html", base::CompareCase::INSENSITIVE_ASCII)) {
     return "text/html";
   } else if (base::EndsWith(filename, ".css",
@@ -211,8 +211,8 @@ void DevToolsDataSource::StartDataRequest(
   std::move(callback).Run(CreateNotFoundResponse());
 }
 
-std::string DevToolsDataSource::GetMimeType(const std::string& path) {
-  return GetMimeTypeForPath(path);
+std::string DevToolsDataSource::GetMimeType(const GURL& url) {
+  return GetMimeTypeForUrl(url);
 }
 
 bool DevToolsDataSource::ShouldAddContentSecurityPolicy() {

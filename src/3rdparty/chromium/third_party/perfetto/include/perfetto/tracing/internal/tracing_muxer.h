@@ -47,7 +47,7 @@ struct DataSourceStaticState;
 // and methods that are required to implement them should go into
 // src/tracing/internal/tracing_muxer_impl.h instead: that one can pull in
 // perfetto headers outside of public, this one cannot.
-class PERFETTO_EXPORT TracingMuxer {
+class PERFETTO_EXPORT_COMPONENT TracingMuxer {
  public:
   static TracingMuxer* Get() { return instance_; }
 
@@ -62,6 +62,7 @@ class PERFETTO_EXPORT TracingMuxer {
   using DataSourceFactory = std::function<std::unique_ptr<DataSourceBase>()>;
   virtual bool RegisterDataSource(const DataSourceDescriptor&,
                                   DataSourceFactory,
+                                  bool supports_multiple_instances,
                                   DataSourceStaticState*) = 0;
 
   // Updates the DataSourceDescriptor for the DataSource.

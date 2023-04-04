@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,11 @@ namespace device {
 
 namespace {
 
+// Check that each rounding multiple is positive number.
 static_assert(kAccelerometerRoundingMultiple > 0.0,
+              "Rounding multiple must be positive.");
+
+static_assert(kAlsRoundingMultiple > 0,
               "Rounding multiple must be positive.");
 
 static_assert(kGyroscopeRoundingMultiple > 0.0,
@@ -25,6 +29,10 @@ static_assert(kOrientationEulerRoundingMultiple > 0.0,
 
 static_assert(kOrientationQuaternionRoundingMultiple > 0.0,
               "Rounding multiple must be positive.");
+
+// Check that threshold value is at least half of rounding multiple.
+static_assert(kAlsSignificanceThreshold >= (kAlsRoundingMultiple / 2),
+              "Threshold must be at least half of rounding multiple.");
 
 template <typename T>
 T square(T x) {

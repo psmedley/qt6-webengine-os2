@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <type_traits>
 #include <utility>
 
 #include "base/compiler_specific.h"
@@ -40,12 +41,13 @@ class PendingAssociatedReceiver {
 #if !BUILDFLAG(IS_NACL)
   // Move conversion operator for custom receiver types. Only participates in
   // overload resolution if a typesafe conversion is supported.
-  template <typename T,
-            std::enable_if_t<std::is_same<
-                PendingAssociatedReceiver<Interface>,
-                absl::result_of_t<decltype (&PendingAssociatedReceiverConverter<
-                                           T>::template To<Interface>)(T&&)>>::
-                                 value>* = nullptr>
+  template <
+      typename T,
+      std::enable_if_t<std::is_same<
+          PendingAssociatedReceiver<Interface>,
+          std::invoke_result_t<decltype(&PendingAssociatedReceiverConverter<
+                                        T>::template To<Interface>),
+                               T&&>>::value>* = nullptr>
   PendingAssociatedReceiver(T&& other)
       : PendingAssociatedReceiver(
             PendingAssociatedReceiverConverter<T>::template To<Interface>(

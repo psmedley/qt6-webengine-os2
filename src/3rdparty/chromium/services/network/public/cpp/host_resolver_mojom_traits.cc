@@ -1,11 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/public/cpp/host_resolver_mojom_traits.h"
 
+#include "base/values.h"
 #include "mojo/public/cpp/base/time_mojom_traits.h"
 #include "net/dns/public/dns_over_https_config.h"
+#include "net/dns/public/dns_over_https_server_config.h"
 #include "net/dns/public/host_resolver_source.h"
 #include "net/dns/public/mdns_listener_update_type.h"
 #include "net/dns/public/resolve_error_info.h"
@@ -77,18 +79,33 @@ absl::optional<net::SecureDnsMode> FromOptionalSecureDnsMode(
 }
 
 // static
+bool StructTraits<network::mojom::DnsOverHttpsServerConfigDataView,
+                  net::DnsOverHttpsServerConfig>::
+    Read(network::mojom::DnsOverHttpsServerConfigDataView data,
+         net::DnsOverHttpsServerConfig* out_server) {
+  std::string server_template;
+  if (!data.ReadServerTemplate(&server_template))
+    return false;
+  net::DnsOverHttpsServerConfig::Endpoints endpoints;
+  if (!data.ReadEndpoints(&endpoints))
+    return false;
+  auto server = net::DnsOverHttpsServerConfig::FromString(
+      std::move(server_template), std::move(endpoints));
+  if (!server.has_value())
+    return false;
+  *out_server = std::move(server.value());
+  return true;
+}
+
+// static
 bool StructTraits<network::mojom::DnsOverHttpsConfigDataView,
                   net::DnsOverHttpsConfig>::
     Read(network::mojom::DnsOverHttpsConfigDataView data,
          net::DnsOverHttpsConfig* out_config) {
-  std::vector<std::string> representation;
-  if (!data.ReadServers(&representation))
+  std::vector<net::DnsOverHttpsServerConfig> servers;
+  if (!data.ReadServers(&servers))
     return false;
-  absl::optional<net::DnsOverHttpsConfig> config =
-      net::DnsOverHttpsConfig::FromStrings(std::move(representation));
-  if (!config.has_value())
-    return false;
-  *out_config = std::move(config.value());
+  *out_config = net::DnsOverHttpsConfig(std::move(servers));
   return true;
 }
 
@@ -188,10 +205,6 @@ DnsQueryType EnumTraits<DnsQueryType, net::DnsQueryType>::ToMojom(
       return DnsQueryType::SRV;
     case net::DnsQueryType::HTTPS:
       return DnsQueryType::HTTPS;
-    case net::DnsQueryType::INTEGRITY:
-    case net::DnsQueryType::HTTPS_EXPERIMENTAL:
-      NOTIMPLEMENTED();
-      return DnsQueryType::UNSPECIFIED;
   }
 }
 

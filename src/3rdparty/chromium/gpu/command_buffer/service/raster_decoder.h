@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,9 +22,7 @@ class SharedContextState;
 class SharedImageManager;
 
 namespace gles2 {
-class CopyTextureCHROMIUMResourceManager;
 class GLES2Util;
-class ImageManager;
 class Logger;
 class Outputter;
 }  // namespace gles2
@@ -73,9 +71,6 @@ class GPU_GLES2_EXPORT RasterDecoder : public DecoderContext,
   virtual gles2::Logger* GetLogger() = 0;
   virtual void SetIgnoreCachedStateForTest(bool ignore) = 0;
 
-  // Gets the ImageManager for this context.
-  virtual gles2::ImageManager* GetImageManagerForTest() = 0;
-
   void set_initialized() { initialized_ = true; }
 
   // Set to true to call glGetError after every command.
@@ -86,10 +81,6 @@ class GPU_GLES2_EXPORT RasterDecoder : public DecoderContext,
   void SetLogCommands(bool log_commands) override;
   gles2::Outputter* outputter() const override;
   bool log_commands() const { return log_commands_; }
-
-  virtual void SetCopyTextureResourceManagerForTest(
-      gles2::CopyTextureCHROMIUMResourceManager*
-          copy_texture_resource_manager) = 0;
 
   virtual int DecoderIdForTest() = 0;
   virtual ServiceTransferCache* GetTransferCacheForTest() = 0;

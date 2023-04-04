@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,9 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
@@ -74,26 +76,6 @@ MediaStreamAudioSource* MediaStreamAudioSource::From(
   return static_cast<MediaStreamAudioSource*>(source->GetPlatformSource());
 }
 
-bool MediaStreamAudioSource::ConnectToTrack(MediaStreamComponent* component) {
-  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
-  DCHECK(component);
-
-  // Sanity-check that there is not already a MediaStreamAudioTrack instance
-  // associated with |component|.
-  if (MediaStreamAudioTrack::From(component)) {
-    LOG(DFATAL) << "Attempting to connect another source to a "
-                   "WebMediaStreamTrack/MediaStreamComponent.";
-    return false;
-  }
-
-  // Create and initialize a new MediaStreamAudioTrack and pass ownership of it
-  // to the MediaStreamComponent.
-  component->SetPlatformTrack(
-      CreateMediaStreamAudioTrack(component->Id().Utf8()));
-
-  return ConnectToInitializedTrack(component);
-}
-
 bool MediaStreamAudioSource::ConnectToInitializedTrack(
     MediaStreamComponent* component) {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
@@ -120,8 +102,9 @@ bool MediaStreamAudioSource::ConnectToInitializedTrack(
   if (is_stopped_)
     return false;
 
-  track->Start(WTF::Bind(&MediaStreamAudioSource::StopAudioDeliveryTo,
-                         weak_factory_.GetWeakPtr(), WTF::Unretained(track)));
+  track->Start(WTF::BindOnce(&MediaStreamAudioSource::StopAudioDeliveryTo,
+                             weak_factory_.GetWeakPtr(),
+                             WTF::Unretained(track)));
   deliverer_.AddConsumer(track);
   LogMessage(
       base::StringPrintf("%s => (added new MediaStreamAudioTrack as consumer, "

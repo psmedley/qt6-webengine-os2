@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ export function record(action: UserAction) {
       'type': chrome.metricsPrivate.MetricTypeType.HISTOGRAM_LOG,
       'min': 1,
       'max': UserAction.NUMBER_OF_ACTIONS,
-      'buckets': UserAction.NUMBER_OF_ACTIONS + 1
+      'buckets': UserAction.NUMBER_OF_ACTIONS + 1,
     };
   }
   chrome.metricsPrivate.recordValue(actionsMetric, action);

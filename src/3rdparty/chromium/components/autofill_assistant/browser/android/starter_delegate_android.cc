@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,15 @@
 #include "components/autofill_assistant/browser/android/trigger_script_bridge_android.h"
 #include "components/autofill_assistant/browser/android/ui_controller_android_utils.h"
 #include "components/autofill_assistant/browser/assistant_field_trial_util.h"
+#include "components/autofill_assistant/browser/features.h"
+#include "components/autofill_assistant/browser/headless/client_headless.h"
+#include "components/autofill_assistant/browser/headless/headless_script_controller_impl.h"
+#include "components/autofill_assistant/browser/preference_manager.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager_impl.h"
+#include "components/autofill_assistant/browser/public/prefs.h"
 #include "components/autofill_assistant/browser/public/runtime_manager_impl.h"
 #include "components/autofill_assistant/browser/script_parameters.h"
-#include "components/autofill_assistant/browser/website_login_manager_impl.h"
+#include "components/prefs/pref_service.h"
 #include "components/version_info/android/channel_getter.h"
 #include "components/version_info/channel.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
@@ -37,7 +43,7 @@ static jlong JNI_Starter_FromWebContents(
   auto* web_contents = content::WebContents::FromJavaWebContents(jweb_contents);
   CHECK(web_contents);
 
-  auto dependencies = Dependencies::CreateFromJavaStaticDependencies(
+  auto dependencies = DependenciesAndroid::CreateFromJavaStaticDependencies(
       ScopedJavaGlobalRef<jobject>(env, jstatic_dependencies));
   StarterDelegateAndroid::CreateForWebContents(web_contents,
                                                std::move(dependencies));
@@ -52,16 +58,16 @@ static jlong JNI_Starter_FromWebContents(
 
 StarterDelegateAndroid::StarterDelegateAndroid(
     content::WebContents* web_contents,
-    std::unique_ptr<Dependencies> dependencies)
+    std::unique_ptr<DependenciesAndroid> dependencies)
     : content::WebContentsUserData<StarterDelegateAndroid>(*web_contents),
       dependencies_(std::move(dependencies)),
+      preference_manager_(GetCommonDependencies()->GetPrefs()),
       website_login_manager_(std::make_unique<WebsiteLoginManagerImpl>(
-          dependencies_->GetPasswordManagerClient(web_contents),
+          GetCommonDependencies()->GetPasswordManagerClient(web_contents),
           web_contents)) {
   // Create the AnnotateDomModelService when the browser starts, such that it
   // starts listening to model changes early enough.
-  dependencies_->GetOrCreateAnnotateDomModelService(
-      web_contents->GetBrowserContext());
+  GetCommonDependencies()->GetOrCreateAnnotateDomModelService();
 }
 
 StarterDelegateAndroid::~StarterDelegateAndroid() = default;
@@ -157,22 +163,19 @@ void StarterDelegateAndroid::OnActivityAttachmentChanged(
 }
 
 bool StarterDelegateAndroid::GetIsFirstTimeUser() const {
-  return Java_Starter_getIsFirstTimeUser(base::android::AttachCurrentThread());
+  return GetPreferenceManager().GetIsFirstTimeTriggerScriptUser();
 }
 
 void StarterDelegateAndroid::SetIsFirstTimeUser(bool first_time_user) {
-  Java_Starter_setIsFirstTimeUser(base::android::AttachCurrentThread(),
-                                  first_time_user);
+  GetPreferenceManager().SetIsFirstTimeTriggerScriptUser(first_time_user);
 }
 
 bool StarterDelegateAndroid::GetOnboardingAccepted() const {
-  return Java_Starter_getOnboardingAccepted(
-      base::android::AttachCurrentThread());
+  return GetPreferenceManager().GetOnboardingAccepted();
 }
 
 void StarterDelegateAndroid::SetOnboardingAccepted(bool accepted) {
-  Java_Starter_setOnboardingAccepted(base::android::AttachCurrentThread(),
-                                     accepted);
+  GetPreferenceManager().SetOnboardingAccepted(accepted);
 }
 
 void StarterDelegateAndroid::ShowOnboarding(
@@ -182,9 +185,16 @@ void StarterDelegateAndroid::ShowOnboarding(
   CreateJavaDependenciesIfNecessary();
   if (onboarding_finished_callback_) {
     DCHECK(false) << "onboarding requested while already being shown";
-    std::move(callback).Run(false, OnboardingResult::DISMISSED);
+    std::move(callback).Run(/*shown=*/false, OnboardingResult::DISMISSED);
     return;
   }
+
+  // Return early if onboarding has already been accepted.
+  if (GetOnboardingAccepted()) {
+    std::move(callback).Run(/*shown=*/false, OnboardingResult::ACCEPTED);
+    return;
+  }
+
   onboarding_finished_callback_ = std::move(callback);
 
   std::vector<std::string> keys;
@@ -199,7 +209,8 @@ void StarterDelegateAndroid::ShowOnboarding(
                               base::android::ConvertUTF8ToJavaString(
                                   env, trigger_context.GetExperimentIds()),
                               base::android::ToJavaArrayOfStrings(env, keys),
-                              base::android::ToJavaArrayOfStrings(env, values));
+                              base::android::ToJavaArrayOfStrings(env, values),
+                              trigger_context.GetIsExternallyTriggered());
 }
 
 void StarterDelegateAndroid::HideOnboarding() {
@@ -227,37 +238,32 @@ void StarterDelegateAndroid::OnOnboardingFinished(
 }
 
 bool StarterDelegateAndroid::GetProactiveHelpSettingEnabled() const {
-  return Java_Starter_getProactiveHelpSettingEnabled(
-      base::android::AttachCurrentThread());
+  return GetPreferenceManager().IsProactiveHelpOn();
 }
 
 void StarterDelegateAndroid::SetProactiveHelpSettingEnabled(bool enabled) {
-  Java_Starter_setProactiveHelpSettingEnabled(
-      base::android::AttachCurrentThread(), enabled);
-}
-
-bool StarterDelegateAndroid::GetMakeSearchesAndBrowsingBetterEnabled() const {
-  if (!java_object_) {
-    // Failsafe, should never happen.
-    NOTREACHED();
-    return false;
-  }
-
-  return Java_Starter_getMakeSearchesAndBrowsingBetterSettingEnabled(
-      base::android::AttachCurrentThread(), java_object_);
+  GetPreferenceManager().SetProactiveHelpSettingEnabled(enabled);
 }
 
 bool StarterDelegateAndroid::GetIsLoggedIn() {
-  return !dependencies_->GetChromeSignedInEmailAddress(&GetWebContents())
-              .empty();
+  return !GetCommonDependencies()->GetSignedInEmail().empty();
+}
+
+bool StarterDelegateAndroid::GetIsSupervisedUser() {
+  return GetCommonDependencies()->IsSupervisedUser();
+}
+
+bool StarterDelegateAndroid::GetIsAllowedForMachineLearning() {
+  return GetCommonDependencies()->IsAllowedForMachineLearning();
 }
 
 bool StarterDelegateAndroid::GetIsCustomTab() const {
-  return dependencies_->IsCustomTab(GetWebContents());
+  return dependencies_->GetPlatformDependencies()->IsCustomTab(
+      GetWebContents());
 }
 
 bool StarterDelegateAndroid::GetIsWebLayer() const {
-  return dependencies_->IsWebLayer();
+  return GetCommonDependencies()->IsWebLayer();
 }
 
 bool StarterDelegateAndroid::GetIsTabCreatedByGSA() const {
@@ -288,6 +294,20 @@ void StarterDelegateAndroid::CreateJavaDependenciesIfNecessary() {
   java_onboarding_helper_ = *(++array.begin());
 }
 
+void StarterDelegateAndroid::HeadlessControllerDoneCallback(
+    HeadlessScriptController::ScriptResult result) {
+  assistant_ui_delegate_.reset();
+  headless_script_controller_.reset();
+}
+
+const PreferenceManager& StarterDelegateAndroid::GetPreferenceManager() const {
+  return preference_manager_;
+}
+
+PreferenceManager& StarterDelegateAndroid::GetPreferenceManager() {
+  return preference_manager_;
+}
+
 void StarterDelegateAndroid::Start(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller,
@@ -305,7 +325,38 @@ void StarterDelegateAndroid::Start(
       /* onboarding_shown = */ false, /* is_direct_action = */ false,
       jinitial_url, GetIsCustomTab());
 
-  starter_->Start(std::move(trigger_context));
+  const bool use_assistant_ui =
+      base::FeatureList::IsEnabled(
+          features::kAutofillAssistantRemoteAssistantUi) &&
+      trigger_context->GetScriptParameters().GetUseAssistantUi();
+  const bool run_headless =
+      trigger_context->GetScriptParameters().GetRunHeadless();
+  if (use_assistant_ui || run_headless) {
+    if (use_assistant_ui) {
+      assistant_ui_delegate_ = std::make_unique<AssistantUiActionDelegate>();
+    }
+    auto client = std::make_unique<ClientHeadless>(
+        &GetWebContents(), starter_->GetCommonDependencies(),
+        /* action_extension_delegate= */
+        use_assistant_ui ? assistant_ui_delegate_.get() : nullptr,
+        GetWebsiteLoginManager(), base::DefaultTickClock::GetInstance(),
+        RuntimeManager::GetForWebContents(&GetWebContents())->GetWeakPtr(),
+        ukm::UkmRecorder::Get(),
+        starter_->GetCommonDependencies()
+            ->GetOrCreateAnnotateDomModelService());
+    headless_script_controller_ =
+        std::make_unique<HeadlessScriptControllerImpl>(
+            &GetWebContents(), starter_.get(), std::move(client));
+
+    headless_script_controller_->StartScript(
+        // Note: this ignores device-only parameters.
+        ui_controller_android_utils::CreateStringMapFromJava(
+            env, jparameter_names, jparameter_values),
+        base::BindOnce(&StarterDelegateAndroid::HeadlessControllerDoneCallback,
+                       base::Unretained(this)));
+  } else {
+    starter_->Start(std::move(trigger_context));
+  }
 }
 
 void StarterDelegateAndroid::StartScriptDefaultUi(
@@ -346,11 +397,21 @@ bool StarterDelegateAndroid::IsRegularScriptVisible() const {
 
 std::unique_ptr<AssistantFieldTrialUtil>
 StarterDelegateAndroid::CreateFieldTrialUtil() {
-  return dependencies_->CreateFieldTrialUtil();
+  return GetCommonDependencies()->CreateFieldTrialUtil();
 }
 
 bool StarterDelegateAndroid::IsAttached() {
   return !!java_object_;
+}
+
+const CommonDependencies* StarterDelegateAndroid::GetCommonDependencies()
+    const {
+  return dependencies_->GetCommonDependencies();
+}
+
+const PlatformDependencies* StarterDelegateAndroid::GetPlatformDependencies()
+    const {
+  return dependencies_->GetPlatformDependencies();
 }
 
 base::WeakPtr<StarterPlatformDelegate> StarterDelegateAndroid::GetWeakPtr() {

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,6 +58,41 @@ MATCHER_P2(LayoutWithSize, width, height, "") {
 
 MATCHER_P(LayoutWithOptions, options, "") {
   return arg.options() == options;
+}
+
+blink::WebMouseEvent CreateLeftClickWebMouseEventAtPositionWithClickCount(
+    const gfx::PointF& position,
+    int click_count_param) {
+  return blink::WebMouseEvent(
+      blink::WebInputEvent::Type::kMouseDown, /*position=*/position,
+      /*global_position=*/position, blink::WebPointerProperties::Button::kLeft,
+      click_count_param, blink::WebInputEvent::Modifiers::kLeftButtonDown,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
+}
+
+blink::WebMouseEvent CreateLeftClickWebMouseEventAtPosition(
+    const gfx::PointF& position) {
+  return CreateLeftClickWebMouseEventAtPositionWithClickCount(position, 1);
+}
+
+blink::WebMouseEvent CreateRightClickWebMouseEventAtPosition(
+    const gfx::PointF& position) {
+  return blink::WebMouseEvent(
+      blink::WebInputEvent::Type::kMouseDown, /*position=*/position,
+      /*global_position=*/position, blink::WebPointerProperties::Button::kRight,
+      /*click_count_param=*/1,
+      blink::WebInputEvent::Modifiers::kRightButtonDown,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
+}
+
+blink::WebMouseEvent CreateMoveWebMouseEventToPosition(
+    const gfx::PointF& position) {
+  return blink::WebMouseEvent(
+      blink::WebInputEvent::Type::kMouseMove, /*position=*/position,
+      /*global_position=*/position,
+      blink::WebPointerProperties::Button::kNoButton, /*click_count_param=*/0,
+      blink::WebInputEvent::Modifiers::kNoModifiers,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
 }
 
 class MockTestClient : public TestClient {
@@ -183,7 +218,7 @@ TEST_F(PDFiumEngineTest, InitializeWithRectanglesMultiPagesPdfInTwoUpView) {
   options.set_page_spread(DocumentLayout::PageSpread::kTwoUpOdd);
   EXPECT_CALL(client, ProposeDocumentLayout(LayoutWithOptions(options)))
       .WillOnce(Return());
-  engine->SetTwoUpView(true);
+  engine->SetDocumentLayout(DocumentLayout::PageSpread::kTwoUpOdd);
 
   engine->ApplyDocumentLayout(options);
 
@@ -468,6 +503,39 @@ TEST_F(PDFiumEngineTest, GetBadPdfVersion) {
   EXPECT_EQ(PdfVersion::kUnknown, doc_metadata.version);
 }
 
+TEST_F(PDFiumEngineTest, GetNamedDestination) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("named_destinations.pdf"));
+  ASSERT_TRUE(engine);
+  ASSERT_EQ(2, engine->GetNumberOfPages());
+
+  // A destination with a valid page object
+  absl::optional<PDFEngine::NamedDestination> valid_page_obj =
+      engine->GetNamedDestination("ValidPageObj");
+  ASSERT_TRUE(valid_page_obj.has_value());
+  EXPECT_EQ(0u, valid_page_obj->page);
+  EXPECT_EQ("XYZ", valid_page_obj->view);
+  ASSERT_EQ(3u, valid_page_obj->num_params);
+  EXPECT_EQ(1.2f, valid_page_obj->params[2]);
+
+  // A destination with an invalid page object
+  absl::optional<PDFEngine::NamedDestination> invalid_page_obj =
+      engine->GetNamedDestination("InvalidPageObj");
+  ASSERT_FALSE(invalid_page_obj.has_value());
+
+  // A destination with a valid page number
+  absl::optional<PDFEngine::NamedDestination> valid_page_number =
+      engine->GetNamedDestination("ValidPageNumber");
+  ASSERT_TRUE(valid_page_number.has_value());
+  EXPECT_EQ(1u, valid_page_number->page);
+
+  // A destination with an out-of-range page number
+  absl::optional<PDFEngine::NamedDestination> invalid_page_number =
+      engine->GetNamedDestination("OutOfRangePageNumber");
+  EXPECT_FALSE(invalid_page_number.has_value());
+}
+
 TEST_F(PDFiumEngineTest, PluginSizeUpdatedBeforeLoad) {
   NiceMock<MockTestClient> client;
   InitializeEngineResult initialize_result = InitializeEngineWithoutLoading(
@@ -645,23 +713,69 @@ TEST_F(PDFiumEngineTest, HandleInputEventRawKeyDown) {
   EXPECT_TRUE(engine->HandleInputEvent(raw_key_down_event));
 }
 
+namespace {
+#if BUILDFLAG(IS_WIN)
+constexpr char kSelectTextExpectedText[] =
+    "Hello, world!\r\nGoodbye, world!\r\nHello, world!\r\nGoodbye, world!";
+#else
+constexpr char kSelectTextExpectedText[] =
+    "Hello, world!\nGoodbye, world!\nHello, world!\nGoodbye, world!";
+#endif
+}  // namespace
+
 TEST_F(PDFiumEngineTest, SelectText) {
   NiceMock<MockTestClient> client;
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("hello_world2.pdf"));
   ASSERT_TRUE(engine);
 
+  EXPECT_TRUE(engine->HasPermission(DocumentPermission::kCopy));
+
   EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
 
   engine->SelectAll();
+  EXPECT_EQ(kSelectTextExpectedText, engine->GetSelectedText());
+}
+
+TEST_F(PDFiumEngineTest, SelectTextBackwards) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("hello_world2.pdf"));
+  ASSERT_TRUE(engine);
+
+  // Plugin size chosen so all pages of the document are visible.
+  engine->PluginSizeUpdated({1024, 4096});
+
+  EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
+
+  constexpr gfx::PointF kSecondPageBeginPosition(100, 420);
+  constexpr gfx::PointF kFirstPageEndPosition(100, 120);
+  EXPECT_TRUE(engine->HandleInputEvent(
+      CreateLeftClickWebMouseEventAtPosition(kSecondPageBeginPosition)));
+  EXPECT_TRUE(engine->HandleInputEvent(
+      CreateMoveWebMouseEventToPosition(kFirstPageEndPosition)));
+
 #if BUILDFLAG(IS_WIN)
-  constexpr char kExpectedText[] =
-      "Hello, world!\r\nGoodbye, world!\r\nHello, world!\r\nGoodbye, world!";
+  constexpr char kExpectedText[] = "bye, world!\r\nHello, world!\r\nGoodby";
 #else
-  constexpr char kExpectedText[] =
-      "Hello, world!\nGoodbye, world!\nHello, world!\nGoodbye, world!";
+  constexpr char kExpectedText[] = "bye, world!\nHello, world!\nGoodby";
 #endif
   EXPECT_EQ(kExpectedText, engine->GetSelectedText());
+}
+
+TEST_F(PDFiumEngineTest, SelectTextWithCopyRestriction) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine = InitializeEngine(
+      &client, FILE_PATH_LITERAL("hello_world2_with_copy_restriction.pdf"));
+  ASSERT_TRUE(engine);
+
+  EXPECT_FALSE(engine->HasPermission(DocumentPermission::kCopy));
+
+  // The copy restriction should not affect the text selection hehavior.
+  EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
+
+  engine->SelectAll();
+  EXPECT_EQ(kSelectTextExpectedText, engine->GetSelectedText());
 }
 
 TEST_F(PDFiumEngineTest, SelectCroppedText) {
@@ -679,6 +793,87 @@ TEST_F(PDFiumEngineTest, SelectCroppedText) {
   constexpr char kExpectedText[] = "world!\n";
 #endif
   EXPECT_EQ(kExpectedText, engine->GetSelectedText());
+}
+
+TEST_F(PDFiumEngineTest, SelectTextWithDoubleClick) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("hello_world2.pdf"));
+  ASSERT_TRUE(engine);
+
+  // Plugin size chosen so all pages of the document are visible.
+  engine->PluginSizeUpdated({1024, 4096});
+
+  EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
+
+  constexpr gfx::PointF kPosition(100, 120);
+  EXPECT_TRUE(engine->HandleInputEvent(
+      CreateLeftClickWebMouseEventAtPositionWithClickCount(kPosition, 2)));
+  EXPECT_EQ("Goodbye", engine->GetSelectedText());
+}
+
+TEST_F(PDFiumEngineTest, SelectTextWithTripleClick) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("hello_world2.pdf"));
+  ASSERT_TRUE(engine);
+
+  // Plugin size chosen so all pages of the document are visible.
+  engine->PluginSizeUpdated({1024, 4096});
+
+  EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
+
+  constexpr gfx::PointF kPosition(100, 120);
+  EXPECT_TRUE(engine->HandleInputEvent(
+      CreateLeftClickWebMouseEventAtPositionWithClickCount(kPosition, 3)));
+  EXPECT_EQ("Goodbye, world!", engine->GetSelectedText());
+}
+
+TEST_F(PDFiumEngineTest, SelectLinkAreaWithNoText) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("link_annots.pdf"));
+  ASSERT_TRUE(engine);
+
+  // Plugin size chosen so all pages of the document are visible.
+  engine->PluginSizeUpdated({1024, 4096});
+
+  EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
+
+  constexpr gfx::PointF kStartPosition(90, 120);
+  EXPECT_TRUE(engine->HandleInputEvent(
+      CreateLeftClickWebMouseEventAtPosition(kStartPosition)));
+
+  constexpr gfx::PointF kMiddlePosition(100, 230);
+  EXPECT_TRUE(engine->HandleInputEvent(
+      CreateMoveWebMouseEventToPosition(kMiddlePosition)));
+
+#if BUILDFLAG(IS_WIN)
+  constexpr char kExpectedText[] = "Link Annotations - Page 1\r\nL";
+#else
+  constexpr char kExpectedText[] = "Link Annotations - Page 1\nL";
+#endif
+  EXPECT_EQ(kExpectedText, engine->GetSelectedText());
+
+  constexpr gfx::PointF kEndPosition(430, 230);
+  EXPECT_FALSE(engine->HandleInputEvent(
+      CreateMoveWebMouseEventToPosition(kEndPosition)));
+
+  // This is still `kExpectedText` because of the unit test's uncanny ability to
+  // move the mouse to `kEndPosition` in one move.
+  EXPECT_EQ(kExpectedText, engine->GetSelectedText());
+}
+
+TEST_F(PDFiumEngineTest, SelectTextWithNonPrintableCharacter) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("bug_1357385.pdf"));
+  ASSERT_TRUE(engine);
+
+  EXPECT_THAT(engine->GetSelectedText(), IsEmpty());
+
+  engine->SelectAll();
+  EXPECT_EQ("Hello, world!", engine->GetSelectedText());
 }
 
 using PDFiumEngineDeathTest = PDFiumEngineTest;
@@ -747,7 +942,7 @@ class PDFiumEngineTabbingTest : public PDFiumTestBase {
   }
 };
 
-TEST_F(PDFiumEngineTabbingTest, LinkUnderCursorTest) {
+TEST_F(PDFiumEngineTabbingTest, LinkUnderCursor) {
   /*
    * Document structure
    * Document
@@ -790,6 +985,50 @@ TEST_F(PDFiumEngineTabbingTest, LinkUnderCursorTest) {
   EXPECT_CALL(client, SetLinkUnderCursor(""));
   ASSERT_TRUE(
       HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kShiftKey));
+}
+
+// Test case for crbug.com/1088296
+TEST_F(PDFiumEngineTabbingTest, LinkUnderCursorAfterTabAndRightClick) {
+  NiceMock<MockTestClient> client;
+  std::unique_ptr<PDFiumEngine> engine =
+      InitializeEngine(&client, FILE_PATH_LITERAL("annots.pdf"));
+  ASSERT_TRUE(engine);
+
+  // Ensure the plugin has a pre-determined size, to enable the hit tests below.
+  engine->PluginSizeUpdated({612, 792});
+
+  // Tab to right before the first non-link annotation.
+  EXPECT_CALL(client, DocumentFocusChanged(true));
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
+
+  // Tab through non-link annotations and validate link under cursor.
+  {
+    InSequence sequence;
+    EXPECT_CALL(client, SetLinkUnderCursor(""));
+    EXPECT_CALL(client, DocumentFocusChanged(false));
+  }
+
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
+  EXPECT_CALL(client, SetLinkUnderCursor(""));
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
+  EXPECT_CALL(client, SetLinkUnderCursor(""));
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
+
+  // Tab to Link annotation.
+  EXPECT_CALL(client, SetLinkUnderCursor("https://www.google.com/"));
+  ASSERT_TRUE(HandleTabEvent(engine.get(), /*modifiers=*/0));
+
+  // Right click somewhere far away should reset the link.
+  constexpr gfx::PointF kOffScreenPosition(0, 0);
+  EXPECT_CALL(client, SetLinkUnderCursor(""));
+  EXPECT_FALSE(engine->HandleInputEvent(
+      CreateRightClickWebMouseEventAtPosition(kOffScreenPosition)));
+
+  // Right click on the link should set it again.
+  constexpr gfx::PointF kLinkPosition(170, 595);
+  EXPECT_CALL(client, SetLinkUnderCursor("https://www.google.com/"));
+  EXPECT_FALSE(engine->HandleInputEvent(
+      CreateRightClickWebMouseEventAtPosition(kLinkPosition)));
 }
 
 TEST_F(PDFiumEngineTabbingTest, TabbingSupportedAnnots) {
@@ -848,7 +1087,7 @@ TEST_F(PDFiumEngineTabbingTest, TabbingSupportedAnnots) {
             GetFocusedElementType(engine.get()));
 }
 
-TEST_F(PDFiumEngineTabbingTest, TabbingForwardTest) {
+TEST_F(PDFiumEngineTabbingTest, TabbingForward) {
   /*
    * Document structure
    * Document
@@ -900,7 +1139,7 @@ TEST_F(PDFiumEngineTabbingTest, TabbingForwardTest) {
             GetFocusedElementType(engine.get()));
 }
 
-TEST_F(PDFiumEngineTabbingTest, TabbingBackwardTest) {
+TEST_F(PDFiumEngineTabbingTest, TabbingBackward) {
   /*
    * Document structure
    * Document
@@ -1010,7 +1249,7 @@ TEST_F(PDFiumEngineTabbingTest, TabbingWithModifiers) {
       HandleTabEvent(engine.get(), blink::WebInputEvent::Modifiers::kAltKey));
 }
 
-TEST_F(PDFiumEngineTabbingTest, NoFocusableElementTabbingTest) {
+TEST_F(PDFiumEngineTabbingTest, NoFocusableElementTabbing) {
   /*
    * Document structure
    * Document
@@ -1056,7 +1295,7 @@ TEST_F(PDFiumEngineTabbingTest, NoFocusableElementTabbingTest) {
             GetFocusedElementType(engine.get()));
 }
 
-TEST_F(PDFiumEngineTabbingTest, RestoringDocumentFocusTest) {
+TEST_F(PDFiumEngineTabbingTest, RestoringDocumentFocus) {
   /*
    * Document structure
    * Document
@@ -1101,7 +1340,7 @@ TEST_F(PDFiumEngineTabbingTest, RestoringDocumentFocusTest) {
             GetFocusedElementType(engine.get()));
 }
 
-TEST_F(PDFiumEngineTabbingTest, RestoringAnnotFocusTest) {
+TEST_F(PDFiumEngineTabbingTest, RestoringAnnotFocus) {
   /*
    * Document structure
    * Document

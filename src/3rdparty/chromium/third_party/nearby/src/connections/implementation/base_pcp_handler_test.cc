@@ -55,6 +55,9 @@ constexpr std::array<char, 6> kFakeMacAddress = {'a', 'b', 'c', 'd', 'e', 'f'};
 constexpr BooleanMediumSelector kTestCases[] = {
     BooleanMediumSelector{},
     BooleanMediumSelector{
+        .ble = true,
+    },
+    BooleanMediumSelector{
         .bluetooth = true,
     },
     BooleanMediumSelector{
@@ -62,6 +65,19 @@ constexpr BooleanMediumSelector kTestCases[] = {
     },
     BooleanMediumSelector{
         .bluetooth = true,
+        .ble = true,
+    },
+    BooleanMediumSelector{
+        .bluetooth = true,
+        .wifi_lan = true,
+    },
+    BooleanMediumSelector{
+        .ble = true,
+        .wifi_lan = true,
+    },
+    BooleanMediumSelector{
+        .bluetooth = true,
+        .ble = true,
         .wifi_lan = true,
     },
 };
@@ -69,7 +85,7 @@ constexpr BooleanMediumSelector kTestCases[] = {
 class MockEndpointChannel : public BaseEndpointChannel {
  public:
   explicit MockEndpointChannel(Pipe* reader, Pipe* writer)
-      : BaseEndpointChannel("channel", &reader->GetInputStream(),
+      : BaseEndpointChannel("service_id", "channel", &reader->GetInputStream(),
                             &writer->GetOutputStream()) {}
 
   ExceptionOr<ByteArray> DoRead() { return BaseEndpointChannel::Read(); }
@@ -611,6 +627,7 @@ TEST_P(BasePcpHandlerTest, OnIncomingFrameChangesState) {
   EndpointManager em(&ecm);
   BwuManager bwu(m, em, ecm, {}, {});
   MockPcpHandler pcp_handler(&m, &em, &ecm, &bwu);
+  analytics::PacketMetaData packet_meta_data;
   StartDiscovery(&client, &pcp_handler);
   auto mediums = pcp_handler.GetDiscoveryMediums(&client);
   auto connect_medium = mediums[mediums.size() - 1];
@@ -631,7 +648,7 @@ TEST_P(BasePcpHandlerTest, OnIncomingFrameChangesState) {
   auto frame =
       parser::FromBytes(parser::ForConnectionResponse(Status::kSuccess));
   pcp_handler.OnIncomingFrame(frame.result(), endpoint_id, &client,
-                              connect_medium);
+                              connect_medium, packet_meta_data);
   NEARBY_LOGS(INFO) << "Closing connection: id=" << endpoint_id;
   channel_b->Close();
   bwu.Shutdown();

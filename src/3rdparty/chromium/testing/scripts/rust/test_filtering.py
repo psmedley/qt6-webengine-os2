@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """This is a library for handling of --isolated-script-test-filter and
@@ -56,8 +56,7 @@ class _TestFilter:
         """
         if self._is_prefix_match:
             return test_name.startswith(self._filter_text)
-        else:
-            return test_name == self._filter_text
+        return test_name == self._filter_text
 
     def is_exclusion_filter(self):
         """Rreturns whether this filter excludes (rather than includes) matching

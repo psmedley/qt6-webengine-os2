@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "components/reporting/client/dm_token_retriever.h"
 #include "components/reporting/util/statusor.h"
 
-namespace reporting {
-
 using ::base::test::RunOnceCallback;
 using ::testing::_;
+
+namespace reporting {
 
 MockDMTokenRetriever::MockDMTokenRetriever() = default;
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
+#include "net/cert/test_root_certs.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
@@ -27,6 +28,7 @@ namespace net {
 
 class AddressList;
 class ScopedPortException;
+class ScopedTestRoot;
 class X509Certificate;
 
 // The base class of Test server implementation.
@@ -176,11 +178,11 @@ class BaseTestServer {
   }
 
   // Registers the test server's certs for the current process.
-  static void RegisterTestCerts();
+  [[nodiscard]] static ScopedTestRoot RegisterTestCerts();
 
   // Marks the root certificate of an HTTPS test server as trusted for
   // the duration of tests.
-  [[nodiscard]] bool LoadTestRootCert() const;
+  [[nodiscard]] bool LoadTestRootCert();
 
   // Returns the certificate that the server is using.
   scoped_refptr<X509Certificate> GetCertificate() const;
@@ -217,14 +219,12 @@ class BaseTestServer {
   [[nodiscard]] bool SetAndParseServerData(const std::string& server_data,
                                            int* port);
 
-  // Generates a DictionaryValue with the arguments for launching the external
-  // Python test server.
-  [[nodiscard]] bool GenerateArguments(base::DictionaryValue* arguments) const;
-
-  // Subclasses can override this to add arguments that are specific to their
-  // own test servers.
-  [[nodiscard]] virtual bool GenerateAdditionalArguments(
-      base::DictionaryValue* arguments) const;
+  // Returns a base::Value::Dict with the arguments for launching the external
+  // Python test server, in the form of
+  // { argument-name: argument-value, ... }
+  //
+  // Returns nullopt if an invalid configuration is specified.
+  absl::optional<base::Value::Dict> GenerateArguments() const;
 
  private:
   void Init(const std::string& host);
@@ -234,6 +234,8 @@ class BaseTestServer {
 
   // Directory that contains the SSL certificates.
   base::FilePath certificates_dir_;
+
+  ScopedTestRoot scoped_test_root_;
 
   // Address on which the tests should connect to the server. With
   // RemoteTestServer it may be different from the address on which the server

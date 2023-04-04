@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,7 +57,7 @@ struct URL_MATCHER_EXPORT FilterComponents {
 // or block-list (false) filter.
 URL_MATCHER_EXPORT scoped_refptr<url_matcher::URLMatcherConditionSet>
 CreateConditionSet(url_matcher::URLMatcher* url_matcher,
-                   url_matcher::URLMatcherConditionSet::ID id,
+                   base::MatcherStringPattern::ID id,
                    const std::string& scheme,
                    const std::string& host,
                    bool match_subdomains,
@@ -98,9 +98,9 @@ URL_MATCHER_EXPORT bool FilterToComponents(const std::string& filter,
 URL_MATCHER_EXPORT void AddFilters(
     url_matcher::URLMatcher* matcher,
     bool allow,
-    url_matcher::URLMatcherConditionSet::ID* id,
-    const base::ListValue* patterns,
-    std::map<url_matcher::URLMatcherConditionSet::ID,
+    base::MatcherStringPattern::ID* id,
+    const base::Value::List& patterns,
+    std::map<base::MatcherStringPattern::ID,
              url_matcher::util::FilterComponents>* filters = nullptr);
 
 // Adds the filters in `patterns` to `url_matcher` as a ConditionSet::Vector.
@@ -115,13 +115,13 @@ URL_MATCHER_EXPORT void AddFilters(
 URL_MATCHER_EXPORT void AddFilters(
     url_matcher::URLMatcher* matcher,
     bool allow,
-    url_matcher::URLMatcherConditionSet::ID* id,
+    base::MatcherStringPattern::ID* id,
     const std::vector<std::string>& patterns,
-    std::map<url_matcher::URLMatcherConditionSet::ID,
+    std::map<base::MatcherStringPattern::ID,
              url_matcher::util::FilterComponents>* filters = nullptr);
 
 URL_MATCHER_EXPORT void AddAllowFilters(url_matcher::URLMatcher* matcher,
-                                        const base::ListValue* patterns);
+                                        const base::Value::List& patterns);
 
 URL_MATCHER_EXPORT void AddAllowFilters(
     url_matcher::URLMatcher* matcher,

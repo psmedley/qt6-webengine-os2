@@ -38,7 +38,8 @@ bool CPDF_CryptoHandler::IsSignatureDictionary(
     const CPDF_Dictionary* dictionary) {
   if (!dictionary)
     return false;
-  const CPDF_Object* type_obj = dictionary->GetDirectObjectFor(kTypeKey);
+  RetainPtr<const CPDF_Object> type_obj =
+      dictionary->GetDirectObjectFor(kTypeKey);
   if (!type_obj)
     type_obj = dictionary->GetDirectObjectFor(pdfium::form_fields::kFT);
   return type_obj && type_obj->GetString() == pdfium::form_fields::kSig;
@@ -135,7 +136,7 @@ void* CPDF_CryptoHandler::DecryptStart(uint32_t objnum, uint32_t gennum) {
 
 bool CPDF_CryptoHandler::DecryptStream(void* context,
                                        pdfium::span<const uint8_t> source,
-                                       CFX_BinaryBuf& dest_buf) {
+                                       BinaryBuffer& dest_buf) {
   if (!context)
     return false;
 
@@ -144,10 +145,11 @@ bool CPDF_CryptoHandler::DecryptStream(void* context,
     return true;
   }
   if (m_Cipher == Cipher::kRC4) {
-    int old_size = dest_buf.GetSize();
+    size_t old_size = dest_buf.GetSize();
     dest_buf.AppendBlock(source.data(), source.size());
-    CRYPT_ArcFourCrypt(static_cast<CRYPT_rc4_context*>(context),
-                       dest_buf.GetSpan().subspan(old_size, source.size()));
+    CRYPT_ArcFourCrypt(
+        static_cast<CRYPT_rc4_context*>(context),
+        dest_buf.GetMutableSpan().subspan(old_size, source.size()));
     return true;
   }
   AESCryptContext* pContext = static_cast<AESCryptContext*>(context);
@@ -183,7 +185,7 @@ bool CPDF_CryptoHandler::DecryptStream(void* context,
   return true;
 }
 
-bool CPDF_CryptoHandler::DecryptFinish(void* context, CFX_BinaryBuf& dest_buf) {
+bool CPDF_CryptoHandler::DecryptFinish(void* context, BinaryBuffer& dest_buf) {
   if (!context)
     return false;
 
@@ -209,7 +211,7 @@ bool CPDF_CryptoHandler::DecryptFinish(void* context, CFX_BinaryBuf& dest_buf) {
 ByteString CPDF_CryptoHandler::Decrypt(uint32_t objnum,
                                        uint32_t gennum,
                                        const ByteString& str) {
-  CFX_BinaryBuf dest_buf;
+  BinaryBuffer dest_buf;
   void* context = DecryptStart(objnum, gennum);
   DecryptStream(context, str.raw_span(), dest_buf);
   DecryptFinish(context, dest_buf);
@@ -230,19 +232,18 @@ bool CPDF_CryptoHandler::DecryptObjectTree(RetainPtr<CPDF_Object> object) {
 
   struct MayBeSignature {
     const CPDF_Dictionary* parent;
-    CPDF_Object* contents;
+    RetainPtr<CPDF_Object> contents;
   };
 
   std::stack<MayBeSignature> may_be_sign_dictionaries;
   const uint32_t obj_num = object->GetObjNum();
   const uint32_t gen_num = object->GetGenNum();
 
-  CPDF_Object* object_to_decrypt = object.Get();
+  RetainPtr<CPDF_Object> object_to_decrypt = object;
   while (object_to_decrypt) {
-    CPDF_NonConstObjectWalker walker(object_to_decrypt);
-    object_to_decrypt = nullptr;
-    while (CPDF_Object* child = walker.GetNext()) {
-      const CPDF_Dictionary* parent_dict =
+    CPDF_NonConstObjectWalker walker(std::move(object_to_decrypt));
+    while (RetainPtr<CPDF_Object> child = walker.GetNext()) {
+      RetainPtr<const CPDF_Dictionary> parent_dict =
           walker.GetParent() ? walker.GetParent()->GetDict() : nullptr;
       if (walker.dictionary_key() == kContentsKey &&
           (parent_dict->KeyExist(kTypeKey) ||
@@ -253,21 +254,22 @@ bool CPDF_CryptoHandler::DecryptObjectTree(RetainPtr<CPDF_Object> object) {
         // Temporary skip it, to prevent signature corruption.
         // It will be decrypted on next interations, if this is not contents of
         // signature dictionary.
-        may_be_sign_dictionaries.push(MayBeSignature({parent_dict, child}));
+        may_be_sign_dictionaries.push({parent_dict.Get(), std::move(child)});
         walker.SkipWalkIntoCurrentObject();
         continue;
       }
       // Strings decryption.
       if (child->IsString()) {
         // TODO(art-snake): Move decryption into the CPDF_String class.
-        CPDF_String* str = child->AsString();
+        CPDF_String* str = child->AsMutableString();
         str->SetString(Decrypt(obj_num, gen_num, str->GetString()));
       }
       // Stream decryption.
       if (child->IsStream()) {
         // TODO(art-snake): Move decryption into the CPDF_Stream class.
-        CPDF_Stream* stream = child->AsStream();
-        auto stream_access = pdfium::MakeRetain<CPDF_StreamAcc>(stream);
+        CPDF_Stream* stream = child->AsMutableStream();
+        auto stream_access =
+            pdfium::MakeRetain<CPDF_StreamAcc>(pdfium::WrapRetain(stream));
         stream_access->LoadAllDataRaw();
 
         if (IsCipherAES() && stream_access->GetSize() < 16) {
@@ -275,7 +277,7 @@ bool CPDF_CryptoHandler::DecryptObjectTree(RetainPtr<CPDF_Object> object) {
           continue;
         }
 
-        CFX_BinaryBuf decrypted_buf;
+        BinaryBuffer decrypted_buf;
         decrypted_buf.EstimateSize(DecryptGetSize(stream_access->GetSize()));
 
         void* context = DecryptStart(obj_num, gen_num);
@@ -283,8 +285,7 @@ bool CPDF_CryptoHandler::DecryptObjectTree(RetainPtr<CPDF_Object> object) {
             DecryptStream(context, stream_access->GetSpan(), decrypted_buf);
         decrypt_result &= DecryptFinish(context, decrypted_buf);
         if (decrypt_result) {
-          const uint32_t decrypted_size = decrypted_buf.GetSize();
-          stream->TakeData(decrypted_buf.DetachBuffer(), decrypted_size);
+          stream->TakeData(decrypted_buf.DetachBuffer());
         } else {
           // Decryption failed, set the stream to empty
           stream->SetData({});

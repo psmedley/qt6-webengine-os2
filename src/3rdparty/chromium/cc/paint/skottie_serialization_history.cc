@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,10 +16,9 @@ namespace cc {
 
 SkottieSerializationHistory::SkottieFrameDataId::SkottieFrameDataId(
     const SkottieFrameData& frame_data)
-    : paint_image_id(frame_data.image.stable_id()),
-      quality(frame_data.quality) {
-  DCHECK_NE(paint_image_id, PaintImage::kInvalidId);
-}
+    : paint_image_id(frame_data.image ? frame_data.image.stable_id()
+                                      : PaintImage::kInvalidId),
+      quality(frame_data.quality) {}
 
 bool SkottieSerializationHistory::SkottieFrameDataId::operator==(
     const SkottieFrameDataId& other) const {

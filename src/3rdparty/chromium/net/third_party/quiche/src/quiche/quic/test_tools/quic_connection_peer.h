@@ -53,6 +53,10 @@ class QuicConnectionPeer {
 
   static QuicTime::Delta GetHandshakeTimeout(QuicConnection* connection);
 
+  static QuicTime::Delta GetBandwidthUpdateTimeout(QuicConnection* connection);
+
+  static void DisableBandwidthUpdate(QuicConnection* connection);
+
   static void SetPerspective(QuicConnection* connection,
                              Perspective perspective);
 
@@ -128,8 +132,6 @@ class QuicConnectionPeer {
   static bool SupportsReleaseTime(QuicConnection* connection);
   static QuicConnection::PacketContent GetCurrentPacketContent(
       QuicConnection* connection);
-  static void SetLastHeaderFormat(QuicConnection* connection,
-                                  PacketHeaderFormat format);
   static void AddBytesReceived(QuicConnection* connection, size_t length);
   static void SetAddressValidated(QuicConnection* connection);
 
@@ -172,6 +174,8 @@ class QuicConnectionPeer {
                                               const QuicSocketAddress& address);
 
   static QuicPathValidator* path_validator(QuicConnection* connection);
+
+  static QuicByteCount BytesReceivedOnDefaultPath(QuicConnection* connection);
 
   static QuicByteCount BytesSentOnAlternativePath(QuicConnection* connection);
 
@@ -220,6 +224,8 @@ class QuicConnectionPeer {
   static QuicCoalescedPacket& GetCoalescedPacket(QuicConnection* connection);
 
   static void FlushCoalescedPacket(QuicConnection* connection);
+
+  static QuicAlarm* GetMultiPortProbingAlarm(QuicConnection* connection);
 };
 
 }  // namespace test

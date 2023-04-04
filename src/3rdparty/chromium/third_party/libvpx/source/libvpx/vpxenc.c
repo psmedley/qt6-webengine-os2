@@ -524,9 +524,12 @@ static const arg_def_t row_mt =
 
 static const arg_def_t disable_loopfilter =
     ARG_DEF(NULL, "disable-loopfilter", 1,
-            "Control Loopfilter in VP9\n"
+            "Control Loopfilter in VP9:\n"
+            "                                          "
             "0: Loopfilter on for all frames (default)\n"
+            "                                          "
             "1: Loopfilter off for non reference frames\n"
+            "                                          "
             "2: Loopfilter off for all frames");
 #endif
 
@@ -1703,6 +1706,10 @@ int main(int argc, const char **argv_) {
    * codec.
    */
   argv = argv_dup(argc - 1, argv_ + 1);
+  if (!argv) {
+    fprintf(stderr, "Error allocating argument list\n");
+    return EXIT_FAILURE;
+  }
   parse_global_config(&global, argv);
 
   if (argc < 3) usage_exit();

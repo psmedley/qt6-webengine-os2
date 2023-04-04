@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,6 +128,20 @@ TEST_F(WebUIMetricsReporterTest, HasMark) {
         std::move(callback).Run(base::TimeTicks::Now().since_origin());
       });
   metrics_reporter_.HasMark("remote_mark", TestHasMarkCallback(true));
+}
+
+// HasLocalMark() should check only local marks.
+TEST_F(WebUIMetricsReporterTest, HasLocalMark) {
+  EXPECT_FALSE(metrics_reporter_.HasLocalMark("local_mark"));
+  metrics_reporter_.Mark("local_mark");
+  EXPECT_TRUE(metrics_reporter_.HasLocalMark("local_mark"));
+
+  ON_CALL(page_metrics_, OnGetMark("remote_mark", _))
+      .WillByDefault([](const std::string& mark,
+                        MetricsReporter::OnGetMarkCallback callback) {
+        std::move(callback).Run(base::TimeTicks::Now().since_origin());
+      });
+  EXPECT_FALSE(metrics_reporter_.HasLocalMark("remote_mark"));
 }
 
 // ClearMark() should clear both local and remote marks.

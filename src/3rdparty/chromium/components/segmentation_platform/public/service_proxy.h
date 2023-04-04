@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,12 @@
 #include <vector>
 
 #include "base/observer_list_types.h"
-#include "components/optimization_guide/proto/models.pb.h"
-
-using optimization_guide::proto::OptimizationTarget;
+#include "components/segmentation_platform/public/proto/segmentation_platform.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace segmentation_platform {
+
+using proto::SegmentId;
 
 // A helper class to expose internals of the segmentationss service to a logging
 // component and/or debug UI.
@@ -21,11 +22,11 @@ class ServiceProxy {
  public:
   // Status about a segment.
   struct SegmentStatus {
-    SegmentStatus(OptimizationTarget segment_id,
+    SegmentStatus(SegmentId segment_id,
                   const std::string& segment_metadata,
                   const std::string& prediction_result,
                   bool can_execute_segment);
-    OptimizationTarget segment_id;
+    SegmentId segment_id;
     std::string segment_metadata;
     std::string prediction_result;
     bool can_execute_segment;
@@ -34,12 +35,12 @@ class ServiceProxy {
   // Information about a client to the segmentation platform.
   struct ClientInfo {
     ClientInfo(const std::string& segmentation_key,
-               OptimizationTarget selected_segment);
+               absl::optional<SegmentId> selected_segment);
     ~ClientInfo();
     ClientInfo(const ClientInfo& other);
 
     std::string segmentation_key;
-    OptimizationTarget selected_segment;
+    absl::optional<SegmentId> selected_segment;
     std::vector<SegmentStatus> segment_status;
   };
 
@@ -63,16 +64,16 @@ class ServiceProxy {
   virtual void GetServiceStatus() = 0;
 
   // Executes the given segment identified by |segment_id|.
-  virtual void ExecuteModel(OptimizationTarget segment_id) = 0;
+  virtual void ExecuteModel(SegmentId segment_id) = 0;
 
   // Overwrites the result for the given segment identified by |segment_id|.
   // This will trigger a new round of segment selection and update the existing
   // result in Prefs.
-  virtual void OverwriteResult(OptimizationTarget segment_id, float result) = 0;
+  virtual void OverwriteResult(SegmentId segment_id, float result) = 0;
 
   // Sets the selected segment for the config identified by |segment_id|.
   virtual void SetSelectedSegment(const std::string& segmentation_key,
-                                  OptimizationTarget segment_id) = 0;
+                                  SegmentId segment_id) = 0;
 
  protected:
   ServiceProxy() = default;

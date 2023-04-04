@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
-import org.chromium.base.metrics.test.ShadowRecordHistogram;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.components.variations.VariationsCompressionUtils.InstanceManipulations;
 
@@ -25,7 +24,7 @@ import java.nio.charset.StandardCharsets;
  * Tests for VariationsCompressionUtils
  */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowRecordHistogram.class})
+@Config(manifest = Config.NONE)
 public class VariationsCompressionUtilsTest {
     /**
      * Test method for successful {@link VariationsSeedFetcher#getInstanceManipulations}

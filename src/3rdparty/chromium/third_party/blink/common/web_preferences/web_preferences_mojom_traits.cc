@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       !data.ReadSansSerifFontFamilyMap(&out->sans_serif_font_family_map) ||
       !data.ReadCursiveFontFamilyMap(&out->cursive_font_family_map) ||
       !data.ReadFantasyFontFamilyMap(&out->fantasy_font_family_map) ||
+      !data.ReadMathFontFamilyMap(&out->math_font_family_map) ||
       !data.ReadLazyFrameLoadingDistanceThresholdsPx(
           &out->lazy_frame_loading_distance_thresholds_px) ||
       !data.ReadLazyImageLoadingDistanceThresholdsPx(
@@ -35,7 +36,6 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       !data.ReadTextTrackFontStyle(&out->text_track_font_style) ||
       !data.ReadTextTrackFontVariant(&out->text_track_font_variant) ||
       !data.ReadTextTrackWindowColor(&out->text_track_window_color) ||
-      !data.ReadTextTrackWindowPadding(&out->text_track_window_padding) ||
       !data.ReadTextTrackWindowRadius(&out->text_track_window_radius) ||
       !data.ReadPrimaryPointerType(&out->primary_pointer_type) ||
       !data.ReadPrimaryHoverType(&out->primary_hover_type) ||
@@ -69,7 +69,6 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->allow_scripts_to_close_windows = data.allow_scripts_to_close_windows();
   out->remote_fonts_enabled = data.remote_fonts_enabled();
   out->javascript_can_access_clipboard = data.javascript_can_access_clipboard();
-  out->xslt_enabled = data.xslt_enabled();
   out->dns_prefetching_enabled = data.dns_prefetching_enabled();
   out->data_saver_enabled = data.data_saver_enabled();
   out->local_storage_enabled = data.local_storage_enabled();
@@ -88,6 +87,7 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       data.privileged_webgl_extensions_enabled();
   out->webgl_errors_to_console_enabled = data.webgl_errors_to_console_enabled();
   out->hide_scrollbars = data.hide_scrollbars();
+  out->enable_webkit_scrollbar_styling = data.enable_webkit_scrollbar_styling();
   out->accelerated_2d_canvas_enabled = data.accelerated_2d_canvas_enabled();
   out->canvas_2d_layers_enabled = data.canvas_2d_layers_enabled();
   out->antialiased_2d_canvas_disabled = data.antialiased_2d_canvas_disabled();
@@ -132,6 +132,8 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->supports_multiple_windows = data.supports_multiple_windows();
   out->viewport_enabled = data.viewport_enabled();
   out->viewport_meta_enabled = data.viewport_meta_enabled();
+  out->auto_zoom_focused_editable_to_legible_scale =
+      data.auto_zoom_focused_editable_to_legible_scale();
   out->shrinks_viewport_contents_to_fit =
       data.shrinks_viewport_contents_to_fit();
   out->smooth_scroll_for_find_enabled = data.smooth_scroll_for_find_enabled();
@@ -146,6 +148,7 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       data.fake_no_alloc_direct_call_for_testing_enabled();
   out->v8_cache_options = data.v8_cache_options();
   out->record_whole_document = data.record_whole_document();
+  out->stylus_handwriting_enabled = data.stylus_handwriting_enabled();
   out->cookie_enabled = data.cookie_enabled();
   out->accelerated_video_decode_enabled =
       data.accelerated_video_decode_enabled();
@@ -214,6 +217,8 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->always_show_focus = data.always_show_focus();
   out->touch_drag_drop_enabled = data.touch_drag_drop_enabled();
   out->webxr_immersive_ar_allowed = data.webxr_immersive_ar_allowed();
+  out->renderer_wide_named_frame_lookup =
+      data.renderer_wide_named_frame_lookup();
   return true;
 }
 

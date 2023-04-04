@@ -16,8 +16,10 @@ class GrGLCaps;
 
 class GrGLBuffer : public GrGpuBuffer {
 public:
-    static sk_sp<GrGLBuffer> Make(GrGLGpu*, size_t size, GrGpuBufferType intendedType,
-                                  GrAccessPattern, const void* data = nullptr);
+    static sk_sp<GrGLBuffer> Make(GrGLGpu*,
+                                  size_t size,
+                                  GrGpuBufferType intendedType,
+                                  GrAccessPattern);
 
     ~GrGLBuffer() override {
         // either release or abandon should have been called by the owner of this object.
@@ -25,12 +27,6 @@ public:
     }
 
     GrGLuint bufferID() const { return fBufferID; }
-
-    /**
-     * Returns the actual size of the underlying GL buffer object. In certain cases we may make this
-     * smaller than the size reported by GrGpuBuffer.
-     */
-    size_t glSizeInBytes() const { return fGLSizeInBytes; }
 
     void setHasAttachedToTexture() { fHasAttachedToTexture = true; }
     bool hasAttachedToTexture() const { return fHasAttachedToTexture; }
@@ -40,7 +36,6 @@ protected:
                size_t size,
                GrGpuBufferType intendedType,
                GrAccessPattern,
-               const void* data,
                std::string_view label);
 
     void onAbandon() override;
@@ -52,18 +47,16 @@ private:
     GrGLGpu* glGpu() const;
     const GrGLCaps& glCaps() const;
 
-    void onMap() override;
-    void onUnmap() override;
-    bool onUpdateData(const void* src, size_t srcSizeInBytes) override;
+    void onMap(MapType) override;
+    void onUnmap(MapType) override;
+    bool onClearToZero() override;
+    bool onUpdateData(const void* src, size_t offset, size_t size, bool preserve) override;
 
-#ifdef SK_DEBUG
-    void validate() const;
-#endif
+    void onSetLabel() override;
 
     GrGpuBufferType fIntendedType;
     GrGLuint        fBufferID;
     GrGLenum        fUsage;
-    size_t          fGLSizeInBytes;
     bool            fHasAttachedToTexture;
 
     using INHERITED = GrGpuBuffer;

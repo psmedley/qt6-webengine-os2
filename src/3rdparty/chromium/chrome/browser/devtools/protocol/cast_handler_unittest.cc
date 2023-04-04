@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -147,7 +147,7 @@ TEST_F(CastHandlerTest, StartDesktopMirroring) {
                 media_router::mojom::RoutePresentationConnectionPtr(),
                 media_router::RouteRequestResult(
                     std::make_unique<media_router::MediaRoute>(Route1()), "id",
-                    "", media_router::RouteRequestResult::OK));
+                    "", media_router::mojom::RouteRequestResultCode::OK));
           }));
   EXPECT_CALL(*callback_ptr, sendSuccess());
   handler_->StartDesktopMirroring(kSinkName1, std::move(callback));
@@ -182,7 +182,7 @@ TEST_F(CastHandlerTest, StartTabMirroring) {
                 media_router::mojom::RoutePresentationConnectionPtr(),
                 media_router::RouteRequestResult(
                     std::make_unique<media_router::MediaRoute>(Route1()), "id",
-                    "", media_router::RouteRequestResult::OK));
+                    "", media_router::mojom::RouteRequestResultCode::OK));
           }));
   EXPECT_CALL(*callback_ptr, sendSuccess());
   handler_->StartTabMirroring(kSinkName1, std::move(callback));

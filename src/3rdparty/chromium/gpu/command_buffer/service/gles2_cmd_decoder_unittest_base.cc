@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,8 +141,9 @@ GLES2DecoderTestBase::~GLES2DecoderTestBase() = default;
 
 void GLES2DecoderTestBase::OnConsoleMessage(int32_t id,
                                             const std::string& message) {}
-void GLES2DecoderTestBase::CacheShader(const std::string& key,
-                                       const std::string& shader) {}
+void GLES2DecoderTestBase::CacheBlob(gpu::GpuDiskCacheType type,
+                                     const std::string& key,
+                                     const std::string& blob) {}
 void GLES2DecoderTestBase::OnFenceSyncRelease(uint64_t release) {}
 void GLES2DecoderTestBase::OnDescheduleUntilFinished() {}
 void GLES2DecoderTestBase::OnRescheduleAfterFinished() {}
@@ -196,10 +197,10 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   DCHECK(normalized_init.extensions.empty() ||
          *normalized_init.extensions.rbegin() == ' ');
   gl::SetGLGetProcAddressProc(gl::MockGLInterface::GetGLProcAddress);
-  gl::GLSurfaceTestSupport::InitializeOneOffWithMockBindings();
+  display_ = gl::GLSurfaceTestSupport::InitializeOneOffWithMockBindings();
 
   gl_ = std::make_unique<StrictMock<MockGLInterface>>();
-  ::gl::MockGLInterface::SetGLInterface(gl_.get());
+  gl::MockGLInterface::SetGLInterface(gl_.get());
 
   SetupMockGLBehaviors();
 
@@ -207,21 +208,19 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
   scoped_refptr<FeatureInfo> feature_info =
       new FeatureInfo(workarounds, gpu_feature_info);
 
-  group_ = scoped_refptr<ContextGroup>(
-      new ContextGroup(gpu_preferences_, GetParam(), &mailbox_manager_,
-                       std::move(memory_tracker_), &shader_translator_cache_,
-                       &framebuffer_completeness_cache_, feature_info,
-                       normalized_init.bind_generates_resource, &image_manager_,
-                       nullptr /* image_factory */,
-                       nullptr /* progress_reporter */, gpu_feature_info,
-                       &discardable_manager_, nullptr, &shared_image_manager_));
+  group_ = scoped_refptr<ContextGroup>(new ContextGroup(
+      gpu_preferences_, GetParam(), &mailbox_manager_,
+      std::move(memory_tracker_), &shader_translator_cache_,
+      &framebuffer_completeness_cache_, feature_info,
+      normalized_init.bind_generates_resource, nullptr /* image_factory */,
+      nullptr /* progress_reporter */, gpu_feature_info, &discardable_manager_,
+      nullptr, &shared_image_manager_));
   bool use_default_textures = normalized_init.bind_generates_resource;
 
   InSequence sequence;
 
   surface_ = new gl::GLSurfaceStub;
   surface_->SetSize(gfx::Size(kBackBufferWidth, kBackBufferHeight));
-  surface_->set_supports_draw_rectangle(surface_supports_draw_rectangle_);
 
   // Context needs to be created before initializing ContextGroup, which will
   // in turn initialize FeatureInfo, which needs a context to determine
@@ -620,9 +619,9 @@ void GLES2DecoderTestBase::ResetDecoder() {
   decoder_.reset();
   group_->Destroy(mock_decoder_.get(), false);
   command_buffer_service_.reset();
-  ::gl::MockGLInterface::SetGLInterface(nullptr);
+  gl::MockGLInterface::SetGLInterface(nullptr);
   gl_.reset();
-  gl::init::ShutdownGL(false);
+  gl::GLSurfaceTestSupport::ShutdownGL(display_);
 }
 
 void GLES2DecoderTestBase::TearDown() {
@@ -1400,19 +1399,6 @@ void GLES2DecoderTestBase::DoDeleteTexture(
 
     GenHelper<cmds::DeleteTexturesImmediate>(client_id);
   }
-}
-
-void GLES2DecoderTestBase::DoBindTexImage2DCHROMIUM(GLenum target,
-                                                    GLint image_id) {
-  cmds::BindTexImage2DCHROMIUM bind_tex_image_2d_cmd;
-  bind_tex_image_2d_cmd.Init(target, image_id);
-  EXPECT_CALL(*gl_, GetError())
-      .Times(AtMost(2))
-      .WillOnce(Return(GL_NO_ERROR))
-      .WillOnce(Return(GL_NO_ERROR))
-      .RetiresOnSaturation();
-  EXPECT_EQ(error::kNoError, ExecuteCmd(bind_tex_image_2d_cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
 void GLES2DecoderTestBase::DoTexImage2D(GLenum target,
@@ -2417,8 +2403,9 @@ GLES2DecoderPassthroughTestBase::~GLES2DecoderPassthroughTestBase() = default;
 void GLES2DecoderPassthroughTestBase::OnConsoleMessage(
     int32_t id,
     const std::string& message) {}
-void GLES2DecoderPassthroughTestBase::CacheShader(const std::string& key,
-                                                  const std::string& shader) {}
+void GLES2DecoderPassthroughTestBase::CacheBlob(gpu::GpuDiskCacheType type,
+                                                const std::string& key,
+                                                const std::string& blob) {}
 void GLES2DecoderPassthroughTestBase::OnFenceSyncRelease(uint64_t release) {}
 void GLES2DecoderPassthroughTestBase::OnDescheduleUntilFinished() {}
 void GLES2DecoderPassthroughTestBase::OnRescheduleAfterFinished() {}
@@ -2444,7 +2431,7 @@ void GLES2DecoderPassthroughTestBase::SetUp() {
 
   gl::init::InitializeStaticGLBindingsImplementation(
       gl::GLImplementationParts(gl::kGLImplementationEGLANGLE), false);
-  gl::init::InitializeGLOneOffPlatformImplementation(
+  display_ = gl::init::InitializeGLOneOffPlatformImplementation(
       /*fallback_to_software_gl=*/false,
       /*disable_gl_drawing=*/false,
       /*init_extensions=*/true,
@@ -2454,13 +2441,13 @@ void GLES2DecoderPassthroughTestBase::SetUp() {
   group_ = new gles2::ContextGroup(
       gpu_preferences_, true, &mailbox_manager_, nullptr /* memory_tracker */,
       &shader_translator_cache_, &framebuffer_completeness_cache_, feature_info,
-      context_creation_attribs_.bind_generates_resource, &image_manager_,
+      context_creation_attribs_.bind_generates_resource,
       nullptr /* image_factory */, nullptr /* progress_reporter */,
       GpuFeatureInfo(), &discardable_manager_,
       &passthrough_discardable_manager_, &shared_image_manager_);
 
   surface_ = gl::init::CreateOffscreenGLSurface(
-      context_creation_attribs_.offscreen_framebuffer_size);
+      display_, context_creation_attribs_.offscreen_framebuffer_size);
   context_ = gl::init::CreateGLContext(
       nullptr, surface_.get(),
       GenerateGLContextAttribs(context_creation_attribs_, group_.get()));
@@ -2506,7 +2493,7 @@ void GLES2DecoderPassthroughTestBase::TearDown() {
   decoder_.reset();
   group_ = nullptr;
   command_buffer_service_.reset();
-  gl::init::ShutdownGL(false);
+  gl::init::ShutdownGL(display_, false);
 }
 
 void GLES2DecoderPassthroughTestBase::SetBucketData(uint32_t bucket_id,

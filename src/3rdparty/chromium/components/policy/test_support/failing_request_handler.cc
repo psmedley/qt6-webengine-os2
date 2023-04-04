@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,10 @@
 
 namespace policy {
 
-FailingRequestHandler::FailingRequestHandler(ClientStorage* client_storage,
-                                             PolicyStorage* policy_storage,
+FailingRequestHandler::FailingRequestHandler(EmbeddedPolicyTestServer* parent,
                                              const std::string& request_type,
                                              net::HttpStatusCode error_code)
-    : EmbeddedPolicyTestServer::RequestHandler(client_storage, policy_storage),
+    : EmbeddedPolicyTestServer::RequestHandler(parent),
       request_type_(request_type),
       error_code_(error_code) {}
 

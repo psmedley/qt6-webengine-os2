@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "content/browser/webauth/authenticator_environment_impl.h"
 #include "device/fido/features.h"
 #include "device/fido/fido_discovery_factory.h"
+#include "device/fido/public_key_credential_user_entity.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "device/fido/win/webauthn_api.h"
@@ -30,6 +31,13 @@ bool WebAuthenticationDelegate::OverrideCallerOriginAndRelyingPartyIdValidation(
     const url::Origin& caller_origin,
     const std::string& relying_party_id) {
   // Perform regular security checks for all origins and RP IDs.
+  return false;
+}
+
+bool WebAuthenticationDelegate::OriginMayUseRemoteDesktopClientOverride(
+    BrowserContext* browser_context,
+    const url::Origin& caller_origin) {
+  // No origin is permitted to claim RP IDs on behalf of another origin.
   return false;
 }
 
@@ -136,6 +144,7 @@ bool AuthenticatorRequestClientDelegate::DoesBlockRequestOnFailure(
 void AuthenticatorRequestClientDelegate::RegisterActionCallbacks(
     base::OnceClosure cancel_callback,
     base::RepeatingClosure start_over_callback,
+    AccountPreselectedCallback account_preselected_callback,
     device::FidoRequestHandlerBase::RequestCallback request_callback,
     base::RepeatingClosure bluetooth_adapter_power_on_callback) {}
 
@@ -149,7 +158,7 @@ void AuthenticatorRequestClientDelegate::ShouldReturnAttestation(
 
 void AuthenticatorRequestClientDelegate::ConfigureCable(
     const url::Origin& origin,
-    device::FidoRequestType request_type,
+    device::CableRequestType request_type,
     base::span<const device::CableDiscoveryData> pairings_from_extension,
     device::FidoDiscoveryFactory* fido_discovery_factory) {}
 
@@ -157,8 +166,12 @@ void AuthenticatorRequestClientDelegate::SelectAccount(
     std::vector<device::AuthenticatorGetAssertionResponse> responses,
     base::OnceCallback<void(device::AuthenticatorGetAssertionResponse)>
         callback) {
-  // SupportsResidentKeys returned false so this should never be called.
-  NOTREACHED();
+  // Automatically choose the first account to allow resident keys for virtual
+  // authenticators without a browser implementation, e.g. on content shell.
+  // TODO(crbug.com/991666): Provide a way to determine which account gets
+  // picked.
+  DCHECK(virtual_environment_);
+  std::move(callback).Run(std::move(responses.at(0)));
 }
 
 void AuthenticatorRequestClientDelegate::DisableUI() {}
@@ -167,8 +180,20 @@ bool AuthenticatorRequestClientDelegate::IsWebAuthnUIEnabled() {
   return false;
 }
 
+void AuthenticatorRequestClientDelegate::SetVirtualEnvironment(
+    bool virtual_environment) {
+  virtual_environment_ = virtual_environment;
+}
+
+bool AuthenticatorRequestClientDelegate::IsVirtualEnvironmentEnabled() {
+  return virtual_environment_;
+}
+
 void AuthenticatorRequestClientDelegate::SetConditionalRequest(
     bool is_conditional) {}
+
+void AuthenticatorRequestClientDelegate::SetUserEntityForMakeCredentialRequest(
+    const device::PublicKeyCredentialUserEntity&) {}
 
 void AuthenticatorRequestClientDelegate::OnTransportAvailabilityEnumerated(
     device::FidoRequestHandlerBase::TransportAvailabilityInfo data) {}

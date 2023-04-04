@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ namespace blink {
 namespace {
 
 // A ConstantSource is always mono.
-constexpr unsigned kNumberOfOutputs = 1;
+constexpr unsigned kNumberOfOutputChannelsCSH = 1;
 
 }  // namespace
 
@@ -23,7 +23,7 @@ ConstantSourceHandler::ConstantSourceHandler(AudioNode& node,
     : AudioScheduledSourceHandler(kNodeTypeConstantSource, node, sample_rate),
       offset_(&offset),
       sample_accurate_values_(GetDeferredTaskHandler().RenderQuantumFrames()) {
-  AddOutput(kNumberOfOutputs);
+  AddOutput(kNumberOfOutputChannelsCSH);
 
   Initialize();
 }
@@ -49,8 +49,8 @@ void ConstantSourceHandler::Process(uint32_t frames_to_process) {
   }
 
   // The audio thread can't block on this lock, so we call tryLock() instead.
-  MutexTryLocker try_locker(process_lock_);
-  if (!try_locker.Locked()) {
+  base::AutoTryLock try_locker(process_lock_);
+  if (!try_locker.is_acquired()) {
     // Too bad - the tryLock() failed.
     output_bus->Zero();
     return;
@@ -109,8 +109,8 @@ bool ConstantSourceHandler::PropagatesSilence() const {
 void ConstantSourceHandler::HandleStoppableSourceNode() {
   double now = Context()->currentTime();
 
-  MutexTryLocker try_locker(process_lock_);
-  if (!try_locker.Locked()) {
+  base::AutoTryLock try_locker(process_lock_);
+  if (!try_locker.is_acquired()) {
     // Can't get the lock, so just return.  It's ok to handle these at a later
     // time; this was just a hint anyway so stopping them a bit later is ok.
     return;

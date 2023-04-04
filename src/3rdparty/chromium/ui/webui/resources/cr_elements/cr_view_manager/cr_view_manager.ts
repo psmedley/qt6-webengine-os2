@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {html, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {assert} from '../../js/assert_ts.js';
+import {CrLazyRenderElement} from '../cr_lazy_render/cr_lazy_render.js';
 
-import {CrLazyRenderElement} from '../cr_lazy_render/cr_lazy_render.m.js';
+import {getTemplate} from './cr_view_manager.html.js';
 
 function getEffectiveView<T extends HTMLElement>(
     element: CrLazyRenderElement<T>|T): HTMLElement {
@@ -44,7 +45,7 @@ viewAnimations.set('slide-in-fade-in-ltr', element => {
   const animation = element.animate(
       [
         {transform: 'translateX(-8px)', opacity: 0},
-        {transform: 'translateX(0)', opacity: 1}
+        {transform: 'translateX(0)', opacity: 1},
       ],
       {
         duration: 300,
@@ -59,7 +60,7 @@ viewAnimations.set('slide-in-fade-in-rtl', element => {
   const animation = element.animate(
       [
         {transform: 'translateX(8px)', opacity: 0},
-        {transform: 'translateX(0)', opacity: 1}
+        {transform: 'translateX(0)', opacity: 1},
       ],
       {
         duration: 300,
@@ -74,6 +75,10 @@ viewAnimations.set('slide-in-fade-in-rtl', element => {
 export class CrViewManagerElement extends PolymerElement {
   static get is() {
     return 'cr-view-manager';
+  }
+
+  static get template() {
+    return getTemplate();
   }
 
   private exit_(element: HTMLElement, animation: string): Promise<void> {
@@ -124,10 +129,6 @@ export class CrViewManagerElement extends PolymerElement {
     }
 
     return Promise.all(promises).then(() => {});
-  }
-
-  static get template() {
-    return html`{__html_template__}`;
   }
 }
 

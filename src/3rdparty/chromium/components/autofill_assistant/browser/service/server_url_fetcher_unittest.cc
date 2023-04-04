@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,12 @@ TEST(ServerUrlFetcherTest, GetUserDataEndpoint) {
   EXPECT_THAT(
       ServerUrlFetcher(GURL("https://www.example.com")).GetUserDataEndpoint(),
       Eq(GURL("https://www.example.com/v1/userData")));
+}
+
+TEST(ServerUrlFetcherTest, GetReportProgressEndpoint) {
+  EXPECT_THAT(ServerUrlFetcher(GURL("https://www.example.com"))
+                  .GetReportProgressEndpoint(),
+              Eq(GURL("https://www.example.com/v1/reportProgress")));
 }
 
 }  // namespace

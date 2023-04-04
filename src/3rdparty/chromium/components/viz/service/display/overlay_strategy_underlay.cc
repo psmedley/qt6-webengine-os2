@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "components/viz/common/quads/draw_quad.h"
 #include "components/viz/common/quads/solid_color_draw_quad.h"
 #include "components/viz/service/display/display_resource_provider.h"
+#include "components/viz/service/display/overlay_candidate_factory.h"
 
 namespace viz {
 
@@ -36,13 +37,14 @@ bool OverlayStrategyUnderlay::Attempt(
   DCHECK(candidate_list->empty());
   auto* render_pass = render_pass_list->back().get();
   QuadList& quad_list = render_pass->quad_list;
+  auto candidate_factory = OverlayCandidateFactory(
+      render_pass, resource_provider, surface_damage_rect_list,
+      &output_color_matrix, GetPrimaryPlaneDisplayRect(primary_plane));
 
   for (auto it = quad_list.begin(); it != quad_list.end(); ++it) {
     OverlayCandidate candidate;
-    if (OverlayCandidate::FromDrawQuad(
-            resource_provider, surface_damage_rect_list, output_color_matrix,
-            *it, GetPrimaryPlaneDisplayRect(primary_plane),
-            &candidate) != OverlayCandidate::CandidateStatus::kSuccess ||
+    if (candidate_factory.FromDrawQuad(*it, candidate) !=
+            OverlayCandidate::CandidateStatus::kSuccess ||
         (opaque_mode_ == OpaqueMode::RequireOpaqueCandidates &&
          !candidate.is_opaque)) {
       continue;
@@ -51,7 +53,7 @@ bool OverlayStrategyUnderlay::Attempt(
     // Filters read back the framebuffer to get the pixel values that need to
     // be filtered.  This is a problem when there are hardware planes because
     // the planes are not composited until they are on the display controller.
-    if (OverlayCandidate::IsOccludedByFilteredQuad(
+    if (candidate_factory.IsOccludedByFilteredQuad(
             candidate, quad_list.begin(), it, render_pass_backdrop_filters)) {
       continue;
     }
@@ -101,14 +103,14 @@ void OverlayStrategyUnderlay::ProposePrioritized(
     std::vector<gfx::Rect>* content_bounds) {
   auto* render_pass = render_pass_list->back().get();
   QuadList& quad_list = render_pass->quad_list;
+  OverlayCandidateFactory candidate_factory = OverlayCandidateFactory(
+      render_pass, resource_provider, surface_damage_rect_list,
+      &output_color_matrix, GetPrimaryPlaneDisplayRect(primary_plane));
 
   for (auto it = quad_list.begin(); it != quad_list.end(); ++it) {
     OverlayCandidate candidate;
-
-    if (OverlayCandidate::FromDrawQuad(
-            resource_provider, surface_damage_rect_list, output_color_matrix,
-            *it, GetPrimaryPlaneDisplayRect(primary_plane),
-            &candidate) != OverlayCandidate::CandidateStatus::kSuccess ||
+    if (candidate_factory.FromDrawQuad(*it, candidate) !=
+            OverlayCandidate::CandidateStatus::kSuccess ||
         (opaque_mode_ == OpaqueMode::RequireOpaqueCandidates &&
          !candidate.is_opaque)) {
       continue;
@@ -120,13 +122,13 @@ void OverlayStrategyUnderlay::ProposePrioritized(
     // If we are requiring an overlay, then we should not block it due to this
     // condition.
     if (!candidate.requires_overlay &&
-        OverlayCandidate::IsOccludedByFilteredQuad(
+        candidate_factory.IsOccludedByFilteredQuad(
             candidate, quad_list.begin(), it, render_pass_backdrop_filters)) {
       continue;
     }
 
-    candidate.damage_area_estimate = OverlayCandidate::EstimateVisibleDamage(
-        *it, surface_damage_rect_list, quad_list.begin(), it);
+    candidate.damage_area_estimate = candidate_factory.EstimateVisibleDamage(
+        *it, candidate, quad_list.begin(), it);
 
     candidates->push_back({it, candidate, this});
   }
@@ -183,10 +185,10 @@ void OverlayStrategyUnderlay::CommitCandidate(
   // need to switch out the video quad with an underlay hole quad.
   if (proposed_candidate.candidate.has_mask_filter) {
     render_pass->ReplaceExistingQuadWithSolidColor(
-        proposed_candidate.quad_iter, SK_ColorBLACK, SkBlendMode::kDstOut);
+        proposed_candidate.quad_iter, SkColors::kBlack, SkBlendMode::kDstOut);
   } else {
     render_pass->ReplaceExistingQuadWithSolidColor(proposed_candidate.quad_iter,
-                                                   SK_ColorTRANSPARENT,
+                                                   SkColors::kTransparent,
                                                    SkBlendMode::kSrcOver);
   }
 }

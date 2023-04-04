@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/containers/flat_map.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/update_client/activity_data_service.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace update_client {
@@ -125,6 +126,7 @@ struct App {
   base::flat_map<std::string, std::string> installer_attributes;
   std::string lang;
   std::string brand_code;
+  int install_date = kDateUnknown;
   std::string install_source;
   std::string install_location;
   std::string fingerprint;

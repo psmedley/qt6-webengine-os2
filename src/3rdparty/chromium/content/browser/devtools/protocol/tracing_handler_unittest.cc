@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,8 @@ const char kCustomTraceConfigString[] =
     "}"
     "]"
     "},"
-    "\"record_mode\":\"record-continuously\""
+    "\"record_mode\":\"record-continuously\","
+    "\"trace_buffer_size_in_kb\":262144"
     "}";
 
 const char kCustomTraceConfigStringDevToolsStyle[] =
@@ -67,7 +68,8 @@ const char kCustomTraceConfigStringDevToolsStyle[] =
     "}"
     "]"
     "},"
-    "\"recordMode\":\"recordContinuously\""
+    "\"recordMode\":\"recordContinuously\","
+    "\"traceBufferSizeInKb\":262144"
     "}";
 
 }  // namespace

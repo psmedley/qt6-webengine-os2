@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,16 +54,17 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
 
     ~Factory() override;
 
-    int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
-                          HttpAuth::Target target,
-                          const SSLInfo& ssl_info,
-                          const NetworkIsolationKey& network_isolation_key,
-                          const url::SchemeHostPort& scheme_host_port,
-                          CreateReason reason,
-                          int digest_nonce_count,
-                          const NetLogWithSource& net_log,
-                          HostResolver* host_resolver,
-                          std::unique_ptr<HttpAuthHandler>* handler) override;
+    int CreateAuthHandler(
+        HttpAuthChallengeTokenizer* challenge,
+        HttpAuth::Target target,
+        const SSLInfo& ssl_info,
+        const NetworkAnonymizationKey& network_anonymization_key,
+        const url::SchemeHostPort& scheme_host_port,
+        CreateReason reason,
+        int digest_nonce_count,
+        const NetLogWithSource& net_log,
+        HostResolver* host_resolver,
+        std::unique_ptr<HttpAuthHandler>* handler) override;
 #if defined(NTLM_SSPI)
     // Set the SSPILibrary to use. Typically the only callers which need to use
     // this are unit tests which pass in a mocked-out version of the SSPI
@@ -92,6 +93,8 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
   HttpAuthHandlerNTLM(const HttpAuthHandlerNTLM&) = delete;
   HttpAuthHandlerNTLM& operator=(const HttpAuthHandlerNTLM&) = delete;
 
+  ~HttpAuthHandlerNTLM() override;
+
   // HttpAuthHandler
   bool NeedsIdentity() override;
   bool AllowsDefaultCredentials() override;
@@ -100,7 +103,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
   // HttpAuthHandler
   bool Init(HttpAuthChallengeTokenizer* tok,
             const SSLInfo& ssl_info,
-            const NetworkIsolationKey& network_isolation_key) override;
+            const NetworkAnonymizationKey& network_anonymization_key) override;
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
                             CompletionOnceCallback callback,
@@ -109,8 +112,6 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
       HttpAuthChallengeTokenizer* challenge) override;
 
  private:
-  ~HttpAuthHandlerNTLM() override;
-
   // Parse the challenge, saving the results into this instance.
   HttpAuth::AuthorizationResult ParseChallenge(HttpAuthChallengeTokenizer* tok);
 

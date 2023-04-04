@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,9 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/execution_context/navigator_base.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/hid/hid_connection_event.h"
 #include "third_party/blink/renderer/modules/hid/hid_device.h"
@@ -35,12 +35,12 @@ const char kFeaturePolicyBlocked[] =
 // requirements for them to be served are met. Returns true if any conditions
 // fail to be met, generating an appropriate exception as well. Otherwise,
 // returns false to indicate the call should be allowed.
-bool ShouldBlockHidServiceCall(LocalDOMWindow* window,
+bool ShouldBlockHidServiceCall(ExecutionContext* context,
                                ExceptionState& exception_state) {
-  if (!window) {
+  if (!context) {
     exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       kContextGone);
-  } else if (!window->IsFeatureEnabled(
+  } else if (!context->IsFeatureEnabled(
                  mojom::blink::PermissionsPolicyFeature::kHid,
                  ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
@@ -60,11 +60,8 @@ void RejectWithTypeError(const String& message,
 
 const char HID::kSupplementName[] = "HID";
 
-HID* HID::hid(Navigator& navigator) {
-  if (!navigator.DomWindow())
-    return nullptr;
-
-  HID* hid = Supplement<Navigator>::From<HID>(navigator);
+HID* HID::hid(NavigatorBase& navigator) {
+  HID* hid = Supplement<NavigatorBase>::From<HID>(navigator);
   if (!hid) {
     hid = MakeGarbageCollected<HID>(navigator);
     ProvideTo(navigator, hid);
@@ -72,22 +69,25 @@ HID* HID::hid(Navigator& navigator) {
   return hid;
 }
 
-HID::HID(Navigator& navigator)
+HID::HID(NavigatorBase& navigator)
     : ExecutionContextLifecycleObserver(navigator.GetExecutionContext()),
-      Supplement<Navigator>(navigator),
-      service_(navigator.DomWindow()),
-      feature_handle_for_scheduler_(
-          navigator.DomWindow()->GetScheduler()->RegisterFeature(
-              SchedulingPolicy::Feature::kWebHID,
-              {SchedulingPolicy::DisableBackForwardCache()})) {}
+      Supplement<NavigatorBase>(navigator),
+      service_(navigator.GetExecutionContext()) {
+  auto* context = GetExecutionContext();
+  if (context) {
+    feature_handle_for_scheduler_ = context->GetScheduler()->RegisterFeature(
+        SchedulingPolicy::Feature::kWebHID,
+        {SchedulingPolicy::DisableBackForwardCache()});
+  }
+}
 
 HID::~HID() {
-  DCHECK(get_devices_promises_.IsEmpty());
-  DCHECK(request_device_promises_.IsEmpty());
+  DCHECK(get_devices_promises_.empty());
+  DCHECK(request_device_promises_.empty());
 }
 
 ExecutionContext* HID::GetExecutionContext() const {
-  return GetSupplementable()->DomWindow();
+  return GetSupplementable()->GetExecutionContext();
 }
 
 const AtomicString& HID::InterfaceName() const {
@@ -145,8 +145,7 @@ void HID::DeviceChanged(device::mojom::blink::HidDeviceInfoPtr device_info) {
 
 ScriptPromise HID::getDevices(ScriptState* script_state,
                               ExceptionState& exception_state) {
-  if (ShouldBlockHidServiceCall(GetSupplementable()->DomWindow(),
-                                exception_state)) {
+  if (ShouldBlockHidServiceCall(GetExecutionContext(), exception_state)) {
     return ScriptPromise();
   }
 
@@ -154,21 +153,28 @@ ScriptPromise HID::getDevices(ScriptState* script_state,
   get_devices_promises_.insert(resolver);
 
   EnsureServiceConnection();
-  service_->GetDevices(WTF::Bind(&HID::FinishGetDevices, WrapPersistent(this),
-                                 WrapPersistent(resolver)));
+  service_->GetDevices(WTF::BindOnce(
+      &HID::FinishGetDevices, WrapPersistent(this), WrapPersistent(resolver)));
   return resolver->Promise();
 }
 
 ScriptPromise HID::requestDevice(ScriptState* script_state,
                                  const HIDDeviceRequestOptions* options,
                                  ExceptionState& exception_state) {
-  if (ShouldBlockHidServiceCall(GetSupplementable()->DomWindow(),
-                                exception_state)) {
+  // requestDevice requires a window to satisfy the user activation requirement
+  // and to show a chooser dialog.
+  const auto* window = GetSupplementable()->DomWindow();
+  if (!window) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                      kContextGone);
     return ScriptPromise();
   }
 
-  if (!LocalFrame::HasTransientUserActivation(
-          GetSupplementable()->DomWindow()->GetFrame())) {
+  if (ShouldBlockHidServiceCall(GetExecutionContext(), exception_state)) {
+    return ScriptPromise();
+  }
+
+  if (!LocalFrame::HasTransientUserActivation(window->GetFrame())) {
     exception_state.ThrowSecurityError(
         "Must be handling a user gesture to show a permission request.");
     return ScriptPromise();
@@ -180,7 +186,7 @@ ScriptPromise HID::requestDevice(ScriptState* script_state,
 
   Vector<mojom::blink::HidDeviceFilterPtr> mojo_filters;
   if (options->hasFilters()) {
-    mojo_filters.ReserveCapacity(options->filters().size());
+    mojo_filters.reserve(options->filters().size());
     for (const auto& filter : options->filters()) {
       String error_message = CheckDeviceFilterValidity(*filter);
       if (error_message) {
@@ -199,7 +205,7 @@ ScriptPromise HID::requestDevice(ScriptState* script_state,
           "'exclusionFilters', if present, must contain at least one filter.");
       return ScriptPromise();
     }
-    mojo_exclusion_filters.ReserveCapacity(options->exclusionFilters().size());
+    mojo_exclusion_filters.reserve(options->exclusionFilters().size());
     for (const auto& exclusion_filter : options->exclusionFilters()) {
       String error_message = CheckDeviceFilterValidity(*exclusion_filter);
       if (error_message) {
@@ -215,8 +221,8 @@ ScriptPromise HID::requestDevice(ScriptState* script_state,
   EnsureServiceConnection();
   service_->RequestDevice(
       std::move(mojo_filters), std::move(mojo_exclusion_filters),
-      WTF::Bind(&HID::FinishRequestDevice, WrapPersistent(this),
-                WrapPersistent(resolver)));
+      WTF::BindOnce(&HID::FinishRequestDevice, WrapPersistent(this),
+                    WrapPersistent(resolver)));
   return promise;
 }
 
@@ -267,8 +273,11 @@ void HID::FinishRequestDevice(
   request_device_promises_.erase(resolver);
 
   HeapVector<Member<HIDDevice>> devices;
-  for (auto& device_info : device_infos)
-    devices.push_back(GetOrCreateDevice(std::move(device_info)));
+  for (auto& device_info : device_infos) {
+    auto* device = GetOrCreateDevice(std::move(device_info));
+    device->ResetIsForgotten();
+    devices.push_back(device);
+  }
 
   resolver->Resolve(devices);
 }
@@ -284,7 +293,7 @@ void HID::EnsureServiceConnection() {
   GetExecutionContext()->GetBrowserInterfaceBroker().GetInterface(
       service_.BindNewPipeAndPassReceiver(task_runner));
   service_.set_disconnect_handler(
-      WTF::Bind(&HID::CloseServiceConnection, WrapWeakPersistent(this)));
+      WTF::BindOnce(&HID::CloseServiceConnection, WrapWeakPersistent(this)));
   DCHECK(!receiver_.is_bound());
   service_->RegisterClient(receiver_.BindNewEndpointAndPassRemote());
 }
@@ -359,7 +368,7 @@ void HID::Trace(Visitor* visitor) const {
   visitor->Trace(device_cache_);
   EventTargetWithInlineData::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
-  Supplement<Navigator>::Trace(visitor);
+  Supplement<NavigatorBase>::Trace(visitor);
 }
 
 }  // namespace blink

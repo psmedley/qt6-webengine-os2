@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -165,6 +165,8 @@ void FakeMessageCenter::DisableNotification(const std::string& id) {}
 void FakeMessageCenter::MarkSinglePopupAsShown(const std::string& id,
                                                bool mark_notification_as_read) {
 }
+
+void FakeMessageCenter::ResetPopupTimer(const std::string& id) {}
 
 void FakeMessageCenter::ResetSinglePopup(const std::string& id) {}
 

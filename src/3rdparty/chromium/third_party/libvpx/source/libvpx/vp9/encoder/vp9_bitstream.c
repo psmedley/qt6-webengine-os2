@@ -134,9 +134,9 @@ static void pack_mb_tokens(vpx_writer *w, TOKENEXTRA **tp,
   const TOKENEXTRA *p;
   const vp9_extra_bit *const extra_bits =
 #if CONFIG_VP9_HIGHBITDEPTH
-      (bit_depth == VPX_BITS_12)
-          ? vp9_extra_bits_high12
-          : (bit_depth == VPX_BITS_10) ? vp9_extra_bits_high10 : vp9_extra_bits;
+      (bit_depth == VPX_BITS_12)   ? vp9_extra_bits_high12
+      : (bit_depth == VPX_BITS_10) ? vp9_extra_bits_high10
+                                   : vp9_extra_bits;
 #else
       vp9_extra_bits;
   (void)bit_depth;
@@ -963,21 +963,20 @@ void vp9_bitstream_encode_tiles_buffer_dealloc(VP9_COMP *const cpi) {
   }
 }
 
-static int encode_tiles_buffer_alloc(VP9_COMP *const cpi) {
+static void encode_tiles_buffer_alloc(VP9_COMP *const cpi) {
+  VP9_COMMON *const cm = &cpi->common;
   int i;
   const size_t worker_data_size =
       cpi->num_workers * sizeof(*cpi->vp9_bitstream_worker_data);
-  cpi->vp9_bitstream_worker_data = vpx_memalign(16, worker_data_size);
+  CHECK_MEM_ERROR(cm, cpi->vp9_bitstream_worker_data,
+                  vpx_memalign(16, worker_data_size));
   memset(cpi->vp9_bitstream_worker_data, 0, worker_data_size);
-  if (!cpi->vp9_bitstream_worker_data) return 1;
   for (i = 1; i < cpi->num_workers; ++i) {
     cpi->vp9_bitstream_worker_data[i].dest_size =
         cpi->oxcf.width * cpi->oxcf.height;
-    cpi->vp9_bitstream_worker_data[i].dest =
-        vpx_malloc(cpi->vp9_bitstream_worker_data[i].dest_size);
-    if (!cpi->vp9_bitstream_worker_data[i].dest) return 1;
+    CHECK_MEM_ERROR(cm, cpi->vp9_bitstream_worker_data[i].dest,
+                    vpx_malloc(cpi->vp9_bitstream_worker_data[i].dest_size));
   }
-  return 0;
 }
 
 static size_t encode_tiles_mt(VP9_COMP *cpi, uint8_t *data_ptr) {
@@ -992,7 +991,7 @@ static size_t encode_tiles_mt(VP9_COMP *cpi, uint8_t *data_ptr) {
       cpi->vp9_bitstream_worker_data[1].dest_size >
           (cpi->oxcf.width * cpi->oxcf.height)) {
     vp9_bitstream_encode_tiles_buffer_dealloc(cpi);
-    if (encode_tiles_buffer_alloc(cpi)) return 0;
+    encode_tiles_buffer_alloc(cpi);
   }
 
   while (tile_col < tile_cols) {

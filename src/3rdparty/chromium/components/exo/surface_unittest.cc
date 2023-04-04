@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -186,6 +186,7 @@ TEST_P(SurfaceTest, Attach) {
   surface->Attach(buffer.get());
   EXPECT_TRUE(surface->HasPendingAttachedBuffer());
   surface->Commit();
+  EXPECT_EQ(gfx::SizeF(buffer_size), surface->content_size());
 
   // Commit without calling Attach() should have no effect.
   surface->Commit();
@@ -196,6 +197,7 @@ TEST_P(SurfaceTest, Attach) {
   surface->Attach(nullptr);
   EXPECT_FALSE(surface->HasPendingAttachedBuffer());
   surface->Commit();
+  EXPECT_TRUE(surface->content_size().IsEmpty());
   // LayerTreeFrameSinkHolder::ReclaimResources() gets called via
   // CompositorFrameSinkClient interface. We need to wait here for the mojo
   // call to finish so that the release callback finishes running before
@@ -489,7 +491,7 @@ TEST_P(SurfaceTest, MAYBE_SetOpaqueRegion) {
         frame.render_pass_list.back()->quad_list.back());
 
     EXPECT_FALSE(texture_draw_quad->ShouldDrawWithBlending());
-    EXPECT_EQ(SK_ColorBLACK, texture_draw_quad->background_color);
+    EXPECT_EQ(SkColors::kBlack, texture_draw_quad->background_color);
     EXPECT_EQ(gfx::Rect(buffer_size), ToTargetSpaceDamage(frame));
   }
 
@@ -506,7 +508,7 @@ TEST_P(SurfaceTest, MAYBE_SetOpaqueRegion) {
     auto* texture_draw_quad = viz::TextureDrawQuad::MaterialCast(
         frame.render_pass_list.back()->quad_list.back());
     EXPECT_TRUE(texture_draw_quad->ShouldDrawWithBlending());
-    EXPECT_EQ(SK_ColorTRANSPARENT, texture_draw_quad->background_color);
+    EXPECT_EQ(SkColors::kTransparent, texture_draw_quad->background_color);
     EXPECT_EQ(gfx::Rect(buffer_size), ToTargetSpaceDamage(frame));
   }
 
@@ -805,6 +807,11 @@ TEST_P(SurfaceTest, SetViewport) {
   const viz::CompositorFrame& frame = GetFrameFromSurface(shell_surface.get());
   ASSERT_EQ(1u, frame.render_pass_list.size());
   EXPECT_EQ(ToPixel(gfx::Rect(0, 0, 512, 512)), GetCompleteDamage(frame));
+
+  // This will make the surface have no content regardless of the viewport.
+  surface->Attach(nullptr);
+  surface->Commit();
+  EXPECT_TRUE(surface->content_size().IsEmpty());
 }
 
 TEST_P(SurfaceTest, SubpixelCoordinate) {
@@ -846,8 +853,7 @@ TEST_P(SurfaceTest, SubpixelCoordinate) {
   for (int j = 0; j < 2; j++) {
     const bool kTestCaseRotation = (j == 1);
     for (size_t i = 0; i < std::size(kTestRects); i++) {
-      auto rect_in_dip = kTestRects[i];
-      device_scale_transform.TransformRect(&rect_in_dip);
+      auto rect_in_dip = device_scale_transform.MapRect(kTestRects[i]);
       sub_surface->SetPosition(rect_in_dip.origin());
       child_surface->SetViewport(rect_in_dip.size());
       const int kChildBufferScale = 2;
@@ -866,8 +872,7 @@ TEST_P(SurfaceTest, SubpixelCoordinate) {
       ASSERT_EQ(2u, quad_list.size());
       auto transform =
           quad_list.front()->shared_quad_state->quad_to_target_transform;
-      auto rect = gfx::RectF(quad_list.front()->rect);
-      transform.TransformRect(&rect);
+      auto rect = transform.MapRect(gfx::RectF(quad_list.front()->rect));
       if (kExpectedAligned[i] && !kTestCaseRotation) {
         // A transformed rect cannot express a rotation.
         // Manipulation of texture coordinates, in addition to a transformed
@@ -915,6 +920,11 @@ TEST_P(SurfaceTest, SetCrop) {
   const viz::CompositorFrame& frame = GetFrameFromSurface(shell_surface.get());
   ASSERT_EQ(1u, frame.render_pass_list.size());
   EXPECT_EQ(ToPixel(gfx::Rect(0, 0, 12, 12)), GetCompleteDamage(frame));
+
+  // This will make the surface have no content regardless of the crop.
+  surface->Attach(nullptr);
+  surface->Commit();
+  EXPECT_TRUE(surface->content_size().IsEmpty());
 }
 
 void SurfaceTest::SetCropAndBufferTransformHelperTransformAndTest(
@@ -1232,21 +1242,21 @@ TEST_P(SurfaceTest, ScaledSurfaceQuad) {
                   ->quad_list.back()
                   ->shared_quad_state->clip_rect);
 
-    auto testing_rect = gfx::RectF(gfx::PointF(0, 0), gfx::SizeF(256, 256));
+    gfx::Rect testing_rect(256, 256);
     // To get 32,32 -> 160,160 into the correct position it must be translated
     // backwards and scaled 0.5x in Y, then everything is scaled by the scale
     // factor.
-    auto expected_transform = gfx::Transform(
-        1.0f * device_scale_factor(), 0.0f, 0.0f, 0.5f * device_scale_factor(),
-        -32.0f * device_scale_factor(), -32.0f * device_scale_factor() * 0.5f);
+    auto expected_transform =
+        gfx::Transform::MakeScale(1.0f * device_scale_factor(),
+                                  0.5f * device_scale_factor()) *
+        gfx::Transform::MakeTranslation(-32.0f, -32.0f);
 
     // When possible exo will represent the transform completely in the |rect|.
     // This leaves the |quad_to_target_transform| transform as Identity.
     if (gfx::Transform() == frame.render_pass_list.back()
                                 ->quad_list.back()
                                 ->shared_quad_state->quad_to_target_transform) {
-      expected_transform.TransformRect(&testing_rect);
-      auto expected_rect = gfx::ToNearestRect(testing_rect);
+      auto expected_rect = expected_transform.MapRect(testing_rect);
       EXPECT_EQ(expected_rect,
                 frame.render_pass_list.back()->quad_list.back()->rect);
     } else {
@@ -1254,7 +1264,7 @@ TEST_P(SurfaceTest, ScaledSurfaceQuad) {
                 frame.render_pass_list.back()
                     ->quad_list.back()
                     ->shared_quad_state->quad_to_target_transform);
-      EXPECT_EQ(gfx::ToNearestRect(testing_rect),
+      EXPECT_EQ(testing_rect,
                 frame.render_pass_list.back()->quad_list.back()->rect);
     }
   }
@@ -1262,8 +1272,8 @@ TEST_P(SurfaceTest, ScaledSurfaceQuad) {
 
 TEST_P(SurfaceTest, ColorBufferAlpha) {
   gfx::Size buffer_size(1, 1);
-  constexpr SkColor4f kBuffColorExpected[] = {{1.f, 0.5f, 0.f, 1.f},
-                                              {0.f, 0.5f, 1.f, 0.f}};
+  constexpr SkColor4f kBuffColorExpected[] = {{1.f, 128.0f / 255.0f, 0.f, 1.f},
+                                              {0.f, 128.0f / 255.0f, 1.f, 0.f}};
   constexpr bool kExpectedOpaque[] = {true, false};
   for (size_t i = 0; i < std::size(kBuffColorExpected); i++) {
     auto buffer =
@@ -1294,8 +1304,7 @@ TEST_P(SurfaceTest, ColorBufferAlpha) {
       EXPECT_EQ(kExpectedOpaque[i],
                 draw_quad->shared_quad_state->are_contents_opaque);
       auto* solid_color_quad = viz::SolidColorDrawQuad::MaterialCast(draw_quad);
-      EXPECT_EQ(kBuffColorExpected[i].SkColor4f::toSkColor(),
-                solid_color_quad->color);
+      EXPECT_EQ(kBuffColorExpected[i], solid_color_quad->color);
     }
   }
 }
@@ -1554,6 +1563,226 @@ TEST_P(SurfaceTest, MAYBE_PerCommitBufferReleaseCallbackForDifferentSurfaces) {
   EXPECT_EQ(per_commit_release_count2, 1);
   // The buffer should now be completely released.
   EXPECT_EQ(buffer_release_count, 1);
+}
+
+TEST_P(SurfaceTest, SubsurfaceClipRect) {
+  gfx::Size buffer_size(256, 256);
+  auto buffer = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
+  auto surface = std::make_unique<Surface>();
+  auto shell_surface = std::make_unique<ShellSurface>(surface.get());
+  surface->Attach(buffer.get());
+
+  gfx::Size child_buffer_size(64, 128);
+  auto child_buffer = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(child_buffer_size));
+  auto child_surface = std::make_unique<Surface>();
+  auto sub_surface =
+      std::make_unique<SubSurface>(child_surface.get(), surface.get());
+  child_surface->Attach(child_buffer.get());
+  child_surface->Commit();
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+
+  {
+    // Subsurface initially has no clip.
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(2u, frame.render_pass_list.back()->quad_list.size());
+    const auto& quad_list = frame.render_pass_list[0]->quad_list;
+    EXPECT_EQ(absl::nullopt, quad_list.front()->shared_quad_state->clip_rect);
+  }
+
+  int clip_size_px = 10;
+  float clip_size_dip = clip_size_px / device_scale_factor();
+  absl::optional<gfx::RectF> clip_rect =
+      gfx::RectF(clip_size_dip, clip_size_dip, clip_size_dip, clip_size_dip);
+  sub_surface->SetClipRect(clip_rect);
+  child_surface->Attach(child_buffer.get());
+  child_surface->Commit();
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+
+  {
+    // Subsurface has a clip applied, and it is converted to px in the
+    // compositor frame.
+    absl::optional<gfx::Rect> clip_rect_px =
+        gfx::Rect(clip_size_px, clip_size_px, clip_size_px, clip_size_px);
+
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(2u, frame.render_pass_list.back()->quad_list.size());
+    const auto& quad_list = frame.render_pass_list[0]->quad_list;
+    EXPECT_EQ(clip_rect_px, quad_list.front()->shared_quad_state->clip_rect);
+  }
+}
+
+// This test makes sure that when we associate 1 or more rect with the same sqs
+// we do so only for canonical rects that form a sealed single layer.
+TEST_P(SurfaceTest, LayerSharedQuadState) {
+  auto canonical_form_check = [](const auto& frame) {
+    EXPECT_EQ(1u, frame.render_pass_list.size());
+    auto& quad_list = frame.render_pass_list.back()->quad_list;
+    bool is_canonical_form = true;
+    for (auto it = quad_list.begin(); it != quad_list.end(); ++it) {
+      // For this test we assume that a 1x1 quad indicates a AA quad. This
+      // assumption is only valid for this test because of our input rects are
+      // not 1x1.
+      is_canonical_form &= (*it)->rect != gfx::Rect(1, 1);
+    }
+    return is_canonical_form;
+  };
+
+  // This parent is merely the background for our children and plays no role in
+  // this test.
+  gfx::Size buffer_size(256, 256);
+  auto buffer = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
+  auto surface = std::make_unique<Surface>();
+  auto shell_surface = std::make_unique<ShellSurface>(surface.get());
+  surface->Attach(buffer.get());
+  surface->SetViewport(gfx::SizeF(13, 13));
+
+  // Test layer joining in x.
+  auto child_buffer_a = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(gfx::Size(64, 64)));
+  auto child_surface_a = std::make_unique<Surface>();
+  auto sub_surface_a =
+      std::make_unique<SubSurface>(child_surface_a.get(), surface.get());
+  child_surface_a->Attach(child_buffer_a.get());
+  sub_surface_a->SetPosition(gfx::PointF(20, 10));
+  child_surface_a->SetViewport(gfx::SizeF(20, 10));
+  child_surface_a->Commit();
+
+  auto child_buffer_b = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(gfx::Size(64, 64)));
+  auto child_surface_b = std::make_unique<Surface>();
+  auto sub_surface_b =
+      std::make_unique<SubSurface>(child_surface_b.get(), surface.get());
+  child_surface_b->Attach(child_buffer_b.get());
+  sub_surface_b->SetPosition(gfx::PointF(40, 10));
+  child_surface_b->SetViewport(gfx::SizeF(20, 10));
+  child_surface_b->Commit();
+
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+  {
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    bool const is_canonical_form = canonical_form_check(frame);
+    auto const kExpectedNumSQSs = is_canonical_form ? 2u : 3u;
+    ASSERT_EQ(kExpectedNumSQSs,
+              frame.render_pass_list.back()->shared_quad_state_list.size());
+  }
+
+  // Test Layer joining in y.
+  sub_surface_a->SetPosition(gfx::PointF(20, 10));
+  child_surface_a->SetViewport(gfx::SizeF(20, 10));
+  child_surface_a->Commit();
+
+  sub_surface_b->SetPosition(gfx::PointF(20, 20));
+  child_surface_b->SetViewport(gfx::SizeF(20, 10));
+  child_surface_b->Commit();
+
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+  {
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    bool const is_canonical_form = canonical_form_check(frame);
+    auto const kExpectedNumSQSs = is_canonical_form ? 2u : 3u;
+    ASSERT_EQ(kExpectedNumSQSs,
+              frame.render_pass_list.back()->shared_quad_state_list.size());
+  }
+
+  // Test Layer joining with overlapping rects but still sealed.
+  sub_surface_a->SetPosition(gfx::PointF(20, 10));
+  child_surface_a->SetViewport(gfx::SizeF(20, 10));
+  child_surface_a->Commit();
+
+  sub_surface_b->SetPosition(gfx::PointF(30, 10));
+  child_surface_b->SetViewport(gfx::SizeF(20, 10));
+  child_surface_b->Commit();
+
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+  {
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    bool const is_canonical_form = canonical_form_check(frame);
+    auto const kExpectedNumSQSs = is_canonical_form ? 2u : 3u;
+    ASSERT_EQ(kExpectedNumSQSs,
+              frame.render_pass_list.back()->shared_quad_state_list.size());
+  }
+
+  // Fail overlapping but not sealed.
+  sub_surface_a->SetPosition(gfx::PointF(20, 10));
+  child_surface_a->SetViewport(gfx::SizeF(20, 10));
+  child_surface_a->Commit();
+
+  sub_surface_b->SetPosition(gfx::PointF(30, 16));
+  child_surface_b->SetViewport(gfx::SizeF(20, 10));
+  child_surface_b->Commit();
+
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+  {
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(3u, frame.render_pass_list.back()->shared_quad_state_list.size());
+  }
+
+  // Fail non overlapping rects
+  sub_surface_a->SetPosition(gfx::PointF(20, 10));
+  child_surface_a->SetViewport(gfx::SizeF(20, 10));
+  child_surface_a->Commit();
+
+  sub_surface_b->SetPosition(gfx::PointF(42, 10));
+  child_surface_b->SetViewport(gfx::SizeF(20, 10));
+  child_surface_b->Commit();
+
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+  {
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(3u, frame.render_pass_list.back()->shared_quad_state_list.size());
+  }
+
+  // Finally let us prove that we can join more than 2 rects by having 3 rects
+  // that should form a single layer.
+  sub_surface_a->SetPosition(gfx::PointF(20, 10));
+  child_surface_a->SetViewport(gfx::SizeF(20, 10));
+  child_surface_a->Commit();
+
+  sub_surface_b->SetPosition(gfx::PointF(20, 20));
+  child_surface_b->SetViewport(gfx::SizeF(20, 10));
+  child_surface_b->Commit();
+
+  auto child_buffer_c = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(gfx::Size(64, 64)));
+  auto child_surface_c = std::make_unique<Surface>();
+  auto sub_surface_c =
+      std::make_unique<SubSurface>(child_surface_c.get(), surface.get());
+  child_surface_c->Attach(child_buffer_c.get());
+  sub_surface_c->SetPosition(gfx::PointF(20, 30));
+  child_surface_c->SetViewport(gfx::SizeF(20, 10));
+  child_surface_c->Commit();
+
+  surface->Commit();
+  base::RunLoop().RunUntilIdle();
+  {
+    const viz::CompositorFrame& frame =
+        GetFrameFromSurface(shell_surface.get());
+    bool const is_canonical_form = canonical_form_check(frame);
+    auto const kExpectedNumSQSs = is_canonical_form ? 2u : 4u;
+    ASSERT_EQ(kExpectedNumSQSs,
+              frame.render_pass_list.back()->shared_quad_state_list.size());
+  }
 }
 
 }  // namespace

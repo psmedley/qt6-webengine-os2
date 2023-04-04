@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,9 +82,7 @@ class IOBufferWithDestructionCallback : public IOBufferWithSize {
 class TestSocketPerformanceWatcher : public SocketPerformanceWatcher {
  public:
   explicit TestSocketPerformanceWatcher(bool should_notify_updated_rtt)
-      : should_notify_updated_rtt_(should_notify_updated_rtt),
-        connection_changed_count_(0u),
-        rtt_notification_count_(0u) {}
+      : should_notify_updated_rtt_(should_notify_updated_rtt) {}
 
   TestSocketPerformanceWatcher(const TestSocketPerformanceWatcher&) = delete;
   TestSocketPerformanceWatcher& operator=(const TestSocketPerformanceWatcher&) =
@@ -108,8 +106,8 @@ class TestSocketPerformanceWatcher : public SocketPerformanceWatcher {
 
  private:
   const bool should_notify_updated_rtt_;
-  size_t connection_changed_count_;
-  size_t rtt_notification_count_;
+  size_t connection_changed_count_ = 0u;
+  size_t rtt_notification_count_ = 0u;
 };
 
 const int kListenBacklog = 5;
@@ -180,8 +178,8 @@ class TCPSocketTest : public PlatformTest, public WithTaskEnvironment {
 
     TestCompletionCallback connect_callback;
 
-    std::unique_ptr<TestSocketPerformanceWatcher> watcher(
-        new TestSocketPerformanceWatcher(should_notify_updated_rtt));
+    auto watcher = std::make_unique<TestSocketPerformanceWatcher>(
+        should_notify_updated_rtt);
     TestSocketPerformanceWatcher* watcher_ptr = watcher.get();
 
     TCPSocket connecting_socket(std::move(watcher), nullptr, NetLogSource());
@@ -1022,27 +1020,25 @@ TEST_F(TCPSocketTest, BindToNetwork) {
   if (!NetworkChangeNotifier::AreNetworkHandlesSupported())
     GTEST_SKIP() << "Network handles are required to test BindToNetwork.";
 
-  const NetworkChangeNotifier::NetworkHandle wrong_network_handle = 65536;
+  const handles::NetworkHandle wrong_network_handle = 65536;
   // Try binding to this IP to trigger the underlying BindToNetwork call.
   const IPEndPoint ip(IPAddress::IPv4Localhost(), 0);
   // TestCompletionCallback connect_callback;
-  TCPClientSocket connecting_socket(local_address_list(), nullptr, nullptr,
-                                    nullptr, NetLogSource(),
-                                    wrong_network_handle);
+  TCPClientSocket wrong_socket(local_address_list(), nullptr, nullptr, nullptr,
+                               NetLogSource(), wrong_network_handle);
   // Different Android versions might report different errors. Hence, just check
   // what shouldn't happen.
-  int rv = connecting_socket.Bind(ip);
+  int rv = wrong_socket.Bind(ip);
   EXPECT_NE(OK, rv);
   EXPECT_NE(ERR_NOT_IMPLEMENTED, rv);
 
   // Connecting using an existing network should succeed.
-  const NetworkChangeNotifier::NetworkHandle network_handle =
+  const handles::NetworkHandle network_handle =
       NetworkChangeNotifier::GetDefaultNetwork();
-  if (network_handle != NetworkChangeNotifier::kInvalidNetworkHandle) {
-    TCPClientSocket connecting_socket(local_address_list(), nullptr, nullptr,
-                                      nullptr, NetLogSource(),
-                                      wrong_network_handle);
-    EXPECT_EQ(OK, connecting_socket.Bind(ip));
+  if (network_handle != handles::kInvalidNetworkHandle) {
+    TCPClientSocket correct_socket(local_address_list(), nullptr, nullptr,
+                                   nullptr, NetLogSource(), network_handle);
+    EXPECT_EQ(OK, correct_socket.Bind(ip));
   }
 }
 

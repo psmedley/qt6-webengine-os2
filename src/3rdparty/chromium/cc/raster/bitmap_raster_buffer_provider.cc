@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ class BitmapRasterBufferImpl : public RasterBuffer {
   // `pixels_` is not a raw_ptr<...> for performance reasons: pointee is never
   // protected by BackupRefPtr, because the pointer comes either from using
   // `mmap`, MapViewOfFile or base::AllocPages directly.
-  void* const pixels_;
+  RAW_PTR_EXCLUSION void* const pixels_;
   bool resource_has_previous_content_;
 };
 

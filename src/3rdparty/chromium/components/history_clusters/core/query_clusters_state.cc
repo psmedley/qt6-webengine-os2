@@ -1,13 +1,15 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/history_clusters/core/query_clusters_state.h"
 
 #include <set>
+#include <string>
 
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/ranges/algorithm.h"
 #include "base/task/thread_pool.h"
 #include "components/history_clusters/core/history_clusters_service.h"
 #include "components/history_clusters/core/history_clusters_util.h"
@@ -30,9 +32,16 @@ class QueryClustersState::PostProcessor
 
   std::vector<history::Cluster> PostProcess(
       std::vector<history::Cluster> clusters) {
-    ApplySearchQuery(query_, &clusters);
-    CullNonProminentOrDuplicateClusters(query_, &clusters,
+    ApplySearchQuery(query_, clusters);
+    CullNonProminentOrDuplicateClusters(query_, clusters,
                                         &seen_single_visit_cluster_urls_);
+    // We have to do this AFTER applying the search query, because applying the
+    // search query re-scores matching visits to promote them above non-matching
+    // visits.
+    HideAndCullLowScoringVisits(clusters);
+    // Do this AFTER we cull the low scoring visits, so those visits don't get
+    // their related searches coalesced onto the cluster level.
+    CoalesceRelatedSearches(clusters);
     return clusters;
   }
 
@@ -51,9 +60,11 @@ class QueryClustersState::PostProcessor
 
 QueryClustersState::QueryClustersState(
     base::WeakPtr<HistoryClustersService> service,
-    const std::string& query)
+    const std::string& query,
+    bool recluster)
     : service_(service),
       query_(query),
+      recluster_(recluster),
       post_processing_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE})),
       post_processing_state_(
@@ -67,20 +78,20 @@ void QueryClustersState::LoadNextBatchOfClusters(ResultCallback callback) {
     return;
 
   base::TimeTicks query_start_time = base::TimeTicks::Now();
-  base::Time end_time = continuation_end_time_.value_or(base::Time());
-  service_->QueryClusters(ClusteringRequestSource::kJourneysPage,
-                          /*begin_time=*/base::Time(), end_time,
-                          base::BindOnce(&QueryClustersState::OnGotRawClusters,
-                                         weak_factory_.GetWeakPtr(),
-                                         query_start_time, std::move(callback)),
-                          &task_tracker_);
+  query_clusters_task = service_->QueryClusters(
+      ClusteringRequestSource::kJourneysPage,
+      /*begin_time=*/base::Time(), continuation_params_, recluster_,
+      base::BindOnce(&QueryClustersState::OnGotRawClusters,
+                     weak_factory_.GetWeakPtr(), query_start_time,
+                     std::move(callback)),
+      HistoryClustersServiceTaskGetMostRecentClusters::Source::kWebUi);
 }
 
 void QueryClustersState::OnGotRawClusters(
     base::TimeTicks query_start_time,
     ResultCallback callback,
     std::vector<history::Cluster> clusters,
-    base::Time continuation_end_time) const {
+    QueryClustersContinuationParams continuation_params) const {
   // Post-process the clusters (expensive task) on an anonymous thread to
   // prevent janks.
   base::ElapsedTimer post_processing_timer;  // Create here to time the task.
@@ -91,17 +102,18 @@ void QueryClustersState::OnGotRawClusters(
       base::BindOnce(&PostProcessor::PostProcess, post_processing_state_,
                      std::move(clusters)),
       base::BindOnce(
-          &QueryClustersState::OnGotClusters, weak_factory_.GetWeakPtr(),
+          &QueryClustersState::OnGotClusters, weak_factory_.GetMutableWeakPtr(),
           std::move(post_processing_timer), clusters_from_backend_count,
-          query_start_time, std::move(callback), continuation_end_time));
+          query_start_time, std::move(callback), continuation_params));
 }
 
-void QueryClustersState::OnGotClusters(base::ElapsedTimer post_processing_timer,
-                                       size_t clusters_from_backend_count,
-                                       base::TimeTicks query_start_time,
-                                       ResultCallback callback,
-                                       base::Time continuation_end_time,
-                                       std::vector<history::Cluster> clusters) {
+void QueryClustersState::OnGotClusters(
+    base::ElapsedTimer post_processing_timer,
+    size_t clusters_from_backend_count,
+    base::TimeTicks query_start_time,
+    ResultCallback callback,
+    QueryClustersContinuationParams continuation_params,
+    std::vector<history::Cluster> clusters) {
   base::UmaHistogramTimes("History.Clusters.ProcessClustersDuration",
                           post_processing_timer.Elapsed());
 
@@ -114,9 +126,7 @@ void QueryClustersState::OnGotClusters(base::ElapsedTimer post_processing_timer,
                                 (1.0 * clusters_from_backend_count) * 100)));
   }
 
-  continuation_end_time_.reset();
-  if (!continuation_end_time.is_null())
-    continuation_end_time_ = continuation_end_time;
+  continuation_params_ = continuation_params;
 
   // In case no clusters came back, recursively ask for more here. We do this
   // to fulfill the mojom contract where we always return at least one cluster,
@@ -128,21 +138,49 @@ void QueryClustersState::OnGotClusters(base::ElapsedTimer post_processing_timer,
   // This is distinct from the "tall monitor" case because the page may already
   // be full of clusters. In that case, the WebUI would not know to make another
   // request for clusters.
-  if (clusters.empty() && continuation_end_time_.has_value()) {
+  if (clusters.empty() && !continuation_params.exhausted_all_visits) {
     LoadNextBatchOfClusters(std::move(callback));
     return;
   }
 
-  bool can_load_more = continuation_end_time_.has_value();
-  std::move(callback).Run(query_, std::move(clusters), can_load_more,
-                          is_continuation_);
+  // This feels like it belongs in `PostProcessor`, but this operates on the
+  // main thread, because the data needs to live on the main thread. Doing it
+  // on the task runner requires making heap copies, which probably costs more
+  // than just doing this simple computation on the main thread.
+  UpdateUniqueRawLabels(clusters);
 
-  // Further responses should be consider continuations.
+  std::move(callback).Run(query_, std::move(clusters),
+                          !continuation_params.exhausted_all_visits,
+                          is_continuation_);
   is_continuation_ = true;
 
   // Log metrics after delivering the results to the page.
   base::TimeDelta service_latency = base::TimeTicks::Now() - query_start_time;
   base::UmaHistogramTimes("History.Clusters.ServiceLatency", service_latency);
+}
+
+void QueryClustersState::UpdateUniqueRawLabels(
+    const std::vector<history::Cluster>& clusters) {
+  // Skip this computation when there's a search query.
+  if (!query_.empty())
+    return;
+
+  for (const auto& cluster : clusters) {
+    if (!cluster.raw_label)
+      return;
+
+    const auto& raw_label_value = cluster.raw_label.value();
+    // Warning: N^2 algorithm below. If this ends up scaling poorly, it can be
+    // optimized by adding a map that tracks which labels have been seen
+    // already.
+    auto it = base::ranges::find(raw_label_counts_so_far_, raw_label_value,
+                                 &LabelCount::first);
+    if (it == raw_label_counts_so_far_.end()) {
+      it = raw_label_counts_so_far_.insert(it,
+                                           std::make_pair(raw_label_value, 0));
+    }
+    it->second++;
+  }
 }
 
 }  // namespace history_clusters

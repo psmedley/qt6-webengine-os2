@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,8 @@ DnsConfig CreateDnsConfig(int num_servers, int num_doh_servers) {
     templates.push_back(
         base::StringPrintf("https://mock.http/doh_test_%d{?dns}", i));
   }
-  config.doh_config = *DnsOverHttpsConfig::FromStrings(std::move(templates));
+  config.doh_config =
+      *DnsOverHttpsConfig::FromTemplatesForTesting(std::move(templates));
 
   return config;
 }
@@ -328,10 +329,11 @@ TEST_F(ResolveContextTest, HostCacheInvalidation) {
 
   base::TimeTicks now;
   HostCache::Key key("example.com", DnsQueryType::UNSPECIFIED, 0,
-                     HostResolverSource::ANY, NetworkIsolationKey());
+                     HostResolverSource::ANY, NetworkAnonymizationKey());
   context.host_cache()->Set(
       key,
-      HostCache::Entry(OK, AddressList(), HostCache::Entry::SOURCE_UNKNOWN),
+      HostCache::Entry(OK, /*ip_endpoints=*/{}, /*aliases=*/{},
+                       HostCache::Entry::SOURCE_UNKNOWN),
       now, base::Seconds(10));
   ASSERT_TRUE(context.host_cache()->Lookup(key, now));
 
@@ -346,7 +348,8 @@ TEST_F(ResolveContextTest, HostCacheInvalidation) {
   // Re-add to the host cache and now add some DoH server status.
   context.host_cache()->Set(
       key,
-      HostCache::Entry(OK, AddressList(), HostCache::Entry::SOURCE_UNKNOWN),
+      HostCache::Entry(OK, /*ip_endpoints=*/{}, /*aliases=*/{},
+                       HostCache::Entry::SOURCE_UNKNOWN),
       now, base::Seconds(10));
   context.RecordServerSuccess(0u /* server_index */, true /* is_doh_server */,
                               session.get());
@@ -379,10 +382,11 @@ TEST_F(ResolveContextTest, HostCacheInvalidation_SameSession) {
   // Add to the host cache and add some DoH server status.
   base::TimeTicks now;
   HostCache::Key key("example.com", DnsQueryType::UNSPECIFIED, 0,
-                     HostResolverSource::ANY, NetworkIsolationKey());
+                     HostResolverSource::ANY, NetworkAnonymizationKey());
   context.host_cache()->Set(
       key,
-      HostCache::Entry(OK, AddressList(), HostCache::Entry::SOURCE_UNKNOWN),
+      HostCache::Entry(OK, /*ip_endpoints=*/{}, /*aliases=*/{"example.com"},
+                       HostCache::Entry::SOURCE_UNKNOWN),
       now, base::Seconds(10));
   context.RecordServerSuccess(0u /* server_index */, true /* is_doh_server */,
                               session.get());

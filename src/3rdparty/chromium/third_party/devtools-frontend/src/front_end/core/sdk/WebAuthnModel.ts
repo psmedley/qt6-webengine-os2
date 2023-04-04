@@ -5,8 +5,7 @@
 import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 import type * as Protocol from '../../generated/protocol.js';
 
-import type {Target} from './Target.js';
-import {Capability} from './Target.js';
+import {Capability, type Target} from './Target.js';
 import {SDKModel} from './SDKModel.js';
 
 export class WebAuthnModel extends SDKModel {
@@ -18,7 +17,7 @@ export class WebAuthnModel extends SDKModel {
 
   setVirtualAuthEnvEnabled(enable: boolean): Promise<Object> {
     if (enable) {
-      return this.#agent.invoke_enable();
+      return this.#agent.invoke_enable({enableUI: true});
     }
     return this.#agent.invoke_disable();
   }

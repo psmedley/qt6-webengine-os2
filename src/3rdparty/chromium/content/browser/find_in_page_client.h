@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_FIND_IN_PAGE_CLIENT_H_
 
 #include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
@@ -27,7 +28,9 @@ class CONTENT_EXPORT FindInPageClient : public blink::mojom::FindInPageClient {
 
   ~FindInPageClient() override;
 
+#if BUILDFLAG(IS_ANDROID)
   void ActivateNearestFindResult(int request_id, const gfx::PointF& point);
+#endif
 
   // Current number of matches for this frame.
   int number_of_matches() { return number_of_matches_; }

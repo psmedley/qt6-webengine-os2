@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,10 +32,14 @@ const displayInfocard = (() => {
      */
     constructor(id) {
       this._infocard = document.getElementById(id);
-      /** @type {HTMLHeadingElement} */
+      /** @type {HTMLSpanElement} */
       this._sizeInfo = this._infocard.querySelector('.size-info');
+      /** @type {HTMLSpanElement} */
+      this._addressInfo = this._infocard.querySelector('.address-info');
+      /** @type {HTMLSpanElement} */
+      this._paddingInfo = this._infocard.querySelector('.padding-info');
       /** @type {HTMLParagraphElement} */
-      this._pathInfo = this._infocard.querySelector('.path-info');
+      this._detailsInfo = this._infocard.querySelector('.details-info');
       /** @type {HTMLDivElement} */
       this._iconInfo = this._infocard.querySelector('.icon-info');
       /** @type {HTMLSpanElement} */
@@ -58,7 +62,8 @@ const displayInfocard = (() => {
     _showDisassemblyOverlay(disassembly) {
       const eltModal = document.getElementById('disassembly-modal');
       const eltCode = document.getElementById('disassembly-code');
-      const eltDownload = document.getElementById('disassembly-download');
+      const eltDownload = /** @type {!HTMLAnchorElement} */ (
+          document.getElementById('disassembly-download'));
       const eltClose = document.getElementById('disassembly-close');
       const diffHtml = Diff2Html.html(disassembly, {
         drawFileList: false,
@@ -68,32 +73,52 @@ const displayInfocard = (() => {
       eltCode.innerHTML = diffHtml;
       eltModal.style.display = '';
       const blob = new Blob([disassembly], {type: 'text/plain'});
-      eltDownload.href = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(blob);
+      eltDownload.href = objectUrl;
       eltClose.onclick = function() {
-        URL.revokeObjectURL(blob);
+        URL.revokeObjectURL(objectUrl);
         eltModal.style.display = 'none';
       }
     }
 
     /**
-     * Updates the size header, which normally displayed the byte size of the
-     * node followed by an abbreviated version.
+     * Updates the header, which normally displayed the byte size of the node
+     * followed by an abbreviated version.
      *
      * Example: "1,234 bytes (1.23 KiB)"
      * @param {TreeNode} node
      */
-    _updateSize(node) {
-      const {description, element, value} = getSizeContents(node);
+    _updateHeader(node) {
+      const sizeContents = getSizeContents(node);
       const sizeFragment = dom.createFragment([
-        document.createTextNode(`${description} (`),
-        element,
+        document.createTextNode(`${sizeContents.description} (`),
+        sizeContents.element,
         document.createTextNode(')'),
       ]);
 
-      // Update DOM
-      setSizeClasses(this._sizeInfo, value);
+      const addressNodes = [];
+      if ('address' in node) {
+        const span = document.createElement('span');
+        const addressHex = node.address.toString(16);
+        span.textContent = `${node.type}@0x${addressHex}`;
+        span.setAttribute('title', `${formatNumber(node.address)}`);
+        addressNodes.push(span);
+      }
+      const addressFragment = dom.createFragment(addressNodes);
 
+      const paddingNodes = [];
+      if ('padding' in node) {
+        const span = document.createElement('span');
+        span.textContent = `Padding: ${formatNumber(node.padding, 0, 2)} bytes`;
+        paddingNodes.push(span);
+      }
+      const paddingFragment = dom.createFragment(paddingNodes);
+
+      // Update DOM
+      setSizeClasses(this._sizeInfo, sizeContents.value);
       dom.replace(this._sizeInfo, sizeFragment);
+      dom.replace(this._addressInfo, addressFragment);
+      dom.replace(this._paddingInfo, paddingFragment);
     }
 
     /**
@@ -114,14 +139,15 @@ const displayInfocard = (() => {
           elements.push(div);
         };
         if (node.container !== '') add_field('Container: ', node.container);
-        add_field('Path: ', node.srcPath || '(No path)');
+        add_field('Source Path: ', node.srcPath || '(No path)');
+        add_field('Object Path: ', node.objPath || '(No path)');
         add_field('Component: ', node.component || '(No component)');
         add_field('Full Name: ', node.fullName || '');
         if (node.disassembly && node.disassembly !== '') {
           const eltAnchor = document.createElement('a')
           eltAnchor.appendChild(document.createTextNode('Show Disassembly'))
           eltAnchor.href = '#';
-          eltAnchor.addEventListener(`click`, (e) => {
+          eltAnchor.addEventListener('click', (e) => {
             e.preventDefault();
             this._showDisassemblyOverlay(node.disassembly)
           });
@@ -137,21 +163,29 @@ const displayInfocard = (() => {
       }
 
       // Update DOM.
-      dom.replace(this._pathInfo, dom.createFragment(elements));
+      dom.replace(this._detailsInfo, dom.createFragment(elements));
     }
 
     /**
-     * Updates the icon and type text. The type label is pulled from the
-     * title of the icon supplied.
-     * @param {SVGSVGElement} icon Icon to display
+     * Returns the type label of a node. By default this is pulled from the
+     * title of the associated icon.
+     * @param {TreeNode} node
+     * @param {!SVGSVGElement} icon
      */
-    _setTypeContent(icon) {
-      const typeDescription = icon.querySelector('title').textContent;
-      icon.setAttribute('fill', '#fff');
+    _getTypeDescription(node, icon) {
+      return icon.querySelector('title').textContent;
+    }
 
-      this._typeInfo.textContent = typeDescription;
-      this._iconInfo.removeChild(this._iconInfo.lastElementChild);
-      this._iconInfo.appendChild(icon);
+    /**
+     * @param {TreeNode} node
+     * @return {!SVGSVGElement} The created icon.
+     */
+    _setTypeContent(node) {
+      const icon = getIconTemplate(node.type[0]);
+      icon.setAttribute('fill', '#fff');
+      this._typeInfo.textContent = this._getTypeDescription(node, icon);
+      this._iconInfo.replaceChild(icon, this._iconInfo.lastElementChild);
+      return icon;
     }
 
     /**
@@ -190,12 +224,11 @@ const displayInfocard = (() => {
       const type = node.type[0];
 
       // Update DOM
-      this._updateSize(node);
+      this._updateHeader(node);
       this._updateDetails(node);
-      if (type !== this._lastType) {
-        // No need to create a new icon if it is identical.
-        const icon = getIconTemplate(type);
-        this._setTypeContent(icon);
+      // If possible, skip making new type content.
+      if (type !== this._lastType || type === _ARTIFACT_TYPES.GROUP) {
+        this._setTypeContent(node);
         this._lastType = type;
       }
       this._flagsInfo.textContent = this._flagsString(node);
@@ -217,12 +250,13 @@ const displayInfocard = (() => {
 
   class SymbolInfocard extends Infocard {
     /**
-     * @param {SVGSVGElement} icon Icon to display
+     * @param {TreeNode} node
+     * @return {!SVGSVGElement} The created icon.
      */
-    _setTypeContent(icon) {
-      const color = icon.getAttribute('fill');
-      super._setTypeContent(icon);
-      this._iconInfo.style.backgroundColor = color;
+    _setTypeContent(node) {
+      const icon = super._setTypeContent(node);
+      this._iconInfo.style.backgroundColor = getIconStyle(node.type[0]).color;
+      return icon;
     }
   }
 
@@ -264,11 +298,29 @@ const displayInfocard = (() => {
     }
 
     /**
-     * @param {SVGSVGElement} icon Icon to display
+     * @param {TreeNode} node
+     * @param {!SVGSVGElement} icon
      */
-    _setTypeContent(icon) {
-      super._setTypeContent(icon);
+    _getTypeDescription(node, icon) {
+      const depth = node.idPath.replace(/[^/]/g, '').length;
+      if (depth === 0) {
+        const t = state.get('group_by');
+        if (t) {
+          // Format, e.g., "generated_type" to "Generated type".
+          return (t[0].toUpperCase() + t.slice(1)).replace(/_/g, ' ');
+        }
+      }
+      return super._getTypeDescription(node, icon);
+    }
+
+    /**
+     * @param {TreeNode} node
+     * @return {!SVGSVGElement} The created icon.
+     */
+    _setTypeContent(node) {
+      const icon = super._setTypeContent(node);
       icon.classList.add('canvas-overlay');
+      return icon;
     }
 
     _flagsString(artifactNode) {
@@ -333,19 +385,9 @@ const displayInfocard = (() => {
       const removedColumn = row.querySelector('.removed');
       const changedColumn = row.querySelector('.changed');
 
-      const countString = stats.count.toLocaleString(_LOCALE, {
-        useGrouping: true,
-      });
-      const sizeString = stats.size.toLocaleString(_LOCALE, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-        useGrouping: true,
-      });
-      const percentString = percentage.toLocaleString(_LOCALE, {
-        style: 'percent',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+      const countString = formatNumber(stats.count);
+      const sizeString = formatNumber(stats.size, 2, 2);
+      const percentString = formatPercent(percentage, 2, 2);
 
       const diffMode = state.has('diff_mode');
       if (diffMode && stats.added !== undefined) {
@@ -354,12 +396,9 @@ const displayInfocard = (() => {
         changedColumn.removeAttribute('hidden');
         countColumn.setAttribute('hidden', '');
 
-        addedColumn.textContent =
-            stats.added.toLocaleString(_LOCALE, {useGrouping: true});
-        removedColumn.textContent =
-            stats.removed.toLocaleString(_LOCALE, {useGrouping: true});
-        changedColumn.textContent =
-            stats.changed.toLocaleString(_LOCALE, {useGrouping: true});
+        addedColumn.textContent = formatNumber(stats.added);
+        removedColumn.textContent = formatNumber(stats.removed);
+        changedColumn.textContent = formatNumber(stats.changed);
       } else {
         addedColumn.setAttribute('hidden', '');
         removedColumn.setAttribute('hidden', '');

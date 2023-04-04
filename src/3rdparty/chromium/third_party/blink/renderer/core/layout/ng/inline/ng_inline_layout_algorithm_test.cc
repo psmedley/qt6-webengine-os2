@@ -1,11 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/ng/ng_base_layout_algorithm_test.h"
 
 #include <sstream>
+#include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/renderer/core/dom/tag_collection.h"
+#include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_box_state.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_break_token.h"
@@ -62,6 +64,31 @@ TEST_F(NGInlineLayoutAlgorithmTest, Types) {
       *To<LayoutBlockFlow>(GetLayoutObjectByElementId("empty")));
   empty.MoveToFirstLine();
   EXPECT_TRUE(empty.Current()->LineBoxFragment()->IsEmptyLineBox());
+}
+
+TEST_F(NGInlineLayoutAlgorithmTest, TypesForFirstLine) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    div::first-line { font-size: 2em; }
+    </style>
+    <div id="normal">normal</div>
+    <div id="empty"><span></span></div>
+  )HTML");
+  NGInlineCursor normal(
+      *To<LayoutBlockFlow>(GetLayoutObjectByElementId("normal")));
+  normal.MoveToFirstLine();
+  EXPECT_FALSE(normal.Current()->LineBoxFragment()->IsEmptyLineBox());
+  EXPECT_EQ(normal.Current().StyleVariant(), NGStyleVariant::kFirstLine);
+  EXPECT_EQ(normal.Current()->LineBoxFragment()->StyleVariant(),
+            NGStyleVariant::kFirstLine);
+
+  NGInlineCursor empty(
+      *To<LayoutBlockFlow>(GetLayoutObjectByElementId("empty")));
+  empty.MoveToFirstLine();
+  EXPECT_TRUE(empty.Current()->LineBoxFragment()->IsEmptyLineBox());
+  EXPECT_EQ(empty.Current().StyleVariant(), NGStyleVariant::kFirstLine);
+  EXPECT_EQ(empty.Current()->LineBoxFragment()->StyleVariant(),
+            NGStyleVariant::kFirstLine);
 }
 
 TEST_F(NGInlineLayoutAlgorithmTest, TypesForBlockInInline) {
@@ -148,14 +175,10 @@ TEST_F(NGInlineLayoutAlgorithmTest, BreakToken) {
   builder.SetAvailableSize(size);
   NGConstraintSpace constraint_space = builder.ToConstraintSpace();
 
-  NGInlineChildLayoutContext context;
   NGBoxFragmentBuilder container_builder(
-      block_flow, block_flow->Style(),
+      block_flow, block_flow->Style(), constraint_space,
       block_flow->Style()->GetWritingDirection());
-  NGFragmentItemsBuilder items_builder(inline_node,
-                                       container_builder.GetWritingDirection());
-  container_builder.SetItemsBuilder(&items_builder);
-  context.SetItemsBuilder(&items_builder);
+  NGInlineChildLayoutContext context(inline_node, &container_builder);
   const NGLayoutResult* layout_result =
       inline_node.Layout(constraint_space, nullptr, nullptr, &context);
   const auto& line1 = layout_result->PhysicalFragment();
@@ -265,6 +288,65 @@ TEST_F(NGInlineLayoutAlgorithmTest, BoxForEndMargin) {
   ASSERT_FALSE(line_box) << "block_flow has two lines.";
 }
 
+TEST_F(NGInlineLayoutAlgorithmTest, InlineBoxBorderPadding) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    div {
+      font-size: 10px;
+      line-height: 10px;
+    }
+    span {
+      border-left: 1px solid blue;
+      border-top: 2px solid blue;
+      border-right: 3px solid blue;
+      border-bottom: 4px solid blue;
+      padding-left: 5px;
+      padding-top: 6px;
+      padding-right: 7px;
+      padding-bottom: 8px;
+    }
+    </style>
+    <div id="container">
+      <span id="span">test<br>test</span>
+    </div>
+  )HTML");
+  auto* block_flow =
+      To<LayoutBlockFlow>(GetLayoutObjectByElementId("container"));
+  NGInlineCursor cursor(*block_flow);
+  const LayoutObject* span = GetLayoutObjectByElementId("span");
+  cursor.MoveTo(*span);
+  const NGFragmentItem& item1 = *cursor.Current();
+  const NGPhysicalBoxFragment* box1 = item1.BoxFragment();
+  ASSERT_TRUE(box1);
+  const NGPhysicalBoxStrut borders1 = box1->Borders();
+  const NGPhysicalBoxStrut padding1 = box1->Padding();
+  int borders_and_padding1[] = {
+      borders1.left.ToInt(),   borders1.top.ToInt(),   borders1.right.ToInt(),
+      borders1.bottom.ToInt(), padding1.left.ToInt(),  padding1.top.ToInt(),
+      padding1.right.ToInt(),  padding1.bottom.ToInt()};
+  EXPECT_THAT(borders_and_padding1,
+              testing::ElementsAre(1, 2, 0, 4, 5, 6, 0, 8));
+  EXPECT_EQ(box1->ContentOffset(), PhysicalOffset(6, 8));
+  EXPECT_EQ(item1.ContentOffsetInContainerFragment(),
+            item1.OffsetInContainerFragment() + box1->ContentOffset());
+
+  cursor.MoveToNextForSameLayoutObject();
+  const NGFragmentItem& item2 = *cursor.Current();
+  const NGPhysicalBoxFragment* box2 = item2.BoxFragment();
+  ASSERT_TRUE(box2);
+  const NGPhysicalBoxStrut borders2 = box2->Borders();
+  const NGPhysicalBoxStrut padding2 = box2->Padding();
+  int borders_and_padding2[] = {
+      borders2.left.ToInt(),   borders2.top.ToInt(),   borders2.right.ToInt(),
+      borders2.bottom.ToInt(), padding2.left.ToInt(),  padding2.top.ToInt(),
+      padding2.right.ToInt(),  padding2.bottom.ToInt()};
+  EXPECT_THAT(borders_and_padding2,
+              testing::ElementsAre(0, 2, 3, 4, 0, 6, 7, 8));
+  EXPECT_EQ(box2->ContentOffset(), PhysicalOffset(0, 8));
+  EXPECT_EQ(item2.ContentOffsetInContainerFragment(),
+            item2.OffsetInContainerFragment() + box2->ContentOffset());
+}
+
 // A block with inline children generates fragment tree as follows:
 // - A box fragment created by NGBlockNode
 //   - A wrapper box fragment created by NGInlineNode
@@ -294,10 +376,11 @@ TEST_F(NGInlineLayoutAlgorithmTest, ContainerBorderPadding) {
   EXPECT_EQ(0, *layout_result->BfcBlockOffset());
   EXPECT_EQ(0, layout_result->BfcLineOffset());
 
-  PhysicalOffset line_offset =
-      layout_result->PhysicalFragment().Children()[0].Offset();
-  EXPECT_EQ(5, line_offset.left);
-  EXPECT_EQ(10, line_offset.top);
+  const auto& fragment =
+      To<NGPhysicalBoxFragment>(layout_result->PhysicalFragment());
+  EXPECT_EQ(fragment.ContentOffset(), PhysicalOffset(5, 10));
+  PhysicalOffset line_offset = fragment.Children()[0].Offset();
+  EXPECT_EQ(line_offset, PhysicalOffset(5, 10));
 }
 
 // The test leaks memory. crbug.com/721932
@@ -645,6 +728,86 @@ TEST_F(NGInlineLayoutAlgorithmTest, TextCombineFake) {
 )DUMP",
             AsFragmentItemsString(
                 *To<LayoutBlockFlow>(GetLayoutObjectByElementId("target"))));
+}
+
+TEST_F(NGInlineLayoutAlgorithmTest, LineBoxWithHangingWidthRTLRightAligned) {
+  LoadAhem();
+  InsertStyleElement(
+      "textarea {"
+      "  width: 100px;"
+      "  text-align: right;"
+      "  font: 10px/10px Ahem;"
+      "}");
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <textarea dir="rtl" id="hangingDoesntOverflow">abc  </textarea>
+    <textarea dir="rtl" id="hangingOverflows">abc        </textarea>
+  )HTML");
+
+  HTMLTextAreaElement* hanging_doesnt_overflow =
+      To<HTMLTextAreaElement>(GetElementById("hangingDoesntOverflow"));
+  NGInlineCursor hanging_doesnt_overflow_cursor(*To<LayoutBlockFlow>(
+      hanging_doesnt_overflow->InnerEditorElement()->GetLayoutObject()));
+  hanging_doesnt_overflow_cursor.MoveToFirstLine();
+  EXPECT_TRUE(hanging_doesnt_overflow_cursor.IsNotNull());
+  PhysicalRect hanging_doesnt_overflow_rect(
+      hanging_doesnt_overflow_cursor.Current().OffsetInContainerFragment(),
+      hanging_doesnt_overflow_cursor.Current().Size());
+  EXPECT_EQ(PhysicalRect(70, 0, 30, 10), hanging_doesnt_overflow_rect);
+
+  HTMLTextAreaElement* hanging_overflows =
+      To<HTMLTextAreaElement>(GetElementById("hangingOverflows"));
+  NGInlineCursor hanging_overflows_cursor(*To<LayoutBlockFlow>(
+      hanging_overflows->InnerEditorElement()->GetLayoutObject()));
+  hanging_overflows_cursor.MoveToFirstLine();
+  EXPECT_TRUE(hanging_overflows_cursor.IsNotNull());
+  PhysicalRect hanging_overflows_rect(
+      hanging_overflows_cursor.Current().OffsetInContainerFragment(),
+      hanging_overflows_cursor.Current().Size());
+  EXPECT_EQ(PhysicalRect(70, 0, 30, 10), hanging_overflows_rect);
+}
+
+TEST_F(NGInlineLayoutAlgorithmTest, LineBoxWithHangingWidthRTLCenterAligned) {
+  LoadAhem();
+  InsertStyleElement(
+      "textarea {"
+      "  width: 100px;"
+      "  text-align: center;"
+      "  font: 10px/10px Ahem;"
+      "}");
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <textarea dir="rtl" id="a">abc  </textarea>
+    <textarea dir="rtl" id="b">abc      </textarea>
+  )HTML");
+
+  HTMLTextAreaElement* a_textarea =
+      To<HTMLTextAreaElement>(GetElementById("a"));
+  NGInlineCursor a_cursor(*To<LayoutBlockFlow>(
+      a_textarea->InnerEditorElement()->GetLayoutObject()));
+  a_cursor.MoveToFirstLine();
+  EXPECT_TRUE(a_cursor.IsNotNull());
+  PhysicalRect a_rect(a_cursor.Current().OffsetInContainerFragment(),
+                      a_cursor.Current().Size());
+  // The line size is 30px and the hanging width is 20px. The rectangle
+  // containing the line and the hanging width is centered, so its right edge
+  // is at (100 + 30 + 20)/2 = 75px. Since the line's base direction is RTL, the
+  // text is at the right and its left edge is at 75px - 30 = 45px.
+  EXPECT_EQ(PhysicalRect(45, 0, 30, 10), a_rect);
+
+  HTMLTextAreaElement* b_textarea =
+      To<HTMLTextAreaElement>(GetElementById("b"));
+  NGInlineCursor b_cursor(*To<LayoutBlockFlow>(
+      b_textarea->InnerEditorElement()->GetLayoutObject()));
+  b_cursor.MoveToFirstLine();
+  EXPECT_TRUE(b_cursor.IsNotNull());
+  PhysicalRect b_rect(b_cursor.Current().OffsetInContainerFragment(),
+                      b_cursor.Current().Size());
+  // The line size is 30px and the hanging width is 60px. The rectangle
+  // containing the line and the hanging width is centered, so its right edge
+  // is at (100 + 30 + 60)/2 = 95px. Since the line's base direction is RTL, the
+  // text is at the right and its left edge is at 95px - 30 = 65px.
+  EXPECT_EQ(PhysicalRect(65, 0, 30, 10), b_rect);
 }
 
 #undef MAYBE_VerticalAlignBottomReplaced

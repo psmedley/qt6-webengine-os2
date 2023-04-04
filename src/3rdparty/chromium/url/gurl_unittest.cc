@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -929,6 +929,7 @@ TEST(GURLTest, ContentForNonStandardURLs) {
   for (const auto& test : cases) {
     GURL url(test.url);
     EXPECT_EQ(test.expected, url.GetContent()) << test.url;
+    EXPECT_EQ(test.expected, url.GetContentPiece()) << test.url;
   }
 }
 

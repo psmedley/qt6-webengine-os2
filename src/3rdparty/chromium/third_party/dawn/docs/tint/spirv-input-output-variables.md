@@ -15,7 +15,7 @@ as variables at module scope.
 ## Vulkan SPIR-V today
 
 SPIR-V for Vulkan models inputs and outputs as module-scope variables in
-the Input and Output storage classes, respectively.
+the Input and Output address spaces, respectively.
 
 The `OpEntryPoint` instruction has a list of module-scope variables that must
 be a superset of all the input and output variables that are statically
@@ -94,7 +94,7 @@ Current translation, through SPIR-V, SPIR-V reader, WGSL writer:
       return;
     }
 
-    @stage(fragment)
+    @fragment
     fn main() -> void {
       bar_();
       return;
@@ -126,7 +126,7 @@ Proposed translation, through SPIR-V, SPIR-V reader, WGSL writer:
       @location(0) frag_color : vec4<f32>;
     };
 
-    @stage(fragment)
+    @fragment
     fn main(
 
       // 'in' variables are entry point parameters

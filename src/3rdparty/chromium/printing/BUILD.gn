@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -148,7 +148,7 @@ component("printing") {
     "page_setup.cc",
     "page_setup.h",
     "pdf_render_settings.h",
-    "print_dialog_gtk_interface.h",
+    "print_dialog_linux_interface.h",
     "print_settings.cc",
     "print_settings.h",
     "print_settings_conversion.cc",
@@ -207,6 +207,10 @@ component("printing") {
       "printing_context_linux.cc",
       "printing_context_linux.h",
     ]
+  }
+
+  if (is_linux) {
+    deps += [ "//ui/linux:linux_ui" ]
   }
 
   if (is_mac) {
@@ -358,6 +362,7 @@ test("printing_unittests") {
 
   if (is_win) {
     sources += [
+      "backend/xps_utils_win_unittest.cc",
       "emf_win_unittest.cc",
       "printed_page_win_unittest.cc",
       "printing_context_win_unittest.cc",
@@ -416,6 +421,8 @@ if (is_android) {
   android_library("printing_java") {
     deps = [
       "//base:base_java",
+      "//base:jni_java",
+      "//build/android:build_java",
       "//third_party/androidx:androidx_annotation_annotation_java",
       "//ui/android:ui_java",
     ]

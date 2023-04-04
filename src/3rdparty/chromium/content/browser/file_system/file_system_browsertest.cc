@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ class FileSystemBrowserTest : public ContentBrowserTest,
 
  protected:
   bool is_incognito_;
-  raw_ptr<Shell> browser_ = nullptr;
+  raw_ptr<Shell, DanglingUntriaged> browser_ = nullptr;
 };
 
 INSTANTIATE_TEST_SUITE_P(All, FileSystemBrowserTest, ::testing::Bool());

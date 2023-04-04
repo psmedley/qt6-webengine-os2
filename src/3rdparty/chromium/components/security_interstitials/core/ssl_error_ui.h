@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ class SSLErrorUI {
 
   virtual ~SSLErrorUI();
 
-  virtual void PopulateStringsForHTML(base::Value* load_time_data);
+  virtual void PopulateStringsForHTML(base::Value::Dict& load_time_data);
   virtual void HandleCommand(SecurityInterstitialCommand command);
 
  protected:
@@ -44,8 +44,8 @@ class SSLErrorUI {
   int cert_error() const;
 
  private:
-  void PopulateOverridableStrings(base::Value* load_time_data);
-  void PopulateNonOverridableStrings(base::Value* load_time_data);
+  void PopulateOverridableStrings(base::Value::Dict& load_time_data);
+  void PopulateNonOverridableStrings(base::Value::Dict& load_time_data);
 
   const GURL request_url_;
   const int cert_error_;
