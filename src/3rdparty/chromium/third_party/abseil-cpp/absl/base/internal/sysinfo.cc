@@ -189,7 +189,11 @@ static double GetNominalCPUFrequency() {
 // and the memory location pointed to by value is set to the value read.
 static bool ReadLongFromFile(const char *file, long *value) {
   bool ret = false;
+#ifndef __OS2__
   int fd = open(file, O_RDONLY | O_CLOEXEC);
+#else
+  int fd = open(file, O_RDONLY);
+#endif
   if (fd != -1) {
     char line[1024];
     char *err;

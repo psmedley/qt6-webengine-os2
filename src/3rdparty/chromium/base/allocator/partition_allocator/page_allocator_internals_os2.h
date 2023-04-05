@@ -7,7 +7,6 @@
 
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
-#include "base/logging.h"
 #include "base/allocator/partition_allocator/partition_alloc_notreached.h"
 
 namespace partition_alloc::internal {
@@ -53,7 +52,7 @@ constexpr bool kHintIsAdvisory = false;
 std::atomic<int32_t> s_allocPageErrorCode{NO_ERROR};
 
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
-  switch (accessibility) {
+  switch (accessibility.permissions) {
     case PageAccessibilityConfiguration::kRead:
       return PAG_READ;
     case PageAccessibilityConfiguration::kReadWrite:
@@ -70,14 +69,16 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   }
 }
 
-uintptr_t SystemAllocPagesInternal(void* hint,
-                               size_t length,
-                               PageAccessibilityConfiguration accessibility,
-                               PageTag page_tag) {
+uintptr_t SystemAllocPagesInternal(
+    uintptr_t hint,
+    size_t length,
+    PageAccessibilityConfiguration accessibility,
+    PageTag page_tag,
+    [[maybe_unused]] int file_descriptor_for_shared_alloc) {
   ULONG flags = GetAccessFlags(accessibility);
   if (flags == 0)
     flags = PAG_READ; // OS/2 requires at least one permission bit.
-  if (accessibility != PageAccessibilityConfiguration::kInaccessible)
+  if (accessibility.permissions != PageAccessibilityConfiguration::kInaccessible)
     flags |= PAG_COMMIT;
   if (hint)
     flags |= OBJ_LOCATION;
@@ -120,7 +121,7 @@ bool TrySetSystemPagesAccessInternal(
     size_t length,
     PageAccessibilityConfiguration accessibility) {
   void* ptr = reinterpret_cast<void*>(address);
-  if (accessibility == PageAccessibilityConfiguration::kInaccessible)
+  if (accessibility.permissions == PageAccessibilityConfiguration::kInaccessible)
     return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
   return MyDosSetMem(ptr, length, PAG_COMMIT |
                      GetAccessFlags(accessibility)) == NO_ERROR;
@@ -130,12 +131,12 @@ void SetSystemPagesAccessInternal(
     uintptr_t address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
-  if (accessibility == PageAccessibilityConfiguration::kInaccessible) {
+  if (accessibility.permissions == PageAccessibilityConfiguration::kInaccessible) {
     APIRET arc = MyDosSetMem(address, length, PAG_DECOMMIT);
     if (arc != NO_ERROR) {
       // We check `arc` for `NO_ERROR` here so that in a crash
       // report we get the error number.
-      CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
+      PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
     }
   } else {
     APIRET arc = MyDosSetMem(address, length, PAG_COMMIT |
@@ -145,14 +146,14 @@ void SetSystemPagesAccessInternal(
         OOM_CRASH(length);
       // We check `arc` for `NO_ERROR` here so that in a crash
       // report we get the arc number.
-      CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
+      PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
     }
   }
 }
 
 void FreePagesInternal(uintptr_t address, size_t length) {
   APIRET arc = DosFreeMemEx(address);
-  CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
+  PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
 }
 
 void DecommitSystemPagesInternal(

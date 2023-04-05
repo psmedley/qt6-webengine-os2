@@ -319,7 +319,7 @@ qt_feature("webengine-developer-build" PRIVATE
 )
 qt_feature("webengine-system-re2" PRIVATE
     LABEL "re2"
-    CONDITION UNIX AND TEST_re2
+    CONDITION (UNIX OR OS2) AND TEST_re2
 )
 qt_feature("webengine-system-icu" PRIVATE
     LABEL "icu"
@@ -332,7 +332,7 @@ qt_feature("webengine-system-libwebp" PRIVATE
 )
 qt_feature("webengine-system-libopenjpeg2" PRIVATE
     LABEL "libopenjpeg2"
-    CONDITION UNIX AND LIBOPENJP2_FOUND
+    CONDITION (UNIX OR OS2) AND LIBOPENJP2_FOUND
 )
 qt_feature("webengine-system-opus" PRIVATE
     LABEL "opus"
@@ -349,7 +349,7 @@ qt_feature("webengine-system-libvpx" PRIVATE
 )
 qt_feature("webengine-system-snappy" PRIVATE
     LABEL "snappy"
-    CONDITION UNIX AND TEST_snappy
+    CONDITION (UNIX OR OS2) AND TEST_snappy
 )
 qt_feature("webengine-system-glib" PRIVATE
     LABEL "glib"

@@ -14,27 +14,31 @@ namespace base {
 
 namespace internal {
 
-bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
+bool SetCurrentThreadTypeForPlatform(ThreadType thread_type,
+                                     MessagePumpType pump_type_hint) {
   ULONG cls = 0;
-  switch (priority) {
-    case ThreadPriority::BACKGROUND:
+  switch (thread_type) {
+    case ThreadType::kBackground:
       cls = PRTYC_IDLETIME;
       break;
-    case ThreadPriority::NORMAL:
+    case ThreadType::kDefault:
+    case ThreadType::kResourceEfficient:
       cls = PRTYC_REGULAR;
       break;
-    case ThreadPriority::DISPLAY:
+    case ThreadType::kDisplayCritical:
+    case ThreadType::kCompositing:
       cls = PRTYC_FOREGROUNDSERVER;
       break;
-    case ThreadPriority::REALTIME_AUDIO:
+    case ThreadType::kRealtimeAudio:
       cls = PRTYC_TIMECRITICAL;
       break;
   }
   return DosSetPriority(PRTYS_THREAD, cls, 0, _gettid()) == NO_ERROR;
 }
 
-absl::optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
-  absl::optional<ThreadPriority> prio = absl::nullopt;
+absl::optional<ThreadPriorityForTest>
+GetCurrentThreadPriorityForPlatformForTest() {
+  absl::optional<ThreadPriorityForTest> prio = absl::nullopt;
   PTIB ptib;
   APIRET arc = DosGetInfoBlocks(&ptib, NULL);
   if (arc == NO_ERROR) {
@@ -42,16 +46,16 @@ absl::optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
     ULONG cls = (ptib->tib_ptib2->tib2_ulpri >> 8) & 0xFF;
     switch (cls) {
       case PRTYC_IDLETIME:
-        prio = absl::make_optional(ThreadPriority::BACKGROUND);
+        prio = absl::make_optional(ThreadPriorityForTest::kBackground);
         break;
       case PRTYC_REGULAR:
-        prio = absl::make_optional(ThreadPriority::NORMAL);
+        prio = absl::make_optional(ThreadPriorityForTest::kNormal);
         break;
       case PRTYC_FOREGROUNDSERVER:
-        prio = absl::make_optional(ThreadPriority::DISPLAY);
+        prio = absl::make_optional(ThreadPriorityForTest::kDisplay);
         break;
       case PRTYC_TIMECRITICAL:
-        prio = absl::make_optional(ThreadPriority::REALTIME_AUDIO);
+        prio = absl::make_optional(ThreadPriorityForTest::kRealtimeAudio);
         break;
     }
   }

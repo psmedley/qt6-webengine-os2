@@ -466,14 +466,20 @@ StatusCode ErrnoToStatusCode(int error_number) {
     case EFAULT:        // Bad address
     case EILSEQ:        // Illegal byte sequence
     case ENOPROTOOPT:   // Protocol not available
+#ifndef __OS2__
     case ENOSTR:        // Not a STREAM
+#endif
     case ENOTSOCK:      // Not a socket
+#ifdef ENOTTY
     case ENOTTY:        // Inappropriate I/O control operation
+#endif
     case EPROTOTYPE:    // Protocol wrong type for socket
     case ESPIPE:        // Invalid seek
       return StatusCode::kInvalidArgument;
     case ETIMEDOUT:  // Connection timed out
+#ifdef ETIME
     case ETIME:      // Timer expired
+#endif
       return StatusCode::kDeadlineExceeded;
     case ENODEV:  // No such device
     case ENOENT:  // No such file or directory
@@ -532,9 +538,13 @@ StatusCode ErrnoToStatusCode(int error_number) {
     case EMLINK:   // Too many links
     case ENFILE:   // Too many open files in system
     case ENOBUFS:  // No buffer space available
+#ifdef ENODATA
     case ENODATA:  // No message is available on the STREAM read queue
+#endif
     case ENOMEM:   // Not enough space
+#ifdef ENOSR
     case ENOSR:    // No STREAM resources
+#endif
 #ifdef EUSERS
     case EUSERS:  // Too many users
 #endif
@@ -577,7 +587,9 @@ StatusCode ErrnoToStatusCode(int error_number) {
     case ENETRESET:     // Connection aborted by network
     case ENETUNREACH:   // Network unreachable
     case ENOLCK:        // No locks available
+#ifdef ENOLINK
     case ENOLINK:       // Link has been severed
+#endif
 #ifdef ENONET
     case ENONET:  // Machine is not on the network
 #endif

@@ -142,7 +142,7 @@
 //    the generated machine code.
 // 3) Prefer applying this attribute to individual variables. Avoid
 //    applying it to types. This tends to localize the effect.
-#if defined(__clang__) || defined(__GNUC__)
+#if defined(__clang__) || (defined(__GNUC__) && !defined(__OS2__))
 #define ABSL_CACHELINE_ALIGNED __attribute__((aligned(ABSL_CACHELINE_SIZE)))
 #elif defined(_MSC_VER)
 #define ABSL_CACHELINE_ALIGNED __declspec(align(ABSL_CACHELINE_SIZE))

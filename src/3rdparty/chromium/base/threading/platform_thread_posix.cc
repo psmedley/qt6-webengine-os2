@@ -433,7 +433,7 @@ ThreadPriorityForTest PlatformThread::GetCurrentThreadPriorityForTest() {
   // getpriority on OS/2 is useless as it only returns the default priority, not
   // what Chromium expects. Just bail out if the above fails (it should not).
   NOTREACHED();
-  return ThreadPriority::NORMAL;
+  return ThreadPriorityForTest::kNormal;
 #else
   int nice_value = internal::GetCurrentThreadNiceValue();
 

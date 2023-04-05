@@ -70,6 +70,7 @@
 #if defined(OS_OS2)
 #include <sys/socket.h>
 #define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+typedef	long		blksize_t;	/* used for block sizes */
 #endif
 
 // We need to do this on AIX due to some inconsistencies in how AIX

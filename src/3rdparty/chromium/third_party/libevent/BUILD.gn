@@ -62,6 +62,12 @@ static_library("bundled_libevent") {
       "epoll.c",
     ]
     include_dirs = [ "android" ]
+  } else if (is_os2) {
+    sources += [
+      "os2/config.h",
+      "os2/event-config.h",
+    ]
+    include_dirs = [ "os2" ]
   }
 
   if (!is_debug) {
