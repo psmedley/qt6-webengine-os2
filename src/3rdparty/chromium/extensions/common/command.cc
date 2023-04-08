@@ -286,6 +286,10 @@ std::string Command::CommandPlatform() {
   // TODO(crbug.com/1312215): Change this once we decide what string should be
   // used for Fuchsia.
   return values::kKeybindingPlatformLinux;
+#elif BUILDFLAG(IS_OS2)
+  // TODO(crbug.com/1312215): Change this once we decide what string should be
+  // used for OS/2.
+  return values::kKeybindingPlatformLinux;
 #else
 #error Unsupported platform
 #endif

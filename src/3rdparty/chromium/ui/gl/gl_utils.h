@@ -65,7 +65,6 @@ void LabelSwapChainBuffers(IDXGISwapChain* swap_chain, const char* name_prefix);
 // the two GLDisplayManager classes are singletons and in component build,
 // calling GetInstance() directly returns different instances in different
 // components.
-#if defined(USE_EGL)
 // Add an entry <preference, system_device_id> to GLDisplayManagerEGL.
 GL_EXPORT void SetGpuPreferenceEGL(GpuPreference preference,
                                    uint64_t system_device_id);
@@ -78,6 +77,7 @@ GL_EXPORT GLDisplay* GetDefaultDisplay();
 // GLDisplayX11.
 GL_EXPORT GLDisplay* GetDisplay(GpuPreference gpu_preference);
 
+#if defined(USE_EGL)
 // Query the default GLDisplayEGL.
 GL_EXPORT GLDisplayEGL* GetDefaultDisplayEGL();
 

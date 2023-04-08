@@ -51,8 +51,6 @@ class AudioOutputStreamOS2 : public AudioOutputStream {
   std::unique_ptr<AudioBus> audio_bus_;
 
   HKAI handle_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioOutputStreamOS2);
 };
 
 }  // namespace media

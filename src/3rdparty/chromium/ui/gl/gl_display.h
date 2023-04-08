@@ -27,6 +27,7 @@ struct DisplayExtensionsEGL;
 template <typename GLDisplayPlatform>
 class GLDisplayManager;
 
+#if defined(USE_EGL) //hack to wokr around build issue on OS/2
 class EGLDisplayPlatform {
  public:
   constexpr EGLDisplayPlatform()
@@ -45,7 +46,7 @@ class EGLDisplayPlatform {
   int platform_;
   bool valid_;
 };
-
+#endif
 // If adding a new type, also add it to EGLDisplayType in
 // tools/metrics/histograms/enums.xml. Don't remove or reorder entries.
 enum DisplayType {

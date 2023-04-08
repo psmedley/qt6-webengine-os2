@@ -9,7 +9,9 @@
 #include "build/chromeos_buildflags.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/gl/gl_features.h"
+#if defined(USE_EGL) //hack to wokr around build issue on OS/2
 #include "ui/gl/gl_surface_egl.h"
+#endif
 #include "ui/gl/gl_utils.h"
 
 #if BUILDFLAG(IS_ANDROID)

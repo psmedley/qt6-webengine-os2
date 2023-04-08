@@ -31,4 +31,14 @@ std::string SysInfo::CPUModelName() {
   return "i386";
 }
 
+// static
+SysInfo::HardwareInfo SysInfo::GetHardwareInfoSync() {
+  HardwareInfo info;
+  info.manufacturer = "Generic";
+  info.model = "Generic";
+  DCHECK(IsStringUTF8(info.manufacturer));
+  DCHECK(IsStringUTF8(info.model));
+  return info;
+}
+
 }  // namespace base

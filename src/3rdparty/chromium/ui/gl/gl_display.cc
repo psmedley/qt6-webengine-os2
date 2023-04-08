@@ -165,6 +165,7 @@ std::vector<std::string> GetStringVectorFromCommandLine(
                            base::SPLIT_WANT_NONEMPTY);
 }
 
+#ifdef USE_EGL
 EGLDisplay GetPlatformANGLEDisplay(
     EGLNativeDisplayType display,
     EGLenum platform_type,
@@ -207,6 +208,7 @@ EGLDisplay GetPlatformANGLEDisplay(
       GetAttribArrayFromStringVector(enabled_features);
   std::vector<const char*> disabled_features_attribs =
       GetAttribArrayFromStringVector(disabled_features);
+
   if (g_driver_egl.client_ext.b_EGL_ANGLE_feature_control) {
     if (!enabled_features_attribs.empty()) {
       display_attribs.push_back(EGL_FEATURE_OVERRIDES_ENABLED_ANGLE);
@@ -386,6 +388,7 @@ EGLDisplay GetDisplayFromType(
       return EGL_NO_DISPLAY;
   }
 }
+#endif
 
 ANGLEImplementation GetANGLEImplementationFromDisplayType(
     DisplayType display_type) {

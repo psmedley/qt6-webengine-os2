@@ -33,6 +33,17 @@ namespace {
 const uint8_t kUpnOid[] = {0x2b, 0x6,  0x1,  0x4, 0x1,
                            0x82, 0x37, 0x14, 0x2, 0x3};
 
+#if defined(OS_OS2)
+// TODO: Remove once https://github.com/bitwiseworks/libc/issues/86 is done.
+static void* dlsym2(const char* sym)
+{
+  // NOTE: NSS3.DLL is statically linked and loaded at startup so there is
+  // no need to dlclose it - dlopen is just to get its handle.
+  void* handle = dlopen("nss3.dll", 0);
+  return handle ? dlsym(handle, sym) : nullptr;
+}
+#endif
+
 std::string DecodeAVAValue(CERTAVA* ava) {
   SECItem* decode_item = CERT_DecodeAVAValue(&ava->value);
   if (!decode_item)
@@ -446,7 +457,14 @@ SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
   using GetCertIsPermFunction = SECStatus (*)(const CERTCertificate*, PRBool*);
   static GetCertIsPermFunction get_cert_is_perm =
       reinterpret_cast<GetCertIsPermFunction>(
+#if defined(OS_OS2)
+          // TODO: We need to use dlopen + dlsym (and underscore) since
+          // RTLD_DEFAULT is not yet implemented in LIBCn (check
+          // https://github.com/bitwiseworks/libc/issues/86 for details).
+          dlsym2("_CERT_GetCertIsPerm"));
+#else
           dlsym(RTLD_DEFAULT, "CERT_GetCertIsPerm"));
+#endif
   if (get_cert_is_perm) {
     return get_cert_is_perm(cert, isperm);
   }

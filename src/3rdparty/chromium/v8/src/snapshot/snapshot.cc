@@ -162,10 +162,11 @@ bool Snapshot::Initialize(Isolate* isolate) {
 
   const v8::StartupData* blob = isolate->snapshot_blob();
   SnapshotImpl::CheckVersion(blob);
+#ifndef __OS2__ //FIXME
   if (Snapshot::ShouldVerifyChecksum(blob)) {
     CHECK(VerifyChecksum(blob));
   }
-
+#endif
   base::Vector<const byte> startup_data =
       SnapshotImpl::ExtractStartupData(blob);
   base::Vector<const byte> read_only_data =

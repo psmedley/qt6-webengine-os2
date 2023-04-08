@@ -9,13 +9,16 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_display.h"
+#include "ui/gl/gl_utils.h"
 
 namespace gl {
 namespace init {
 
-bool InitializeGLOneOffPlatform(uint64_t) {
+GLDisplay* InitializeGLOneOffPlatform(uint64_t system_device_id) {
   // TODO: Implement it on OS/2.
 
+#if 0
   switch (GetGLImplementation()) {
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
@@ -24,6 +27,8 @@ bool InitializeGLOneOffPlatform(uint64_t) {
       NOTREACHED();
   }
   return false;
+  return true;
+#endif
 }
 
 bool InitializeStaticGLBindings(GLImplementationParts implementation) {
@@ -47,7 +52,7 @@ bool InitializeStaticGLBindings(GLImplementationParts implementation) {
   return false;
 }
 
-void ShutdownGLPlatform() {
+void ShutdownGLPlatform(GLDisplay* display) {
   // TODO: Implement it on OS/2.
 
   ClearBindingsGL();

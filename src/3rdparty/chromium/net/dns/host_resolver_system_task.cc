@@ -27,6 +27,12 @@
 #include "net/base/winsock_init.h"
 #endif
 
+#if BUILDFLAG(IS_OS2)
+#ifndef AI_ADDRCONFIG
+#define AI_ADDRCONFIG 0
+#endif
+#endif
+
 namespace net {
 
 namespace {
@@ -311,7 +317,7 @@ void HostResolverSystemTask::OnLookupComplete(const uint32_t attempt_number,
 
 void EnsureSystemHostResolverCallReady() {
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OPENBSD) && \
-    !BUILDFLAG(IS_ANDROID)
+    !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_OS2)
   EnsureDnsReloaderInit();
 #elif BUILDFLAG(IS_WIN)
   EnsureWinsockInit();
@@ -342,7 +348,7 @@ int SystemHostResolverCall(const std::string& host,
   struct addrinfo hints = {0};
   hints.ai_family = AddressFamilyToAF(address_family);
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
   // DO NOT USE AI_ADDRCONFIG ON WINDOWS.
   //
   // The following comment in <winsock2.h> is the best documentation I found
@@ -364,7 +370,7 @@ int SystemHostResolverCall(const std::string& host,
   //   address.
   // See http://crbug.com/5234.
   //
-  // OpenBSD does not support it, either.
+  // OpenBSD and OS/2 do not support it, either.
   hints.ai_flags = 0;
 #else
   hints.ai_flags = AI_ADDRCONFIG;
@@ -397,7 +403,7 @@ int SystemHostResolverCall(const std::string& host,
                                                 base::BlockingType::WILL_BLOCK);
 
 #if BUILDFLAG(IS_POSIX) && \
-    !(BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ANDROID))
+    !(BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_OS2) || BUILDFLAG(IS_ANDROID))
   DnsReloaderMaybeReload();
 #endif
   auto [ai, err, os_error] = AddressInfo::Get(host, hints, nullptr, network);

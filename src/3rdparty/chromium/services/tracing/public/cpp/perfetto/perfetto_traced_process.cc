@@ -517,7 +517,7 @@ void PerfettoTracedProcess::ShouldAllowSystemConsumerSession(
 }
 
 void PerfettoTracedProcess::SetSystemProducerEnabledForTesting(bool enabled) {
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
   // If set to disabled, use the dummy implementation to prevent the real system
   // producer from interfering with browser tests.
   g_system_producer_enabled = enabled;

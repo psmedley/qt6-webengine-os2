@@ -207,7 +207,7 @@ GLDisplayEGL* GetDefaultDisplayEGL() {
 GLDisplayEGL* GetDisplayEGL(uint64_t system_device_id) {
   return GLDisplayManagerEGL::GetInstance()->GetDisplay(system_device_id);
 }
-#endif  // USE_EGL
+#endif
 
 #if defined(USE_GLX)
 GLDisplayX11* GetDisplayX11(uint64_t system_device_id) {

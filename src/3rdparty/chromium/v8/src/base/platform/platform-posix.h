@@ -24,7 +24,7 @@ class PosixTimezoneCache : public TimezoneCache {
   static const int msPerSecond = 1000;
 };
 
-#if !V8_OS_FUCHSIA
+#if !V8_OS_FUCHSIA && !V8_OS_OS2
 int GetProtectionFromMemoryPermission(OS::MemoryPermission access);
 #endif
 

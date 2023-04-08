@@ -45,9 +45,6 @@ class AudioManagerOS2 : public AudioManagerBase {
   AudioParameters GetPreferredOutputStreamParameters(
       const std::string& output_device_id,
       const AudioParameters& input_params) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioManagerOS2);
 };
 
 }  // namespace media

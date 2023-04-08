@@ -7,7 +7,7 @@
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_htmlcanvaselement_offscreencanvas.h"
-+#include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_canvas_alpha_mode.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_canvas_alpha_mode.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_canvas_configuration.h"
 #ifndef __OS2__
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_canvasrenderingcontext2d_gpucanvascontext_imagebitmaprenderingcontext_webgl2renderingcontext_webglrenderingcontext.h"

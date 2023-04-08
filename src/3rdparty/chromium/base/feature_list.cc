@@ -529,7 +529,7 @@ void FeatureList::SetInstance(std::unique_ptr<FeatureList> instance) {
   // Note: Intentional leak of global singleton.
   g_feature_list_instance = instance.release();
 
-#if !BUILDFLAG(IS_NACL)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_OS2)
   // Configured first because it takes precedence over the getrandom() trial.
   internal::ConfigureBoringSSLBackedRandBytesFieldTrial();
 #endif

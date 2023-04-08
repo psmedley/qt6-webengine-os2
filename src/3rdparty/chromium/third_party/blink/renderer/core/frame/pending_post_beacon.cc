@@ -6,7 +6,11 @@
 
 #include "third_party/blink/public/mojom/frame/pending_beacon.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_pending_beacon_options.h"
+#ifndef __OS2__
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview_blob_formdata_readablestream_urlsearchparams_usvstring.h"
+#else
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview_blob_formdata_readablestream_urlsearch.h"
+#endif
 #include "third_party/blink/renderer/core/loader/beacon_data.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"

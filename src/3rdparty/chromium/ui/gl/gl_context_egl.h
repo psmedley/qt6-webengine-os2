@@ -34,8 +34,9 @@ class GL_EXPORT GLContextEGL : public GLContextReal {
   unsigned int CheckStickyGraphicsResetStatusImpl() override;
   void SetUnbindFboOnMakeCurrent() override;
   void SetVisibility(bool visibility) override;
+#ifdef USE_EGL
   GLDisplayEGL* GetGLDisplayEGL() override;
-
+#endif
  protected:
   ~GLContextEGL() override;
 

@@ -182,6 +182,7 @@ extern const char kKeybindingPlatformChromeOs[];
 extern const char kKeybindingPlatformDefault[];
 extern const char kKeybindingPlatformLinux[];
 extern const char kKeybindingPlatformMac[];
+extern const char kKeybindingPlatformOS2[];
 extern const char kKeybindingPlatformWin[];
 extern const char kKeyAlt[];
 extern const char kKeyShift[];

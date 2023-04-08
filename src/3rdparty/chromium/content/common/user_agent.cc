@@ -67,6 +67,8 @@ std::string GetUnifiedPlatform() {
   return "Fuchsia";
 #elif BUILDFLAG(IS_LINUX)
   return "X11; Linux x86_64";
+#elif BUILDFLAG(IS_OS2)
+  return "OS/2";
 #else
 #error Unsupported platform
 #endif

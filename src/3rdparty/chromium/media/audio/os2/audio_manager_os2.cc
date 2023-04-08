@@ -56,8 +56,11 @@ AudioParameters AudioManagerOS2::GetInputStreamParameters(
   // the default configuration used in the AudioCapturer implementation.
   // Assume that the system-provided AudioConsumer supports echo cancellation,
   // noise suppression and automatic gain control.
+  const size_t kSampleRate = 16000;
+  const size_t kPeriodSamples = 160;
   AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                         CHANNEL_LAYOUT_MONO, 16000, 160);
+                         ChannelLayoutConfig::Mono(), kSampleRate,
+                         kPeriodSamples);
   params.set_effects(AudioParameters::ECHO_CANCELLER |
                      AudioParameters::NOISE_SUPPRESSION |
                      AudioParameters::AUTOMATIC_GAIN_CONTROL);
@@ -115,7 +118,7 @@ AudioParameters AudioManagerOS2::GetPreferredOutputStreamParameters(
 
   return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
                          obtained.ulChannels == 2 ?
-                             CHANNEL_LAYOUT_STEREO : CHANNEL_LAYOUT_MONO,
+                             ChannelLayoutConfig::Stereo() : ChannelLayoutConfig::Mono(),
                          obtained.ulSamplingRate, frames_per_buffer);
 }
 

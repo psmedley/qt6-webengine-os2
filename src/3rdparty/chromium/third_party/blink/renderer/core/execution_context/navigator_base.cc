@@ -29,7 +29,7 @@ String GetReducedNavigatorPlatform() {
   return "MacIntel";
 #elif BUILDFLAG(IS_WIN)
   return "Win32";
-#elif BUILDFLAG(IS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_OS2)
   return "";
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   return "Linux x86_64";

@@ -173,6 +173,17 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
   return arc == NO_ERROR;
 }
 
+void OS::SetDataReadOnly(void* address, size_t size) {
+  // TODO(v8:13194): Figure out which API to use on OS/2 {vmar.protect}
+  // fails.
+  // CHECK(OS::SetPermissions(address, size, MemoryPermission::kRead));
+}
+
+// static
+bool OS::RecommitPages(void* address, size_t size, MemoryPermission access) {
+  return SetPermissions(address, size, access);
+}
+
 // static
 bool OS::DecommitPages(void* address, size_t size) {
   // We rely on DiscardSystemPages decommitting the pages immediately (via

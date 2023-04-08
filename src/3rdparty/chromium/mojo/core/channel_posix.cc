@@ -57,13 +57,8 @@ class MessageView {
   // Owns |message|. |offset| indexes the first unsent byte in the message.
   MessageView(Channel::MessagePtr message, size_t offset)
       : message_(std::move(message)),
-        offset_(offset)
-#if defined(OS_OS2)
-      , handles_(message_->TakeHandles())
-#else
-      , handles_(message_->TakeHandles()) {
-#endif
-  {
+        offset_(offset),
+        handles_(message_->TakeHandles()) {
     DCHECK(!message_->data_num_bytes() || message_->data_num_bytes() > offset_);
   }
 
@@ -227,6 +222,7 @@ bool ChannelPosix::GetReadPlatformHandles(const void* payload,
                                           bool* deferred) {
   if (num_handles > std::numeric_limits<uint16_t>::max())
     return false;
+
 #if defined(OS_OS2)
     // On OS/2, we can have SHMEM and socket handles which are located in the
     // extra header section.
@@ -253,10 +249,11 @@ bool ChannelPosix::GetReadPlatformHandles(const void* payload,
       handles->at(i) = PlatformHandleInTransit::CreateFromLIBCxHandle(
           new_handles[i]);
     }
+  return true;
 #else
   return GetReadPlatformHandlesForIpcz(num_handles, *handles);
-}
 #endif
+}
 
 bool ChannelPosix::GetReadPlatformHandlesForIpcz(
     size_t num_handles,
@@ -264,6 +261,7 @@ bool ChannelPosix::GetReadPlatformHandlesForIpcz(
   if (incoming_fds_.size() < num_handles) {
     return true;
   }
+
   DCHECK(handles.empty());
   handles.reserve(num_handles);
   while (num_handles--) {
@@ -513,6 +511,7 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
       result = SocketWrite(socket_.get(), message_view.data(),
                            message_view.data_num_bytes());
     }
+
     if (result < 0) {
       if (errno != EAGAIN &&
           errno != EWOULDBLOCK
@@ -544,7 +543,7 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
     bytes_written = static_cast<size_t>(result);
     } while (
 #if !defined(OS_OS2)
-             handles_written < num_handles ||
+           handles_written < num_handles ||
 #endif
            bytes_written < message_view.data_num_bytes());
 

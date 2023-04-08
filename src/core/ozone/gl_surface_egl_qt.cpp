@@ -263,6 +263,7 @@ void* GLSurfacelessQtEGL::GetShareHandle()
 } // namespace gl
 #endif // !BUILDFLAG(IS_MAC)
 
+#if !BUILDFLAG(IS_OS2)
 namespace gl {
 
 std::string DisplayExtensionsEGL::GetPlatformExtensions(void*)
@@ -275,4 +276,4 @@ std::string DisplayExtensionsEGL::GetPlatformExtensions(void*)
     return str ? std::string(str) : "";
 }
 } // namespace gl
-
+#endif
