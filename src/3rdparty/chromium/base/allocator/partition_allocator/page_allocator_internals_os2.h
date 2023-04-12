@@ -57,8 +57,10 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
     case PageAccessibilityConfiguration::kRead:
       return PAG_READ;
     case PageAccessibilityConfiguration::kReadWrite:
+    case PageAccessibilityConfiguration::kReadWriteTagged:
       return PAG_READ | PAG_WRITE;
     case PageAccessibilityConfiguration::kReadExecute:
+    case PageAccessibilityConfiguration::kReadExecuteProtected:
       return PAG_READ | PAG_EXECUTE;
     case PageAccessibilityConfiguration::kReadWriteExecute:
       return PAG_READ | PAG_WRITE | PAG_EXECUTE;
@@ -70,7 +72,7 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   }
 }
 
-uintptr_t SystemAllocPagesInternal(void* hint,
+uintptr_t SystemAllocPagesInternal(uintptr_t hint,
                                size_t length,
                                PageAccessibilityConfiguration accessibility,
                                PageTag page_tag) {
@@ -82,9 +84,9 @@ uintptr_t SystemAllocPagesInternal(void* hint,
   if (hint)
     flags |= OBJ_LOCATION;
   else
-    flags |= OBJ_ANY; // Requiest high memory.
+    flags |= OBJ_ANY; // Request high memory.
 
-  void *base = hint;
+  void *base = (PVOID)hint;
   APIRET arc = DosAllocMemEx(&base, length, flags);
   if (arc != NO_ERROR && (flags & OBJ_ANY)) {
     // Try low memory.
@@ -93,9 +95,8 @@ uintptr_t SystemAllocPagesInternal(void* hint,
   }
   if (arc != NO_ERROR) {
     s_allocPageErrorCode = arc;
-    return 0;
   }
-  return base;
+  return reinterpret_cast<uintptr_t>(base);
 }
 
 uintptr_t TrimMappingInternal(uintptr_t base_address,
@@ -119,10 +120,9 @@ bool TrySetSystemPagesAccessInternal(
     uintptr_t address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
-  void* ptr = reinterpret_cast<void*>(address);
   if (accessibility == PageAccessibilityConfiguration::kInaccessible)
-    return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
-  return MyDosSetMem(ptr, length, PAG_COMMIT |
+    return MyDosSetMem((PVOID)address, length, PAG_DECOMMIT) == NO_ERROR;
+  return MyDosSetMem((PVOID)address, length, PAG_COMMIT |
                      GetAccessFlags(accessibility)) == NO_ERROR;
 }
 
@@ -131,14 +131,14 @@ void SetSystemPagesAccessInternal(
     size_t length,
     PageAccessibilityConfiguration accessibility) {
   if (accessibility == PageAccessibilityConfiguration::kInaccessible) {
-    APIRET arc = MyDosSetMem(address, length, PAG_DECOMMIT);
+    APIRET arc = MyDosSetMem((PVOID)address, length, PAG_DECOMMIT);
     if (arc != NO_ERROR) {
       // We check `arc` for `NO_ERROR` here so that in a crash
       // report we get the error number.
       CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
     }
   } else {
-    APIRET arc = MyDosSetMem(address, length, PAG_COMMIT |
+    APIRET arc = MyDosSetMem((PVOID)address, length, PAG_COMMIT |
                              GetAccessFlags(accessibility));
     if (arc != NO_ERROR) {
       if (arc == ERROR_NOT_ENOUGH_MEMORY)
@@ -151,7 +151,7 @@ void SetSystemPagesAccessInternal(
 }
 
 void FreePagesInternal(uintptr_t address, size_t length) {
-  APIRET arc = DosFreeMemEx(address);
+  APIRET arc = DosFreeMemEx((PVOID)address);
   CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
 }
 
@@ -161,8 +161,7 @@ void DecommitSystemPagesInternal(
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
   // making pages inaccessible.
-  SetSystemPagesAccess(address, length,
-                       PageAccessibilityConfiguration::kInaccessible);
+  SetSystemPagesAccess(address, length, PageAccessibilityConfiguration::kInaccessible);
 }
 
 void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
