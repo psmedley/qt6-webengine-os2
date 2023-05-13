@@ -57,8 +57,10 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
     case PageRead:
       return PAG_READ;
     case PageReadWrite:
+    case PageReadWriteTagged:
       return PAG_READ | PAG_WRITE;
     case PageReadExecute:
+    case PageReadExecuteProtected:
       return PAG_READ | PAG_EXECUTE;
     case PageReadWriteExecute:
       return PAG_READ | PAG_WRITE | PAG_EXECUTE;
@@ -134,7 +136,7 @@ void SetSystemPagesAccessInternal(
     if (arc != NO_ERROR) {
       // We check `arc` for `NO_ERROR` here so that in a crash
       // report we get the error number.
-      CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
+      PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
     }
   } else {
     APIRET arc = MyDosSetMem(address, length, PAG_COMMIT |
@@ -144,7 +146,7 @@ void SetSystemPagesAccessInternal(
         OOM_CRASH(length);
       // We check `arc` for `NO_ERROR` here so that in a crash
       // report we get the arc number.
-      CHECK_EQ(static_cast<ULONG>(NO_ERROR), arc);
+      PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
     }
   }
 }
@@ -163,13 +165,13 @@ void DecommitSystemPagesInternal(
   SetSystemPagesAccess(address, length, PageInaccessible);
 }
 
-bool RecommitSystemPagesInternal(void* address,
+void RecommitSystemPagesInternal(void* address,
                                  size_t length,
     PageAccessibilityConfiguration accessibility,
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
   // making pages inaccessible.
-  return TrySetSystemPagesAccess(address, length, accessibility);
+  SetSystemPagesAccess(address, length, accessibility);
 }
 
 bool TryRecommitSystemPagesInternal(
