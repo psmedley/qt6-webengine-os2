@@ -32,6 +32,9 @@
 #endif
 #endif  // defined(WEBRTC_POSIX) && !defined(__native_client__)
 
+#ifdef WEBRTC_OS2
+#define AI_ADDRCONFIG 0
+#endif
 #include "api/task_queue/task_queue_base.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
