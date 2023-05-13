@@ -211,6 +211,10 @@ static void ProduceCacheInternal(
 
   switch (produce_cache_options) {
     case V8CodeCache::ProduceCacheOptions::kSetTimeStamp:
+#ifdef __OS2__ // workaround for case where cache_handler is NULL causing a TRP on OS/2
+      if (!cache_handler)
+          break;
+#endif
       V8CodeCache::SetCacheTimeStamp(code_cache_host, cache_handler);
       break;
     case V8CodeCache::ProduceCacheOptions::kProduceCodeCache: {
