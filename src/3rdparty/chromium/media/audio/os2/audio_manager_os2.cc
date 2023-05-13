@@ -101,6 +101,7 @@ AudioParameters AudioManagerOS2::GetPreferredOutputStreamParameters(
     LOG(ERROR) << "kaiOpen returned " << (LONG)arc << " for sampling rate "
                << wanted.ulSamplingRate << " and channels "
                << wanted.ulChannels;
+    return AudioParameters();
   }
   kaiClose(handle);
 
