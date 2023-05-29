@@ -440,7 +440,7 @@ function(add_linker_options target buildDir completeStatic)
     set(archives_rsp "${buildDir}/${ninjaTarget}_archives.rsp")
     set(libs_rsp "${buildDir}/${ninjaTarget}_libs.rsp")
     set_target_properties(${cmakeTarget} PROPERTIES STATIC_LIBRARY_OPTIONS "@${objects_rsp}")
-    if(LINUX)
+    if(LINUX OR ANDROID)
          get_gn_arch(cpu ${TEST_architecture_arch})
          if(CMAKE_CROSSCOMPILING AND cpu STREQUAL "arm" AND ${config} STREQUAL "Debug")
              target_link_options(${cmakeTarget} PRIVATE "LINKER:--long-plt")
@@ -846,7 +846,7 @@ macro(append_build_type_setup)
     if(${config} STREQUAL "Debug")
         list(APPEND gnArgArg is_debug=true symbol_level=2)
         if(WIN32)
-            list(APPEND gnArgArg enable_iterator_debugging=true v8_optimized_debug=false)
+            list(APPEND gnArgArg enable_iterator_debugging=true)
         endif()
     elseif(${config} STREQUAL "Release")
         list(APPEND gnArgArg is_debug=false symbol_level=0)
@@ -944,6 +944,14 @@ macro(append_compiler_linker_sdk_setup)
         if(DEFINED QT_FEATURE_stdlib_libcpp AND LINUX)
             extend_gn_list(gnArgArg ARGS use_libcxx
                 CONDITION QT_FEATURE_stdlib_libcpp
+            )
+        endif()
+        if(ANDROID)
+            list(APPEND gnArgArg
+                android_ndk_root="${CMAKE_ANDROID_NDK}"
+                android_ndk_version="${CMAKE_ANDROID_NDK_VERSION}"
+                clang_use_default_sample_profile=false
+                #android_ndk_major_version=22
             )
         endif()
     else()
@@ -1058,6 +1066,9 @@ macro(append_toolchain_setup)
             get_ios_sysroot(sysroot ${arch})
             list(APPEND gnArgArg target_sysroot="${sysroot}" target_os="ios")
         endif()
+    endif()
+    if(ANDROID)
+        list(APPEND gnArgArg target_os="android")
     endif()
 endmacro()
 
@@ -1313,4 +1324,33 @@ function(add_build feature value)
     endforeach()
     set(depTracker "${depTracker}" ${feature})
     set_property(GLOBAL PROPERTY MATRIX_DEPENDENCY_TRACKER "${depTracker}")
+endfunction()
+
+function(add_code_attributions_target)
+    cmake_parse_arguments(PARSE_ARGV 0 arg ""
+        "TARGET;OUTPUT;GN_TARGET;FILE_TEMPLATE;ENTRY_TEMPLATE;BUILDDIR" ""
+    )
+    _qt_internal_validate_all_args_are_parsed(arg)
+    get_filename_component(fileTemplate ${arg_FILE_TEMPLATE} ABSOLUTE)
+    get_filename_component(entryTemplate ${arg_ENTRY_TEMPLATE} ABSOLUTE)
+    add_custom_command(
+        OUTPUT ${arg_OUTPUT}
+        COMMAND ${CMAKE_COMMAND}
+            -DLICENSE_SCRIPT=${WEBENGINE_ROOT_SOURCE_DIR}/src/3rdparty/chromium/tools/licenses.py
+            -DFILE_TEMPLATE=${fileTemplate}
+            -DENTRY_TEMPLATE=${entryTemplate}
+            -DGN_TARGET=${arg_GN_TARGET}
+            -DBUILDDIR=${arg_BUILDDIR}
+            -DOUTPUT=${arg_OUTPUT}
+            -DPython3_EXECUTABLE=${Python3_EXECUTABLE}
+            -P ${WEBENGINE_ROOT_SOURCE_DIR}/cmake/License.cmake
+        WORKING_DIRECTORY ${WEBENGINE_ROOT_BUILD_DIR}
+        DEPENDS
+            ${WEBENGINE_ROOT_SOURCE_DIR}/src/3rdparty/chromium/tools/licenses.py
+            ${arg_FILE_TEMPLATE}
+            ${arg_ENTRY_TEMPLATE}
+            ${WEBENGINE_ROOT_SOURCE_DIR}/cmake/License.cmake
+        USES_TERMINAL
+     )
+     add_custom_target(${arg_TARGET} DEPENDS ${arg_OUTPUT})
 endfunction()

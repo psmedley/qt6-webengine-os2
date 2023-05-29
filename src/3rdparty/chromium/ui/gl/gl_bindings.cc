@@ -15,7 +15,7 @@
 #include "ui/gfx/x/glx.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/gl/gl_surface_wgl.h"
 #endif
 
@@ -26,7 +26,7 @@
 
 namespace gl {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 std::string DriverWGL::GetPlatformExtensions() {
   const char* str = nullptr;
   str = wglGetExtensionsStringARB(GLSurfaceWGL::GetDisplayDC());
@@ -57,7 +57,7 @@ void DisplayExtensionsEGL::UpdateConditionalExtensionSettings(
 }
 
 // static
-#if !defined(TOOLKIT_QT)
+#if !defined(TOOLKIT_QT) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 std::string DisplayExtensionsEGL::GetPlatformExtensions(EGLDisplay display) {
   if (display == EGL_NO_DISPLAY)
     return "";

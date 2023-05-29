@@ -12,11 +12,8 @@
 #include <QtPdfQuick/private/qquickpdfpageimage_p.h>
 #include "../shared/util.h"
 
-<<<<<<< HEAD
-=======
 using namespace Qt::StringLiterals;
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 Q_LOGGING_CATEGORY(lcTests, "qt.pdf.tests")
 
 class tst_MultiPageView : public QQuickDataTest
@@ -78,7 +75,7 @@ void tst_MultiPageView::internalLink()
     QVERIFY(showView(window, testFileUrl("multiPageView.qml")));
     QQuickItem *pdfView = window.rootObject();
     QVERIFY(pdfView);
-    pdfView->setProperty("source", "bookmarksAndLinks.pdf");
+    pdfView->setProperty("source", testFileUrl("bookmarksAndLinks.pdf"));
     QTRY_COMPARE(pdfView->property("currentPageRenderingStatus").toInt(), QQuickPdfPageImage::Ready);
 
     QQuickItem *table = static_cast<QQuickItem *>(findFirstChild(pdfView, "QQuickTableView"));
@@ -262,11 +259,7 @@ void tst_MultiPageView::password()
     // actual QPdfDocument::pageCountChanged(int), for comparison with the illusory QQuickPdfDocument::pageCountChanged
     QVERIFY(extPageCountChangedSpy.isValid());
 
-<<<<<<< HEAD
-    QVERIFY(pdfView->setProperty("source", u"pdf-sample.protected.pdf"_qs));
-=======
-    QVERIFY(pdfView->setProperty("source", u"pdf-sample.protected.pdf"_s));
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
+    QVERIFY(pdfView->setProperty("source", testFileUrl(u"pdf-sample.protected.pdf"_s)));
 
     QTRY_COMPARE(passwordRequiredSpy.size(), 1);
     qCDebug(lcTests) << "error while awaiting password" << doc->error()
@@ -277,11 +270,7 @@ void tst_MultiPageView::password()
     QCOMPARE(extPageCountChangedSpy.size(), 0);
     QCOMPARE(statusChangedSpy.size(), 2); // Loading and then Error
     statusChangedSpy.clear();
-<<<<<<< HEAD
-    QVERIFY(doc->setProperty("password", u"Qt"_qs));
-=======
     QVERIFY(doc->setProperty("password", u"Qt"_s));
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
     QCOMPARE(passwordChangedSpy.size(), 1);
     QTRY_COMPARE(doc->property("status").toInt(), int(QPdfDocument::Status::Ready));
     qCDebug(lcTests) << "after setPassword" << doc->error()
@@ -301,13 +290,8 @@ void tst_MultiPageView::selectionAndClipboard()
     QVERIFY(pdfView);
     QQuickPdfDocument *doc = pdfView->property("document").value<QQuickPdfDocument*>();
     QVERIFY(doc);
-<<<<<<< HEAD
-    QVERIFY(doc->setProperty("password", u"Qt"_qs));
-    QVERIFY(pdfView->setProperty("source", u"pdf-sample.protected.pdf"_qs));
-=======
     QVERIFY(doc->setProperty("password", u"Qt"_s));
-    QVERIFY(pdfView->setProperty("source", u"pdf-sample.protected.pdf"_s));
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
+    QVERIFY(pdfView->setProperty("source", testFileUrl((u"pdf-sample.protected.pdf"_s))));
     QTRY_COMPARE(pdfView->property("currentPageRenderingStatus").toInt(), QQuickPdfPageImage::Ready);
 
     QVERIFY(QMetaObject::invokeMethod(pdfView, "selectAll"));
@@ -334,13 +318,8 @@ void tst_MultiPageView::search()
     QTRY_COMPARE(pdfView->width(), 200);
     QQuickPdfDocument *doc = pdfView->property("document").value<QQuickPdfDocument*>();
     QVERIFY(doc);
-<<<<<<< HEAD
-    QVERIFY(doc->setProperty("password", u"Qt"_qs));
-    QVERIFY(pdfView->setProperty("source", u"pdf-sample.protected.pdf"_qs));
-=======
     QVERIFY(doc->setProperty("password", u"Qt"_s));
-    QVERIFY(pdfView->setProperty("source", u"pdf-sample.protected.pdf"_s));
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
+    QVERIFY(pdfView->setProperty("source", testFileUrl(u"pdf-sample.protected.pdf"_s)));
     QTRY_COMPARE(pdfView->property("currentPageRenderingStatus").toInt(), QQuickPdfPageImage::Ready);
     QPdfSearchModel *searchModel = pdfView->property("searchModel").value<QPdfSearchModel*>();
     QVERIFY(searchModel);
@@ -351,11 +330,7 @@ void tst_MultiPageView::search()
     QObject *multiline = findFirstChild(firstPage, "QQuickPathMultiline");
     QVERIFY(multiline);
 
-<<<<<<< HEAD
-    pdfView->setProperty("searchString", u"PDF"_qs);
-=======
     pdfView->setProperty("searchString", u"PDF"_s);
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
     QTRY_COMPARE(searchModel->rowCount(QModelIndex()), 7); // occurrences of the word "PDF" in this file
     const int count = searchModel->rowCount(QModelIndex());
     QList<QList<QPointF>> resultOutlines = multiline->property("paths").value<QList<QList<QPointF>>>();

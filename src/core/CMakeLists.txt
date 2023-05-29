@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.19)
 
 find_package(Ninja 1.7.2 REQUIRED)
 find_package(Nodejs 12 REQUIRED)
+find_package(Perl)
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
     create_pkg_config_host_wrapper(${CMAKE_CURRENT_BINARY_DIR})
@@ -98,6 +99,7 @@ foreach(arch ${archs})
                 compositor/content_gpu_client_qt.cpp compositor/content_gpu_client_qt.h
                 compositor/display_overrides.cpp
                 compositor/display_software_output_surface.cpp compositor/display_software_output_surface.h
+                compositor/native_skia_output_device.cpp compositor/native_skia_output_device.h
                 content_browser_client_qt.cpp content_browser_client_qt.h
                 content_client_qt.cpp content_client_qt.h
                 content_main_delegate_qt.cpp content_main_delegate_qt.h
@@ -218,6 +220,12 @@ foreach(arch ${archs})
                 compositor/display_skia_output_device.cpp compositor/display_skia_output_device.h
         )
 
+        extend_gn_target(${buildGn} CONDITION MACOS
+            SOURCES
+                compositor/native_skia_output_device_mac.mm
+                compositor/native_skia_output_device_mac2.mm
+        )
+
         extend_gn_target(${buildGn} CONDITION MACOS AND QT_FEATURE_opengl
             SOURCES
                 macos_context_type_helper.mm macos_context_type_helper.h
@@ -315,6 +323,7 @@ foreach(arch ${archs})
             angle_enable_swiftshader=false
             dawn_use_swiftshader=false
             use_dawn=false
+            build_dawn_tests=false
             enable_vr=false
             enable_web_speech=false
             enable_widevine=true
@@ -419,6 +428,12 @@ foreach(arch ${archs})
                     CONDITION QT_FEATURE_webengine_system_${slib}
                 )
             endforeach()
+            if(NOT QT_FEATURE_webengine_system_opus)
+                extend_gn_list(gnArgArg
+                   ARGS has_perl
+                   CONDITION Perl_FOUND
+            )
+            endif()
             extend_gn_list(gnArgArg
                 ARGS use_system_libxslt
                 CONDITION QT_FEATURE_webengine_system_libxml
@@ -486,6 +501,7 @@ foreach(arch ${archs})
             list(APPEND gnArgArg
                 use_external_popup_menu=false
                 angle_enable_vulkan=false
+                use_static_angle=true
             )
         endif()
 
@@ -501,6 +517,7 @@ foreach(arch ${archs})
                 com_init_check_hook_disabled=true
                 heterogeneous_executables=true
                 enable_vr=false
+                use_static_angle=true
             )
         endif()
 

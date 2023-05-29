@@ -18,6 +18,7 @@ else()
     find_package(GPerf)
     find_package(BISON)
     find_package(FLEX)
+    find_package(Perl)
     find_package(PkgConfig)
     find_package(Snappy)
     find_package(Nodejs 12.0)
@@ -37,7 +38,7 @@ if(PkgConfig_FOUND)
     pkg_check_modules(X11 x11)
     pkg_check_modules(XPROTO glproto)
     pkg_check_modules(GLIB glib-2.0>=2.32.0)
-    pkg_check_modules(HARFBUZZ harfbuzz>=2.9.0 harfbuzz-subset>=2.9.0)
+    pkg_check_modules(HARFBUZZ harfbuzz>=4.3.0 harfbuzz-subset>=4.3.0)
     pkg_check_modules(JPEG libjpeg IMPORTED_TARGET)
     pkg_check_modules(LIBEVENT libevent)
     pkg_check_modules(MINIZIP minizip)
@@ -474,8 +475,8 @@ add_check_for_support(
 )
 add_check_for_support(
    MODULES QtPdf
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS
-   MESSAGE "Build can be done only on Linux, Windows, macOS, or iOS."
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS OR (ANDROID AND NOT CMAKE_HOST_WIN32)
+   MESSAGE "Build can be done only on Linux, Windows, macO, iOS and Android(on non-Windows hosts only)."
 )
 if(LINUX AND CMAKE_CROSSCOMPILING)
    get_gn_arch(testArch ${TEST_architecture_arch})
@@ -585,7 +586,8 @@ add_check_for_support(
        (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL Clang AND
           CMAKE_CXX_SIMULATE_ID STREQUAL MSVC) OR
        (MACOS AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang) OR
-       (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang)
+       (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang) OR
+       (ANDROID AND CMAKE_CXX_COMPILER_ID STREQUAL Clang)
    MESSAGE "${CMAKE_CXX_COMPILER_ID} compiler is not supported."
 )
 
@@ -686,3 +688,10 @@ if(PRINT_BFD_LINKER_WARNING)
         MESSAGE "Using bfd linker requires at least 4096 open files limit"
     )
 endif()
+if(NOT FEATURE_webengine_opus_system AND NOT Perl_FOUND)
+    qt_configure_add_report_entry(
+        TYPE WARNING
+        MESSAGE "No perl found, compiling opus without some optimizations."
+    )
+endif()
+

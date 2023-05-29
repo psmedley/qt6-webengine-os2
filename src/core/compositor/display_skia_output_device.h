@@ -23,6 +23,7 @@ class DisplaySkiaOutputDevice final : public viz::SkiaOutputDevice, public Compo
 {
 public:
     DisplaySkiaOutputDevice(scoped_refptr<gpu::SharedContextState> contextState,
+                            bool requiresAlpha,
                             gpu::MemoryTracker *memoryTracker,
                             DidSwapBufferCompleteCallback didSwapBufferCompleteCallback);
     ~DisplaySkiaOutputDevice() override;
@@ -43,13 +44,14 @@ public:
     // Overridden from Compositor.
     void swapFrame() override;
     void waitForTexture() override;
-    int textureId() override;
+    QSGTexture *texture(QQuickWindow *win, uint32_t texOpts) override;
+    bool textureIsFlipped() override;
     QSize size() override;
-    bool hasAlphaChannel() override;
+    bool requiresAlphaChannel() override;
     float devicePixelRatio() override;
 #if QT_CONFIG(webengine_vulkan)
-    VkImage vkImage(QQuickWindow *win) override;
-    VkImageLayout vkImageLayout() override;
+    VkImage vkImage(QQuickWindow *win);
+    VkImageLayout vkImageLayout();
     void releaseVulkanResources(QQuickWindow *win) override;
 #endif
 
@@ -81,6 +83,7 @@ private:
     std::unique_ptr<Buffer> m_backBuffer;
     viz::OutputSurfaceFrame m_frame;
     bool m_readyToUpdate = false;
+    bool m_requiresAlpha;
     scoped_refptr<base::SingleThreadTaskRunner> m_taskRunner;
 
 #if QT_CONFIG(webengine_vulkan)
