@@ -586,6 +586,8 @@ def _GnBinary():
     subdir = 'mac'
   elif sys.platform == 'win32':
     subdir, exe = 'win', 'gn.exe'
+  elif sys.platform == 'os2knix':
+    subdir, exe = 'os2', 'gn.exe'
   else:
     raise RuntimeError("Unsupported platform '%s'." % sys.platform)
 
