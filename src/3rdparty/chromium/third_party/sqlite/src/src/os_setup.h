@@ -43,7 +43,7 @@
 #    define SQLITE_OS_WIN 1
 #    define SQLITE_OS_UNIX 0
 #    define SQLITE_OS_OS2 0
-#  elif defined(__OS2__
+#  elif defined(__OS2__)
 #    define SQLITE_OS_WIN 0
 #    define SQLITE_OS_UNIX 0
 #    define SQLITE_OS_OS2 1
