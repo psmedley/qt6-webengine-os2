@@ -52,6 +52,21 @@ ScriptPromise DocumentPictureInPicture::requestWindow(
     return ScriptPromise();
   }
 
+  if (dom_window->GetFrame() &&
+      !dom_window->GetFrame()->IsOutermostMainFrame()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
+                                      "Opening a PiP window is only allowed "
+                                      "from a top-level browsing context");
+    return ScriptPromise();
+  }
+
+  if (dom_window->IsPictureInPictureWindow()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotAllowedError,
+        "Opening a PiP window from a PiP window is not allowed");
+    return ScriptPromise();
+  }
+
   // TODO(https://crbug.com/1253970): Check if PiP is allowed (e.g. user
   // gesture, permissions, etc).
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);

@@ -1,6 +1,15 @@
 # Copyright (C) 2022 The Qt Company Ltd.
 # SPDX-License-Identifier: BSD-3-Clause
 
+# this macro is missing in 6.2
+if(NOT COMMAND _qt_internal_validate_all_args_are_parsed)
+    macro(_qt_internal_validate_all_args_are_parsed result)
+        if(DEFINED ${result}_UNPARSED_ARGUMENTS)
+            message(FATAL_ERROR "Unknown arguments (${${result}_UNPARSED_ARGUMENTS}).")
+        endif()
+    endmacro()
+endif()
+
 function(assertTargets)
     cmake_parse_arguments(PARSE_ARGV 0 arg
         "" "" "MODULES;TARGETS"
@@ -497,6 +506,8 @@ function(add_linker_options target buildDir completeStatic)
         endif()
         get_copy_of_response_file(libs_rsp ${target} libs)
         target_link_options(${cmakeTarget} PRIVATE "$<$<CONFIG:${config}>:@${libs_rsp}>")
+        # enable larger PDBs
+        target_link_options(${cmakeTarget} PRIVATE "/pdbpagesize:8192")
         # we need libs rsp also when linking process with sandbox lib
         set_property(TARGET ${cmakeTarget} PROPERTY LIBS_RSP ${libs_rsp})
     endif()
@@ -1048,11 +1059,13 @@ macro(append_toolchain_setup)
         list(APPEND gnArgArg
             custom_toolchain="${buildDir}/target_toolchain:target"
             host_toolchain="${buildDir}/host_toolchain:host"
-            v8_snapshot_toolchain="${buildDir}/v8_toolchain:v8"
         )
         get_gn_arch(cpu ${TEST_architecture_arch})
         if(CMAKE_CROSSCOMPILING)
-            list(APPEND gnArgArg target_cpu="${cpu}")
+            list(APPEND gnArgArg
+                v8_snapshot_toolchain="${buildDir}/v8_toolchain:v8"
+                target_cpu="${cpu}"
+            )
         else()
             list(APPEND gnArgArg host_cpu="${cpu}")
         endif()
@@ -1232,6 +1245,9 @@ function(add_gn_command)
             ${arg_BUILDDIR}/${targetConfigFileName}
     )
     add_dependencies(run_${arg_MODULE}_GnDone runGn_${arg_GN_TARGET})
+    if(TARGET thirdparty_sync_headers)
+        add_dependencies(runGn_${arg_GN_TARGET} thirdparty_sync_headers)
+    endif()
     create_gn_target_config(${arg_GN_TARGET} ${arg_BUILDDIR}/${targetConfigFileName})
 endfunction()
 

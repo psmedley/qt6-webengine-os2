@@ -21,6 +21,10 @@ project(QtWebEngine
     LANGUAGES CXX C
 )
 
+if(COMMAND qt_internal_project_setup)
+    qt_internal_project_setup()
+endif()
+
 find_package(Qt6 ${PROJECT_VERSION} CONFIG QUIET OPTIONAL_COMPONENTS
     Gui Widgets Network OpenGL Quick Qml PrintSupport
     WebChannel Positioning QuickControls2 Test QuickWidgets QuickTest WebSockets Designer

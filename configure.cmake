@@ -45,7 +45,7 @@ if(PkgConfig_FOUND)
     pkg_check_modules(PNG libpng>=1.6.0)
     pkg_check_modules(ZLIB zlib)
     pkg_check_modules(RE2 re2 IMPORTED_TARGET)
-    pkg_check_modules(ICU icu-uc>=68 icu-i18n>=68)
+    pkg_check_modules(ICU icu-uc>=70 icu-i18n>=70)
     pkg_check_modules(WEBP libwebp libwebpmux libwebpdemux)
     pkg_check_modules(LCMS2 lcms2)
     pkg_check_modules(FREETYPE freetype2 IMPORTED_TARGET)
@@ -251,6 +251,7 @@ qt_feature("qtwebengine-quick-build" PRIVATE
 qt_feature("qtpdf-build" PUBLIC
     LABEL "Build Qt PDF"
     PURPOSE "Enables building the Qt Pdf modules."
+    CONDITION Qt6Core_VERSION VERSION_GREATER_EQUAL "6.3"
 )
 qt_feature("qtpdf-widgets-build" PRIVATE
     LABEL "Build QtPdfWidgets"
@@ -409,7 +410,7 @@ qt_feature("webengine-system-harfbuzz" PRIVATE
     CONDITION (UNIX OR OS2) AND TARGET Qt::Gui AND HARFBUZZ_FOUND AND QT_FEATURE_system_harfbuzz
 )
 qt_feature("webengine-qt-harfbuzz" PRIVATE
-    LABEL "qtpng"
+    LABEL "qtharfbuzz"
     CONDITION QT_FEATURE_static
         AND TARGET Qt::Gui
         AND QT_FEATURE_harfbuzz

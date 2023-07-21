@@ -21,6 +21,10 @@ project(QtWebEngineConfigure
 
 find_package(Qt6 ${PROJECT_VERSION} CONFIG REQUIRED COMPONENTS BuildInternals Core)
 
+if(COMMAND qt_internal_project_setup)
+    qt_internal_project_setup()
+endif()
+
 set(buildDir ${CMAKE_CURRENT_BINARY_DIR})
 configure_gn_toolchain(host ${TEST_architecture_arch} ${TEST_architecture_arch}
     ${WEBENGINE_ROOT_SOURCE_DIR}/src/host/BUILD.toolchain.gn.in

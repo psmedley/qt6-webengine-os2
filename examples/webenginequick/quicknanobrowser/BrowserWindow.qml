@@ -4,7 +4,7 @@
 import QtCore
 import QtQml
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Fusion
 import QtQuick.Layouts
 import QtQuick.Window
 import QtWebEngine
@@ -471,7 +471,6 @@ ApplicationWindow {
         }
 
         function removeView(index) {
-            tabBar.removeItem(index);
             if (tabBar.count > 1) {
                 tabBar.removeItem(tabBar.itemAt(index));
                 tabLayout.children[index].destroy();

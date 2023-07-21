@@ -1812,14 +1812,14 @@ MaybeHandle<Object> StoreIC::Store(Handle<Object> object, Handle<Name> name,
   // been thrown if the private field already exists in the object.
   if (IsAnyDefineOwn() && !name->IsPrivateName() && !object->IsJSProxy() &&
       !Handle<JSObject>::cast(object)->HasNamedInterceptor()) {
-    Maybe<bool> can_define = JSReceiver::CheckIfCanDefine(
+    Maybe<bool> can_define = JSObject::CheckIfCanDefineAsConfigurable(
         isolate(), &it, value, Nothing<ShouldThrow>());
     MAYBE_RETURN_NULL(can_define);
     if (!can_define.FromJust()) {
       return isolate()->factory()->undefined_value();
     }
-    // Restart the lookup iterator updated by CheckIfCanDefine() for
-    // UpdateCaches() to handle access checks.
+    // Restart the lookup iterator updated by CheckIfCanDefineAsConfigurable()
+    // for UpdateCaches() to handle access checks.
     if (use_ic && object->IsAccessCheckNeeded()) {
       it.Restart();
     }
@@ -2296,10 +2296,18 @@ Handle<Object> KeyedStoreIC::StoreElementHandler(
              receiver_map->has_sealed_elements() ||
              receiver_map->has_nonextensible_elements() ||
              receiver_map->has_typed_array_or_rab_gsab_typed_array_elements()) {
+    // TODO(jgruber): Update counter name.
     TRACE_HANDLER_STATS(isolate(), KeyedStoreIC_StoreFastElementStub);
-    code = StoreHandler::StoreFastElementBuiltin(isolate(), store_mode);
-    if (receiver_map->has_typed_array_or_rab_gsab_typed_array_elements()) {
-      return code;
+    if (receiver_map->IsJSArgumentsObjectMap() &&
+        receiver_map->has_fast_packed_elements()) {
+      // Allow fast behaviour for in-bounds stores while making it miss and
+      // properly handle the out of bounds store case.
+      code = StoreHandler::StoreFastElementBuiltin(isolate(), STANDARD_STORE);
+    } else {
+      code = StoreHandler::StoreFastElementBuiltin(isolate(), store_mode);
+      if (receiver_map->has_typed_array_or_rab_gsab_typed_array_elements()) {
+        return code;
+      }
     }
   } else if (IsStoreInArrayLiteralIC()) {
     // TODO(jgruber): Update counter name.
@@ -2310,7 +2318,7 @@ Handle<Object> KeyedStoreIC::StoreElementHandler(
     TRACE_HANDLER_STATS(isolate(), KeyedStoreIC_StoreElementStub);
     DCHECK(DICTIONARY_ELEMENTS == receiver_map->elements_kind() ||
            receiver_map->has_frozen_elements());
-    code = StoreHandler::StoreSlow(isolate(), store_mode);
+    return StoreHandler::StoreSlow(isolate(), store_mode);
   }
 
   if (IsAnyDefineOwn() || IsStoreInArrayLiteralIC()) return code;

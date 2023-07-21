@@ -318,6 +318,7 @@ foreach(arch ${archs})
             enable_reporting=false
             enable_resource_allowlist_generation=false
             enable_screen_ai_service=false
+            enable_session_service=false
             enable_swiftshader=false
             enable_swiftshader_vulkan=false
             angle_enable_swiftshader=false
@@ -410,7 +411,6 @@ foreach(arch ${archs})
                 use_bluez=false
                 use_vaapi=false
                 use_udev=true
-                enable_session_service=false
                 is_cfi=false
                 use_ozone=true
                 ozone_auto_platforms=false
@@ -512,11 +512,9 @@ foreach(arch ${archs})
 
         if(WIN32)
             list(APPEND gnArgArg
-                enable_session_service=false
                 ninja_use_custom_environment_files=false
                 com_init_check_hook_disabled=true
                 heterogeneous_executables=true
-                enable_vr=false
                 use_static_angle=true
             )
         endif()
@@ -593,3 +591,11 @@ if(QT_FEATURE_webengine_spellchecker AND NOT CMAKE_CROSSCOMPILING)
     add_dependencies(${dict_target_name} WebEngineCore)
 endif()
 
+##
+#  CHROMIUM UPDATE
+##
+
+add_custom_target(update-chromium
+    COMMAND ${CMAKE_COMMAND} -P ${WEBENGINE_ROOT_SOURCE_DIR}/cmake/SubmoduleUpdate.cmake
+    DEPENDS ${WEBENGINE_ROOT_SOURCE_DIR}/cmake/SubmoduleUpdate.cmake
+)
