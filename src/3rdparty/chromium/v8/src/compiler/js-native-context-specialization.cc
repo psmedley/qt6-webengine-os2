@@ -1955,7 +1955,7 @@ Reduction JSNativeContextSpecialization::ReduceJSGetIterator(Node* node) {
     }
     Node* throw_node =
         graph()->NewNode(common()->Throw(), call_runtime, control_not_receiver);
-    NodeProperties::MergeControlToEnd(graph(), common(), throw_node);
+    MergeControlToEnd(graph(), common(), throw_node);
   }
   Node* if_receiver = graph()->NewNode(common()->IfTrue(), branch_node);
   ReplaceWithValue(node, call_property, effect, if_receiver);
@@ -2439,9 +2439,7 @@ Reduction JSNativeContextSpecialization::ReduceEagerDeoptimize(
   Node* deoptimize =
       graph()->NewNode(common()->Deoptimize(reason, FeedbackSource()),
                        frame_state, effect, control);
-  // TODO(bmeurer): This should be on the AdvancedReducer somehow.
-  NodeProperties::MergeControlToEnd(graph(), common(), deoptimize);
-  Revisit(graph()->end());
+  MergeControlToEnd(graph(), common(), deoptimize);
   node->TrimInputCount(0);
   NodeProperties::ChangeOp(node, common()->Dead());
   return Changed(node);
@@ -3628,15 +3626,21 @@ JSNativeContextSpecialization::BuildElementAccess(
         // the (potential) backing store growth would normalize and thus
         // the elements kind of the {receiver} would change to slow mode.
         //
-        // For PACKED_*_ELEMENTS the {index} must be within the range
+        // For JSArray PACKED_*_ELEMENTS the {index} must be within the range
         // [0,length+1[ to be valid. In case {index} equals {length},
         // the {receiver} will be extended, but kept packed.
+        //
+        // Non-JSArray PACKED_*_ELEMENTS always grow by adding holes because they
+        // lack the magical length property, which requires a map transition.
+        // So we can assume that this did not happen if we did not see this map.
         Node* limit =
             IsHoleyElementsKind(elements_kind)
                 ? graph()->NewNode(simplified()->NumberAdd(), elements_length,
                                    jsgraph()->Constant(JSObject::kMaxGap))
-                : graph()->NewNode(simplified()->NumberAdd(), length,
-                                   jsgraph()->OneConstant());
+                : receiver_is_jsarray
+                    ? graph()->NewNode(simplified()->NumberAdd(), length,
+                                       jsgraph()->OneConstant())
+                    : elements_length;
         index = effect = graph()->NewNode(
             simplified()->CheckBounds(
                 FeedbackSource(), CheckBoundsFlag::kConvertStringAndMinusZero),
