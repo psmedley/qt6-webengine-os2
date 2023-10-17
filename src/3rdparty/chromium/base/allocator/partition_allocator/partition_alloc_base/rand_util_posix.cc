@@ -86,6 +86,18 @@ void RandBytes(void* output, size_t output_length) {
   if (getentropy(output, output_length) == 0) {
     return;
   }
+#elif BUILDFLAG(IS_OS2)
+    int i;
+    char *buf2 = output;
+    for (i = 0; i < output_length;) {
+        unsigned long ul = (unsigned long)random();
+        *buf2++ = (unsigned char)(ul);
+        i++;
+        if (i <= output_length)
+          *buf2++ = (unsigned char)(ul >> 8);
+        i++;
+    }
+    return (ssize_t)output_length;
 #endif
 
   // If the OS-specific mechanisms didn't work, fall through to reading from

@@ -179,6 +179,9 @@ GLDisplay* InitializeGLNoExtensionsOneOff(bool init_bindings,
 }
 
 bool InitializeStaticGLBindingsOneOff() {
+#ifdef __OS2__
+  return false;
+#endif
   DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
 
   bool fallback_to_software_gl = false;
